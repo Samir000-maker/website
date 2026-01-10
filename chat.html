@@ -481,7 +481,7 @@
       updateTimer();
 
       const idToken = await firebaseUser.getIdToken();
-      const socketUrl = window.location.origin;
+      const socketUrl = 'https://website-hdem.onrender.com';
       const socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
