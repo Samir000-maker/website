@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Sign Up - Mood Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link rel="stylesheet" href="global.css">
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+</head>
+<body class="bg-background-light min-h-screen flex flex-col">
+    <header class="w-full px-6 py-5 md:px-12 flex justify-between items-center">
+        <a href="/" class="flex items-center gap-2 group">
+            <span class="text-xl font-bold tracking-tight text-gray-900">🌱 Mood Tracker</span>
+        </a>
+        <a href="/login.html" class="text-sm font-medium text-gray-600 hover:text-primary transition-colors">
+            Login
+        </a>
+    </header>
+
+    <main class="flex-grow flex items-center justify-center p-4">
+        <div class="w-full max-w-[440px] bg-white rounded-xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.06)] p-8 md:p-10 animate-fade-in-up">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center text-4xl mb-4">🌱</div>
+                <h1 class="text-2xl font-bold text-gray-900 mb-2">Create your account</h1>
+                <p class="text-gray-500 text-sm">Join us to start tracking your emotional well-being</p>
+            </div>
+
+            <form id="signupForm" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Email</label>
+                    <input type="email" id="email" required
+                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
+                        placeholder="you@example.com">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Password</label>
+                    <input type="password" id="password" required
+                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
+                        placeholder="Min. 8 characters">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Confirm Password</label>
+                    <input type="password" id="confirmPassword" required
+                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
+                        placeholder="Re-enter your password">
+                </div>
+
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" id="terms" required
+                        class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary mt-1">
+                    <label for="terms" class="text-xs text-gray-500">
+                        I agree to the <a href="#" class="text-primary hover:underline">Terms of Service</a> and 
+                        <a href="#" class="text-primary hover:underline">Privacy Policy</a>
+                    </label>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-full h-12 mt-6">
+                    Create Account
+                </button>
+            </form>
+
+            <div class="relative flex py-6 items-center">
+                <div class="flex-grow border-t border-gray-200"></div>
+                <span class="mx-4 text-xs font-medium text-gray-400 uppercase">Or continue with</span>
+                <div class="flex-grow border-t border-gray-200"></div>
+            </div>
+
+            <button id="googleSignIn" class="btn btn-secondary w-full h-12">
+                <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M23.766 12.2764C23.766 11.4607 23.6999 10.6406 23.5588 9.83807H12.24V14.4591H18.7217C18.4528 15.9494 17.5885 17.2678 16.323 18.1056V21.1039H20.19C22.4608 19.0139 23.766 15.9274 23.766 12.2764Z" fill="#4285F4"/>
+                    <path d="M12.24 24.0008C15.4765 24.0008 18.2059 22.9382 20.1945 21.1039L16.3275 18.1055C15.2517 18.8375 13.8627 19.252 12.2445 19.252C9.11388 19.252 6.45946 17.1399 5.50705 14.3003H1.5166V17.3912C3.55371 21.4434 7.7029 24.0008 12.24 24.0008Z" fill="#34A853"/>
+                    <path d="M5.50253 14.3003C5.00236 12.8099 5.00236 11.1961 5.50253 9.70575V6.61481H1.5166C-0.18551 10.0056 -0.18551 14.0004 1.5166 17.3912L5.50253 14.3003Z" fill="#FBBC05"/>
+                    <path d="M12.24 4.74966C13.9509 4.7232 15.6044 5.36697 16.8434 6.54867L20.2695 3.12262C18.1001 1.0855 15.2208 -0.034466 12.24 0.000808666C7.7029 0.000808666 3.55371 2.55822 1.5166 6.61481L5.50253 9.70575C6.45064 6.86173 9.10947 4.74966 12.24 4.74966Z" fill="#EA4335"/>
+                </svg>
+                Sign up with Google
+            </button>
+
+            <div class="mt-8 text-center text-sm text-gray-500">
+                Already have an account?
+                <a href="/login.html" class="font-bold text-primary hover:text-primary-dark transition-colors ml-1">Log In</a>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+
+    <script>
+        // Instead of destructuring into names that may already exist globally,
+        // create a single reference to window.MoodApp and safe local aliases.
+        const MoodApp = window.MoodApp || {};
+
+        // Local aliases (unlikely to collide with other global identifiers)
+        const _Auth = MoodApp.Auth;
+        const _API = MoodApp.API;
+        const _Toast = MoodApp.Toast;
+        const _Loading = MoodApp.Loading;
+        const _PageTransition = MoodApp.PageTransition;
+        const _Validator = MoodApp.Validator;
+
+        // Helpful diagnostic messages if something isn't available.
+        if (!MoodApp || Object.keys(MoodApp).length === 0) {
+            console.warn('Warning: window.MoodApp is not defined. Make sure app.js creates window.MoodApp before this script runs.');
+        }
+        if (!_Validator) console.warn('Validator helper not found (window.MoodApp.Validator). Validation will fail.');
+        if (!_Toast) console.warn('Toast helper not found (window.MoodApp.Toast). UI feedback will fall back to console.');
+        if (!_Loading) console.warn('Loading helper not found (window.MoodApp.Loading).');
+        if (!_Auth) console.warn('Auth helper not found (window.MoodApp.Auth). Authentication storage flows may fail.');
+        if (!_PageTransition) console.warn('PageTransition helper not found (window.MoodApp.PageTransition).');
+
+        // Firebase config (preserved exactly as provided)
+        const firebaseConfig = {
+            apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+            authDomain: "projectt3-8c55e.firebaseapp.com",
+            projectId: "projectt3-8c55e",
+            storageBucket: "projectt3-8c55e.firebasestorage.app",
+            messagingSenderId: "64611387728",
+            appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+            measurementId: "G-0Z91D0Q6EE"
+        };
+
+        try {
+            // If firebase already initialized elsewhere, this will throw; it's safe to ignore/init once.
+            if (!firebase.apps?.length) {
+                firebase.initializeApp(firebaseConfig);
+            } else {
+                console.info('Firebase already initialized.');
+            }
+        } catch (error) {
+            console.error('Firebase init error:', error);
+        }
+
+        // Helper wrappers to gracefully handle missing UI helpers
+        const toastError = (msg) => {
+            if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
+            else console.error('Toast.error:', msg);
+        };
+        const toastSuccess = (msg) => {
+            if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
+            else console.log('Toast.success:', msg);
+        };
+        const loadingShow = (msg) => {
+            if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+        };
+        const loadingHide = () => {
+            if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+        };
+
+        // DOM elements
+        const signupForm = document.getElementById('signupForm');
+        const googleBtn = document.getElementById('googleSignIn');
+
+        // Sign-up form submit handler
+        if (signupForm) {
+            signupForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                // get inputs
+                const emailEl = document.getElementById('email');
+                const passwordEl = document.getElementById('password');
+                const confirmEl = document.getElementById('confirmPassword');
+
+                const email = emailEl ? emailEl.value.trim() : '';
+                const password = passwordEl ? passwordEl.value : '';
+                const confirmPassword = confirmEl ? confirmEl.value : '';
+
+                // Validation
+                if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
+                    toastError('Validation helper unavailable. Cannot validate input.');
+                    return;
+                }
+                if (!_Validator.isValidEmail(email)) {
+                    toastError('Please enter a valid email address');
+                    return;
+                }
+                if (!_Validator.isValidPassword || !_Validator.isValidPassword(password)) {
+                    toastError('Password must be at least 8 characters');
+                    return;
+                }
+                if (password !== confirmPassword) {
+                    toastError('Passwords do not match');
+                    return;
+                }
+
+                loadingShow('Creating your account...');
+
+                try {
+                    // Create Firebase user (compat SDK)
+                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+                    const idToken = await userCredential.user.getIdToken();
+
+                    // Store token via your Auth helper if available
+                    if (_Auth && typeof _Auth.setAuth === 'function') {
+                        _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
+                    } else {
+                        console.warn('Auth.setAuth not available. Token not stored in app helper.');
+                    }
+
+                    loadingHide();
+                    toastSuccess('Account created successfully!');
+
+                    // Redirect to username setup (use PageTransition if available)
+                    setTimeout(() => {
+                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                            _PageTransition.navigateTo('/username.html');
+                        } else {
+                            window.location.href = '/username.html';
+                        }
+                    }, 1000);
+                } catch (error) {
+                    loadingHide();
+                    console.error('Signup error:', error);
+                    toastError(error?.message || 'Failed to create account');
+                }
+            });
+        } else {
+            console.warn('Signup form not found on page.');
+        }
+
+        // Google sign-in handler
+        if (googleBtn) {
+            googleBtn.addEventListener('click', async () => {
+                loadingShow('Signing in with Google...');
+
+                try {
+                    const provider = new firebase.auth.GoogleAuthProvider();
+                    const result = await firebase.auth().signInWithPopup(provider);
+                    const idToken = await result.user.getIdToken();
+
+                    if (_Auth && typeof _Auth.setAuth === 'function') {
+                        _Auth.setAuth(idToken, {
+                            email: result.user.email,
+                            uid: result.user.uid,
+                            displayName: result.user.displayName,
+                            photoURL: result.user.photoURL
+                        });
+                    } else {
+                        console.warn('Auth.setAuth not available. Token not stored in app helper.');
+                    }
+
+                    loadingHide();
+                    toastSuccess('Signed in successfully!');
+
+                    setTimeout(() => {
+                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                            _PageTransition.navigateTo('/username.html');
+                        } else {
+                            window.location.href = '/username.html';
+                        }
+                    }, 1000);
+                } catch (error) {
+                    loadingHide();
+                    console.error('Google sign in error:', error);
+                    toastError(error?.message || 'Failed to sign in with Google');
+                }
+            });
+        } else {
+            console.warn('Google sign-in button not found.');
+        }
+    </script>
+</body>
+</html>
