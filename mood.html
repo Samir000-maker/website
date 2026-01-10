@@ -190,7 +190,7 @@
 
         // Connect Socket.IO to backend server
         // Always connect to localhost:3000 regardless of where frontend is served
-        const socketUrl = 'http://localhost:3000';
+        const socketUrl = 'https://website-hdem.onrender.com';
         socketInstance = io(socketUrl, {
           transports: ['websocket', 'polling'],
           reconnection: true,
