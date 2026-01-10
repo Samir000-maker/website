@@ -234,6 +234,7 @@
       // Call state management
       let isInitiatingCall = false;
       let pendingCallData = null;
+      let isNavigatingToCall = false; // NEW: Prevent socket disconnect during navigation
 
       // Helper function to create profile picture element
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
@@ -512,7 +513,7 @@
 
       // Initialize socket
       const idToken = await firebaseUser.getIdToken();
-      const socketUrl = 'https://website-hdem.onrender.com';
+      const socketUrl = window.location.origin; // Use same origin for production
       const socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -622,7 +623,11 @@
 
       socketInstance.on('call_accepted', (data) => {
         console.log('✅ Call accepted:', data);
-        // Store call data and navigate to call room
+        
+        // Set flag to prevent socket disconnect
+        isNavigatingToCall = true;
+        
+        // Store call data
         localStorage.setItem('activeCall', JSON.stringify({
           callId: data.callId,
           roomId: roomData.roomId,
@@ -630,10 +635,11 @@
           users: data.users
         }));
         
-        // Reset state before navigation
+        // Reset state
         isInitiatingCall = false;
         
-        // Navigate to call page
+        // Navigate to call page WITHOUT closing socket
+        console.log('🎬 Navigating to call page...');
         window.location.href = '/call.html';
       });
 
@@ -784,9 +790,10 @@
         });
       }
 
-      // Cleanup on page unload
+      // Cleanup on page unload - ONLY if not navigating to call
       window.addEventListener('beforeunload', () => {
-        if (socketInstance && !window.location.pathname.includes('call.html')) {
+        if (!isNavigatingToCall && socketInstance) {
+          console.log('🚪 Cleaning up socket connection...');
           socketInstance.emit('leave_room');
           socketInstance.disconnect();
         }
