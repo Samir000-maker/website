@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>How are you feeling? - MoodJournal</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="global.css" rel="stylesheet">
+</head>
+<body class="bg-background-light min-h-screen flex flex-col">
+  <header class="w-full border-b border-gray-200 bg-white/80 backdrop-blur">
+    <div class="max-w-5xl mx-auto flex h-16 items-center justify-between px-4 sm:px-6">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">🌊</span>
+        <h2 class="text-lg font-bold">MoodJournal</h2>
+      </div>
+      <button id="logoutBtn" class="text-sm font-medium text-gray-500 hover:text-gray-900">Logout</button>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">
+    <div class="text-center mb-8 animate-fade-in-up">
+      <div class="inline-flex items-center justify-center bg-primary/10 text-primary px-4 py-2 rounded-full text-sm font-medium mb-4">
+        ☀️ AFTERNOON REFLECTION
+      </div>
+      <h1 class="text-3xl font-extrabold text-gray-900 mb-2">
+        How are you feeling right now?
+      </h1>
+      <p class="text-lg text-gray-500 max-w-lg mx-auto">
+        Take a moment to pause. Select the emotion that best resonates with you
+      </p>
+    </div>
+
+    <div id="moodsGrid" class="grid grid-cols-3 gap-4 max-w-2xl mx-auto mb-8 animate-fade-in-up" style="animation-delay: 0.1s">
+      <!-- Moods will be loaded here -->
+    </div>
+
+    <div class="max-w-2xl mx-auto mb-8">
+      <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <label class="block text-sm font-bold text-gray-700 mb-3">
+          📝 ADD A NOTE (OPTIONAL)
+        </label>
+        <textarea id="noteText"
+                  class="w-full p-4 border border-gray-200 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 resize-none"
+                  rows="3"
+                  maxlength="500"
+                  placeholder="Why do you feel this way? Journaling helps you understand your triggers..."></textarea>
+        <div class="flex items-center justify-between mt-3">
+          <span class="text-xs text-gray-400">🔒 Private & Encrypted</span>
+          <button id="logMoodBtn" disabled class="btn btn-secondary text-sm px-4 py-2 disabled:opacity-50">
+            <span class="material-symbols-outlined text-[18px] mr-1">edit</span>
+            Log Mood
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mb-6">
+      <button id="enterChatBtn" disabled
+              class="btn btn-primary h-14 px-8 text-base disabled:opacity-50 disabled:cursor-not-allowed">
+        <span class="material-symbols-outlined mr-2">chat</span>
+        Enter Chat
+      </button>
+    </div>
+
+    <div class="max-w-4xl mx-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-900">Recent Entries</h2>
+        <button id="loadMoreBtn" class="text-sm font-medium text-primary hover:text-primary-dark">View all →</button>
+      </div>
+
+      <div id="notesList" class="space-y-3">
+        <!-- Notes will be loaded here -->
+      </div>
+
+      <div id="loading" class="text-center py-8 hidden">
+        <div class="loading-spinner mx-auto"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+  <!-- Socket.IO Client -->
+  <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+
+  <!-- Initialize Firebase -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+      authDomain: "projectt3-8c55e.firebaseapp.com",
+      projectId: "projectt3-8c55e",
+      storageBucket: "projectt3-8c55e.firebasestorage.app",
+      messagingSenderId: "64611387728",
+      appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+      measurementId: "G-0Z91D0Q6EE"
+    };
+    try {
+      if (!firebase.apps?.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      // Critical: Set auth persistence
+      firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    } catch (err) {
+      console.error('Firebase init error', err);
+    }
+  </script>
+
+  <!-- Load app.js -->
+  <script src="app.js"></script>
+
+  <!-- Page-specific script -->
+  <script>
+  (async function () {
+    const MoodApp = window.MoodApp || {};
+    const _Auth = MoodApp.Auth;
+    const _API = MoodApp.API;
+    const _Toast = MoodApp.Toast;
+    const _Loading = MoodApp.Loading;
+    const _PageTransition = MoodApp.PageTransition;
+    const _Utils = MoodApp.Utils;
+
+    // Helper functions
+    const toast = (m, t='success') => { 
+      if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
+      console[t==='error'?'error':'log'](m); 
+    };
+    const showLoading = (m) => { 
+      if (_Loading && typeof _Loading.show === 'function') _Loading.show(m); 
+    };
+    const hideLoading = () => { 
+      if (_Loading && typeof _Loading.hide === 'function') _Loading.hide(); 
+    };
+
+    // DOM refs
+    const moodsGrid = document.getElementById('moodsGrid');
+    const noteText = document.getElementById('noteText');
+    const logMoodBtn = document.getElementById('logMoodBtn');
+    const enterChatBtn = document.getElementById('enterChatBtn');
+    const notesList = document.getElementById('notesList');
+    const loadingEl = document.getElementById('loading');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    const moods = {
+      happy: '😊', sad: '😢', angry: '😠', lonely: '😔',
+      calm: '😌', excited: '🤩', tired: '😴', stressed: '😣', confused: '😕'
+    };
+
+    let selectedMood = null;
+    let page = 0;
+    let socketInstance = null;
+    let currentUser = null;
+
+    // ============================================
+    // SOCKET.IO CONNECTION
+    // ============================================
+    async function initializeSocket() {
+      try {
+        // Get current Firebase user
+        const firebaseUser = firebase.auth().currentUser;
+        if (!firebaseUser) {
+          console.error('No Firebase user found');
+          return null;
+        }
+
+        // Get fresh ID token
+        const idToken = await firebaseUser.getIdToken();
+
+        // Get user profile from API
+        if (!_API || typeof _API.get !== 'function') {
+          console.error('API helper not available');
+          return null;
+        }
+
+        const userData = await _API.get('/api/users/me');
+        currentUser = {
+          userId: userData._id,
+          username: userData.username,
+          pfpUrl: userData.pfpUrl,
+          email: userData.email
+        };
+
+        console.log('✅ Current user loaded:', currentUser);
+
+        // Connect Socket.IO to backend server
+        // Always connect to localhost:3000 regardless of where frontend is served
+        const socketUrl = 'http://localhost:3000';
+        socketInstance = io(socketUrl, {
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          auth: {
+            token: idToken
+          }
+        });
+
+        // Socket event handlers
+        socketInstance.on('connect', () => {
+          console.log('🔌 Socket connected:', socketInstance.id);
+          
+          // Authenticate socket with user info
+          socketInstance.emit('authenticate', {
+            token: idToken,
+            userId: currentUser.userId
+          });
+        });
+
+        socketInstance.on('authenticated', (data) => {
+          console.log('✅ Socket authenticated:', data);
+        });
+
+        socketInstance.on('auth_error', (data) => {
+          console.error('❌ Socket auth error:', data);
+          toast('Authentication failed. Please refresh the page.', 'error');
+        });
+
+        socketInstance.on('connect_error', (error) => {
+          console.error('🔌 Socket connection error:', error);
+        });
+
+        socketInstance.on('disconnect', (reason) => {
+          console.log('🔌 Socket disconnected:', reason);
+        });
+
+        return socketInstance;
+      } catch (error) {
+        console.error('Socket initialization error:', error);
+        return null;
+      }
+    }
+
+    // ============================================
+    // MOOD SELECTION
+    // ============================================
+    function renderMoods() {
+      if (!moodsGrid) return;
+      moodsGrid.innerHTML = '';
+      Object.entries(moods).forEach(([id, emoji]) => {
+        const btn = document.createElement('button');
+        btn.className = 'mood-btn aspect-square flex flex-col items-center justify-center gap-3 p-6 rounded-2xl border-2 border-gray-200 hover:border-primary hover:bg-primary/5 transition-all';
+        btn.innerHTML = `<span class="text-5xl">${emoji}</span><span class="text-sm font-bold capitalize">${id}</span>`;
+        btn.addEventListener('click', () => selectMood(id, btn));
+        moodsGrid.appendChild(btn);
+      });
+    }
+
+    function selectMood(mood, el) {
+      selectedMood = mood;
+      document.querySelectorAll('.mood-btn').forEach(b => {
+        b.classList.remove('border-primary','bg-primary/10','ring-2','ring-primary/20');
+      });
+      if (el) {
+        el.classList.add('border-primary','bg-primary/10','ring-2','ring-primary/20');
+      }
+      if (enterChatBtn) enterChatBtn.disabled = false;
+      if (logMoodBtn) logMoodBtn.disabled = false;
+    }
+
+    // ============================================
+    // ENTER CHAT (MATCHMAKING)
+    // ============================================
+    async function handleEnterChat() {
+      if (!selectedMood) {
+        toast('Please select a mood first', 'warning');
+        return;
+      }
+
+      if (!socketInstance || !socketInstance.connected) {
+        toast('Connecting to server...', 'warning');
+        socketInstance = await initializeSocket();
+        
+        // Wait for connection
+        await new Promise((resolve) => {
+          if (socketInstance && socketInstance.connected) {
+            resolve();
+          } else if (socketInstance) {
+            socketInstance.once('connect', resolve);
+            setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
+          } else {
+            resolve();
+          }
+        });
+
+        if (!socketInstance || !socketInstance.connected) {
+          toast('Failed to connect to server. Please try again.', 'error');
+          return;
+        }
+      }
+
+      // Store selected mood
+      try {
+        localStorage.setItem('selectedMood', selectedMood);
+      } catch (e) {
+        console.warn('LocalStorage not available:', e);
+      }
+
+      console.log('🎮 Joining matchmaking with mood:', selectedMood);
+
+      // Navigate to discovery page
+      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+        _PageTransition.navigateTo('/discovery.html');
+      } else {
+        window.location.href = '/discovery.html';
+      }
+    }
+
+    // ============================================
+    // LOG MOOD (NOTES)
+    // ============================================
+    async function handleLogMood() {
+      const text = (noteText && noteText.value) ? noteText.value.trim() : '';
+      if (!text) {
+        toast('Please add a note', 'warning');
+        return;
+      }
+      if (!selectedMood) {
+        toast('Please select a mood', 'warning');
+        return;
+      }
+
+      showLoading('Saving your mood...');
+      try {
+        if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
+        await _API.post('/api/notes', { text, mood: selectedMood });
+        hideLoading();
+        toast('Mood logged!', 'success');
+        if (noteText) noteText.value = '';
+        loadNotes(0);
+      } catch (err) {
+        hideLoading();
+        console.error('Failed to log mood:', err);
+        toast(err.message || 'Failed to log mood', 'error');
+      }
+    }
+
+    // ============================================
+    // NOTES DISPLAY
+    // ============================================
+    function renderNote(note) {
+      const el = document.createElement('div');
+      el.className = 'bg-white p-4 rounded-xl border border-gray-200 flex items-start gap-3 animate-fade-in-up';
+      const moodEmoji = note && note.mood ? (moods[note.mood] || '😊') : '😊';
+      const username = note && note.username ? note.username : 'Anonymous';
+      const createdAt = note && note.createdAt ? 
+        (_Utils && typeof _Utils.formatDate === 'function' ? 
+          _Utils.formatDate(note.createdAt) : 
+          new Date(note.createdAt).toLocaleString()) : '';
+      const textHtml = note && note.text ? 
+        (_Utils && typeof _Utils.escapeHtml === 'function' ? 
+          _Utils.escapeHtml(note.text) : 
+          (()=>{const d=document.createElement('div');d.textContent=note.text;return d.innerHTML;})()) : '';
+      
+      el.innerHTML = `
+        <div class="flex-shrink-0">
+          <div class="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-2xl">${moodEmoji}</div>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-bold text-sm">${username}</span>
+            <span class="text-xs text-gray-400">${createdAt}</span>
+          </div>
+          <p class="text-sm text-gray-600">${textHtml}</p>
+        </div>
+      `;
+      return el;
+    }
+
+    async function loadNotes(pageNum = 0) {
+      if (loadingEl) loadingEl.classList.remove('hidden');
+      try {
+        if (!_API || typeof _API.get !== 'function') throw new Error('API.get missing');
+        const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
+        if (pageNum === 0 && notesList) notesList.innerHTML = '';
+        const notesArray = Array.isArray(data.notes) ? data.notes : [];
+        notesArray.forEach(n => { 
+          if (notesList) notesList.appendChild(renderNote(n)); 
+        });
+        page = pageNum;
+      } catch (err) {
+        console.error('Failed to load notes:', err);
+        toast(err.message || 'Failed to load notes','error');
+      } finally {
+        if (loadingEl) loadingEl.classList.add('hidden');
+      }
+    }
+
+    // ============================================
+    // LOGOUT
+    // ============================================
+    function handleLogout() {
+      try {
+        // Disconnect socket
+        if (socketInstance) {
+          socketInstance.disconnect();
+          socketInstance = null;
+        }
+
+        // Clear auth
+        if (_Auth && typeof _Auth.clearAuth === 'function') {
+          _Auth.clearAuth();
+        } else {
+          localStorage.removeItem('user');
+        }
+
+        // Sign out from Firebase
+        firebase.auth().signOut();
+      } catch (e) {
+        console.error('Logout error', e);
+      }
+      
+      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+        _PageTransition.navigateTo('/login.html');
+      } else {
+        window.location.href = '/login.html';
+      }
+    }
+
+    // ============================================
+    // EVENT LISTENERS
+    // ============================================
+    function attachListeners() {
+      if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
+      if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
+      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
+      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+      if (noteText) {
+        noteText.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            if (!logMoodBtn.disabled) handleLogMood();
+          }
+        });
+      }
+    }
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    async function initPage() {
+      // Require authentication
+      try {
+        if (_Auth && typeof _Auth.requireAuth === 'function') {
+          await _Auth.requireAuth();
+        }
+      } catch (err) {
+        console.error('Error running requireAuth():', err);
+        return;
+      }
+
+      // Initialize Socket.IO
+      console.log('🔌 Initializing socket connection...');
+      socketInstance = await initializeSocket();
+
+      // Render UI
+      renderMoods();
+      attachListeners();
+      loadNotes(0);
+    }
+
+    // Start the page
+    initPage();
+  })();
+  </script>
+</body>
+</html>
