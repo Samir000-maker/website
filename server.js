@@ -38,7 +38,7 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
 // Configure multer for file uploads (memory storage)
 const upload = multer({
@@ -71,8 +71,9 @@ const userCalls = new Map(); // userId -> callId
  */
 
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
+
 
 
 app.get('/health', (req, res) => {
