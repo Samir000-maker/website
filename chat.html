@@ -9,7 +9,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="global.css" rel="stylesheet">
     <style>
-        /* ... same styles ... */
         .reply-btn {
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -210,23 +209,9 @@
       let replyingTo = null;
       let isInitiatingCall = false;
       let pendingCallData = null;
-
-      // CRITICAL: Mark navigation to call page BEFORE navigating
-      function navigateToCallPage(callData) {
-        console.log('🎬 Preparing to navigate to call page...');
-        
-        // Store call data
-        localStorage.setItem('activeCall', JSON.stringify(callData));
-        
-        // Set flag in sessionStorage (persists across navigation)
-        sessionStorage.setItem('navigatingToCall', 'true');
-        
-        // Small delay to ensure flag is set
-        setTimeout(() => {
-          console.log('🚀 Navigating to /call.html');
-          window.location.href = '/call.html';
-        }, 100);
-      }
+      
+      // CRITICAL: Global flag to prevent ANY disconnect
+      window._preventSocketDisconnect = false;
 
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
@@ -481,10 +466,12 @@
       updateTimer();
 
       const idToken = await firebaseUser.getIdToken();
-      const socketUrl = 'https://website-hdem.onrender.com';
+      const socketUrl = window.location.origin;
       const socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
+        reconnectionDelay: 500,
+        reconnectionAttempts: 10,
         auth: { token: idToken }
       });
 
@@ -566,13 +553,24 @@
         console.log('✅ Call accepted:', data);
         isInitiatingCall = false;
         
-        // Navigate using our helper function
-        navigateToCallPage({
+        // CRITICAL: Set global flag FIRST
+        window._preventSocketDisconnect = true;
+        sessionStorage.setItem('navigatingToCall', 'true');
+        
+        // Store call data
+        localStorage.setItem('activeCall', JSON.stringify({
           callId: data.callId,
           roomId: roomData.roomId,
           callType: data.callType,
           users: data.users
-        });
+        }));
+        
+        console.log('🚀 Navigating to call page (socket will NOT disconnect)');
+        
+        // Use location.replace to avoid adding to history and triggering unload
+        setTimeout(() => {
+          location.replace('/call.html');
+        }, 100);
       });
 
       socketInstance.on('call_declined', (data) => {
@@ -686,24 +684,28 @@
         });
       }
 
-      // CRITICAL: Check sessionStorage flag on page unload
+      // CRITICAL: Check global flag before ANY disconnect
       window.addEventListener('beforeunload', (e) => {
-        const isNavigatingToCall = sessionStorage.getItem('navigatingToCall') === 'true';
-        
-        if (isNavigatingToCall) {
-          console.log('✅ Navigating to call - NOT disconnecting socket');
-          // Don't disconnect - we're going to call page
-          return;
+        if (window._preventSocketDisconnect) {
+          console.log('🔒 Socket disconnect PREVENTED - navigating to call');
+          return; // DON'T disconnect!
         }
         
-        // Normal page close/refresh - cleanup
-        console.log('🚪 Page closing - cleaning up');
+        console.log('🚪 Normal page close - cleaning up');
         if (socketInstance) {
           socketInstance.emit('leave_room');
           socketInstance.disconnect();
         }
         if (timerInterval) {
           clearInterval(timerInterval);
+        }
+      });
+
+      // Also prevent on visibilitychange
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && !window._preventSocketDisconnect) {
+          console.log('👁️ Page hidden - but keeping socket alive');
+          // Don't disconnect even when hidden
         }
       });
 
