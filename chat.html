@@ -9,7 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="global.css" rel="stylesheet">
     <style>
-        /* Reply button styles */
+        /* ... same styles ... */
         .reply-btn {
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -19,7 +19,6 @@
             opacity: 1;
         }
         
-        /* Reply preview animation */
         .reply-preview {
             animation: slideUp 0.2s ease-out;
         }
@@ -35,7 +34,6 @@
             }
         }
         
-        /* Quoted message styles inside bubble */
         .quoted-message {
             border-left: 3px solid #93c5fd;
             padding-left: 8px;
@@ -51,13 +49,11 @@
             border-left-color: #4a9d9d;
         }
 
-        /* Sidebar styles */
         .sidebar {
             width: 280px;
             min-width: 280px;
         }
 
-        /* User card hover effect */
         .user-card {
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
@@ -67,7 +63,6 @@
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
 
-        /* Disable button when calling */
         .calling {
             opacity: 0.6;
             cursor: not-allowed;
@@ -92,29 +87,21 @@
     </header>
 
     <div class="flex flex-1 h-[calc(100vh-4rem)]">
-        <!-- Left Sidebar: Active Users -->
         <aside class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
             <div class="p-4">
                 <h3 class="text-xs font-bold text-gray-500 uppercase mb-4">Active Users</h3>
-                <div id="usersList" class="space-y-3">
-                    <!-- Users will be loaded here -->
-                </div>
+                <div id="usersList" class="space-y-3"></div>
             </div>
         </aside>
 
-        <!-- Main Chat Area -->
         <main class="flex-1 flex flex-col">
-            <!-- Messages Container -->
             <div id="messagesList" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
                 <div class="text-center text-sm text-gray-400 mb-4">
                     Welcome to the safe space. Be kind and supportive.
                 </div>
-                <!-- Messages will appear here -->
             </div>
 
-            <!-- Message Input Area -->
             <div class="border-t border-gray-200 bg-white">
-                <!-- Reply Preview Bar -->
                 <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-4 py-3 bg-gray-50">
                     <div class="flex items-start justify-between gap-3">
                         <div class="flex-1 min-w-0">
@@ -130,7 +117,6 @@
                     </div>
                 </div>
                 
-                <!-- Message Input -->
                 <div class="p-4">
                     <form id="messageForm" class="flex gap-3">
                         <input type="text" id="messageInput" required maxlength="500"
@@ -145,7 +131,6 @@
         </main>
     </div>
 
-    <!-- Call Action Buttons (Floating) -->
     <div class="fixed bottom-6 right-6 flex gap-3 z-50">
         <button id="audioCallBtn" 
             class="w-14 h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
@@ -159,7 +144,6 @@
         </button>
     </div>
 
-    <!-- Incoming Call Modal -->
     <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center">
         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 animate-fade-in">
             <div class="text-center">
@@ -187,7 +171,6 @@
         </div>
     </div>
 
-    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
@@ -208,10 +191,7 @@
       firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     </script>
 
-    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-
-    <!-- App -->
     <script src="app.js"></script>
 
     <script>
@@ -220,7 +200,6 @@
       const _Auth = MoodApp.Auth;
       const _API = MoodApp.API;
       const _Toast = MoodApp.Toast;
-      const _PageTransition = MoodApp.PageTransition;
       const _Utils = MoodApp.Utils;
 
       const toast = (m, t='success') => { 
@@ -228,19 +207,31 @@
         console[t==='error'?'error':'log'](m); 
       };
 
-      // Reply state management
       let replyingTo = null;
-      
-      // Call state management
       let isInitiatingCall = false;
       let pendingCallData = null;
-      let isNavigatingToCall = false; // NEW: Prevent socket disconnect during navigation
 
-      // Helper function to create profile picture element
+      // CRITICAL: Mark navigation to call page BEFORE navigating
+      function navigateToCallPage(callData) {
+        console.log('🎬 Preparing to navigate to call page...');
+        
+        // Store call data
+        localStorage.setItem('activeCall', JSON.stringify(callData));
+        
+        // Set flag in sessionStorage (persists across navigation)
+        sessionStorage.setItem('navigatingToCall', 'true');
+        
+        // Small delay to ensure flag is set
+        setTimeout(() => {
+          console.log('🚀 Navigating to /call.html');
+          window.location.href = '/call.html';
+        }, 100);
+      }
+
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
         const container = document.createElement('div');
-        container.className = `${size} rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-white shadow-sm flex-shrink-0`;
+        container.className = `${size} rounded-full overflow-hidden bg-slate-100 border-2 border-white shadow-sm flex-shrink-0`;
         
         if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
           const img = document.createElement('img');
@@ -259,7 +250,6 @@
         return container;
       }
 
-      // Show reply preview
       function showReplyPreview(messageData) {
         replyingTo = messageData;
         const replyPreview = document.getElementById('replyPreview');
@@ -278,7 +268,6 @@
         }
       }
 
-      // Hide reply preview
       function hideReplyPreview() {
         replyingTo = null;
         const replyPreview = document.getElementById('replyPreview');
@@ -287,7 +276,6 @@
         }
       }
 
-      // Escape HTML helper
       function escapeHtml(text) {
         if (_Utils && typeof _Utils.escapeHtml === 'function') {
           return _Utils.escapeHtml(text);
@@ -297,7 +285,6 @@
         return div.innerHTML;
       }
 
-      // Format date helper
       function formatTimestamp(timestamp) {
         if (_Utils && typeof _Utils.formatDate === 'function') {
           return _Utils.formatDate(timestamp);
@@ -305,7 +292,6 @@
         return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
 
-      // Create message element
       function createMessageElement(data, isCurrentUser) {
         const messageItem = document.createElement('div');
         messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
@@ -389,7 +375,6 @@
         return messageItem;
       }
 
-      // Require auth
       try {
         await _Auth.requireAuth();
       } catch (err) {
@@ -398,28 +383,20 @@
         return;
       }
 
-      // Get room data
       const roomDataStr = localStorage.getItem('currentRoom');
       if (!roomDataStr) {
         toast('No active room found', 'error');
-        setTimeout(() => {
-          window.location.href = '/mood.html';
-        }, 1500);
+        setTimeout(() => window.location.href = '/mood.html', 1500);
         return;
       }
 
       const roomData = JSON.parse(roomDataStr);
-      console.log('🎮 Room data:', roomData);
-
       if (!roomData.roomId) {
         toast('Invalid room data', 'error');
-        setTimeout(() => {
-          window.location.href = '/mood.html';
-        }, 1500);
+        setTimeout(() => window.location.href = '/mood.html', 1500);
         return;
       }
 
-      // Get current user
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
         window.location.href = '/login.html';
@@ -433,9 +410,6 @@
         pfpUrl: userData.pfpUrl
       };
 
-      console.log('✅ Current user:', currentUser);
-
-      // DOM refs
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
       const messageInput = document.getElementById('messageInput');
@@ -450,12 +424,10 @@
       const acceptCallBtn = document.getElementById('acceptCallBtn');
       const declineCallBtn = document.getElementById('declineCallBtn');
 
-      // Cancel reply button
       if (cancelReplyBtn) {
         cancelReplyBtn.addEventListener('click', hideReplyPreview);
       }
 
-      // Display users with profile pictures in sidebar
       if (usersList && Array.isArray(roomData.users)) {
         roomData.users.forEach(user => {
           const userCard = document.createElement('div');
@@ -487,7 +459,6 @@
         }
       }
 
-      // Timer
       let timerInterval = null;
       const updateTimer = () => {
         const now = Date.now();
@@ -502,29 +473,23 @@
         if (remaining === 0) {
           if (timerInterval) clearInterval(timerInterval);
           toast('Room has expired', 'warning');
-          setTimeout(() => {
-            window.location.href = '/mood.html';
-          }, 2000);
+          setTimeout(() => window.location.href = '/mood.html', 2000);
         }
       };
 
       timerInterval = setInterval(updateTimer, 1000);
       updateTimer();
 
-      // Initialize socket
       const idToken = await firebaseUser.getIdToken();
-      const socketUrl = window.location.origin; // Use same origin for production
+      const socketUrl = window.location.origin;
       const socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
-        auth: {
-          token: idToken
-        }
+        auth: { token: idToken }
       });
 
       socketInstance.on('connect', () => {
         console.log('🔌 Socket connected:', socketInstance.id);
-        
         socketInstance.emit('authenticate', {
           token: idToken,
           userId: currentUser.userId
@@ -533,7 +498,6 @@
 
       socketInstance.on('authenticated', (data) => {
         console.log('✅ Socket authenticated:', data);
-        console.log('🚪 Joining room:', roomData.roomId);
         socketInstance.emit('join_room', { roomId: roomData.roomId });
       });
 
@@ -543,41 +507,28 @@
 
       socketInstance.on('error', (data) => {
         console.error('❌ Socket error:', data);
-        
         if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
-          toast('Room no longer available. Returning to mood selection.', 'error');
-          setTimeout(() => {
-            window.location.href = '/mood.html';
-          }, 2000);
+          toast('Room no longer available', 'error');
+          setTimeout(() => window.location.href = '/mood.html', 2000);
         } else {
           toast(data.message || 'An error occurred', 'error');
         }
       });
 
-      // Socket events - CHAT MESSAGE
       socketInstance.on('chat_message', (data) => {
-        console.log('💬 Message received:', data);
-        
         const isCurrentUser = data.userId === currentUser.userId;
         const msgEl = createMessageElement(data, isCurrentUser);
-        
         if (messagesList) {
           messagesList.appendChild(msgEl);
           messagesList.scrollTop = messagesList.scrollHeight;
         }
       });
 
-      // Socket events - USER LEFT
       socketInstance.on('user_left', (data) => {
-        console.log('👋 User left:', data);
-        
         const msgEl = document.createElement('div');
         msgEl.className = 'text-center text-sm text-gray-400 my-2';
         msgEl.textContent = `${data.username || 'A user'} left the room`;
-        
-        if (messagesList) {
-          messagesList.appendChild(msgEl);
-        }
+        if (messagesList) messagesList.appendChild(msgEl);
 
         if (onlineCount && data.remainingUsers !== undefined) {
           onlineCount.textContent = `${data.remainingUsers} Online`;
@@ -585,27 +536,17 @@
 
         if (data.remainingUsers <= 1) {
           toast('Room closing...', 'warning');
-          setTimeout(() => {
-            window.location.href = '/mood.html';
-          }, 2000);
+          setTimeout(() => window.location.href = '/mood.html', 2000);
         }
       });
 
-      // Socket events - LEFT ROOM
       socketInstance.on('left_room', (data) => {
-        console.log('✅ Successfully left room:', data);
         toast('Left room', 'success');
-        setTimeout(() => {
-          window.location.href = '/mood.html';
-        }, 1000);
+        setTimeout(() => window.location.href = '/mood.html', 1000);
       });
 
-      // Call signaling events
       socketInstance.on('incoming_call', (data) => {
-        console.log('📞 Incoming call:', data);
         pendingCallData = data;
-        
-        // Show incoming call modal
         const callerName = document.getElementById('callerName');
         const callType = document.getElementById('callType');
         const callerAvatar = document.getElementById('callerAvatar');
@@ -623,104 +564,70 @@
 
       socketInstance.on('call_accepted', (data) => {
         console.log('✅ Call accepted:', data);
+        isInitiatingCall = false;
         
-        // Set flag to prevent socket disconnect
-        isNavigatingToCall = true;
-        
-        // Store call data
-        localStorage.setItem('activeCall', JSON.stringify({
+        // Navigate using our helper function
+        navigateToCallPage({
           callId: data.callId,
           roomId: roomData.roomId,
           callType: data.callType,
           users: data.users
-        }));
-        
-        // Reset state
-        isInitiatingCall = false;
-        
-        // Navigate to call page WITHOUT closing socket
-        console.log('🎬 Navigating to call page...');
-        window.location.href = '/call.html';
+        });
       });
 
       socketInstance.on('call_declined', (data) => {
-        console.log('❌ Call declined:', data);
         toast('Call was declined', 'warning');
         isInitiatingCall = false;
-        
-        // Re-enable buttons
         if (audioCallBtn) audioCallBtn.classList.remove('calling');
         if (videoCallBtn) videoCallBtn.classList.remove('calling');
       });
 
-      socketInstance.on('call_ended', (data) => {
-        console.log('📵 Call ended:', data);
-        if (window.location.pathname === '/call.html') {
-          window.location.href = '/chat.html';
-        }
-      });
-
-      // Audio call button - PREVENT DUPLICATE CALLS
       if (audioCallBtn) {
         audioCallBtn.addEventListener('click', () => {
-          if (isInitiatingCall) {
-            console.log('⚠️ Already initiating a call');
-            return;
-          }
-          
+          if (isInitiatingCall) return;
           isInitiatingCall = true;
           audioCallBtn.classList.add('calling');
           videoCallBtn.classList.add('calling');
           
-          console.log('📞 Initiating audio call');
           socketInstance.emit('initiate_call', {
             roomId: roomData.roomId,
             callType: 'audio'
           });
           toast('Calling...', 'success');
           
-          // Reset after timeout if no response
           setTimeout(() => {
             if (isInitiatingCall) {
               isInitiatingCall = false;
               audioCallBtn.classList.remove('calling');
               videoCallBtn.classList.remove('calling');
             }
-          }, 30000); // 30 second timeout
+          }, 30000);
         });
       }
 
-      // Video call button - PREVENT DUPLICATE CALLS
       if (videoCallBtn) {
         videoCallBtn.addEventListener('click', () => {
-          if (isInitiatingCall) {
-            console.log('⚠️ Already initiating a call');
-            return;
-          }
-          
+          if (isInitiatingCall) return;
           isInitiatingCall = true;
           audioCallBtn.classList.add('calling');
           videoCallBtn.classList.add('calling');
           
-          console.log('📹 Initiating video call');
           socketInstance.emit('initiate_call', {
             roomId: roomData.roomId,
             callType: 'video'
           });
           toast('Calling...', 'success');
           
-          // Reset after timeout if no response
           setTimeout(() => {
             if (isInitiatingCall) {
               isInitiatingCall = false;
               audioCallBtn.classList.remove('calling');
               videoCallBtn.classList.remove('calling');
             }
-          }, 30000); // 30 second timeout
+          }, 30000);
         });
       }
 
-      // Accept call button
       if (acceptCallBtn) {
         acceptCallBtn.addEventListener('click', () => {
           if (pendingCallData) {
@@ -734,7 +641,6 @@
         });
       }
 
-      // Decline call button
       if (declineCallBtn) {
         declineCallBtn.addEventListener('click', () => {
           if (pendingCallData) {
@@ -748,15 +654,11 @@
         });
       }
 
-      // Send message
       if (messageForm) {
         messageForm.addEventListener('submit', (e) => {
           e.preventDefault();
-
           const message = messageInput ? messageInput.value.trim() : '';
           if (!message) return;
-
-          console.log('📤 Sending message:', message);
 
           const messageData = {
             roomId: roomData.roomId,
@@ -770,30 +672,33 @@
               message: replyingTo.message,
               userId: replyingTo.userId
             };
-            
             hideReplyPreview();
           }
 
           socketInstance.emit('chat_message', messageData);
-
-          if (messageInput) {
-            messageInput.value = '';
-          }
+          if (messageInput) messageInput.value = '';
         });
       }
 
-      // Leave room
       if (leaveBtn) {
         leaveBtn.addEventListener('click', () => {
-          console.log('👋 Leaving room...');
           socketInstance.emit('leave_room');
         });
       }
 
-      // Cleanup on page unload - ONLY if not navigating to call
-      window.addEventListener('beforeunload', () => {
-        if (!isNavigatingToCall && socketInstance) {
-          console.log('🚪 Cleaning up socket connection...');
+      // CRITICAL: Check sessionStorage flag on page unload
+      window.addEventListener('beforeunload', (e) => {
+        const isNavigatingToCall = sessionStorage.getItem('navigatingToCall') === 'true';
+        
+        if (isNavigatingToCall) {
+          console.log('✅ Navigating to call - NOT disconnecting socket');
+          // Don't disconnect - we're going to call page
+          return;
+        }
+        
+        // Normal page close/refresh - cleanup
+        console.log('🚪 Page closing - cleaning up');
+        if (socketInstance) {
           socketInstance.emit('leave_room');
           socketInstance.disconnect();
         }
