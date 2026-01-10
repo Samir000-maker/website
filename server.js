@@ -12,6 +12,13 @@ import { uploadProfilePicture, getDefaultProfilePicture } from './cloudflare-sto
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
 import * as matchmaking from './matchmaking.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
 // Initialize Express app
 const app = express();
 const server = createServer(app);
@@ -31,7 +38,7 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Configure multer for file uploads (memory storage)
 const upload = multer({
@@ -62,6 +69,12 @@ const userCalls = new Map(); // userId -> callId
 /**
  * Health check endpoint
  */
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
