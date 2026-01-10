@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Select Username - MoodLog</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link rel="stylesheet" href="global.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+</head>
+<body class="bg-background-light min-h-screen flex flex-col">
+    <div class="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <div class="absolute -top-[10%] -left-[5%] w-[40vw] h-[40vw] bg-primary/5 rounded-full blur-[100px]"></div>
+        <div class="absolute top-[20%] right-[10%] w-[20vw] h-[20vw] bg-blue-400/5 rounded-full blur-[80px]"></div>
+    </div>
+
+    <header class="relative z-10 flex items-center justify-between px-6 py-5 md:px-10 lg:px-40">
+        <div class="flex items-center gap-3">
+            <div class="size-8 text-primary">🎯</div>
+            <h2 class="text-xl font-bold tracking-tight">MoodLog</h2>
+        </div>
+        <div class="hidden md:flex items-center gap-2 text-sm font-medium text-gray-500">
+            <span>Account</span>
+            <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+            <span class="text-primary">Profile</span>
+        </div>
+    </header>
+
+    <main class="relative z-10 flex flex-1 flex-col justify-center items-center px-4 py-8">
+        <div class="w-full max-w-[520px] animate-fade-in-up">
+            <div class="mb-8 text-center">
+                <div class="inline-flex items-center justify-center size-14 rounded-2xl bg-primary/10 text-primary mb-5 shadow-sm ring-1 ring-primary/20">
+                    <span class="material-symbols-outlined text-[32px]">alternate_email</span>
+                </div>
+                <h1 class="text-3xl md:text-4xl font-black leading-tight tracking-[-0.02em] text-gray-900 mb-3">
+                    Claim your unique handle
+                </h1>
+                <p class="text-gray-500 text-lg leading-relaxed">
+                    Pick a username to connect with friends and start your mood logging journey
+                </p>
+            </div>
+
+            <div class="bg-surface-light rounded-xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] ring-1 ring-black/5 p-6 md:p-8">
+                <form id="usernameForm" class="flex flex-col gap-6">
+                    <div class="relative group">
+                        <label for="username" class="block text-sm font-bold text-gray-700 mb-2 ml-1">Username</label>
+                        <div class="relative flex items-center">
+                            <span class="absolute left-4 text-gray-400 font-medium text-xl select-none">@</span>
+                            <input type="text" id="username" 
+                                class="form-input block w-full rounded-xl border-gray-200 bg-gray-50 text-gray-900 h-16 pl-10 pr-12 text-lg font-medium focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                                placeholder="your_username"
+                                maxlength="20" autocomplete="off">
+                            <div id="statusIcon" class="absolute right-4 hidden"></div>
+                        </div>
+                        <div id="feedback" class="mt-3"></div>
+                    </div>
+
+                    <div class="bg-background-light rounded-lg p-4 border border-gray-200">
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Guidelines</h4>
+                        <ul class="space-y-2">
+                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                3-20 characters in length
+                            </li>
+                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                Letters, numbers, underscores, and hyphens only
+                            </li>
+                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                Must be unique across the platform
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="pt-2">
+                        <button type="submit" id="submitBtn" disabled
+                            class="btn btn-primary w-full h-14 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <span class="font-bold text-base tracking-wide">Confirm Username</span>
+                            <span class="material-symbols-outlined ml-2">arrow_forward</span>
+                        </button>
+                        <p class="mt-4 text-center text-sm text-gray-400">
+                            You can change this later in settings
+                        </p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+
+    <script>
+        (function () {
+            const MoodApp = window.MoodApp || {};
+            const _Auth = MoodApp.Auth;
+            const _API = MoodApp.API;
+            const _Toast = MoodApp.Toast;
+            const _Loading = MoodApp.Loading;
+            const _PageTransition = MoodApp.PageTransition;
+
+            // Firebase config
+            const firebaseConfig = {
+                apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+                authDomain: "projectt3-8c55e.firebaseapp.com",
+                projectId: "projectt3-8c55e",
+                storageBucket: "projectt3-8c55e.firebasestorage.app",
+                messagingSenderId: "64611387728",
+                appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+                measurementId: "G-0Z91D0Q6EE"
+            };
+
+            try {
+                if (!firebase.apps?.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
+            } catch (error) {
+                console.error('Firebase init error:', error);
+            }
+
+            // Safe wrapper helpers
+            const toastError = (msg) => {
+                if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
+                else console.error('Toast.error:', msg);
+            };
+            const toastSuccess = (msg) => {
+                if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
+                else console.log('Toast.success:', msg);
+            };
+            const loadingShow = (msg) => {
+                if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+            };
+            const loadingHide = () => {
+                if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+            };
+
+            // Simple debounce
+            const debounce = (fn, wait = 300) => {
+                let timer = null;
+                return function (...args) {
+                    if (timer) clearTimeout(timer);
+                    timer = setTimeout(() => fn.apply(this, args), wait);
+                };
+            };
+
+            // Validator
+            const isValidUsername = (u) => {
+                if (!u || typeof u !== 'string') return false;
+                const trimmed = u.trim();
+                return /^[a-zA-Z0-9_-]{3,20}$/.test(trimmed);
+            };
+
+            // DOM references
+            const usernameInput = document.getElementById('username');
+            const submitBtn = document.getElementById('submitBtn');
+            const statusIcon = document.getElementById('statusIcon');
+            const feedback = document.getElementById('feedback');
+            const usernameForm = document.getElementById('usernameForm');
+
+            // Auth check
+            try {
+                if (_Auth && typeof _Auth.requireAuth === 'function') {
+                    _Auth.requireAuth();
+                }
+            } catch (err) {
+                console.error('Error calling Auth.requireAuth():', err);
+            }
+
+            // Show feedback
+            function showFeedback(type, message) {
+                if (!feedback) return;
+                const color = type === 'success' ? 'emerald' : 'red';
+                const icon = type === 'success' ? '✓' : '✗';
+                feedback.innerHTML = `
+                    <div class="flex items-start gap-2 px-1">
+                        <span class="text-${color}-600 text-[18px] shrink-0">${icon}</span>
+                        <p class="text-sm font-medium text-${color}-600 leading-normal">${message}</p>
+                    </div>
+                `;
+            }
+
+            const hideStatusIcon = () => {
+                if (!statusIcon) return;
+                statusIcon.classList.add('hidden');
+                statusIcon.innerHTML = '';
+            };
+
+            const showSpinner = () => {
+                if (!statusIcon) return;
+                statusIcon.innerHTML = '<div class="loading-spinner" style="width:20px;height:20px;border-width:2px;border-radius:9999px;border-style:solid;border-color:#6b7280;border-top-color:transparent;animation:spin 1s linear infinite"></div>';
+                statusIcon.classList.remove('hidden');
+            };
+
+            let isAvailable = false;
+            let lastCheckedUsername = '';
+
+            // Get API base URL
+            const getApiBaseUrl = () => {
+                try {
+                    const { hostname, port } = window.location;
+                    if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
+                        return 'http://localhost:3000';
+                    }
+                } catch {}
+                return window.location.origin;
+            };
+
+            const API_BASE_URL = getApiBaseUrl();
+
+            // Check username with timeout - ALWAYS use direct fetch (no auth required)
+            const checkUsername = debounce(async (username) => {
+                if (!isValidUsername(username)) {
+                    showFeedback('error', 'Username must be 3-20 characters: letters, numbers, underscores, hyphens');
+                    isAvailable = false;
+                    if (submitBtn) submitBtn.disabled = true;
+                    hideStatusIcon();
+                    return;
+                }
+
+                // Prevent duplicate checks
+                if (lastCheckedUsername === username && isAvailable) {
+                    return;
+                }
+
+                lastCheckedUsername = username;
+                showSpinner();
+                if (feedback) feedback.innerHTML = '';
+
+                // Set timeout for API call
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                try {
+                    console.log('Checking username availability:', username);
+                    
+                    // ALWAYS use direct fetch for username check (no auth required)
+                    const response = await fetch(`${API_BASE_URL}/api/check-username`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username }),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`Server returned ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Username check result:', result);
+
+                    if (result && result.available) {
+                        isAvailable = true;
+                        if (submitBtn) submitBtn.disabled = false;
+                        statusIcon.innerHTML = '<span class="text-emerald-600 text-2xl">✓</span>';
+                        statusIcon.classList.remove('hidden');
+                        showFeedback('success', `Excellent! <strong>@${username}</strong> is available`);
+                    } else {
+                        isAvailable = false;
+                        if (submitBtn) submitBtn.disabled = true;
+                        statusIcon.innerHTML = '<span class="text-red-600 text-2xl">✗</span>';
+                        statusIcon.classList.remove('hidden');
+
+                        let suggestionsHtml = '';
+                        if (result && Array.isArray(result.suggestions) && result.suggestions.length) {
+                            suggestionsHtml = `<br><small>Try: ${result.suggestions.map(s => `<strong>@${s}</strong>`).join(', ')}</small>`;
+                        }
+                        showFeedback('error', `Username taken${suggestionsHtml}`);
+                    }
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    console.error('Error checking username:', error);
+                    
+                    hideStatusIcon();
+                    
+                    // If it's a timeout or network error, show error
+                    if (error.name === 'AbortError') {
+                        showFeedback('error', 'Request timeout. Please try again.');
+                    } else {
+                        showFeedback('error', 'Unable to check availability. Please try again.');
+                    }
+                    
+                    isAvailable = false;
+                    if (submitBtn) submitBtn.disabled = true;
+                }
+            }, 500);
+
+            // Input event
+            if (usernameInput) {
+                usernameInput.addEventListener('input', (e) => {
+                    const username = (e.target.value || '').trim().toLowerCase();
+
+                    if (!username) {
+                        hideStatusIcon();
+                        if (feedback) feedback.innerHTML = '';
+                        if (submitBtn) submitBtn.disabled = true;
+                        isAvailable = false;
+                        lastCheckedUsername = '';
+                        return;
+                    }
+
+                    if (!isValidUsername(username)) {
+                        hideStatusIcon();
+                        showFeedback('error', 'Only letters, numbers, underscores, and hyphens allowed');
+                        if (submitBtn) submitBtn.disabled = true;
+                        isAvailable = false;
+                        return;
+                    }
+
+                    checkUsername(username);
+                });
+            }
+
+            // Form submit
+            if (usernameForm) {
+                usernameForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const username = usernameInput ? usernameInput.value.trim().toLowerCase() : '';
+
+                    console.log('Form submitted with username:', username, 'isAvailable:', isAvailable);
+
+                    if (!username || !isValidUsername(username)) {
+                        toastError('Please enter a valid username');
+                        return;
+                    }
+
+                    if (!isAvailable) {
+                        toastError('Please choose an available username');
+                        return;
+                    }
+
+                    loadingShow('Setting up your profile...');
+
+                    try {
+                        let result;
+                        
+                        // Use API helper for authenticated request
+                        if (_API && typeof _API.post === 'function') {
+                            result = await _API.post('/api/users/profile', { username });
+                        } else {
+                            // Fallback: get token manually
+                            const user = firebase.auth().currentUser;
+                            if (!user) {
+                                throw new Error('Not authenticated');
+                            }
+                            
+                            const token = await user.getIdToken();
+                            
+                            const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({ username })
+                            });
+
+                            if (!response.ok) {
+                                throw new Error(`Failed to save username: ${response.status}`);
+                            }
+
+                            result = await response.json();
+                        }
+
+                        console.log('Profile save result:', result);
+
+                        // Save username locally
+                        try {
+                            localStorage.setItem('moodapp_username', username);
+                        } catch (err) {
+                            console.warn('Could not save to localStorage:', err);
+                        }
+
+                        loadingHide();
+                        toastSuccess('Username saved!');
+
+                        setTimeout(() => {
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/profile-picture.html');
+                            } else {
+                                window.location.href = '/profile-picture.html';
+                            }
+                        }, 1000);
+                    } catch (error) {
+                        loadingHide();
+                        console.error('Failed to save username:', error);
+                        toastError(error && error.message ? error.message : 'Failed to save username. Please try again.');
+                    }
+                });
+            }
+
+            // Add CSS for spinner animation
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                }
+            `;
+            document.head.appendChild(style);
+        })();
+    </script>
+</body>
+</html>
