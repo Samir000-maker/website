@@ -1,0 +1,196 @@
+!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile Picture - MoodLog</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="global.css" rel="stylesheet">
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+</head>
+
+<body class="bg-background-light min-h-screen flex flex-col">
+
+<header class="relative z-10 flex items-center justify-between px-6 py-5 md:px-10">
+    <div class="flex items-center gap-3">
+        <div class="size-8 text-primary">📸</div>
+        <h2 class="text-xl font-bold tracking-tight">MoodLog</h2>
+    </div>
+</header>
+
+<main class="relative z-10 flex flex-1 flex-col justify-center items-center px-4 py-8">
+    <div class="w-full max-w-[520px] animate-fade-in-up">
+
+        <div class="mb-8 text-center">
+            <div class="inline-flex items-center justify-center size-14 rounded-2xl bg-primary/10 text-primary mb-5">
+                <span class="material-symbols-outlined text-[32px]">add_a_photo</span>
+            </div>
+            <h1 class="text-3xl md:text-4xl font-black leading-tight text-gray-900 mb-3">
+                Add a profile picture
+            </h1>
+            <p class="text-gray-500 text-lg">
+                Personalize your profile. It helps others recognize you
+            </p>
+        </div>
+
+        <div class="bg-surface-light rounded-xl shadow-xl ring-1 ring-black/5 p-6 md:p-10">
+
+            <div class="flex flex-col items-center gap-8 pb-4">
+                <div class="relative group">
+                    <div id="previewContainer"
+                         class="w-48 h-48 rounded-full bg-gray-50 flex items-center justify-center border-4 border-white shadow-lg ring-1 ring-gray-100 overflow-hidden">
+                        <span class="material-symbols-outlined text-[80px] text-gray-300">person</span>
+                        <img id="preview" class="hidden w-full h-full object-cover">
+                    </div>
+
+                    <label for="fileInput"
+                           class="absolute bottom-2 right-2 flex items-center justify-center size-12 rounded-full bg-primary text-white shadow-lg hover:bg-primary-dark hover:scale-105 transition-all cursor-pointer ring-4 ring-white">
+                        <span class="material-symbols-outlined text-[20px]">upload</span>
+                    </label>
+
+                    <input type="file" id="fileInput" accept="image/*" class="hidden">
+                </div>
+
+                <div class="flex flex-col items-center gap-2 w-full">
+                    <label for="fileInput" class="btn btn-secondary cursor-pointer">
+                        <span class="material-symbols-outlined text-[20px] mr-2">folder_open</span>
+                        Choose from Library
+                    </label>
+                    <p class="text-xs font-medium text-gray-400 mt-1">
+                        JPG, PNG or GIF. Max size 5MB
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-200 flex flex-col gap-3">
+                <button id="saveBtn" disabled
+                        class="btn btn-primary w-full h-14 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span class="font-bold text-base">Save & Continue</span>
+                    <span class="material-symbols-outlined ml-2">check</span>
+                </button>
+
+                <button id="skipBtn"
+                        class="w-full h-12 rounded-xl text-gray-500 font-semibold hover:bg-gray-50 transition-colors">
+                    Skip for now
+                </button>
+            </div>
+
+        </div>
+    </div>
+</main>
+
+<!-- Core App -->
+<script src="app.js"></script>
+
+<!-- Page Script (Scoped Safely) -->
+<script>
+(async () => {
+    // Firebase config
+    const firebaseConfig = {
+        apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+        authDomain: "projectt3-8c55e.firebaseapp.com",
+        projectId: "projectt3-8c55e",
+        storageBucket: "projectt3-8c55e.firebasestorage.app",
+        messagingSenderId: "64611387728",
+        appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+        measurementId: "G-0Z91D0Q6EE"
+    };
+
+    try {
+        if (!firebase.apps?.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+    } catch (error) {
+        console.error('Firebase init error:', error);
+    }
+
+    const { Auth, API, Toast, Loading, PageTransition } = window.MoodApp;
+
+    // Wait for auth to be ready
+    try {
+        await Auth.requireAuth();
+    } catch (err) {
+        console.error('Auth required failed:', err);
+        return;
+    }
+
+    const fileInput = document.getElementById('fileInput');
+    const preview = document.getElementById('preview');
+    const previewContainer = document.getElementById('previewContainer');
+    const saveBtn = document.getElementById('saveBtn');
+    const skipBtn = document.getElementById('skipBtn');
+
+    let selectedFile = null;
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 5 * 1024 * 1024) {
+            Toast.error('File size must be under 5MB');
+            return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+            Toast.error('Please select an image file');
+            return;
+        }
+
+        selectedFile = file;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            preview.src = event.target.result;
+            preview.classList.remove('hidden');
+            previewContainer
+                .querySelector('.material-symbols-outlined')
+                .classList.add('hidden');
+            saveBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    });
+
+    saveBtn.addEventListener('click', async () => {
+        if (!selectedFile) {
+            Toast.error('Please select a file first');
+            return;
+        }
+
+        Loading.show('Uploading your picture...');
+
+        try {
+            console.log('Uploading file:', selectedFile.name, selectedFile.type, selectedFile.size);
+            
+            const result = await API.uploadFile('/api/users/upload-pfp', selectedFile);
+            
+            console.log('Upload result:', result);
+            
+            Loading.hide();
+            Toast.success('Profile picture saved!');
+
+            setTimeout(() => {
+                PageTransition.navigateTo('/mood.html');
+            }, 1000);
+
+        } catch (error) {
+            Loading.hide();
+            console.error('Upload error:', error);
+            Toast.error(error.message || 'Failed to upload picture. Please try again.');
+        }
+    });
+
+    skipBtn.addEventListener('click', () => {
+        PageTransition.navigateTo('/mood.html');
+    });
+})();
+</script>
+
+</body>
+</html>
