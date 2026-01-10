@@ -512,7 +512,7 @@
 
       // Initialize socket
       const idToken = await firebaseUser.getIdToken();
-      const socketUrl = 'http://localhost:3000';
+      const socketUrl = 'https://website-hdem.onrender.com';
       const socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
