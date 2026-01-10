@@ -848,6 +848,10 @@
         }
       }
 
+      // Clear navigation flag (we've successfully arrived)
+      sessionStorage.removeItem('navigatingToCall');
+      console.log('✅ Arrived at call page - cleared navigation flag');
+      
       // Start initialization
       initializeCall();
       
