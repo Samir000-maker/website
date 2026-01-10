@@ -58,7 +58,7 @@ const API_BASE_URL = (() => {
   try {
     const { hostname, port } = window.location;
     if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
-      return 'http://localhost:3000';
+      return 'https://website-hdem.onrender.com';
     }
   } catch {}
 
