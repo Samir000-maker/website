@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Room - MoodLog</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="global.css" rel="stylesheet">
+    <style>
+        /* Reply button styles */
+        .reply-btn {
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            cursor: pointer;
+        }
+        .message-item:hover .reply-btn {
+            opacity: 1;
+        }
+        
+        /* Reply preview animation */
+        .reply-preview {
+            animation: slideUp 0.2s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(10px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Quoted message styles inside bubble */
+        .quoted-message {
+            border-left: 3px solid #93c5fd;
+            padding-left: 8px;
+            margin-bottom: 6px;
+            background-color: rgba(255, 255, 255, 0.15);
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 0.813rem;
+        }
+        
+        .quoted-message-light {
+            background-color: rgba(0, 0, 0, 0.05);
+            border-left-color: #4a9d9d;
+        }
+
+        /* Sidebar styles */
+        .sidebar {
+            width: 280px;
+            min-width: 280px;
+        }
+
+        /* User card hover effect */
+        .user-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .user-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Disable button when calling */
+        .calling {
+            opacity: 0.6;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-background-light min-h-screen flex flex-col">
+    <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/80 backdrop-blur">
+        <div class="mx-auto flex h-16 max-w-full items-center justify-between px-4 sm:px-6">
+            <div>
+                <h2 class="text-lg font-bold">Mindful Space</h2>
+                <div class="flex items-center gap-2 text-xs text-gray-500">
+                    <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
+                    <span id="onlineCount">Loading...</span>
+                    <span>•</span>
+                    <span id="timeRemaining">--:-- remaining</span>
+                </div>
+            </div>
+            <button id="leaveBtn" class="text-sm font-medium text-red-600 hover:text-red-700">Leave Room</button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 h-[calc(100vh-4rem)]">
+        <!-- Left Sidebar: Active Users -->
+        <aside class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
+            <div class="p-4">
+                <h3 class="text-xs font-bold text-gray-500 uppercase mb-4">Active Users</h3>
+                <div id="usersList" class="space-y-3">
+                    <!-- Users will be loaded here -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="flex-1 flex flex-col">
+            <!-- Messages Container -->
+            <div id="messagesList" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+                <div class="text-center text-sm text-gray-400 mb-4">
+                    Welcome to the safe space. Be kind and supportive.
+                </div>
+                <!-- Messages will appear here -->
+            </div>
+
+            <!-- Message Input Area -->
+            <div class="border-t border-gray-200 bg-white">
+                <!-- Reply Preview Bar -->
+                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-4 py-3 bg-gray-50">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
+                                <span class="text-sm font-medium text-primary" id="replyToUsername">Replying to User</span>
+                            </div>
+                            <p class="text-sm text-gray-600 truncate" id="replyToMessage">Original message text</p>
+                        </div>
+                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <span class="material-symbols-outlined text-xl">close</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Message Input -->
+                <div class="p-4">
+                    <form id="messageForm" class="flex gap-3">
+                        <input type="text" id="messageInput" required maxlength="500"
+                            class="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            placeholder="Type a message...">
+                        <button type="submit" class="btn btn-primary px-6">
+                            <span class="material-symbols-outlined">send</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Call Action Buttons (Floating) -->
+    <div class="fixed bottom-6 right-6 flex gap-3 z-50">
+        <button id="audioCallBtn" 
+            class="w-14 h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
+            title="Start Audio Call">
+            <span class="material-symbols-outlined text-2xl">call</span>
+        </button>
+        <button id="videoCallBtn" 
+            class="w-14 h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
+            title="Start Video Call">
+            <span class="material-symbols-outlined text-2xl">videocam</span>
+        </button>
+    </div>
+
+    <!-- Incoming Call Modal -->
+    <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 animate-fade-in">
+            <div class="text-center">
+                <div class="mb-6">
+                    <div id="callerAvatar" class="w-24 h-24 mx-auto rounded-full overflow-hidden bg-primary/20 flex items-center justify-center">
+                        <span class="text-4xl">📞</span>
+                    </div>
+                </div>
+                <h3 class="text-xl font-bold mb-2" id="callerName">Incoming Call</h3>
+                <p class="text-gray-600 mb-8" id="callType">Audio Call</p>
+                
+                <div class="flex gap-4 justify-center">
+                    <button id="declineCallBtn" 
+                        class="flex items-center gap-2 px-6 py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-all">
+                        <span class="material-symbols-outlined">call_end</span>
+                        <span class="font-medium">Decline</span>
+                    </button>
+                    <button id="acceptCallBtn" 
+                        class="flex items-center gap-2 px-6 py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 transition-all">
+                        <span class="material-symbols-outlined">call</span>
+                        <span class="font-medium">Accept</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+        authDomain: "projectt3-8c55e.firebaseapp.com",
+        projectId: "projectt3-8c55e",
+        storageBucket: "projectt3-8c55e.firebasestorage.app",
+        messagingSenderId: "64611387728",
+        appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+        measurementId: "G-0Z91D0Q6EE"
+      };
+
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+    </script>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+
+    <!-- App -->
+    <script src="app.js"></script>
+
+    <script>
+    (async () => {
+      const MoodApp = window.MoodApp || {};
+      const _Auth = MoodApp.Auth;
+      const _API = MoodApp.API;
+      const _Toast = MoodApp.Toast;
+      const _PageTransition = MoodApp.PageTransition;
+      const _Utils = MoodApp.Utils;
+
+      const toast = (m, t='success') => { 
+        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
+        console[t==='error'?'error':'log'](m); 
+      };
+
+      // Reply state management
+      let replyingTo = null;
+      
+      // Call state management
+      let isInitiatingCall = false;
+      let pendingCallData = null;
+
+      // Helper function to create profile picture element
+      function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
+        const initial = username ? username.charAt(0).toUpperCase() : 'U';
+        const container = document.createElement('div');
+        container.className = `${size} rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-white shadow-sm flex-shrink-0`;
+        
+        if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
+          const img = document.createElement('img');
+          img.src = pfpUrl;
+          img.alt = username;
+          img.className = 'h-full w-full object-cover';
+          img.onerror = function() {
+            this.onerror = null;
+            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+          };
+          container.appendChild(img);
+        } else {
+          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+        }
+        
+        return container;
+      }
+
+      // Show reply preview
+      function showReplyPreview(messageData) {
+        replyingTo = messageData;
+        const replyPreview = document.getElementById('replyPreview');
+        const replyToUsername = document.getElementById('replyToUsername');
+        const replyToMessage = document.getElementById('replyToMessage');
+        const messageInput = document.getElementById('messageInput');
+        
+        if (replyPreview && replyToUsername && replyToMessage) {
+          replyToUsername.textContent = `Replying to ${messageData.username}`;
+          replyToMessage.textContent = messageData.message;
+          replyPreview.classList.remove('hidden');
+          
+          if (messageInput) {
+            messageInput.focus();
+          }
+        }
+      }
+
+      // Hide reply preview
+      function hideReplyPreview() {
+        replyingTo = null;
+        const replyPreview = document.getElementById('replyPreview');
+        if (replyPreview) {
+          replyPreview.classList.add('hidden');
+        }
+      }
+
+      // Escape HTML helper
+      function escapeHtml(text) {
+        if (_Utils && typeof _Utils.escapeHtml === 'function') {
+          return _Utils.escapeHtml(text);
+        }
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // Format date helper
+      function formatTimestamp(timestamp) {
+        if (_Utils && typeof _Utils.formatDate === 'function') {
+          return _Utils.formatDate(timestamp);
+        }
+        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+
+      // Create message element
+      function createMessageElement(data, isCurrentUser) {
+        const messageItem = document.createElement('div');
+        messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
+        messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
+        
+        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-10 h-10');
+        const messageContent = document.createElement('div');
+        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[70%] flex-1`;
+
+        const headerDiv = document.createElement('div');
+        headerDiv.className = `flex items-center gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+        
+        const usernameSpan = document.createElement('span');
+        usernameSpan.className = 'text-sm font-semibold text-gray-900';
+        usernameSpan.textContent = data.username || 'User';
+        
+        const timestampSpan = document.createElement('span');
+        timestampSpan.className = 'text-xs text-gray-400';
+        timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
+        
+        headerDiv.appendChild(usernameSpan);
+        headerDiv.appendChild(timestampSpan);
+        messageContent.appendChild(headerDiv);
+
+        const bubbleWrapper = document.createElement('div');
+        bubbleWrapper.className = 'flex items-center gap-1';
+        if (isCurrentUser) {
+          bubbleWrapper.className += ' flex-row-reverse';
+        }
+
+        const messageBubble = document.createElement('div');
+        messageBubble.className = `px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words`;
+
+        if (data.replyTo) {
+          const quotedDiv = document.createElement('div');
+          quotedDiv.className = `quoted-message ${isCurrentUser ? '' : 'quoted-message-light'}`;
+          
+          const quotedUsername = document.createElement('div');
+          quotedUsername.className = `text-xs font-semibold mb-1 ${isCurrentUser ? 'text-blue-200' : 'text-primary'}`;
+          quotedUsername.textContent = data.replyTo.username;
+          
+          const quotedText = document.createElement('div');
+          quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'}`;
+          quotedText.textContent = data.replyTo.message;
+          
+          quotedDiv.appendChild(quotedUsername);
+          quotedDiv.appendChild(quotedText);
+          messageBubble.appendChild(quotedDiv);
+        }
+
+        const messageText = document.createElement('div');
+        messageText.className = 'text-sm';
+        messageText.innerHTML = escapeHtml(data.message || '');
+        messageBubble.appendChild(messageText);
+
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'reply-btn p-1.5 hover:bg-gray-100 rounded-full transition-colors';
+        replyBtn.title = 'Reply';
+        replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400" style="font-size: 18px;">reply</span>';
+        replyBtn.addEventListener('click', () => {
+          showReplyPreview({
+            messageId: messageItem.dataset.messageId,
+            username: data.username,
+            message: data.message,
+            userId: data.userId
+          });
+        });
+
+        if (isCurrentUser) {
+          bubbleWrapper.appendChild(replyBtn);
+          bubbleWrapper.appendChild(messageBubble);
+        } else {
+          bubbleWrapper.appendChild(messageBubble);
+          bubbleWrapper.appendChild(replyBtn);
+        }
+
+        messageContent.appendChild(bubbleWrapper);
+        messageItem.appendChild(pfpContainer);
+        messageItem.appendChild(messageContent);
+        
+        return messageItem;
+      }
+
+      // Require auth
+      try {
+        await _Auth.requireAuth();
+      } catch (err) {
+        console.error('Auth required failed:', err);
+        window.location.href = '/login.html';
+        return;
+      }
+
+      // Get room data
+      const roomDataStr = localStorage.getItem('currentRoom');
+      if (!roomDataStr) {
+        toast('No active room found', 'error');
+        setTimeout(() => {
+          window.location.href = '/mood.html';
+        }, 1500);
+        return;
+      }
+
+      const roomData = JSON.parse(roomDataStr);
+      console.log('🎮 Room data:', roomData);
+
+      if (!roomData.roomId) {
+        toast('Invalid room data', 'error');
+        setTimeout(() => {
+          window.location.href = '/mood.html';
+        }, 1500);
+        return;
+      }
+
+      // Get current user
+      const firebaseUser = firebase.auth().currentUser;
+      if (!firebaseUser) {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      const userData = await _API.get('/api/users/me');
+      const currentUser = {
+        userId: userData._id,
+        username: userData.username,
+        pfpUrl: userData.pfpUrl
+      };
+
+      console.log('✅ Current user:', currentUser);
+
+      // DOM refs
+      const messagesList = document.getElementById('messagesList');
+      const messageForm = document.getElementById('messageForm');
+      const messageInput = document.getElementById('messageInput');
+      const usersList = document.getElementById('usersList');
+      const onlineCount = document.getElementById('onlineCount');
+      const timeRemaining = document.getElementById('timeRemaining');
+      const leaveBtn = document.getElementById('leaveBtn');
+      const cancelReplyBtn = document.getElementById('cancelReply');
+      const audioCallBtn = document.getElementById('audioCallBtn');
+      const videoCallBtn = document.getElementById('videoCallBtn');
+      const incomingCallModal = document.getElementById('incomingCallModal');
+      const acceptCallBtn = document.getElementById('acceptCallBtn');
+      const declineCallBtn = document.getElementById('declineCallBtn');
+
+      // Cancel reply button
+      if (cancelReplyBtn) {
+        cancelReplyBtn.addEventListener('click', hideReplyPreview);
+      }
+
+      // Display users with profile pictures in sidebar
+      if (usersList && Array.isArray(roomData.users)) {
+        roomData.users.forEach(user => {
+          const userCard = document.createElement('div');
+          userCard.className = 'user-card flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+          
+          const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-12 h-12');
+          
+          const userInfo = document.createElement('div');
+          userInfo.className = 'flex-1 min-w-0';
+          
+          const nameSpan = document.createElement('div');
+          nameSpan.className = 'text-sm font-semibold truncate';
+          nameSpan.textContent = user.username || 'User';
+          
+          const statusSpan = document.createElement('div');
+          statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
+          statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500"></span> Online';
+          
+          userInfo.appendChild(nameSpan);
+          userInfo.appendChild(statusSpan);
+          
+          userCard.appendChild(pfpElement);
+          userCard.appendChild(userInfo);
+          usersList.appendChild(userCard);
+        });
+
+        if (onlineCount) {
+          onlineCount.textContent = `${roomData.users.length} Online`;
+        }
+      }
+
+      // Timer
+      let timerInterval = null;
+      const updateTimer = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, roomData.expiresAt - now);
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        
+        if (timeRemaining) {
+          timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+        }
+
+        if (remaining === 0) {
+          if (timerInterval) clearInterval(timerInterval);
+          toast('Room has expired', 'warning');
+          setTimeout(() => {
+            window.location.href = '/mood.html';
+          }, 2000);
+        }
+      };
+
+      timerInterval = setInterval(updateTimer, 1000);
+      updateTimer();
+
+      // Initialize socket
+      const idToken = await firebaseUser.getIdToken();
+      const socketUrl = 'http://localhost:3000';
+      const socketInstance = io(socketUrl, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        auth: {
+          token: idToken
+        }
+      });
+
+      socketInstance.on('connect', () => {
+        console.log('🔌 Socket connected:', socketInstance.id);
+        
+        socketInstance.emit('authenticate', {
+          token: idToken,
+          userId: currentUser.userId
+        });
+      });
+
+      socketInstance.on('authenticated', (data) => {
+        console.log('✅ Socket authenticated:', data);
+        console.log('🚪 Joining room:', roomData.roomId);
+        socketInstance.emit('join_room', { roomId: roomData.roomId });
+      });
+
+      socketInstance.on('room_joined', (data) => {
+        console.log('✅ Room joined successfully:', data);
+      });
+
+      socketInstance.on('error', (data) => {
+        console.error('❌ Socket error:', data);
+        
+        if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
+          toast('Room no longer available. Returning to mood selection.', 'error');
+          setTimeout(() => {
+            window.location.href = '/mood.html';
+          }, 2000);
+        } else {
+          toast(data.message || 'An error occurred', 'error');
+        }
+      });
+
+      // Socket events - CHAT MESSAGE
+      socketInstance.on('chat_message', (data) => {
+        console.log('💬 Message received:', data);
+        
+        const isCurrentUser = data.userId === currentUser.userId;
+        const msgEl = createMessageElement(data, isCurrentUser);
+        
+        if (messagesList) {
+          messagesList.appendChild(msgEl);
+          messagesList.scrollTop = messagesList.scrollHeight;
+        }
+      });
+
+      // Socket events - USER LEFT
+      socketInstance.on('user_left', (data) => {
+        console.log('👋 User left:', data);
+        
+        const msgEl = document.createElement('div');
+        msgEl.className = 'text-center text-sm text-gray-400 my-2';
+        msgEl.textContent = `${data.username || 'A user'} left the room`;
+        
+        if (messagesList) {
+          messagesList.appendChild(msgEl);
+        }
+
+        if (onlineCount && data.remainingUsers !== undefined) {
+          onlineCount.textContent = `${data.remainingUsers} Online`;
+        }
+
+        if (data.remainingUsers <= 1) {
+          toast('Room closing...', 'warning');
+          setTimeout(() => {
+            window.location.href = '/mood.html';
+          }, 2000);
+        }
+      });
+
+      // Socket events - LEFT ROOM
+      socketInstance.on('left_room', (data) => {
+        console.log('✅ Successfully left room:', data);
+        toast('Left room', 'success');
+        setTimeout(() => {
+          window.location.href = '/mood.html';
+        }, 1000);
+      });
+
+      // Call signaling events
+      socketInstance.on('incoming_call', (data) => {
+        console.log('📞 Incoming call:', data);
+        pendingCallData = data;
+        
+        // Show incoming call modal
+        const callerName = document.getElementById('callerName');
+        const callType = document.getElementById('callType');
+        const callerAvatar = document.getElementById('callerAvatar');
+        
+        if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+        if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+        if (callerAvatar) {
+          callerAvatar.innerHTML = '';
+          const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+          callerAvatar.appendChild(pfp);
+        }
+        
+        incomingCallModal.classList.remove('hidden');
+      });
+
+      socketInstance.on('call_accepted', (data) => {
+        console.log('✅ Call accepted:', data);
+        // Store call data and navigate to call room
+        localStorage.setItem('activeCall', JSON.stringify({
+          callId: data.callId,
+          roomId: roomData.roomId,
+          callType: data.callType,
+          users: data.users
+        }));
+        
+        // Reset state before navigation
+        isInitiatingCall = false;
+        
+        // Navigate to call page
+        window.location.href = '/call.html';
+      });
+
+      socketInstance.on('call_declined', (data) => {
+        console.log('❌ Call declined:', data);
+        toast('Call was declined', 'warning');
+        isInitiatingCall = false;
+        
+        // Re-enable buttons
+        if (audioCallBtn) audioCallBtn.classList.remove('calling');
+        if (videoCallBtn) videoCallBtn.classList.remove('calling');
+      });
+
+      socketInstance.on('call_ended', (data) => {
+        console.log('📵 Call ended:', data);
+        if (window.location.pathname === '/call.html') {
+          window.location.href = '/chat.html';
+        }
+      });
+
+      // Audio call button - PREVENT DUPLICATE CALLS
+      if (audioCallBtn) {
+        audioCallBtn.addEventListener('click', () => {
+          if (isInitiatingCall) {
+            console.log('⚠️ Already initiating a call');
+            return;
+          }
+          
+          isInitiatingCall = true;
+          audioCallBtn.classList.add('calling');
+          videoCallBtn.classList.add('calling');
+          
+          console.log('📞 Initiating audio call');
+          socketInstance.emit('initiate_call', {
+            roomId: roomData.roomId,
+            callType: 'audio'
+          });
+          toast('Calling...', 'success');
+          
+          // Reset after timeout if no response
+          setTimeout(() => {
+            if (isInitiatingCall) {
+              isInitiatingCall = false;
+              audioCallBtn.classList.remove('calling');
+              videoCallBtn.classList.remove('calling');
+            }
+          }, 30000); // 30 second timeout
+        });
+      }
+
+      // Video call button - PREVENT DUPLICATE CALLS
+      if (videoCallBtn) {
+        videoCallBtn.addEventListener('click', () => {
+          if (isInitiatingCall) {
+            console.log('⚠️ Already initiating a call');
+            return;
+          }
+          
+          isInitiatingCall = true;
+          audioCallBtn.classList.add('calling');
+          videoCallBtn.classList.add('calling');
+          
+          console.log('📹 Initiating video call');
+          socketInstance.emit('initiate_call', {
+            roomId: roomData.roomId,
+            callType: 'video'
+          });
+          toast('Calling...', 'success');
+          
+          // Reset after timeout if no response
+          setTimeout(() => {
+            if (isInitiatingCall) {
+              isInitiatingCall = false;
+              audioCallBtn.classList.remove('calling');
+              videoCallBtn.classList.remove('calling');
+            }
+          }, 30000); // 30 second timeout
+        });
+      }
+
+      // Accept call button
+      if (acceptCallBtn) {
+        acceptCallBtn.addEventListener('click', () => {
+          if (pendingCallData) {
+            socketInstance.emit('accept_call', {
+              callId: pendingCallData.callId,
+              roomId: roomData.roomId
+            });
+            incomingCallModal.classList.add('hidden');
+            pendingCallData = null;
+          }
+        });
+      }
+
+      // Decline call button
+      if (declineCallBtn) {
+        declineCallBtn.addEventListener('click', () => {
+          if (pendingCallData) {
+            socketInstance.emit('decline_call', {
+              callId: pendingCallData.callId,
+              roomId: roomData.roomId
+            });
+            incomingCallModal.classList.add('hidden');
+            pendingCallData = null;
+          }
+        });
+      }
+
+      // Send message
+      if (messageForm) {
+        messageForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+
+          const message = messageInput ? messageInput.value.trim() : '';
+          if (!message) return;
+
+          console.log('📤 Sending message:', message);
+
+          const messageData = {
+            roomId: roomData.roomId,
+            message: message
+          };
+
+          if (replyingTo) {
+            messageData.replyTo = {
+              messageId: replyingTo.messageId,
+              username: replyingTo.username,
+              message: replyingTo.message,
+              userId: replyingTo.userId
+            };
+            
+            hideReplyPreview();
+          }
+
+          socketInstance.emit('chat_message', messageData);
+
+          if (messageInput) {
+            messageInput.value = '';
+          }
+        });
+      }
+
+      // Leave room
+      if (leaveBtn) {
+        leaveBtn.addEventListener('click', () => {
+          console.log('👋 Leaving room...');
+          socketInstance.emit('leave_room');
+        });
+      }
+
+      // Cleanup on page unload
+      window.addEventListener('beforeunload', () => {
+        if (socketInstance && !window.location.pathname.includes('call.html')) {
+          socketInstance.emit('leave_room');
+          socketInstance.disconnect();
+        }
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+      });
+
+    })();
+    </script>
+</body>
+</html>
