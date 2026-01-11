@@ -557,6 +557,10 @@ function setupUserCardClick() {
         return messageItem;
       }
 
+
+
+      window.createMessageElement = createMessageElement;
+
       try {
         await _Auth.requireAuth();
       } catch (err) {
@@ -591,6 +595,8 @@ function setupUserCardClick() {
         username: userData.username,
         pfpUrl: userData.pfpUrl
       };
+
+        window.currentUser = currentUser;
 
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
@@ -673,6 +679,27 @@ function setupUserCardClick() {
         reconnectionAttempts: 10,
         auth: { token: idToken }
       });
+      
+      socketInstance.on('room_expired', (data) => {
+  console.log('⏱️ Room expired:', data.message);
+  toast(data.message, 'warning');
+  
+  // Clear state
+  if (window.StateManager) {
+    window.StateManager.clearRoom();
+  }
+  
+  // Redirect to mood page
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 2000);
+});
+
+socketInstance.on('room_expiring_soon', (data) => {
+  console.log('⚠️ Room expiring in 1 minute');
+  toast('This conversation will end in 1 minute', 'warning');
+});
+      
 
       socketInstance.on('connect', () => {
         console.log('🔌 Socket connected:', socketInstance.id);
