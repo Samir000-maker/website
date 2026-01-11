@@ -359,44 +359,52 @@
       let pendingCallData = null;
       let navigatingToCall = false;
 
-      // Mobile sidebar toggle
-      const sidebar = document.getElementById('sidebar');
-      const sidebarToggle = document.getElementById('sidebarToggle');
-      const sidebarClose = document.getElementById('sidebarClose');
-      const sidebarOverlay = document.getElementById('sidebarOverlay');
+// Mobile sidebar toggle - IMPROVED
+const sidebar = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebarToggle');
+const sidebarClose = document.getElementById('sidebarClose');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
 
-      function openSidebar() {
-        sidebar.classList.add('show');
-        sidebarOverlay.classList.add('active');
-        document.body.style.overflow = 'hidden';
-      }
+function openSidebar() {
+  sidebar.classList.add('show');
+  sidebarOverlay.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
 
-      function closeSidebar() {
-        sidebar.classList.remove('show');
-        sidebarOverlay.classList.remove('active');
-        document.body.style.overflow = '';
-      }
+function closeSidebar() {
+  sidebar.classList.remove('show');
+  sidebarOverlay.classList.remove('active');
+  document.body.style.overflow = '';
+}
 
-      if (sidebarToggle) {
-        sidebarToggle.addEventListener('click', openSidebar);
-      }
+function toggleSidebar() {
+  if (sidebar.classList.contains('show')) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
+}
 
-      if (sidebarClose) {
-        sidebarClose.addEventListener('click', closeSidebar);
-      }
+if (sidebarToggle) {
+  sidebarToggle.addEventListener('click', toggleSidebar); // Changed to toggleSidebar
+}
 
-      if (sidebarOverlay) {
-        sidebarOverlay.addEventListener('click', closeSidebar);
-      }
+if (sidebarClose) {
+  sidebarClose.addEventListener('click', closeSidebar);
+}
 
-      // Close sidebar when clicking a user (mobile)
-      function setupUserCardClick() {
-        if (window.innerWidth <= 768) {
-          document.querySelectorAll('.user-card').forEach(card => {
-            card.addEventListener('click', closeSidebar);
-          });
-        }
-      }
+if (sidebarOverlay) {
+  sidebarOverlay.addEventListener('click', closeSidebar);
+}
+
+// Close sidebar when clicking a user (mobile)
+function setupUserCardClick() {
+  if (window.innerWidth <= 768) {
+    document.querySelectorAll('.user-card').forEach(card => {
+      card.addEventListener('click', closeSidebar);
+    });
+  }
+}
 
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
