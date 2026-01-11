@@ -2,13 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat Room - MoodLog</title>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="global.css" rel="stylesheet">
     <style>
+        body {
+            font-family: 'Manrope', sans-serif;
+        }
+        
+        /* Message animations */
         .reply-btn {
             opacity: 0;
             transition: opacity 0.2s ease;
@@ -48,9 +53,58 @@
             border-left-color: #4a9d9d;
         }
 
+        /* Responsive sidebar */
         .sidebar {
-            width: 280px;
-            min-width: 280px;
+            transition: transform 0.3s ease;
+        }
+        
+        .sidebar.hidden {
+            transform: translateX(-100%);
+        }
+        
+        /* Mobile: sidebar overlay */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                height: 100vh;
+                width: 280px;
+                z-index: 40;
+                box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            }
+            
+            .sidebar-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 30;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.3s ease;
+            }
+            
+            .sidebar-overlay.active {
+                opacity: 1;
+                pointer-events: auto;
+            }
+        }
+        
+        /* Desktop: sidebar always visible */
+        @media (min-width: 769px) {
+            .sidebar {
+                position: relative;
+                width: 280px;
+                min-width: 280px;
+            }
+            
+            .sidebar-toggle {
+                display: none;
+            }
+            
+            .sidebar-overlay {
+                display: none;
+            }
         }
 
         .user-card {
@@ -67,62 +121,113 @@
             cursor: not-allowed;
             pointer-events: none;
         }
+        
+        /* Mobile call buttons */
+        @media (max-width: 640px) {
+            .call-buttons {
+                bottom: 80px; /* Above mobile input */
+                right: 12px;
+                gap: 8px;
+            }
+            
+            .call-buttons button {
+                width: 48px;
+                height: 48px;
+            }
+        }
+        
+        /* Safe area for notched devices */
+        @supports (padding: max(0px)) {
+            .header-safe {
+                padding-top: max(1rem, env(safe-area-inset-top));
+            }
+            
+            .bottom-safe {
+                padding-bottom: max(1rem, env(safe-area-inset-bottom));
+            }
+        }
     </style>
 </head>
-<body class="bg-background-light min-h-screen flex flex-col">
-    <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/80 backdrop-blur">
-        <div class="mx-auto flex h-16 max-w-full items-center justify-between px-4 sm:px-6">
-            <div>
-                <h2 class="text-lg font-bold">Mindful Space</h2>
-                <div class="flex items-center gap-2 text-xs text-gray-500">
-                    <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
-                    <span id="onlineCount">Loading...</span>
-                    <span>•</span>
-                    <span id="timeRemaining">--:-- remaining</span>
+<body class="bg-background-light min-h-screen flex flex-col overflow-hidden">
+    <!-- Header with mobile menu toggle -->
+    <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
+        <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
+            <div class="flex items-center gap-2 sm:gap-3">
+                <!-- Mobile menu toggle -->
+                <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-100 rounded-lg md:hidden">
+                    <span class="material-symbols-outlined text-gray-700">menu</span>
+                </button>
+                
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold">Mindful Space</h2>
+                    <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-500">
+                        <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
+                        <span id="onlineCount">Loading...</span>
+                        <span class="hidden sm:inline">•</span>
+                        <span id="timeRemaining" class="hidden sm:inline">--:-- remaining</span>
+                    </div>
                 </div>
             </div>
-            <button id="leaveBtn" class="text-sm font-medium text-red-600 hover:text-red-700">Leave Room</button>
+            <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2">
+                <span class="hidden sm:inline">Leave Room</span>
+                <span class="sm:hidden material-symbols-outlined text-xl">logout</span>
+            </button>
         </div>
     </header>
 
-    <div class="flex flex-1 h-[calc(100vh-4rem)]">
-        <aside class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
-            <div class="p-4">
-                <h3 class="text-xs font-bold text-gray-500 uppercase mb-4">Active Users</h3>
-                <div id="usersList" class="space-y-3"></div>
+    <div class="flex flex-1 overflow-hidden relative">
+        <!-- Sidebar overlay (mobile only) -->
+        <div id="sidebarOverlay" class="sidebar-overlay"></div>
+        
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar border-r border-gray-200 bg-white overflow-y-auto hidden md:block">
+            <div class="p-3 sm:p-4">
+                <div class="flex items-center justify-between mb-3 sm:mb-4">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase">Active Users</h3>
+                    <!-- Close button (mobile only) -->
+                    <button id="sidebarClose" class="md:hidden p-1 hover:bg-gray-100 rounded">
+                        <span class="material-symbols-outlined text-gray-500 text-xl">close</span>
+                    </button>
+                </div>
+                <div id="usersList" class="space-y-2 sm:space-y-3"></div>
             </div>
         </aside>
 
-        <main class="flex-1 flex flex-col">
-            <div id="messagesList" class="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-                <div class="text-center text-sm text-gray-400 mb-4">
+        <!-- Main chat area -->
+        <main class="flex-1 flex flex-col min-w-0">
+            <!-- Messages list -->
+            <div id="messagesList" class="flex-1 overflow-y-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-4">
+                <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
                     Welcome to the safe space. Be kind and supportive.
                 </div>
             </div>
 
-            <div class="border-t border-gray-200 bg-white">
-                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-4 py-3 bg-gray-50">
-                    <div class="flex items-start justify-between gap-3">
+            <!-- Input area -->
+            <div class="border-t border-gray-200 bg-white bottom-safe">
+                <!-- Reply preview -->
+                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-3 bg-gray-50">
+                    <div class="flex items-start justify-between gap-2 sm:gap-3">
                         <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 mb-1">
+                            <div class="flex items-center gap-1.5 sm:gap-2 mb-1">
                                 <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
-                                <span class="text-sm font-medium text-primary" id="replyToUsername">Replying to User</span>
+                                <span class="text-xs sm:text-sm font-medium text-primary" id="replyToUsername">Replying to User</span>
                             </div>
-                            <p class="text-sm text-gray-600 truncate" id="replyToMessage">Original message text</p>
+                            <p class="text-xs sm:text-sm text-gray-600 truncate" id="replyToMessage">Original message text</p>
                         </div>
-                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors">
-                            <span class="material-symbols-outlined text-xl">close</span>
+                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                            <span class="material-symbols-outlined text-lg sm:text-xl">close</span>
                         </button>
                     </div>
                 </div>
                 
-                <div class="p-4">
-                    <form id="messageForm" class="flex gap-3">
+                <!-- Message form -->
+                <div class="p-3 sm:p-4">
+                    <form id="messageForm" class="flex gap-2 sm:gap-3">
                         <input type="text" id="messageInput" required maxlength="500"
-                            class="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            class="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20"
                             placeholder="Type a message...">
-                        <button type="submit" class="btn btn-primary px-6">
-                            <span class="material-symbols-outlined">send</span>
+                        <button type="submit" class="btn btn-primary px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl">
+                            <span class="material-symbols-outlined text-xl sm:text-2xl">send</span>
                         </button>
                     </form>
                 </div>
@@ -130,39 +235,41 @@
         </main>
     </div>
 
-    <div class="fixed bottom-6 right-6 flex gap-3 z-50">
+    <!-- Call buttons (responsive positioning) -->
+    <div class="call-buttons fixed bottom-20 sm:bottom-6 right-4 sm:right-6 flex gap-2 sm:gap-3 z-40">
         <button id="audioCallBtn" 
-            class="w-14 h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
+            class="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
             title="Start Audio Call">
-            <span class="material-symbols-outlined text-2xl">call</span>
+            <span class="material-symbols-outlined text-xl sm:text-2xl">call</span>
         </button>
         <button id="videoCallBtn" 
-            class="w-14 h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
+            class="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
             title="Start Video Call">
-            <span class="material-symbols-outlined text-2xl">videocam</span>
+            <span class="material-symbols-outlined text-xl sm:text-2xl">videocam</span>
         </button>
     </div>
 
-    <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center">
-        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 animate-fade-in">
+    <!-- Incoming call modal (responsive) -->
+    <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full animate-fade-in">
             <div class="text-center">
-                <div class="mb-6">
-                    <div id="callerAvatar" class="w-24 h-24 mx-auto rounded-full overflow-hidden bg-primary/20 flex items-center justify-center">
-                        <span class="text-4xl">📞</span>
+                <div class="mb-4 sm:mb-6">
+                    <div id="callerAvatar" class="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-full overflow-hidden bg-primary/20 flex items-center justify-center">
+                        <span class="text-3xl sm:text-4xl">📞</span>
                     </div>
                 </div>
-                <h3 class="text-xl font-bold mb-2" id="callerName">Incoming Call</h3>
-                <p class="text-gray-600 mb-8" id="callType">Audio Call</p>
+                <h3 class="text-lg sm:text-xl font-bold mb-2" id="callerName">Incoming Call</h3>
+                <p class="text-sm sm:text-base text-gray-600 mb-6 sm:mb-8" id="callType">Audio Call</p>
                 
-                <div class="flex gap-4 justify-center">
+                <div class="flex gap-3 sm:gap-4 justify-center">
                     <button id="declineCallBtn" 
-                        class="flex items-center gap-2 px-6 py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-all">
-                        <span class="material-symbols-outlined">call_end</span>
+                        class="flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-all text-sm sm:text-base">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call_end</span>
                         <span class="font-medium">Decline</span>
                     </button>
                     <button id="acceptCallBtn" 
-                        class="flex items-center gap-2 px-6 py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 transition-all">
-                        <span class="material-symbols-outlined">call</span>
+                        class="flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 transition-all text-sm sm:text-base">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
                         <span class="font-medium">Accept</span>
                     </button>
                 </div>
@@ -209,9 +316,47 @@
       let replyingTo = null;
       let isInitiatingCall = false;
       let pendingCallData = null;
-      
-      // CRITICAL FIX: Track if we're navigating to call page
       let navigatingToCall = false;
+
+      // Mobile sidebar toggle
+      const sidebar = document.getElementById('sidebar');
+      const sidebarToggle = document.getElementById('sidebarToggle');
+      const sidebarClose = document.getElementById('sidebarClose');
+      const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+      function openSidebar() {
+        sidebar.classList.remove('hidden');
+        sidebar.classList.remove('hidden');
+        sidebarOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeSidebar() {
+        sidebar.classList.add('hidden');
+        sidebarOverlay.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+
+      if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', openSidebar);
+      }
+
+      if (sidebarClose) {
+        sidebarClose.addEventListener('click', closeSidebar);
+      }
+
+      if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeSidebar);
+      }
+
+      // Close sidebar when clicking a user (mobile)
+      function setupUserCardClick() {
+        if (window.innerWidth <= 768) {
+          document.querySelectorAll('.user-card').forEach(card => {
+            card.addEventListener('click', closeSidebar);
+          });
+        }
+      }
 
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
@@ -282,19 +427,19 @@
         messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
         messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
         
-        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-10 h-10');
+        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
         const messageContent = document.createElement('div');
-        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[70%] flex-1`;
+        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1`;
 
         const headerDiv = document.createElement('div');
-        headerDiv.className = `flex items-center gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+        headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
         
         const usernameSpan = document.createElement('span');
-        usernameSpan.className = 'text-sm font-semibold text-gray-900';
+        usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900';
         usernameSpan.textContent = data.username || 'User';
         
         const timestampSpan = document.createElement('span');
-        timestampSpan.className = 'text-xs text-gray-400';
+        timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400';
         timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
         
         headerDiv.appendChild(usernameSpan);
@@ -308,7 +453,7 @@
         }
 
         const messageBubble = document.createElement('div');
-        messageBubble.className = `px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words`;
+        messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base`;
 
         if (data.replyTo) {
           const quotedDiv = document.createElement('div');
@@ -328,14 +473,14 @@
         }
 
         const messageText = document.createElement('div');
-        messageText.className = 'text-sm';
+        messageText.className = 'text-sm sm:text-base';
         messageText.innerHTML = escapeHtml(data.message || '');
         messageBubble.appendChild(messageText);
 
         const replyBtn = document.createElement('button');
-        replyBtn.className = 'reply-btn p-1.5 hover:bg-gray-100 rounded-full transition-colors';
+        replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors';
         replyBtn.title = 'Reply';
-        replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400" style="font-size: 18px;">reply</span>';
+        replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400 text-base sm:text-lg">reply</span>';
         replyBtn.addEventListener('click', () => {
           showReplyPreview({
             messageId: messageItem.dataset.messageId,
@@ -416,9 +561,9 @@
       if (usersList && Array.isArray(roomData.users)) {
         roomData.users.forEach(user => {
           const userCard = document.createElement('div');
-          userCard.className = 'user-card flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+          userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
           
-          const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-12 h-12');
+          const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
           
           const userInfo = document.createElement('div');
           userInfo.className = 'flex-1 min-w-0';
@@ -438,6 +583,8 @@
           userCard.appendChild(userInfo);
           usersList.appendChild(userCard);
         });
+
+        setupUserCardClick();
 
         if (onlineCount) {
           onlineCount.textContent = `${roomData.users.length} Online`;
@@ -513,7 +660,7 @@
 
       socketInstance.on('user_left', (data) => {
         const msgEl = document.createElement('div');
-        msgEl.className = 'text-center text-sm text-gray-400 my-2';
+        msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
         msgEl.textContent = `${data.username || 'A user'} left the room`;
         if (messagesList) messagesList.appendChild(msgEl);
 
@@ -552,11 +699,8 @@
       socketInstance.on('call_accepted', (data) => {
         console.log('✅ Call accepted:', data);
         isInitiatingCall = false;
-        
-        // CRITICAL FIX: Set flag BEFORE navigation
         navigatingToCall = true;
         
-        // Store call data
         localStorage.setItem('activeCall', JSON.stringify({
           callId: data.callId,
           roomId: roomData.roomId,
@@ -564,9 +708,7 @@
           users: data.users
         }));
         
-        console.log('🚀 Navigating to call page (socket will stay connected)');
-        
-        // Navigate to call page
+        console.log('🚀 Navigating to call page');
         window.location.href = '/call.html';
       });
 
@@ -681,11 +823,9 @@
         });
       }
 
-      // CRITICAL FIX: Only disconnect if NOT navigating to call
       window.addEventListener('beforeunload', (e) => {
         if (navigatingToCall) {
           console.log('🔒 Socket kept alive - navigating to call');
-          // DON'T disconnect - we need the socket for the call
           return;
         }
         
