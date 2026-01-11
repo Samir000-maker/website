@@ -33,19 +33,9 @@
         
         /* Active speaker highlight */
         .active-speaker {
-    box-shadow: 0 0 0 3px #33bfcc, 0 0 20px rgba(51, 191, 204, 0.4);
-    animation: pulse-border 1.5s ease-in-out infinite;
-    transform: scale(1.02);
-}
-
-@keyframes pulse-border {
-    0%, 100% {
-        box-shadow: 0 0 0 3px #33bfcc, 0 0 20px rgba(51, 191, 204, 0.4);
-    }
-    50% {
-        box-shadow: 0 0 0 6px rgba(51, 191, 204, 0.8), 0 0 30px rgba(51, 191, 204, 0.6);
-    }
-}
+            box-shadow: 0 0 0 4px #33bfcc;
+            animation: pulse-border 1.5s ease-in-out infinite;
+        }
         
         @keyframes pulse-border {
             0%, 100% {
@@ -578,16 +568,46 @@
           let lastSpeakingTime = 0;
           
           function detectSpeaking() {
-    if (!speakingIndicator || !participantTile) {
-        audioContext.close();
-        return;
-    }
-    
-    analyser.getByteFrequencyData(dataArray);
-    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-    
-    const now = Date.now();
-    if (average > SPEAKING_THRESHOLD) {
+            if (!speakingIndicator || !participantTile) {
+              audioContext.close();
+              return;
+            }
+            
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            
+            const now = Date.now();
+            if (average > SPEAKING_THRESHOLD) {
+              if (!isSpeaking) {
+                isSpeaking = true;
+                speakingIndicator.classList.add('active');
+                participantTile.classList.add('active-speaker');
+                
+                // Emit speaking state to other users
+                if (socketInstance && userId === currentUser.userId) {
+                  socketInstance.emit('speaking_state', {
+                    callId: callData.callId,
+                    speaking: true
+                  });
+                }
+              }
+              lastSpeakingTime = now;
+            } else if (isSpeaking && now - lastSpeakingTime > SPEAKING_TIMEOUT) {
+              isSpeaking = false;
+              speakingIndicator.classList.remove('active');
+              participantTile.classList.remove('active-speaker');
+              
+              // Emit speaking state to other users
+              if (socketInstance && userId === currentUser.userId) {
+                socketInstance.emit('speaking_state', {
+                  callId: callData.callId,
+                  speaking: false
+                });
+              }
+            }
+            
+            requestAnimationFrame(detectSpeaking);
+          }
           
           detectSpeaking();
           audioContexts.set(userId, audioContext);
@@ -732,10 +752,65 @@
           const callSubtitle = document.getElementById('callSubtitle');
           
           if (statusEl) {
-    switch (state) {
-        case 'connected':
-            statusEl.textContent = 'CONNECTED';
-            statusEl.className = 'text-green-500 text-xs sm:text-sm font-bold uppercase tracking-wider';
+            switch (state) {
+              case 'connected':
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'text-primary text-xs sm:text-sm font-semibold uppercase tracking-wider';
+                
+                // Update subtitle
+                if (callSubtitle) {
+                  const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1; // +1 for self
+                  callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
+                }
+                
+                pc.getStats().then(stats => {
+                  stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                      const localCandidate = stats.get(report.localCandidateId);
+                      if (localCandidate) {
+                        debugLog(`Selected candidate for ${userId}: ${localCandidate.candidateType}`, 'success');
+                        connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
+                        updateConnectionQuality();
+                        
+                        socketInstance.emit('connection_state_update', {
+                          callId: callData.callId,
+                          state: 'connected',
+                          candidateType: localCandidate.candidateType
+                        });
+                      }
+                    }
+                  });
+                });
+                break;
+              case 'connecting':
+                statusEl.textContent = 'Connecting...';
+                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
+                break;
+              case 'disconnected':
+                statusEl.textContent = 'Reconnecting...';
+                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
+                break;
+              case 'failed':
+                debugLog(`Connection failed with ${userId} - attempting ICE restart`, 'error');
+                statusEl.textContent = 'Connection failed';
+                statusEl.className = 'text-red-500 text-xs sm:text-sm';
+                setTimeout(() => {
+                  if (pc.connectionState === 'failed') {
+                    debugLog(`Restarting ICE for ${userId}`, 'warning');
+                    pc.restartIce();
+                  }
+                }, 1000);
+                socketInstance.emit('connection_state_update', {
+                  callId: callData.callId,
+                  state: 'failed'
+                });
+                break;
+              case 'closed':
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'text-slate-500 text-xs sm:text-sm';
+                break;
+            }
+          }
         };
         
         pc.oniceconnectionstatechange = () => {
