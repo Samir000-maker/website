@@ -13,6 +13,10 @@
 
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+<script src="/state-manager.js"></script>
+<script src="/navigation-guard.js"></script>
+<script src="/discovery-integration.js"></script>
   
   <script id="tailwind-config">
     tailwind.config = {
@@ -283,6 +287,16 @@
 <!-- Page Logic -->
 <script>
 (async () => {
+
+  await new Promise(resolve => {
+    const checkManagers = setInterval(() => {
+      if (window.StateManager && window.NavigationGuard) {
+        clearInterval(checkManagers);
+        resolve();
+      }
+    }, 100);
+  });
+  
   const MoodApp = window.MoodApp || {};
   const _Auth = MoodApp.Auth;
   const _API = MoodApp.API;
