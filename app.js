@@ -405,6 +405,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 300);
 });
 
+
+// At the end of app.js, before the export
+window.MoodApp = {
+  Storage,
+  Auth,
+  API,
+  Toast,
+  Loading,
+  PageTransition,
+  Validator,
+  Utils,
+  socket,
+  // Add these:
+  StateManager: null,  // Will be set by state-manager.js
+  NavigationGuard: null  // Will be set by navigation-guard.js
+};
+
 /* =========================================================
    EXPORT
    ========================================================= */
