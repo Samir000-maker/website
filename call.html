@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Active Call - MoodLog</title>
+    <title>Active Call - MoodLog (Enhanced)</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
@@ -21,13 +21,7 @@
                     },
                     fontFamily: {
                         "display": ["Manrope", "sans-serif"]
-                    },
-                    borderRadius: {
-                        "DEFAULT": "0.5rem",
-                        "lg": "1rem",
-                        "xl": "1.5rem",
-                        "full": "9999px"
-                    },
+                    }
                 },
             },
         }
@@ -51,11 +45,25 @@
             position: relative;
             background: #1c1e22;
         }
+        .debug-panel {
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        .debug-entry {
+            padding: 2px 4px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .debug-success { color: #10b981; }
+        .debug-error { color: #ef4444; }
+        .debug-warning { color: #f59e0b; }
+        .debug-info { color: #3b82f6; }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
     <!-- Top Navigation Bar -->
-    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between bg-background-light dark:bg-background-dark">
+    <header class="sticky top-0 z-50 w-full border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between bg-background-light dark:bg-background-dark">
         <div class="flex items-center gap-4">
             <div class="bg-primary/20 p-2 rounded-lg">
                 <span class="material-symbols-outlined text-primary">graphic_eq</span>
@@ -73,14 +81,28 @@
                 </span>
                 <span class="text-sm font-bold font-mono" id="callDuration">00:00:00</span>
             </div>
-            <button class="p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors">
-                <span class="material-symbols-outlined">settings</span>
+            <button id="toggleDebug" class="p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors" title="Toggle Debug Panel">
+                <span class="material-symbols-outlined">bug_report</span>
             </button>
             <button class="p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors">
                 <span class="material-symbols-outlined">info</span>
             </button>
         </div>
     </header>
+
+    <!-- Debug Panel (Collapsible) -->
+    <div id="debugPanel" class="hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-surface-dark">
+        <div class="p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold">WebRTC Debug Console</h3>
+                <div class="flex gap-2">
+                    <span id="connectionQuality" class="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-700">Initializing...</span>
+                    <button id="clearDebug" class="text-xs px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600">Clear</button>
+                </div>
+            </div>
+            <div id="debugLogs" class="debug-panel bg-gray-50 dark:bg-gray-900 rounded p-2"></div>
+        </div>
+    </div>
 
     <!-- Main Content: Participant Grid -->
     <main class="flex-1 overflow-y-auto p-6 md:p-12">
@@ -94,7 +116,6 @@
     <!-- Bottom Persistent Control Bar -->
     <footer class="w-full p-6 flex justify-center sticky bottom-0 bg-gradient-to-t from-background-light dark:from-background-dark via-background-light/95 dark:via-background-dark/95 to-transparent">
         <div class="bg-white dark:bg-surface-dark shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-700 p-2 flex items-center gap-2">
-            <!-- Standard Controls -->
             <div class="flex items-center gap-1 px-2 border-r border-slate-200 dark:border-slate-700">
                 <button id="micBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-white hover:opacity-90 transition-all active:scale-95">
                     <span class="material-symbols-outlined">mic</span>
@@ -106,14 +127,12 @@
                     <span class="material-symbols-outlined">screen_share</span>
                 </button>
             </div>
-            <!-- Mood Specific Control -->
             <div class="flex items-center gap-2 px-4">
                 <button id="moodBtn" class="flex items-center gap-2 px-4 h-12 rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all">
                     <span class="text-xl" id="currentMoodEmoji">😊</span>
                     <span class="text-sm font-bold">Update Mood</span>
                 </button>
             </div>
-            <!-- Leave Button -->
             <div class="pl-2">
                 <button id="leaveCallBtn" class="flex items-center gap-2 px-6 h-12 rounded-xl bg-accent-red text-white hover:brightness-110 shadow-lg shadow-accent-red/20 transition-all active:scale-95">
                     <span class="material-symbols-outlined font-bold">call_end</span>
@@ -162,25 +181,93 @@
         console[t==='error'?'error':'log'](m); 
       };
 
-      // Enhanced WebRTC Configuration with proper STUN usage
-      const ICE_SERVERS = {
-        iceServers: [
-          { 
-            urls: [
-              'stun:stun.cloudflare.com:3478',
-              'stun:stun.cloudflare.com:53'
-            ]
-          }
-        ],
+      // ============================================
+      // DEBUG LOGGING SYSTEM
+      // ============================================
+      
+      const debugLogs = [];
+      const debugContainer = document.getElementById('debugLogs');
+      const debugPanel = document.getElementById('debugPanel');
+      
+      function debugLog(message, type = 'info') {
+        const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+        const entry = { timestamp, message, type };
+        debugLogs.push(entry);
+        
+        if (debugContainer) {
+          const logDiv = document.createElement('div');
+          logDiv.className = `debug-entry debug-${type}`;
+          logDiv.textContent = `[${timestamp}] ${message}`;
+          debugContainer.appendChild(logDiv);
+          debugContainer.scrollTop = debugContainer.scrollHeight;
+        }
+        
+        console.log(`[WebRTC ${type.toUpperCase()}]`, message);
+      }
+
+      document.getElementById('toggleDebug')?.addEventListener('click', () => {
+        debugPanel.classList.toggle('hidden');
+      });
+
+      document.getElementById('clearDebug')?.addEventListener('click', () => {
+        debugLogs.length = 0;
+        if (debugContainer) debugContainer.innerHTML = '';
+      });
+
+      // ============================================
+      // ENHANCED ICE CONFIGURATION
+      // ============================================
+      
+      let ICE_SERVERS = null;
+
+      async function fetchIceServers() {
+        try {
+          debugLog('Fetching ICE servers from backend...', 'info');
+          const response = await _API.get('/api/ice-servers');
+          ICE_SERVERS = response.iceServers;
+          
+          debugLog(`ICE servers loaded: ${ICE_SERVERS.length} configurations`, 'success');
+          ICE_SERVERS.forEach((server, idx) => {
+            if (server.urls) {
+              const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+              urls.forEach(url => {
+                const hasCredentials = !!(server.username && server.credential);
+                const serverType = url.startsWith('turn:') ? 'TURN' : 'STUN';
+                debugLog(`  [${idx}] ${serverType}: ${url} ${hasCredentials ? '(authenticated)' : ''}`, 'info');
+              });
+            }
+          });
+          
+          return ICE_SERVERS;
+        } catch (error) {
+          debugLog(`Failed to fetch ICE servers: ${error.message}`, 'error');
+          
+          // Fallback to STUN-only configuration
+          ICE_SERVERS = [
+            {
+              urls: [
+                'stun:stun.cloudflare.com:3478',
+                'stun:stun.l.google.com:19302',
+                'stun:stun1.l.google.com:19302'
+              ]
+            }
+          ];
+          debugLog('Using fallback STUN-only configuration', 'warning');
+          return ICE_SERVERS;
+        }
+      }
+
+      // Enhanced WebRTC Configuration
+      const PEER_CONNECTION_CONFIG = {
         iceCandidatePoolSize: 10,
-        iceTransportPolicy: 'all', // Use all candidates (relay and direct)
+        iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require'
       };
 
       // State management
       let localStream = null;
-      let peerConnections = new Map(); // userId -> RTCPeerConnection
+      let peerConnections = new Map();
       let socketInstance = null;
       let callData = null;
       let currentUser = null;
@@ -190,6 +277,9 @@
       let durationInterval = null;
       let isInitializing = false;
       let hasJoinedCall = false;
+      
+      // Connection quality tracking
+      const connectionStats = new Map();
 
       // Helper function to create profile picture element
       function createProfilePictureElement(pfpUrl, username, size = 'w-24 h-24') {
@@ -220,11 +310,9 @@
         tile.id = `participant-${user.userId}`;
         tile.className = `video-tile relative group bg-slate-100 dark:bg-surface-dark rounded-xl p-6 flex flex-col items-center justify-center text-center border transition-all duration-300 ${isSelf ? 'border-2 border-dashed border-primary/40 bg-primary/10 dark:bg-primary/5' : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600'}`;
         
-        // Video container
         const videoContainer = document.createElement('div');
         videoContainer.className = 'relative mb-4';
         
-        // Video element (hidden by default until video is enabled)
         const videoElement = document.createElement('video');
         videoElement.id = `video-${user.userId}`;
         videoElement.className = 'w-24 h-24 rounded-full object-cover hidden';
@@ -234,20 +322,17 @@
           videoElement.muted = true;
         }
         
-        // Profile picture (shown when video is off)
         const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-24 h-24');
         pfpElement.id = `pfp-${user.userId}`;
         
         videoContainer.appendChild(videoElement);
         videoContainer.appendChild(pfpElement);
         
-        // Mood emoji badge
         const moodBadge = document.createElement('div');
         moodBadge.className = 'absolute -bottom-1 -right-1 bg-white dark:bg-background-dark p-1.5 rounded-full shadow-lg border border-slate-200 dark:border-slate-700';
         moodBadge.innerHTML = '<span class="text-xl leading-none">😊</span>';
         videoContainer.appendChild(moodBadge);
         
-        // Mic status indicator
         const micIndicator = document.createElement('div');
         micIndicator.id = `mic-${user.userId}`;
         micIndicator.className = 'absolute top-0 right-0 bg-accent-red p-1 rounded-full text-white hidden';
@@ -256,7 +341,6 @@
         
         tile.appendChild(videoContainer);
         
-        // User info
         const userInfo = document.createElement('div');
         const username = document.createElement('p');
         username.className = 'text-slate-900 dark:text-white text-base font-bold';
@@ -274,10 +358,10 @@
         return tile;
       }
 
-      // Initialize local media with better constraints
+      // Initialize local media
       async function initializeLocalMedia() {
         try {
-          console.log('🎤 Requesting local media...', callData.callType);
+          debugLog(`Requesting local media (type: ${callData.callType})...`, 'info');
           
           const constraints = {
             audio: {
@@ -293,19 +377,18 @@
           };
           
           localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          console.log('✅ Local media initialized:', localStream.getTracks().map(t => t.kind));
+          const tracks = localStream.getTracks();
+          debugLog(`Local media initialized: ${tracks.map(t => `${t.kind}(${t.label})`).join(', ')}`, 'success');
           
-          // Update video state
           isVideoEnabled = callData.callType === 'video';
           isAudioEnabled = true;
           
-          // Add local video if video call
           if (isVideoEnabled) {
             const localVideo = document.getElementById(`video-${currentUser.userId}`);
             const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
             if (localVideo && localStream) {
               localVideo.srcObject = localStream;
-              await localVideo.play().catch(e => console.warn('Video play warning:', e));
+              await localVideo.play().catch(e => debugLog(`Video play warning: ${e.message}`, 'warning'));
               localVideo.classList.remove('hidden');
               if (localPfp) localPfp.classList.add('hidden');
             }
@@ -313,29 +396,44 @@
           
           return localStream;
         } catch (error) {
-          console.error('❌ Failed to get local media:', error);
+          debugLog(`Failed to get local media: ${error.name} - ${error.message}`, 'error');
           toast('Failed to access camera/microphone. Please check permissions.', 'error');
           throw error;
         }
       }
 
-      // Create peer connection with enhanced configuration
+      // Create peer connection with enhanced logging
       function createPeerConnection(userId) {
-        console.log('🔗 Creating peer connection for:', userId);
+        debugLog(`Creating peer connection for user: ${userId}`, 'info');
         
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        const config = {
+          ...PEER_CONNECTION_CONFIG,
+          iceServers: ICE_SERVERS
+        };
+        
+        const pc = new RTCPeerConnection(config);
+        
+        // Track connection stats
+        connectionStats.set(userId, {
+          startTime: Date.now(),
+          iceState: 'new',
+          connectionState: 'new',
+          candidatesReceived: 0,
+          candidatesSent: 0,
+          selectedCandidate: null
+        });
         
         // Add local tracks
         if (localStream) {
           localStream.getTracks().forEach(track => {
-            const sender = pc.addTrack(track, localStream);
-            console.log('📤 Added local track:', track.kind, 'to', userId);
+            pc.addTrack(track, localStream);
+            debugLog(`Added local ${track.kind} track to connection with ${userId}`, 'info');
           });
         }
         
         // Handle incoming tracks
         pc.ontrack = (event) => {
-          console.log('📹 Received remote track from:', userId, event.track.kind, 'readyState:', event.track.readyState);
+          debugLog(`Received remote ${event.track.kind} from ${userId} (readyState: ${event.track.readyState})`, 'success');
           const remoteVideo = document.getElementById(`video-${userId}`);
           const remotePfp = document.getElementById(`pfp-${userId}`);
           
@@ -344,14 +442,11 @@
               remoteVideo.srcObject = new MediaStream();
             }
             remoteVideo.srcObject.addTrack(event.track);
+            remoteVideo.play().catch(e => debugLog(`Remote video play warning: ${e.message}`, 'warning'));
             
-            // Auto-play remote video
-            remoteVideo.play().catch(e => console.warn('Remote video play warning:', e));
-            
-            // Show video if it's a video track and has frames
             if (event.track.kind === 'video') {
               event.track.onunmute = () => {
-                console.log('📹 Video track unmuted for:', userId);
+                debugLog(`Video track unmuted for ${userId}`, 'info');
                 remoteVideo.classList.remove('hidden');
                 if (remotePfp) remotePfp.classList.add('hidden');
               };
@@ -359,34 +454,67 @@
           }
         };
         
-        // Handle ICE candidates - IMPORTANT: Send all candidates immediately
+        // Handle ICE candidates with detailed logging
         pc.onicecandidate = (event) => {
           if (event.candidate) {
-            console.log('🧊 Sending ICE candidate to:', userId, event.candidate.type);
+            const stats = connectionStats.get(userId);
+            stats.candidatesSent++;
+            
+            const c = event.candidate;
+            debugLog(`ICE candidate for ${userId}: type=${c.type}, protocol=${c.protocol}, priority=${c.priority}`, 'info');
+            
             socketInstance.emit('ice_candidate', {
               callId: callData.callId,
               targetUserId: userId,
-              candidate: event.candidate
+              candidate: c
             });
           } else {
-            console.log('🧊 ICE gathering completed for:', userId);
+            debugLog(`ICE gathering completed for ${userId}`, 'success');
           }
         };
         
-        // Monitor ICE gathering state
+        // ICE gathering state
         pc.onicegatheringstatechange = () => {
-          console.log(`🧊 ICE gathering state for ${userId}:`, pc.iceGatheringState);
+          const state = pc.iceGatheringState;
+          debugLog(`ICE gathering state for ${userId}: ${state}`, 'info');
+          connectionStats.get(userId).iceGatheringState = state;
         };
         
-        // Handle connection state changes with better logging
+        // Connection state with detailed tracking
         pc.onconnectionstatechange = () => {
-          console.log(`🔌 Connection state with ${userId}:`, pc.connectionState);
+          const state = pc.connectionState;
+          const stats = connectionStats.get(userId);
+          stats.connectionState = state;
+          
+          debugLog(`Connection state with ${userId}: ${state}`, state === 'connected' ? 'success' : state === 'failed' ? 'error' : 'info');
+          
           const statusEl = document.getElementById(`status-${userId}`);
           if (statusEl) {
-            switch (pc.connectionState) {
+            switch (state) {
               case 'connected':
                 statusEl.textContent = 'Connected';
                 statusEl.className = 'text-primary text-xs font-semibold uppercase tracking-wider';
+                // Get selected candidate pair
+                pc.getStats().then(stats => {
+                  stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                      const localCandidate = stats.get(report.localCandidateId);
+                      const remoteCandidate = stats.get(report.remoteCandidateId);
+                      if (localCandidate) {
+                        debugLog(`Selected candidate pair for ${userId}: local=${localCandidate.candidateType}, remote=${remoteCandidate?.candidateType}`, 'success');
+                        stats.selectedCandidate = localCandidate.candidateType;
+                        updateConnectionQuality();
+                        
+                        // Report to server
+                        socketInstance.emit('connection_state_update', {
+                          callId: callData.callId,
+                          state: 'connected',
+                          candidateType: localCandidate.candidateType
+                        });
+                      }
+                    }
+                  });
+                });
                 break;
               case 'connecting':
                 statusEl.textContent = 'Connecting...';
@@ -397,16 +525,19 @@
                 statusEl.className = 'text-yellow-500 text-sm';
                 break;
               case 'failed':
-                console.error('❌ Connection failed with:', userId);
+                debugLog(`Connection failed with ${userId} - attempting ICE restart`, 'error');
                 statusEl.textContent = 'Connection failed';
                 statusEl.className = 'text-red-500 text-sm';
-                // Attempt to reconnect
                 setTimeout(() => {
                   if (pc.connectionState === 'failed') {
-                    console.log('🔄 Attempting to restart ICE for:', userId);
+                    debugLog(`Restarting ICE for ${userId}`, 'warning');
                     pc.restartIce();
                   }
                 }, 1000);
+                socketInstance.emit('connection_state_update', {
+                  callId: callData.callId,
+                  state: 'failed'
+                });
                 break;
               case 'closed':
                 statusEl.textContent = 'Disconnected';
@@ -416,12 +547,14 @@
           }
         };
         
-        // Monitor ICE connection state
+        // ICE connection state
         pc.oniceconnectionstatechange = () => {
-          console.log(`🧊 ICE connection state with ${userId}:`, pc.iceConnectionState);
-          if (pc.iceConnectionState === 'failed') {
-            console.error('❌ ICE connection failed with:', userId);
-            console.log('💡 Attempting ICE restart...');
+          const state = pc.iceConnectionState;
+          debugLog(`ICE connection state with ${userId}: ${state}`, 'info');
+          connectionStats.get(userId).iceState = state;
+          
+          if (state === 'failed') {
+            debugLog(`ICE connection failed with ${userId} - attempting restart`, 'error');
             pc.restartIce();
           }
         };
@@ -430,10 +563,49 @@
         return pc;
       }
 
+      // Update connection quality indicator
+      function updateConnectionQuality() {
+        const qualityEl = document.getElementById('connectionQuality');
+        if (!qualityEl) return;
+        
+        let hasRelay = false;
+        let hasSrflx = false;
+        let hasHost = false;
+        let connectedCount = 0;
+        
+        connectionStats.forEach((stats, userId) => {
+          if (stats.connectionState === 'connected') {
+            connectedCount++;
+            if (stats.selectedCandidate === 'relay') hasRelay = true;
+            else if (stats.selectedCandidate === 'srflx') hasSrflx = true;
+            else if (stats.selectedCandidate === 'host') hasHost = true;
+          }
+        });
+        
+        let quality = 'Unknown';
+        let bgClass = 'bg-gray-200 dark:bg-gray-700';
+        
+        if (connectedCount > 0) {
+          if (hasRelay) {
+            quality = 'TURN Relay';
+            bgClass = 'bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100';
+          } else if (hasSrflx) {
+            quality = 'P2P (STUN)';
+            bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
+          } else if (hasHost) {
+            quality = 'P2P Direct';
+            bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
+          }
+        }
+        
+        qualityEl.textContent = quality;
+        qualityEl.className = `text-xs px-2 py-1 rounded ${bgClass}`;
+      }
+
       // Create and send offer
       async function createOffer(userId) {
         try {
-          console.log('📤 Creating offer for:', userId);
+          debugLog(`Creating offer for ${userId}`, 'info');
           const pc = createPeerConnection(userId);
           
           const offer = await pc.createOffer({
@@ -442,54 +614,58 @@
           });
           
           await pc.setLocalDescription(offer);
-          console.log('📤 Sending offer to:', userId);
+          debugLog(`Offer created and set as local description for ${userId}`, 'success');
           
           socketInstance.emit('webrtc_offer', {
             callId: callData.callId,
             targetUserId: userId,
             offer: offer
           });
+          
+          debugLog(`Offer sent to ${userId}`, 'info');
         } catch (error) {
-          console.error('❌ Error creating offer for', userId, ':', error);
+          debugLog(`Error creating offer for ${userId}: ${error.message}`, 'error');
         }
       }
 
       // Handle incoming offer
       async function handleOffer(fromUserId, offer) {
         try {
-          console.log('📥 Received offer from:', fromUserId);
+          debugLog(`Received offer from ${fromUserId}`, 'info');
           const pc = createPeerConnection(fromUserId);
           
           await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          console.log('✅ Set remote description from:', fromUserId);
+          debugLog(`Remote description set from ${fromUserId}`, 'success');
           
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+          debugLog(`Answer created for ${fromUserId}`, 'success');
           
-          console.log('📤 Sending answer to:', fromUserId);
           socketInstance.emit('webrtc_answer', {
             callId: callData.callId,
             targetUserId: fromUserId,
             answer: answer
           });
+          
+          debugLog(`Answer sent to ${fromUserId}`, 'info');
         } catch (error) {
-          console.error('❌ Error handling offer from', fromUserId, ':', error);
+          debugLog(`Error handling offer from ${fromUserId}: ${error.message}`, 'error');
         }
       }
 
       // Handle incoming answer
       async function handleAnswer(fromUserId, answer) {
         try {
-          console.log('📥 Received answer from:', fromUserId);
+          debugLog(`Received answer from ${fromUserId}`, 'info');
           const pc = peerConnections.get(fromUserId);
           if (pc) {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            console.log('✅ Set remote description (answer) from:', fromUserId);
+            debugLog(`Remote description (answer) set from ${fromUserId}`, 'success');
           } else {
-            console.warn('⚠️ No peer connection found for:', fromUserId);
+            debugLog(`No peer connection found for ${fromUserId} when handling answer`, 'warning');
           }
         } catch (error) {
-          console.error('❌ Error handling answer from', fromUserId, ':', error);
+          debugLog(`Error handling answer from ${fromUserId}: ${error.message}`, 'error');
         }
       }
 
@@ -499,12 +675,14 @@
           const pc = peerConnections.get(fromUserId);
           if (pc && pc.remoteDescription) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            console.log('🧊 Added ICE candidate from:', fromUserId, candidate.type);
+            const stats = connectionStats.get(fromUserId);
+            stats.candidatesReceived++;
+            debugLog(`ICE candidate added from ${fromUserId}: type=${candidate.type}`, 'info');
           } else {
-            console.warn('⚠️ Cannot add ICE candidate - no peer connection or remote description for:', fromUserId);
+            debugLog(`Cannot add ICE candidate from ${fromUserId} - ${!pc ? 'no connection' : 'no remote description'}`, 'warning');
           }
         } catch (error) {
-          console.error('❌ Error adding ICE candidate from', fromUserId, ':', error);
+          debugLog(`Error adding ICE candidate from ${fromUserId}: ${error.message}`, 'error');
         }
       }
 
@@ -532,7 +710,7 @@
               if (micIndicator) micIndicator.classList.remove('hidden');
             }
             
-            // Notify other participants
+            debugLog(`Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`, 'info');
             socketInstance.emit('audio_state_changed', {
               callId: callData.callId,
               enabled: isAudioEnabled
@@ -573,7 +751,7 @@
               if (localPfp) localPfp.classList.remove('hidden');
             }
             
-            // Notify other participants
+            debugLog(`Video ${isVideoEnabled ? 'enabled' : 'disabled'}`, 'info');
             socketInstance.emit('video_state_changed', {
               callId: callData.callId,
               enabled: isVideoEnabled
@@ -600,44 +778,38 @@
       // Leave call
       function leaveCall() {
         if (isInitializing) {
-          console.log('⚠️ Still initializing, preventing duplicate leave');
+          debugLog('Still initializing, preventing duplicate leave', 'warning');
           return;
         }
         
-        console.log('📵 Leaving call...');
+        debugLog('Leaving call...', 'info');
         isInitializing = true;
         
-        // Stop local stream
         if (localStream) {
           localStream.getTracks().forEach(track => {
             track.stop();
-            console.log('🛑 Stopped track:', track.kind);
+            debugLog(`Stopped ${track.kind} track`, 'info');
           });
         }
         
-        // Close all peer connections
         peerConnections.forEach((pc, userId) => {
-          console.log('🔌 Closing connection to:', userId);
+          debugLog(`Closing connection to ${userId}`, 'info');
           pc.close();
         });
         peerConnections.clear();
         
-        // Notify server
         if (socketInstance && socketInstance.connected) {
           socketInstance.emit('leave_call', {
             callId: callData.callId
           });
         }
         
-        // Clear duration interval
         if (durationInterval) {
           clearInterval(durationInterval);
         }
         
-        // Clear call data
         localStorage.removeItem('activeCall');
         
-        // Return to chat
         setTimeout(() => {
           window.location.href = '/chat.html';
         }, 500);
@@ -646,17 +818,19 @@
       // Initialize call
       async function initializeCall() {
         if (isInitializing) {
-          console.log('⚠️ Already initializing call');
+          debugLog('Already initializing call', 'warning');
           return;
         }
         
         isInitializing = true;
+        debugLog('=== Initializing Call ===', 'info');
         
         try {
-          // Require auth
           await _Auth.requireAuth();
           
-          // Get call data
+          // Fetch ICE servers first
+          await fetchIceServers();
+          
           const callDataStr = localStorage.getItem('activeCall');
           if (!callDataStr) {
             toast('No active call found', 'error');
@@ -665,9 +839,8 @@
           }
           
           callData = JSON.parse(callDataStr);
-          console.log('📞 Call data:', callData);
+          debugLog(`Call data loaded: ${JSON.stringify(callData)}`, 'info');
           
-          // Get current user
           const firebaseUser = firebase.auth().currentUser;
           if (!firebaseUser) {
             window.location.href = '/login.html';
@@ -681,17 +854,15 @@
             pfpUrl: userData.pfpUrl
           };
           
-          console.log('✅ Current user:', currentUser);
+          debugLog(`Current user: ${currentUser.username} (${currentUser.userId})`, 'info');
           
-          // Update UI
           const callTitle = document.getElementById('callTitle');
           const callSubtitle = document.getElementById('callSubtitle');
           if (callTitle) callTitle.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
           if (callSubtitle) callSubtitle.textContent = 'Initializing...';
           
-          // Initialize socket
           const idToken = await firebaseUser.getIdToken();
-          const socketUrl = 'https://website-hdem.onrender.com';
+          const socketUrl = window.location.origin;
           socketInstance = io(socketUrl, {
             transports: ['websocket', 'polling'],
             reconnection: true,
@@ -700,9 +871,8 @@
             auth: { token: idToken }
           });
           
-          // Socket event handlers
           socketInstance.on('connect', () => {
-            console.log('🔌 Socket connected:', socketInstance.id);
+            debugLog(`Socket connected: ${socketInstance.id}`, 'success');
             socketInstance.emit('authenticate', {
               token: idToken,
               userId: currentUser.userId
@@ -710,11 +880,10 @@
           });
           
           socketInstance.on('authenticated', async () => {
-            console.log('✅ Socket authenticated');
+            debugLog('Socket authenticated', 'success');
             
             if (!hasJoinedCall) {
               hasJoinedCall = true;
-              // Join call room
               socketInstance.emit('join_call', {
                 callId: callData.callId
               });
@@ -722,14 +891,12 @@
           });
           
           socketInstance.on('call_joined', async (data) => {
-            console.log('✅ Joined call:', data);
+            debugLog(`Call joined: ${data.participants.length} participants`, 'success');
             
             if (callSubtitle) callSubtitle.textContent = `${data.participants.length} participant${data.participants.length > 1 ? 's' : ''}`;
             
-            // Initialize local media FIRST
             await initializeLocalMedia();
             
-            // Create participant tiles
             const participantGrid = document.getElementById('participantGrid');
             if (participantGrid) {
               participantGrid.innerHTML = '';
@@ -739,48 +906,44 @@
                 const tile = createParticipantTile(participant, isSelf);
                 participantGrid.appendChild(tile);
                 
-                // Initiate WebRTC connection with other participants (if not self)
                 if (!isSelf) {
-                  // Small delay to ensure both sides are ready
                   setTimeout(() => createOffer(participant.userId), 500);
                 }
               });
             }
             
-            // Start call duration timer
             callStartTime = Date.now();
             durationInterval = setInterval(updateCallDuration, 1000);
             
             isInitializing = false;
+            debugLog('=== Call Initialization Complete ===', 'success');
           });
           
           socketInstance.on('user_joined_call', (data) => {
-            console.log('👋 User joined call:', data.user);
+            debugLog(`User joined call: ${data.user.username}`, 'info');
             
-            // Add new participant tile
             const participantGrid = document.getElementById('participantGrid');
             if (participantGrid && !document.getElementById(`participant-${data.user.userId}`)) {
               const tile = createParticipantTile(data.user, false);
               participantGrid.appendChild(tile);
-              
-              // Initiate WebRTC connection
               setTimeout(() => createOffer(data.user.userId), 500);
             }
           });
           
           socketInstance.on('user_left_call', (data) => {
-            console.log('👋 User left call:', data.userId);
+            debugLog(`User left call: ${data.userId}`, 'info');
             
-            // Remove participant tile
             const tile = document.getElementById(`participant-${data.userId}`);
             if (tile) tile.remove();
             
-            // Close peer connection
             const pc = peerConnections.get(data.userId);
             if (pc) {
               pc.close();
               peerConnections.delete(data.userId);
             }
+            
+            connectionStats.delete(data.userId);
+            updateConnectionQuality();
           });
           
           socketInstance.on('webrtc_offer', (data) => {
@@ -821,12 +984,11 @@
           });
           
           socketInstance.on('call_ended', () => {
-            console.log('📵 Call ended by host');
+            debugLog('Call ended by host', 'warning');
             toast('Call ended', 'warning');
             leaveCall();
           });
           
-          // Set up control buttons
           const micBtn = document.getElementById('micBtn');
           const videoBtn = document.getElementById('videoBtn');
           const leaveCallBtn = document.getElementById('leaveCallBtn');
@@ -835,24 +997,21 @@
           if (videoBtn) videoBtn.addEventListener('click', toggleVideo);
           if (leaveCallBtn) leaveCallBtn.addEventListener('click', leaveCall);
           
-          // Handle page unload
           window.addEventListener('beforeunload', (e) => {
             leaveCall();
           });
           
         } catch (error) {
-          console.error('❌ Call initialization error:', error);
+          debugLog(`Call initialization error: ${error.message}`, 'error');
           toast('Failed to initialize call', 'error');
           isInitializing = false;
           setTimeout(() => window.location.href = '/chat.html', 2000);
         }
       }
 
-      // Clear navigation flag (we've successfully arrived)
       sessionStorage.removeItem('navigatingToCall');
-      console.log('✅ Arrived at call page - cleared navigation flag');
+      debugLog('Cleared navigation flag', 'info');
       
-      // Start initialization
       initializeCall();
       
     })();
