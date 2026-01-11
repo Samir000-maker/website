@@ -1,3 +1,8 @@
+// CRITICAL FIXES FOR CALL CONNECTIVITY
+// 1. Persist call state when users navigate to call page
+// 2. Allow users to rejoin active calls
+// 3. Don't destroy calls on temporary disconnection
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -5,7 +10,6 @@ import cors from 'cors';
 import multer from 'multer';
 import { ObjectId } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
 import config from './config.js';
 import { connectDB, getDB } from './database.js';
 import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyToken } from './firebase-auth.js';
@@ -23,12 +27,6 @@ const __dirname = path.dirname(__filename);
 // TURN SERVER CONFIGURATION
 // ============================================
 
-/**
- * Generate Cloudflare TURN credentials
- * NOTE: This requires Cloudflare TURN API tokens to be set in environment variables:
- * - CLOUDFLARE_TURN_TOKEN_ID
- * - CLOUDFLARE_TURN_API_TOKEN
- */
 async function generateTurnCredentials() {
   const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
   const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
@@ -49,7 +47,7 @@ async function generateTurnCredentials() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          ttl: 86400 // 24 hours
+          ttl: 86400
         })
       }
     );
@@ -68,11 +66,7 @@ async function generateTurnCredentials() {
   }
 }
 
-/**
- * Get ICE servers configuration (STUN + TURN)
- */
 async function getIceServers() {
-  // Multiple STUN servers for redundancy
   const iceServers = [
     {
       urls: [
@@ -83,7 +77,6 @@ async function getIceServers() {
     }
   ];
 
-  // Try to add TURN server if credentials available
   const turnCreds = await generateTurnCredentials();
   if (turnCreds && turnCreds.iceServers) {
     iceServers.push(...turnCreds.iceServers.ice_servers);
@@ -95,11 +88,9 @@ async function getIceServers() {
   return iceServers;
 }
 
-// Initialize Express app
 const app = express();
 const server = createServer(app);
 
-// Initialize Socket.IO with CORS
 const io = new Server(server, {
   cors: {
     origin: '*',
@@ -111,12 +102,10 @@ const io = new Server(server, {
   pingInterval: 25000
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Configure multer for file uploads (memory storage)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -130,14 +119,13 @@ const upload = multer({
   }
 });
 
-// Rate limiting map for matchmaking
 const matchmakingRateLimit = new Map();
 
-// Call management
-const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], createdAt }
+// CRITICAL: Enhanced call management with persistence
+const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], status, createdAt }
 const userCalls = new Map(); // userId -> callId
+const callGracePeriod = new Map(); // callId -> timeout
 
-// WebRTC diagnostics
 const webrtcMetrics = {
   totalCalls: 0,
   successfulConnections: 0,
@@ -166,10 +154,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-/**
- * Get ICE servers for WebRTC connection
- * GET /api/ice-servers
- */
 app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
   try {
     console.log('📡 ICE servers requested');
@@ -178,7 +162,7 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
     res.json({ 
       iceServers,
       timestamp: Date.now(),
-      ttl: 86400 // 24 hours
+      ttl: 86400
     });
   } catch (error) {
     console.error('❌ Error getting ICE servers:', error);
@@ -186,9 +170,6 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
   }
 });
 
-/**
- * Check username availability
- */
 app.post('/api/check-username', async (req, res) => {
   try {
     const { username } = req.body;
@@ -246,9 +227,6 @@ app.post('/api/check-username', async (req, res) => {
   }
 });
 
-/**
- * Create/Update user profile
- */
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
@@ -321,9 +299,6 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   }
 });
 
-/**
- * Upload profile picture
- */
 app.post('/api/users/upload-pfp', 
   authenticateFirebase, 
   upload.single('file'), 
@@ -365,9 +340,6 @@ app.post('/api/users/upload-pfp',
   }
 );
 
-/**
- * Get user profile
- */
 app.get('/api/users/me', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
@@ -388,9 +360,6 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
   }
 });
 
-/**
- * Post a worldwide note
- */
 app.post('/api/notes', authenticateFirebase, async (req, res) => {
   try {
     const { text, mood } = req.body;
@@ -429,9 +398,6 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
   }
 });
 
-/**
- * Get worldwide notes (paginated)
- */
 app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 0;
@@ -470,9 +436,6 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
   }
 });
 
-/**
- * Get available moods
- */
 app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
 });
@@ -486,9 +449,6 @@ const socketUsers = new Map();
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
 
-  /**
-   * Authenticate socket connection
-   */
   socket.on('authenticate', async ({ token, userId }) => {
     try {
       console.log('🔐 Authenticating socket for userId:', userId);
@@ -535,10 +495,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // [Previous socket.io handlers continue here - matchmaking, chat, etc.]
-  // Due to length, I'll continue in the next part...
-
-socket.on('join_matchmaking', async ({ mood }) => {
+  socket.on('join_matchmaking', async ({ mood }) => {
     try {
       const user = socketUsers.get(socket.id);
       
@@ -738,11 +695,14 @@ socket.on('join_matchmaking', async ({ mood }) => {
       }
 
       const callId = uuidv4();
+      
+      // CRITICAL: Create call with 'pending' status
       const call = {
         callId,
         roomId,
         callType,
         participants: [user.userId],
+        status: 'pending', // pending, active, ended
         createdAt: Date.now(),
         initiator: user.userId
       };
@@ -791,12 +751,16 @@ socket.on('join_matchmaking', async ({ mood }) => {
         return;
       }
 
+      // Add user to call participants
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
       }
+      
+      // CRITICAL: Mark call as 'active'
+      call.status = 'active';
 
-      console.log(`✅ User ${user.username} accepted call ${callId}`);
+      console.log(`✅ User ${user.username} accepted call ${callId} - now ACTIVE`);
 
       const room = matchmaking.getRoom(roomId);
       if (!room) {
@@ -806,6 +770,7 @@ socket.on('join_matchmaking', async ({ mood }) => {
 
       const callUsers = room.users.filter(u => call.participants.includes(u.userId));
       
+      // Notify ALL participants that call is accepted
       callUsers.forEach(roomUser => {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
         if (targetSocket) {
@@ -877,13 +842,22 @@ socket.on('join_matchmaking', async ({ mood }) => {
       const call = activeCalls.get(callId);
       
       if (!call) {
+        console.error(`❌ Call ${callId} not found for user ${user.username}`);
         socket.emit('error', { message: 'Call not found' });
         return;
       }
 
       if (!call.participants.includes(user.userId)) {
+        console.error(`❌ User ${user.username} not in call ${callId}`);
         socket.emit('error', { message: 'You are not in this call' });
         return;
+      }
+
+      // CRITICAL: Clear any grace period timeout
+      if (callGracePeriod.has(callId)) {
+        clearTimeout(callGracePeriod.get(callId));
+        callGracePeriod.delete(callId);
+        console.log(`⏱️ Cleared grace period for call ${callId}`);
       }
 
       socket.join(`call-${callId}`);
@@ -956,7 +930,6 @@ socket.on('join_matchmaking', async ({ mood }) => {
       if (!user) return;
 
       console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
-      console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -982,7 +955,6 @@ socket.on('join_matchmaking', async ({ mood }) => {
       if (!user) return;
 
       console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
-      console.log(`   Answer type: ${answer.type}, SDP length: ${answer.sdp?.length || 0}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1007,8 +979,7 @@ socket.on('join_matchmaking', async ({ mood }) => {
       
       if (!user) return;
 
-      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}`);
-      console.log(`   Type: ${candidate.type}, Protocol: ${candidate.protocol}, Address: ${candidate.address}`);
+      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}: type=${candidate.type}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1108,27 +1079,50 @@ socket.on('join_matchmaking', async ({ mood }) => {
     if (user) {
       console.log(`🔌 User ${user.username} disconnected`);
 
-      matchmaking.cancelMatchmaking(user.userId);
-      
+      // Check if user is in a call
       const callId = userCalls.get(user.userId);
       if (callId) {
         const call = activeCalls.get(callId);
-        if (call) {
-          call.participants = call.participants.filter(p => p !== user.userId);
-          userCalls.delete(user.userId);
+        if (call && call.status === 'active') {
+          // CRITICAL: Don't immediately destroy - give grace period for navigation
+          console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
+          
+          // Set grace period (10 seconds for navigation)
+          const graceTimeout = setTimeout(() => {
+            console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
+            
+            // Check if they actually reconnected
+            const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+            
+            if (!reconnected) {
+              console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
+              
+              call.participants = call.participants.filter(p => p !== user.userId);
+              userCalls.delete(user.userId);
 
-          io.to(`call-${callId}`).emit('user_left_call', {
-            userId: user.userId,
-            username: user.username
-          });
+              io.to(`call-${callId}`).emit('user_left_call', {
+                userId: user.userId,
+                username: user.username
+              });
 
-          if (call.participants.length === 0) {
-            activeCalls.delete(callId);
-            console.log(`🗑️ Call ${callId} ended (disconnection)`);
-          }
+              if (call.participants.length === 0) {
+                activeCalls.delete(callId);
+                callGracePeriod.delete(callId);
+                console.log(`🗑️ Call ${callId} ended (all participants left)`);
+              }
+            } else {
+              console.log(`✅ User ${user.username} rejoined call`);
+            }
+          }, 10000); // 10 second grace period
+          
+          callGracePeriod.set(callId, graceTimeout);
         }
       }
       
+      // Matchmaking cleanup
+      matchmaking.cancelMatchmaking(user.userId);
+      
+      // Room cleanup with grace period
       const roomId = matchmaking.getRoomIdByUser(user.userId);
       
       if (roomId) {
