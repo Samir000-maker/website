@@ -58,6 +58,25 @@
             transition: transform 0.3s ease;
         }
         
+        
+        /* Fix for mobile navigation bars */
+.main-container {
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height - excludes nav bars */
+}
+
+.chat-main {
+    max-height: calc(100vh - 64px); /* 64px for header */
+    max-height: calc(100dvh - 64px);
+}
+
+@media (max-width: 768px) {
+    .chat-main {
+        max-height: calc(100vh - 56px); /* 56px for mobile header */
+        max-height: calc(100dvh - 56px);
+    }
+}
+        
         /* Mobile: sidebar overlay */
         @media (max-width: 768px) {
             .sidebar {
@@ -167,7 +186,7 @@
         }
     </style>
 </head>
-<body class="bg-background-light h-screen flex flex-col overflow-hidden">
+<body class="bg-background-light main-container flex flex-col overflow-hidden">
     <!-- Header with mobile menu toggle -->
     <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
         <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
@@ -211,7 +230,7 @@
         </div>
     </header>
 
-    <div class="flex flex-1 overflow-hidden relative min-h-0">
+    <div class="flex flex-1 overflow-hidden relative chat-main">
         <!-- Sidebar overlay (mobile only) -->
         <div id="sidebarOverlay" class="sidebar-overlay"></div>
         
@@ -238,36 +257,36 @@
         </div>
     </div>
 
-    <!-- Input area - FIXED -->
-    <div class="border-t border-gray-200 bg-white flex-shrink-0 safe-bottom">
-        <!-- Reply preview -->
-        <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
-            <div class="flex items-start justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-1.5 mb-1">
-                        <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
-                        <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
-                    </div>
-                    <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
+    <!-- Input area - MOBILE SAFE -->
+<div class="border-t border-gray-200 bg-white flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+    <!-- Reply preview -->
+    <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
+        <div class="flex items-start justify-between gap-2">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                    <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
+                    <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
                 </div>
-                <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
-                    <span class="material-symbols-outlined text-lg">close</span>
-                </button>
+                <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
             </div>
-        </div>
-        
-        <!-- Message form -->
-        <div class="p-3">
-            <form id="messageForm" class="flex gap-2 items-center">
-                <input type="text" id="messageInput" required maxlength="500"
-                    class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
-                    placeholder="Type a message..." style="min-width: 0;">
-                <button type="submit" class="w-12 h-12 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90">
-                    <span class="material-symbols-outlined">send</span>
-                </button>
-            </form>
+            <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
+                <span class="material-symbols-outlined text-lg">close</span>
+            </button>
         </div>
     </div>
+    
+    <!-- Message form -->
+    <div class="p-3 pb-4">
+        <form id="messageForm" class="flex gap-2 items-center">
+            <input type="text" id="messageInput" required maxlength="500"
+                class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
+                placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
+            <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90 active:scale-95 transition-transform">
+                <span class="material-symbols-outlined">send</span>
+            </button>
+        </form>
+    </div>
+</div>
 </main>
     </div>
 
