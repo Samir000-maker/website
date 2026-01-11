@@ -91,6 +91,20 @@
 
   <!-- Initialize Firebase -->
   <script>
+
+// At the start of your page script
+if (window.StateManager) {
+  const state = window.StateManager.getState();
+  
+  // If coming from expired room, clear state
+  if (state.room && window.StateManager.isRoomExpired()) {
+    window.StateManager.clearRoom();
+  }
+  
+  // Set current page
+  window.StateManager.setPage('mood');
+}
+    
     const firebaseConfig = {
       apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
       authDomain: "projectt3-8c55e.firebaseapp.com",
