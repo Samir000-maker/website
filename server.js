@@ -5,6 +5,7 @@ import cors from 'cors';
 import multer from 'multer';
 import { ObjectId } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import config from './config.js';
 import { connectDB, getDB } from './database.js';
 import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyToken } from './firebase-auth.js';
@@ -18,6 +19,81 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ============================================
+// TURN SERVER CONFIGURATION
+// ============================================
+
+/**
+ * Generate Cloudflare TURN credentials
+ * NOTE: This requires Cloudflare TURN API tokens to be set in environment variables:
+ * - CLOUDFLARE_TURN_TOKEN_ID
+ * - CLOUDFLARE_TURN_API_TOKEN
+ */
+async function generateTurnCredentials() {
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
+
+  if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
+    console.warn('⚠️ TURN credentials not configured - TURN server will not be available');
+    console.warn('Set CLOUDFLARE_TURN_TOKEN_ID and CLOUDFLARE_TURN_API_TOKEN environment variables');
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${TURN_TOKEN_ID}/credentials/generate`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${TURN_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ttl: 86400 // 24 hours
+        })
+      }
+    );
+
+    if (!response.ok) {
+      console.error('❌ Failed to generate TURN credentials:', response.status);
+      return null;
+    }
+
+    const credentials = await response.json();
+    console.log('✅ TURN credentials generated successfully');
+    return credentials;
+  } catch (error) {
+    console.error('❌ Error generating TURN credentials:', error);
+    return null;
+  }
+}
+
+/**
+ * Get ICE servers configuration (STUN + TURN)
+ */
+async function getIceServers() {
+  // Multiple STUN servers for redundancy
+  const iceServers = [
+    {
+      urls: [
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302'
+      ]
+    }
+  ];
+
+  // Try to add TURN server if credentials available
+  const turnCreds = await generateTurnCredentials();
+  if (turnCreds && turnCreds.iceServers) {
+    iceServers.push(...turnCreds.iceServers.ice_servers);
+    console.log('✅ TURN server added to ICE configuration');
+  } else {
+    console.warn('⚠️ Operating without TURN server - may fail in restrictive networks');
+  }
+
+  return iceServers;
+}
 
 // Initialize Express app
 const app = express();
@@ -47,7 +123,6 @@ const upload = multer({
     fileSize: config.MAX_FILE_SIZE
   },
   fileFilter: (req, file, cb) => {
-    // Accept images only
     if (!file.mimetype.startsWith('image/')) {
       return cb(new Error('Only image files are allowed'), false);
     }
@@ -62,19 +137,22 @@ const matchmakingRateLimit = new Map();
 const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], createdAt }
 const userCalls = new Map(); // userId -> callId
 
+// WebRTC diagnostics
+const webrtcMetrics = {
+  totalCalls: 0,
+  successfulConnections: 0,
+  failedConnections: 0,
+  turnUsage: 0,
+  stunUsage: 0
+};
+
 // ============================================
 // API ROUTES
 // ============================================
 
-/**
- * Health check endpoint
- */
-
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
-
-
 
 app.get('/health', (req, res) => {
   res.json({ 
@@ -82,23 +160,38 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     activeRooms: matchmaking.getActiveRooms().length,
     activeCalls: activeCalls.size,
+    webrtcMetrics,
+    turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
     server: 'running'
   });
 });
 
 /**
+ * Get ICE servers for WebRTC connection
+ * GET /api/ice-servers
+ */
+app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
+  try {
+    console.log('📡 ICE servers requested');
+    const iceServers = await getIceServers();
+    
+    res.json({ 
+      iceServers,
+      timestamp: Date.now(),
+      ttl: 86400 // 24 hours
+    });
+  } catch (error) {
+    console.error('❌ Error getting ICE servers:', error);
+    res.status(500).json({ error: 'Failed to get ICE servers' });
+  }
+});
+
+/**
  * Check username availability
- * POST /api/check-username
- * Body: { username: string }
- * NOTE: Does NOT require authentication
  */
 app.post('/api/check-username', async (req, res) => {
   try {
     const { username } = req.body;
-
-    console.log('Checking username:', username);
-
-    // Validate username
     if (!username || typeof username !== 'string') {
       return res.status(400).json({ 
         available: false,
@@ -107,8 +200,6 @@ app.post('/api/check-username', async (req, res) => {
     }
 
     const trimmedUsername = username.trim().toLowerCase();
-
-    // Check length (3-20 characters)
     if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
       return res.status(400).json({ 
         available: false,
@@ -116,7 +207,6 @@ app.post('/api/check-username', async (req, res) => {
       });
     }
 
-    // Check format - allow letters, numbers, underscores, and hyphens
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUsername)) {
       return res.status(400).json({ 
         available: false,
@@ -125,72 +215,50 @@ app.post('/api/check-username', async (req, res) => {
     }
 
     const db = getDB();
-    
-    // Check if username exists (case-insensitive)
     const existingUser = await db.collection('users').findOne(
       { username: trimmedUsername },
       { projection: { _id: 1 } }
     );
 
     if (existingUser) {
-      console.log('Username taken:', trimmedUsername);
-      
-      // Generate suggestions
       const suggestions = [];
       for (let i = 0; i < 3; i++) {
         const suffix = Math.floor(Math.random() * 999) + 1;
         const suggestion = `${trimmedUsername}_${suffix}`;
-        
-        // Check if suggestion is available
         const suggestionExists = await db.collection('users').findOne(
           { username: suggestion },
           { projection: { _id: 1 } }
         );
-        
         if (!suggestionExists) {
           suggestions.push(suggestion);
         }
       }
-
-      return res.json({ 
-        available: false, 
-        suggestions 
-      });
+      return res.json({ available: false, suggestions });
     }
 
-    // Username is available
-    console.log('Username available:', trimmedUsername);
     res.json({ available: true });
-    
   } catch (error) {
     console.error('Check username error:', error);
     res.status(500).json({ 
       available: false,
-      error: 'Internal server error',
-      message: error.message
+      error: 'Internal server error'
     });
   }
 });
 
 /**
  * Create/Update user profile
- * POST /api/users/profile
- * Body: { username: string, pfpUrl?: string }
  */
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
     const firebaseUser = req.firebaseUser;
 
-    console.log('Creating/updating profile for:', firebaseUser.email, 'with username:', username);
-
     if (!username) {
       return res.status(400).json({ error: 'Username is required' });
     }
 
-    // Validate username format
     const trimmedUsername = username.trim().toLowerCase();
-    
     if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
       return res.status(400).json({ 
         error: 'Username must be between 3 and 20 characters' 
@@ -204,22 +272,16 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-    
-    // Check if user already exists
     const existingUser = await db.collection('users').findOne({ 
       email: firebaseUser.email 
     });
 
     if (existingUser && existingUser.username !== trimmedUsername) {
-      // User is trying to change username - check availability
       const usernameExists = await db.collection('users').findOne({
         username: trimmedUsername
       });
-
       if (usernameExists) {
-        return res.status(400).json({ 
-          error: 'Username already taken' 
-        });
+        return res.status(400).json({ error: 'Username already taken' });
       }
     }
 
@@ -231,30 +293,19 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     };
 
     if (existingUser) {
-      // Update existing user
       await db.collection('users').updateOne(
         { _id: existingUser._id },
         { $set: userData }
       );
-
-      // Invalidate cache
       await invalidateUserProfileCache(existingUser._id.toString());
-
-      console.log('Profile updated for:', trimmedUsername);
-
       res.json({ 
         success: true, 
         userId: existingUser._id,
         message: 'Profile updated' 
       });
     } else {
-      // Create new user
       userData.createdAt = new Date();
-      
       const result = await db.collection('users').insertOne(userData);
-
-      console.log('Profile created for:', trimmedUsername);
-
       res.json({ 
         success: true, 
         userId: result.insertedId,
@@ -263,10 +314,8 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
   } catch (error) {
     if (error.code === 11000) {
-      // Duplicate key error (username already exists)
       return res.status(400).json({ error: 'Username already taken' });
     }
-
     console.error('Create profile error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -274,8 +323,6 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
 
 /**
  * Upload profile picture
- * POST /api/users/upload-pfp
- * Form data: file (image)
  */
 app.post('/api/users/upload-pfp', 
   authenticateFirebase, 
@@ -288,8 +335,6 @@ app.post('/api/users/upload-pfp',
 
       const firebaseUser = req.firebaseUser;
       const db = getDB();
-
-      // Get user
       const user = await db.collection('users').findOne({ 
         email: firebaseUser.email 
       });
@@ -298,27 +343,21 @@ app.post('/api/users/upload-pfp',
         return res.status(404).json({ error: 'User not found' });
       }
 
-      // Upload to Cloudflare R2
       const pfpUrl = await uploadProfilePicture(
         req.file.buffer,
         req.file.mimetype,
         user._id.toString()
       );
 
-      // Update user profile
       await db.collection('users').updateOne(
         { _id: user._id },
         { $set: { pfpUrl, updatedAt: new Date() } }
       );
 
-      // Update cache
       const updatedUser = { ...user, pfpUrl };
       await updateUserProfileCache(user._id.toString(), updatedUser);
 
-      res.json({ 
-        success: true, 
-        pfpUrl 
-      });
+      res.json({ success: true, pfpUrl });
     } catch (error) {
       console.error('Upload PFP error:', error);
       res.status(500).json({ error: 'Failed to upload profile picture' });
@@ -328,13 +367,11 @@ app.post('/api/users/upload-pfp',
 
 /**
  * Get user profile
- * GET /api/users/me
  */
 app.get('/api/users/me', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
-
     const user = await db.collection('users').findOne(
       { email: firebaseUser.email },
       { projection: { password: 0 } }
@@ -353,8 +390,6 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
 /**
  * Post a worldwide note
- * POST /api/notes
- * Body: { text: string, mood?: string }
  */
 app.post('/api/notes', authenticateFirebase, async (req, res) => {
   try {
@@ -363,14 +398,12 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
 
     if (!text || text.length > config.MAX_NOTE_LENGTH) {
       return res.status(400).json({ 
-        error: 'Invalid note', 
+        error: 'Invalid note',
         message: `Note must be between 1 and ${config.MAX_NOTE_LENGTH} characters` 
       });
     }
 
     const db = getDB();
-    
-    // Get user
     const user = await db.collection('users').findOne({ 
       email: firebaseUser.email 
     });
@@ -389,11 +422,7 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
     };
 
     const result = await db.collection('notes').insertOne(note);
-
-    res.json({ 
-      success: true, 
-      noteId: result.insertedId 
-    });
+    res.json({ success: true, noteId: result.insertedId });
   } catch (error) {
     console.error('Post note error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -402,7 +431,6 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
 
 /**
  * Get worldwide notes (paginated)
- * GET /api/notes?page=0&limit=25
  */
 app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
   try {
@@ -413,8 +441,6 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
     );
 
     const db = getDB();
-    
-    // Use indexed query (sorted by createdAt descending)
     const notes = await db.collection('notes')
       .find({})
       .sort({ createdAt: -1 })
@@ -446,7 +472,6 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
 
 /**
  * Get available moods
- * GET /api/moods
  */
 app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
@@ -456,7 +481,6 @@ app.get('/api/moods', (req, res) => {
 // SOCKET.IO REAL-TIME COMMUNICATION
 // ============================================
 
-// Store socket to user mapping
 const socketUsers = new Map();
 
 io.on('connection', (socket) => {
@@ -469,12 +493,11 @@ io.on('connection', (socket) => {
     try {
       console.log('🔐 Authenticating socket for userId:', userId);
 
-      // Verify Firebase token
       let decodedToken;
       try {
         decodedToken = await verifyToken(token);
       } catch (error) {
-        console.error('Token verification failed:', error);
+        console.error('❌ Token verification failed:', error);
         socket.emit('auth_error', { message: 'Invalid or expired token' });
         return;
       }
@@ -489,7 +512,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Store user data for this socket
       socketUsers.set(socket.id, {
         userId: user._id.toString(),
         username: user.username,
@@ -513,10 +535,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Join matchmaking queue
-   */
-  socket.on('join_matchmaking', async ({ mood }) => {
+  // [Previous socket.io handlers continue here - matchmaking, chat, etc.]
+  // Due to length, I'll continue in the next part...
+
+socket.on('join_matchmaking', async ({ mood }) => {
     try {
       const user = socketUsers.get(socket.id);
       
@@ -528,14 +550,12 @@ io.on('connection', (socket) => {
 
       console.log(`🎮 User ${user.username} joining matchmaking for mood: ${mood}`);
 
-      // Validate mood
       const validMood = config.MOODS.find(m => m.id === mood);
       if (!validMood) {
         socket.emit('error', { message: 'Invalid mood' });
         return;
       }
 
-      // Add to matchmaking queue with CURRENT socket ID
       const room = matchmaking.addToQueue({
         ...user,
         mood,
@@ -543,21 +563,17 @@ io.on('connection', (socket) => {
       });
 
       if (room) {
-        // Match found! Notify all users and have them join the Socket.IO room
         console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
         room.users.forEach(roomUser => {
-          // Find the CURRENT active socket for each user
           const userSocket = findActiveSocketForUser(roomUser.userId);
           
           if (userSocket) {
             console.log(`📤 Emitting match_found to ${roomUser.username} on socket ${userSocket.id}`);
             
-            // Join Socket.IO room IMMEDIATELY
             userSocket.join(room.id);
             console.log(`✅ User ${roomUser.username} joined Socket.IO room ${room.id}`);
             
-            // Then emit match_found event
             userSocket.emit('match_found', {
               roomId: room.id,
               mood: room.mood,
@@ -574,7 +590,6 @@ io.on('connection', (socket) => {
         });
 
       } else {
-        // Queued, waiting for more users
         const queuePosition = matchmaking.getQueueStatus(mood);
         socket.emit('queued', { 
           mood, 
@@ -588,11 +603,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Helper function to find active socket for a user
-   */
   function findActiveSocketForUser(userId) {
-    // Search through all connected sockets for this user
     for (const [socketId, userData] of socketUsers.entries()) {
       if (userData.userId === userId) {
         const socketInstance = io.sockets.sockets.get(socketId);
@@ -604,9 +615,6 @@ io.on('connection', (socket) => {
     return null;
   }
 
-  /**
-   * Join room (when user enters chat)
-   */
   socket.on('join_room', ({ roomId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -639,7 +647,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Join Socket.IO room if not already joined
       if (!socket.rooms.has(roomId)) {
         socket.join(roomId);
         console.log(`✅ User ${user.username} joined Socket.IO room ${roomId}`);
@@ -647,7 +654,6 @@ io.on('connection', (socket) => {
         console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
       }
 
-      // Confirm room joined
       socket.emit('room_joined', { roomId });
       
     } catch (error) {
@@ -656,9 +662,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Cancel matchmaking
-   */
   socket.on('cancel_matchmaking', () => {
     const user = socketUsers.get(socket.id);
     if (user) {
@@ -668,9 +671,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Send chat message
-   */
   socket.on('chat_message', ({ roomId, message, replyTo }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -695,7 +695,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Build message data object
       const messageData = {
         userId: user.userId,
         username: user.username,
@@ -704,18 +703,11 @@ io.on('connection', (socket) => {
         timestamp: Date.now()
       };
 
-      // Add replyTo if it exists
       if (replyTo) {
         messageData.replyTo = replyTo;
-        console.log(`📧 Message is a reply to: ${replyTo.username}`);
       }
 
-      // Add message to room (ephemeral storage)
       room.addMessage(messageData);
-
-      console.log(`💬 Message in room ${roomId} from ${user.username}: ${message}`);
-
-      // Broadcast to all users in room (including sender)
       io.to(roomId).emit('chat_message', messageData);
       
     } catch (error) {
@@ -724,9 +716,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Initiate call
-   */
   socket.on('initiate_call', ({ roomId, callType }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -748,12 +737,11 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Create call
       const callId = uuidv4();
       const call = {
         callId,
         roomId,
-        callType, // 'audio' or 'video'
+        callType,
         participants: [user.userId],
         createdAt: Date.now(),
         initiator: user.userId
@@ -761,10 +749,10 @@ io.on('connection', (socket) => {
 
       activeCalls.set(callId, call);
       userCalls.set(user.userId, callId);
+      webrtcMetrics.totalCalls++;
 
       console.log(`📞 Call initiated: ${callId} by ${user.username} (${callType})`);
 
-      // Notify other users in room
       room.users.forEach(roomUser => {
         if (roomUser.userId !== user.userId) {
           const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -787,9 +775,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Accept call
-   */
   socket.on('accept_call', ({ callId, roomId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -806,7 +791,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Add user to call
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
@@ -814,14 +798,12 @@ io.on('connection', (socket) => {
 
       console.log(`✅ User ${user.username} accepted call ${callId}`);
 
-      // Get room to fetch all users
       const room = matchmaking.getRoom(roomId);
       if (!room) {
         socket.emit('error', { message: 'Room not found' });
         return;
       }
 
-      // Notify all participants
       const callUsers = room.users.filter(u => call.participants.includes(u.userId));
       
       callUsers.forEach(roomUser => {
@@ -845,9 +827,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Decline call
-   */
   socket.on('decline_call', ({ callId, roomId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -866,7 +845,6 @@ io.on('connection', (socket) => {
 
       console.log(`❌ User ${user.username} declined call ${callId}`);
 
-      // Notify initiator
       const initiatorSocket = findActiveSocketForUser(call.initiator);
       if (initiatorSocket) {
         initiatorSocket.emit('call_declined', {
@@ -876,7 +854,6 @@ io.on('connection', (socket) => {
         });
       }
 
-      // Clean up call if no one accepted
       if (call.participants.length === 1) {
         activeCalls.delete(callId);
         userCalls.delete(call.initiator);
@@ -888,9 +865,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Join call (WebRTC room)
-   */
   socket.on('join_call', ({ callId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -912,15 +886,12 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Join Socket.IO room for the call
       socket.join(`call-${callId}`);
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
-      // Get room to fetch participant details
       const room = matchmaking.getRoom(call.roomId);
       const participants = room ? room.users.filter(u => call.participants.includes(u.userId)) : [];
 
-      // Send current participants
       socket.emit('call_joined', {
         callId,
         callType: call.callType,
@@ -931,7 +902,6 @@ io.on('connection', (socket) => {
         }))
       });
 
-      // Notify other participants
       socket.to(`call-${callId}`).emit('user_joined_call', {
         user: {
           userId: user.userId,
@@ -946,9 +916,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Leave call
-   */
   socket.on('leave_call', ({ callId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -959,22 +926,18 @@ io.on('connection', (socket) => {
       
       if (!call) return;
 
-      // Remove user from call
       call.participants = call.participants.filter(p => p !== user.userId);
       userCalls.delete(user.userId);
 
       console.log(`📵 User ${user.username} left call ${callId}`);
 
-      // Leave Socket.IO room
       socket.leave(`call-${callId}`);
 
-      // Notify other participants
       io.to(`call-${callId}`).emit('user_left_call', {
         userId: user.userId,
         username: user.username
       });
 
-      // Clean up call if empty
       if (call.participants.length === 0) {
         activeCalls.delete(callId);
         console.log(`🗑️ Call ${callId} ended (no participants)`);
@@ -985,14 +948,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * WebRTC Signaling: Offer
-   */
+  // WebRTC Signaling with enhanced logging
   socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     try {
       const user = socketUsers.get(socket.id);
       
       if (!user) return;
+
+      console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
+      console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1001,7 +965,9 @@ io.on('connection', (socket) => {
           fromUserId: user.userId,
           offer
         });
-        console.log(`📤 WebRTC offer forwarded from ${user.username} to ${targetUserId}`);
+        console.log(`✅ Offer forwarded to ${targetUserId}`);
+      } else {
+        console.warn(`⚠️ Target user ${targetUserId} not found for offer`);
       }
 
     } catch (error) {
@@ -1009,14 +975,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * WebRTC Signaling: Answer
-   */
   socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
     try {
       const user = socketUsers.get(socket.id);
       
       if (!user) return;
+
+      console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
+      console.log(`   Answer type: ${answer.type}, SDP length: ${answer.sdp?.length || 0}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1025,7 +991,9 @@ io.on('connection', (socket) => {
           fromUserId: user.userId,
           answer
         });
-        console.log(`📤 WebRTC answer forwarded from ${user.username} to ${targetUserId}`);
+        console.log(`✅ Answer forwarded to ${targetUserId}`);
+      } else {
+        console.warn(`⚠️ Target user ${targetUserId} not found for answer`);
       }
 
     } catch (error) {
@@ -1033,14 +1001,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * WebRTC Signaling: ICE Candidate
-   */
   socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     try {
       const user = socketUsers.get(socket.id);
       
       if (!user) return;
+
+      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}`);
+      console.log(`   Type: ${candidate.type}, Protocol: ${candidate.protocol}, Address: ${candidate.address}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1049,7 +1017,8 @@ io.on('connection', (socket) => {
           fromUserId: user.userId,
           candidate
         });
-        console.log(`🧊 ICE candidate forwarded from ${user.username} to ${targetUserId}`);
+      } else {
+        console.warn(`⚠️ Target user ${targetUserId} not found for ICE candidate`);
       }
 
     } catch (error) {
@@ -1057,16 +1026,33 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Audio state changed
-   */
+  socket.on('connection_state_update', ({ callId, state, candidateType }) => {
+    const user = socketUsers.get(socket.id);
+    if (!user) return;
+
+    console.log(`🔌 Connection state from ${user.username}: ${state}`);
+    if (candidateType) {
+      console.log(`   Using candidate type: ${candidateType}`);
+      if (candidateType === 'relay') {
+        webrtcMetrics.turnUsage++;
+      } else if (candidateType === 'srflx') {
+        webrtcMetrics.stunUsage++;
+      }
+    }
+
+    if (state === 'connected') {
+      webrtcMetrics.successfulConnections++;
+    } else if (state === 'failed') {
+      webrtcMetrics.failedConnections++;
+    }
+  });
+
   socket.on('audio_state_changed', ({ callId, enabled }) => {
     try {
       const user = socketUsers.get(socket.id);
       
       if (!user) return;
 
-      // Broadcast to other participants
       socket.to(`call-${callId}`).emit('audio_state_changed', {
         userId: user.userId,
         enabled
@@ -1077,16 +1063,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Video state changed
-   */
   socket.on('video_state_changed', ({ callId, enabled }) => {
     try {
       const user = socketUsers.get(socket.id);
       
       if (!user) return;
 
-      // Broadcast to other participants
       socket.to(`call-${callId}`).emit('video_state_changed', {
         userId: user.userId,
         enabled
@@ -1097,9 +1079,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Leave room
-   */
   socket.on('leave_room', () => {
     const user = socketUsers.get(socket.id);
     
@@ -1108,10 +1087,8 @@ io.on('connection', (socket) => {
     const result = matchmaking.leaveRoom(user.userId);
     
     if (result.roomId) {
-      // Leave Socket.IO room
       socket.leave(result.roomId);
 
-      // Notify other users
       if (!result.destroyed) {
         io.to(result.roomId).emit('user_left', {
           userId: user.userId,
@@ -1125,34 +1102,26 @@ io.on('connection', (socket) => {
     }
   });
 
-  /**
-   * Handle disconnection
-   */
   socket.on('disconnect', () => {
     const user = socketUsers.get(socket.id);
     
     if (user) {
       console.log(`🔌 User ${user.username} disconnected`);
 
-      // Remove from matchmaking
       matchmaking.cancelMatchmaking(user.userId);
       
-      // Check if user is in a call
       const callId = userCalls.get(user.userId);
       if (callId) {
         const call = activeCalls.get(callId);
         if (call) {
-          // Remove from call
           call.participants = call.participants.filter(p => p !== user.userId);
           userCalls.delete(user.userId);
 
-          // Notify other participants
           io.to(`call-${callId}`).emit('user_left_call', {
             userId: user.userId,
             username: user.username
           });
 
-          // Clean up call if empty
           if (call.participants.length === 0) {
             activeCalls.delete(callId);
             console.log(`🗑️ Call ${callId} ended (disconnection)`);
@@ -1160,16 +1129,12 @@ io.on('connection', (socket) => {
         }
       }
       
-      // Check if user is in a room
       const roomId = matchmaking.getRoomIdByUser(user.userId);
       
       if (roomId) {
-        // User is in a room - grace period
         console.log(`⏳ User ${user.username} disconnected but still in room ${roomId} (grace period)`);
         
-        // Set a grace period timer (5 seconds)
         setTimeout(() => {
-          // Check if user reconnected
           const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
           
           if (stillDisconnected) {
@@ -1186,7 +1151,7 @@ io.on('connection', (socket) => {
           } else {
             console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
           }
-        }, 5000); // 5 second grace period
+        }, 5000);
       }
 
       socketUsers.delete(socket.id);
@@ -1202,19 +1167,22 @@ io.on('connection', (socket) => {
 
 async function startServer() {
   try {
-    // Connect to MongoDB
     await connectDB();
-
-    // Initialize Firebase
     initializeFirebase();
 
-    // Start server
     const PORT = config.PORT;
     server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
       console.log(`🔌 Socket.IO ready for connections`);
       console.log(`📞 WebRTC signaling enabled`);
+      
+      const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN);
+      if (hasTurn) {
+        console.log(`✅ TURN server configured (Cloudflare)`);
+      } else {
+        console.log(`⚠️ TURN server NOT configured - set CLOUDFLARE_TURN_TOKEN_ID and CLOUDFLARE_TURN_API_TOKEN`);
+      }
     });
   } catch (error) {
     console.error('Failed to start server:', error);
