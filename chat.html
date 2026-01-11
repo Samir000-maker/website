@@ -58,10 +58,6 @@
             transition: transform 0.3s ease;
         }
         
-        .sidebar.hidden {
-            transform: translateX(-100%);
-        }
-        
         /* Mobile: sidebar overlay */
         @media (max-width: 768px) {
             .sidebar {
@@ -72,6 +68,11 @@
                 width: 280px;
                 z-index: 40;
                 box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+                transform: translateX(-100%);
+            }
+            
+            .sidebar.show {
+                transform: translateX(0);
             }
             
             .sidebar-overlay {
@@ -96,6 +97,7 @@
                 position: relative;
                 width: 280px;
                 min-width: 280px;
+                display: block !important;
             }
             
             .sidebar-toggle {
@@ -122,17 +124,17 @@
             pointer-events: none;
         }
         
-        /* Mobile call buttons */
+        /* Call buttons positioning */
+        .call-buttons-container {
+            position: relative;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
         @media (max-width: 640px) {
-            .call-buttons {
-                bottom: 80px; /* Above mobile input */
-                right: 12px;
+            .call-buttons-container {
                 gap: 8px;
-            }
-            
-            .call-buttons button {
-                width: 48px;
-                height: 48px;
             }
         }
         
@@ -146,32 +148,66 @@
                 padding-bottom: max(1rem, env(safe-area-inset-bottom));
             }
         }
+        
+        /* Input area responsive */
+        @media (max-width: 640px) {
+            #messageForm {
+                gap: 8px;
+            }
+            
+            #messageInput {
+                font-size: 16px; /* Prevents zoom on iOS */
+                min-height: 44px; /* Touch target size */
+            }
+            
+            #messageForm button[type="submit"] {
+                min-width: 44px;
+                min-height: 44px;
+            }
+        }
     </style>
 </head>
 <body class="bg-background-light min-h-screen flex flex-col overflow-hidden">
     <!-- Header with mobile menu toggle -->
     <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
         <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
-            <div class="flex items-center gap-2 sm:gap-3">
+            <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
                 <!-- Mobile menu toggle -->
-                <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-100 rounded-lg md:hidden">
+                <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-100 rounded-lg md:hidden flex-shrink-0">
                     <span class="material-symbols-outlined text-gray-700">menu</span>
                 </button>
                 
-                <div>
-                    <h2 class="text-base sm:text-lg font-bold">Mindful Space</h2>
+                <div class="min-w-0 flex-1">
+                    <h2 class="text-base sm:text-lg font-bold truncate">Mindful Space</h2>
                     <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-500">
-                        <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
-                        <span id="onlineCount">Loading...</span>
+                        <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
+                        <span id="onlineCount" class="truncate">Loading...</span>
                         <span class="hidden sm:inline">•</span>
-                        <span id="timeRemaining" class="hidden sm:inline">--:-- remaining</span>
+                        <span id="timeRemaining" class="hidden sm:inline truncate">--:-- remaining</span>
                     </div>
                 </div>
             </div>
-            <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2">
-                <span class="hidden sm:inline">Leave Room</span>
-                <span class="sm:hidden material-symbols-outlined text-xl">logout</span>
-            </button>
+            
+            <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                <!-- Call buttons integrated in header -->
+                <div class="call-buttons-container">
+                    <button id="audioCallBtn" 
+                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+                        title="Start Audio Call">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
+                    </button>
+                    <button id="videoCallBtn" 
+                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+                        title="Start Video Call">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
+                    </button>
+                </div>
+                
+                <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2 whitespace-nowrap">
+                    <span class="hidden sm:inline">Leave Room</span>
+                    <span class="sm:hidden material-symbols-outlined text-xl">logout</span>
+                </button>
+            </div>
         </div>
     </header>
 
@@ -180,7 +216,7 @@
         <div id="sidebarOverlay" class="sidebar-overlay"></div>
         
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar border-r border-gray-200 bg-white overflow-y-auto hidden md:block">
+        <aside id="sidebar" class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
             <div class="p-3 sm:p-4">
                 <div class="flex items-center justify-between mb-3 sm:mb-4">
                     <h3 class="text-xs font-bold text-gray-500 uppercase">Active Users</h3>
@@ -194,7 +230,7 @@
         </aside>
 
         <!-- Main chat area -->
-        <main class="flex-1 flex flex-col min-w-0">
+        <main class="flex-1 flex flex-col min-w-0 bg-white">
             <!-- Messages list -->
             <div id="messagesList" class="flex-1 overflow-y-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-4">
                 <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
@@ -203,7 +239,7 @@
             </div>
 
             <!-- Input area -->
-            <div class="border-t border-gray-200 bg-white bottom-safe">
+            <div class="border-t border-gray-200 bg-white bottom-safe flex-shrink-0">
                 <!-- Reply preview -->
                 <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 sm:px-4 py-2 sm:py-3 bg-gray-50">
                     <div class="flex items-start justify-between gap-2 sm:gap-3">
@@ -214,7 +250,7 @@
                             </div>
                             <p class="text-xs sm:text-sm text-gray-600 truncate" id="replyToMessage">Original message text</p>
                         </div>
-                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors p-1 flex-shrink-0">
                             <span class="material-symbols-outlined text-lg sm:text-xl">close</span>
                         </button>
                     </div>
@@ -224,29 +260,15 @@
                 <div class="p-3 sm:p-4">
                     <form id="messageForm" class="flex gap-2 sm:gap-3">
                         <input type="text" id="messageInput" required maxlength="500"
-                            class="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            class="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-200 rounded-lg sm:rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 min-w-0"
                             placeholder="Type a message...">
-                        <button type="submit" class="btn btn-primary px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl">
+                        <button type="submit" class="btn btn-primary px-4 sm:px-6 py-2 sm:py-3 rounded-lg sm:rounded-xl flex-shrink-0">
                             <span class="material-symbols-outlined text-xl sm:text-2xl">send</span>
                         </button>
                     </form>
                 </div>
             </div>
         </main>
-    </div>
-
-    <!-- Call buttons (responsive positioning) -->
-    <div class="call-buttons fixed bottom-20 sm:bottom-6 right-4 sm:right-6 flex gap-2 sm:gap-3 z-40">
-        <button id="audioCallBtn" 
-            class="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
-            title="Start Audio Call">
-            <span class="material-symbols-outlined text-xl sm:text-2xl">call</span>
-        </button>
-        <button id="videoCallBtn" 
-            class="w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 transition-all active:scale-95"
-            title="Start Video Call">
-            <span class="material-symbols-outlined text-xl sm:text-2xl">videocam</span>
-        </button>
     </div>
 
     <!-- Incoming call modal (responsive) -->
@@ -325,14 +347,13 @@
       const sidebarOverlay = document.getElementById('sidebarOverlay');
 
       function openSidebar() {
-        sidebar.classList.remove('hidden');
-        sidebar.classList.remove('hidden');
+        sidebar.classList.add('show');
         sidebarOverlay.classList.add('active');
         document.body.style.overflow = 'hidden';
       }
 
       function closeSidebar() {
-        sidebar.classList.add('hidden');
+        sidebar.classList.remove('show');
         sidebarOverlay.classList.remove('active');
         document.body.style.overflow = '';
       }
@@ -429,17 +450,17 @@
         
         const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
         const messageContent = document.createElement('div');
-        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1`;
+        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1 min-w-0`;
 
         const headerDiv = document.createElement('div');
         headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
         
         const usernameSpan = document.createElement('span');
-        usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900';
+        usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900 truncate';
         usernameSpan.textContent = data.username || 'User';
         
         const timestampSpan = document.createElement('span');
-        timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400';
+        timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400 whitespace-nowrap';
         timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
         
         headerDiv.appendChild(usernameSpan);
@@ -453,7 +474,7 @@
         }
 
         const messageBubble = document.createElement('div');
-        messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base`;
+        messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
 
         if (data.replyTo) {
           const quotedDiv = document.createElement('div');
@@ -464,7 +485,7 @@
           quotedUsername.textContent = data.replyTo.username;
           
           const quotedText = document.createElement('div');
-          quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'}`;
+          quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'} break-words`;
           quotedText.textContent = data.replyTo.message;
           
           quotedDiv.appendChild(quotedUsername);
@@ -473,12 +494,12 @@
         }
 
         const messageText = document.createElement('div');
-        messageText.className = 'text-sm sm:text-base';
+        messageText.className = 'text-sm sm:text-base break-words';
         messageText.innerHTML = escapeHtml(data.message || '');
         messageBubble.appendChild(messageText);
 
         const replyBtn = document.createElement('button');
-        replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors';
+        replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0';
         replyBtn.title = 'Reply';
         replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400 text-base sm:text-lg">reply</span>';
         replyBtn.addEventListener('click', () => {
@@ -574,7 +595,7 @@
           
           const statusSpan = document.createElement('div');
           statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-          statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500"></span> Online';
+          statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
           
           userInfo.appendChild(nameSpan);
           userInfo.appendChild(statusSpan);
