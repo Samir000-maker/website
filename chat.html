@@ -167,7 +167,7 @@
         }
     </style>
 </head>
-<body class="bg-background-light min-h-screen flex flex-col overflow-hidden">
+<body class="bg-background-light h-screen flex flex-col overflow-hidden">
     <!-- Header with mobile menu toggle -->
     <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
         <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
@@ -211,7 +211,7 @@
         </div>
     </header>
 
-    <div class="flex flex-1 overflow-hidden relative">
+    <div class="flex flex-1 overflow-hidden relative min-h-0">
         <!-- Sidebar overlay (mobile only) -->
         <div id="sidebarOverlay" class="sidebar-overlay"></div>
         
@@ -229,19 +229,19 @@
             </div>
         </aside>
 
-        <!-- Main chat area -->
-<main class="flex-1 flex flex-col min-w-0 bg-white overflow-hidden">
+<!-- Main chat area -->
+<main class="flex-1 flex flex-col min-h-0 bg-white">
     <!-- Messages list -->
-    <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4">
+    <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
         <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
             Welcome to the safe space. Be kind and supportive.
         </div>
     </div>
 
-    <!-- Input area -->
-    <div class="border-t border-gray-200 bg-white bottom-safe flex-shrink-0 w-full">
+    <!-- Input area - FIXED -->
+    <div class="border-t border-gray-200 bg-white flex-shrink-0 safe-bottom">
         <!-- Reply preview -->
-        <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-2 sm:px-4 py-2 bg-gray-50">
+        <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
             <div class="flex items-start justify-between gap-2">
                 <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-1.5 mb-1">
@@ -250,20 +250,20 @@
                     </div>
                     <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
                 </div>
-                <button id="cancelReply" class="text-gray-400 hover:text-gray-600 transition-colors p-1 flex-shrink-0">
+                <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
                     <span class="material-symbols-outlined text-lg">close</span>
                 </button>
             </div>
         </div>
         
         <!-- Message form -->
-        <div class="p-2 w-full">
-            <form id="messageForm" class="flex gap-2 items-center w-full">
+        <div class="p-3">
+            <form id="messageForm" class="flex gap-2 items-center">
                 <input type="text" id="messageInput" required maxlength="500"
-                    class="flex-1 min-w-0 px-3 py-3 text-base border border-gray-300 rounded-lg focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
-                    placeholder="Type a message...">
-                <button type="submit" class="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
-                    <span class="material-symbols-outlined text-xl">send</span>
+                    class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
+                    placeholder="Type a message..." style="min-width: 0;">
+                <button type="submit" class="w-12 h-12 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90">
+                    <span class="material-symbols-outlined">send</span>
                 </button>
             </form>
         </div>
