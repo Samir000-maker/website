@@ -210,8 +210,8 @@
       let isInitiatingCall = false;
       let pendingCallData = null;
       
-      // CRITICAL: Global flag to prevent ANY disconnect
-      window._preventSocketDisconnect = false;
+      // CRITICAL FIX: Track if we're navigating to call page
+      let navigatingToCall = false;
 
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
@@ -553,9 +553,8 @@
         console.log('✅ Call accepted:', data);
         isInitiatingCall = false;
         
-        // CRITICAL: Set global flag FIRST
-        window._preventSocketDisconnect = true;
-        sessionStorage.setItem('navigatingToCall', 'true');
+        // CRITICAL FIX: Set flag BEFORE navigation
+        navigatingToCall = true;
         
         // Store call data
         localStorage.setItem('activeCall', JSON.stringify({
@@ -565,12 +564,10 @@
           users: data.users
         }));
         
-        console.log('🚀 Navigating to call page (socket will NOT disconnect)');
+        console.log('🚀 Navigating to call page (socket will stay connected)');
         
-        // Use location.replace to avoid adding to history and triggering unload
-        setTimeout(() => {
-          location.replace('/call.html');
-        }, 100);
+        // Navigate to call page
+        window.location.href = '/call.html';
       });
 
       socketInstance.on('call_declined', (data) => {
@@ -684,11 +681,12 @@
         });
       }
 
-      // CRITICAL: Check global flag before ANY disconnect
+      // CRITICAL FIX: Only disconnect if NOT navigating to call
       window.addEventListener('beforeunload', (e) => {
-        if (window._preventSocketDisconnect) {
-          console.log('🔒 Socket disconnect PREVENTED - navigating to call');
-          return; // DON'T disconnect!
+        if (navigatingToCall) {
+          console.log('🔒 Socket kept alive - navigating to call');
+          // DON'T disconnect - we need the socket for the call
+          return;
         }
         
         console.log('🚪 Normal page close - cleaning up');
@@ -698,14 +696,6 @@
         }
         if (timerInterval) {
           clearInterval(timerInterval);
-        }
-      });
-
-      // Also prevent on visibilitychange
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden && !window._preventSocketDisconnect) {
-          console.log('👁️ Page hidden - but keeping socket alive');
-          // Don't disconnect even when hidden
         }
       });
 
