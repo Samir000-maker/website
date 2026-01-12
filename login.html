@@ -96,7 +96,6 @@
     <script src="app.js"></script>
 
 <script>
-  // Safe usage of window.MoodApp without redeclaring global names
   const MoodApp = window.MoodApp || {};
   const _Auth = MoodApp.Auth;
   const _Toast = MoodApp.Toast;
@@ -104,16 +103,15 @@
   const _PageTransition = MoodApp.PageTransition;
   const _Validator = MoodApp.Validator;
 
-  // Initialize Firebase (keep your real values)
-        const firebaseConfig = {
-            apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
-            authDomain: "projectt3-8c55e.firebaseapp.com",
-            projectId: "projectt3-8c55e",
-            storageBucket: "projectt3-8c55e.firebasestorage.app",
-            messagingSenderId: "64611387728",
-            appId: "1:64611387728:web:2e53a18151ab3de1b60455",
-            measurementId: "G-0Z91D0Q6EE"
-        };
+  const firebaseConfig = {
+      apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+      authDomain: "projectt3-8c55e.firebaseapp.com",
+      projectId: "projectt3-8c55e",
+      storageBucket: "projectt3-8c55e.firebasestorage.app",
+      messagingSenderId: "64611387728",
+      appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+      measurementId: "G-0Z91D0Q6EE"
+  };
 
   try {
     if (window.firebase && !firebase.apps?.length) {
@@ -123,7 +121,30 @@
     console.error('Firebase init error:', error);
   }
 
-  // Helper short-cuts with safe fallbacks
+  // Check if user is already logged in
+  firebase.auth().onAuthStateChanged(async (user) => {
+      if (user) {
+          console.log('User already signed in, redirecting...');
+          if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+              _PageTransition.navigateTo('/mood.html');
+          } else {
+              window.location.href = '/mood.html';
+          }
+      }
+  });
+
+  const getApiBaseUrl = () => {
+      try {
+          const { hostname, port } = window.location;
+          if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
+              return 'http://localhost:3000';
+          }
+      } catch {}
+      return window.location.origin;
+  };
+
+  const API_BASE_URL = getApiBaseUrl();
+
   const toastError = (msg) => {
     if (_Toast && typeof _Toast.error === 'function') return _Toast.error(msg);
     console.error('Toast.error:', msg);
@@ -135,11 +156,9 @@
   const loadingShow = (msg) => { if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg); };
   const loadingHide = () => { if (_Loading && typeof _Loading.hide === 'function') _Loading.hide(); };
 
-  // DOM references
   const loginForm = document.getElementById('loginForm');
   const googleBtn = document.getElementById('googleSignIn');
 
-  // Submit handler
   if (loginForm) {
     loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -147,7 +166,6 @@
       const email = document.getElementById('email')?.value.trim() || '';
       const password = document.getElementById('password')?.value || '';
 
-      // Validator fallback
       if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
         if (!email) { toastError('Please enter a valid email address'); return; }
       } else {
@@ -159,24 +177,18 @@
       loadingShow('Signing in...');
 
       try {
-        // Sign in with Firebase
         const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-        // request fresh id token (Firebase SDK auto-refreshes when needed)
         const idToken = await userCredential.user.getIdToken();
 
-        // Store user info (do NOT persist ID token)
         if (_Auth && typeof _Auth.setAuth === 'function') {
-          // setAuth accepts (token, user) for backward compatibility; many implementations ignore token
           _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
         } else {
-          // fallback: store user-only metadata (non-sensitive)
           try { localStorage.setItem('user', JSON.stringify({ email, uid: userCredential.user.uid })); } catch (err) {}
         }
 
         loadingHide();
         toastSuccess('Welcome back!');
 
-        // Navigate
         if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
           _PageTransition.navigateTo('/mood.html');
         } else {
@@ -192,7 +204,6 @@
     console.warn('Login form element not found.');
   }
 
-  // Google sign-in handler
   if (googleBtn) {
     googleBtn.addEventListener('click', async () => {
       loadingShow('Signing in with Google...');
@@ -201,6 +212,17 @@
         const provider = new firebase.auth.GoogleAuthProvider();
         const result = await firebase.auth().signInWithPopup(provider);
         const idToken = await result.user.getIdToken();
+
+        // Check if user profile exists in backend
+        const checkResponse = await fetch(`${API_BASE_URL}/api/users/check-profile`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${idToken}`
+            }
+        });
+
+        const checkData = await checkResponse.json();
 
         if (_Auth && typeof _Auth.setAuth === 'function') {
           _Auth.setAuth(idToken, {
@@ -221,12 +243,28 @@
         }
 
         loadingHide();
-        toastSuccess('Welcome back!');
 
-        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/mood.html');
-        } else {
-          window.location.href = '/mood.html';
+        // If user profile exists (existing user), go to mood.html
+        if (checkData.exists && checkData.hasUsername) {
+            toastSuccess('Welcome back!');
+            setTimeout(() => {
+                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                    _PageTransition.navigateTo('/mood.html');
+                } else {
+                    window.location.href = '/mood.html';
+                }
+            }, 1000);
+        } 
+        // New user - redirect to username page
+        else {
+            toastSuccess('Please complete your profile setup');
+            setTimeout(() => {
+                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                    _PageTransition.navigateTo('/username.html');
+                } else {
+                    window.location.href = '/username.html';
+                }
+            }, 1000);
         }
       } catch (error) {
         loadingHide();
