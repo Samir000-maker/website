@@ -102,8 +102,6 @@ const io = new Server(server, {
   pingInterval: 25000
 });
 
-matchmaking.setSocketIO(io);
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
