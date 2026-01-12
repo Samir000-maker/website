@@ -1,9 +1,7 @@
-// CRITICAL FIXES FOR PRODUCTION - ALL PATCHES APPLIED
-// 1. Message queuing for backgrounded clients
-// 2. Extended grace periods for call navigation
-// 3. Background mode tracking
-// 4. Message sync on reconnection
-// 5. High concurrency optimizations
+// CRITICAL FIXES FOR CALL CONNECTIVITY
+// 1. Persist call state when users navigate to call page
+// 2. Allow users to rejoin active calls
+// 3. Don't destroy calls on temporary disconnection
 
 import express from 'express';
 import { createServer } from 'http';
@@ -35,6 +33,7 @@ async function generateTurnCredentials() {
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - TURN server will not be available');
+    console.warn('Set CLOUDFLARE_TURN_TOKEN_ID and CLOUDFLARE_TURN_API_TOKEN environment variables');
     return null;
   }
 
@@ -73,8 +72,7 @@ async function getIceServers() {
       urls: [
         'stun:stun.cloudflare.com:3478',
         'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-        'stun:stun2.l.google.com:19302'
+        'stun:stun1.l.google.com:19302'
       ]
     }
   ];
@@ -101,12 +99,10 @@ const io = new Server(server, {
   },
   transports: ['websocket', 'polling'],
   pingTimeout: 60000,
-  pingInterval: 25000,
-  maxHttpBufferSize: 1e8, // 100 MB for high concurrency
-  perMessageDeflate: {
-    threshold: 1024 // Compress messages > 1KB
-  }
+  pingInterval: 25000
 });
+
+matchmaking.setSocketIO(io);
 
 app.use(cors());
 app.use(express.json());
@@ -127,13 +123,10 @@ const upload = multer({
 
 const matchmakingRateLimit = new Map();
 
-// PRODUCTION: Enhanced state tracking
-const activeCalls = new Map();
-const userCalls = new Map();
-const callGracePeriod = new Map();
-const socketUsers = new Map();
-const backgroundClients = new Map(); // NEW: Track backgrounded clients
-const messageQueues = new Map(); // NEW: Queue messages for background clients
+// CRITICAL: Enhanced call management with persistence
+const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], status, createdAt }
+const userCalls = new Map(); // userId -> callId
+const callGracePeriod = new Map(); // callId -> timeout
 
 const webrtcMetrics = {
   totalCalls: 0,
@@ -142,77 +135,6 @@ const webrtcMetrics = {
   turnUsage: 0,
   stunUsage: 0
 };
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
-function findActiveSocketForUser(userId) {
-  for (const [socketId, userData] of socketUsers.entries()) {
-    if (userData.userId === userId) {
-      const socketInstance = io.sockets.sockets.get(socketId);
-      if (socketInstance && socketInstance.connected) {
-        return socketInstance;
-      }
-    }
-  }
-  return null;
-}
-
-function handleRoomCleanup(userId, socketId) {
-  matchmaking.cancelMatchmaking(userId);
-  
-  const roomId = matchmaking.getRoomIdByUser(userId);
-  
-  if (roomId) {
-    console.log(`⏳ User disconnected from room ${roomId} (grace period - keeping room alive)`);
-    
-    // CRITICAL: Give 15 seconds for page navigation (discovery → chat)
-    setTimeout(() => {
-      const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === userId);
-      
-      if (stillDisconnected) {
-        console.log(`👋 User ${userId} did not reconnect after 15s, checking room status`);
-        
-        const room = matchmaking.getRoom(roomId);
-        if (!room) {
-          console.log(`⚠️ Room ${roomId} no longer exists`);
-          return;
-        }
-        
-        // Check if ANY user is still connected via socket
-        const hasConnectedUsers = room.users.some(roomUser => {
-          return Array.from(socketUsers.values()).some(socketUser => 
-            socketUser.userId === roomUser.userId
-          );
-        });
-        
-        if (hasConnectedUsers) {
-          console.log(`✅ Room ${roomId} has connected users, keeping alive`);
-          return;
-        }
-        
-        // Only leave room if NO users are connected
-        console.log(`🚪 No users connected to room ${roomId}, user ${userId} leaving`);
-        const result = matchmaking.leaveRoom(userId);
-        
-        if (result.roomId && !result.destroyed) {
-          io.to(result.roomId).emit('user_left', {
-            userId: userId,
-            username: 'User',
-            remainingUsers: result.remainingUsers
-          });
-        }
-      } else {
-        console.log(`✅ User ${userId} reconnected, keeping in room ${roomId}`);
-      }
-    }, 15000); // INCREASED from 5000 to 15000
-  }
-  
-  socketUsers.delete(socketId);
-  backgroundClients.delete(socketId);
-  messageQueues.delete(socketId);
-}
 
 // ============================================
 // API ROUTES
@@ -228,8 +150,6 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     activeRooms: matchmaking.getActiveRooms().length,
     activeCalls: activeCalls.size,
-    connectedClients: socketUsers.size,
-    backgroundClients: backgroundClients.size,
     webrtcMetrics,
     turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
     server: 'running'
@@ -526,6 +446,8 @@ app.get('/api/moods', (req, res) => {
 // SOCKET.IO REAL-TIME COMMUNICATION
 // ============================================
 
+const socketUsers = new Map();
+
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
 
@@ -572,53 +494,6 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Socket auth error:', error);
       socket.emit('auth_error', { message: 'Authentication failed' });
-    }
-  });
-
-  // NEW: Background mode tracking
-  socket.on('background_mode', ({ active }) => {
-    const user = socketUsers.get(socket.id);
-    if (!user) return;
-
-    console.log(`${active ? '🌙' : '☀️'} User ${user.username} ${active ? 'backgrounded' : 'foregrounded'}`);
-
-    if (active) {
-      backgroundClients.set(socket.id, {
-        userId: user.userId,
-        username: user.username,
-        since: Date.now()
-      });
-      
-      if (!messageQueues.has(socket.id)) {
-        messageQueues.set(socket.id, []);
-      }
-    } else {
-      backgroundClients.delete(socket.id);
-      
-      const queue = messageQueues.get(socket.id);
-      if (queue && queue.length > 0) {
-        console.log(`📬 Sending ${queue.length} queued messages to ${user.username}`);
-        socket.emit('missed_messages', { messages: queue, count: queue.length });
-        messageQueues.delete(socket.id);
-      }
-    }
-  });
-
-  // NEW: Message sync for reconnection
-  socket.on('sync_messages', ({ roomId, lastTimestamp }) => {
-    const user = socketUsers.get(socket.id);
-    if (!user || !roomId) return;
-
-    console.log(`🔄 Syncing messages for ${user.username} from ${lastTimestamp}`);
-
-    const room = matchmaking.getRoom(roomId);
-    if (!room) return;
-
-    const messages = room.getMessages().filter(msg => msg.timestamp > lastTimestamp);
-
-    if (messages.length > 0) {
-      console.log(`📨 Sending ${messages.length} synced messages to ${user.username}`);
-      socket.emit('missed_messages', { messages, count: messages.length });
     }
   });
 
@@ -687,6 +562,18 @@ io.on('connection', (socket) => {
     }
   });
 
+  function findActiveSocketForUser(userId) {
+    for (const [socketId, userData] of socketUsers.entries()) {
+      if (userData.userId === userId) {
+        const socketInstance = io.sockets.sockets.get(socketId);
+        if (socketInstance && socketInstance.connected) {
+          return socketInstance;
+        }
+      }
+    }
+    return null;
+  }
+
   socket.on('join_room', ({ roomId }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -726,19 +613,7 @@ io.on('connection', (socket) => {
         console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
       }
 
-      // CRITICAL: Mark user as actively in room
-      socket.data = socket.data || {};
-      socket.data.activeRoomId = roomId;
-      socket.data.joinedAt = Date.now();
-
-      socket.emit('room_joined', { 
-        roomId,
-        users: room.users.map(u => ({
-          userId: u.userId,
-          username: u.username,
-          pfpUrl: u.pfpUrl
-        }))
-      });
+      socket.emit('room_joined', { roomId });
       
     } catch (error) {
       console.error('Join room error:', error);
@@ -784,8 +659,7 @@ io.on('connection', (socket) => {
         username: user.username,
         pfpUrl: user.pfpUrl,
         message,
-        timestamp: Date.now(),
-        messageId: uuidv4()
+        timestamp: Date.now()
       };
 
       if (replyTo) {
@@ -793,25 +667,7 @@ io.on('connection', (socket) => {
       }
 
       room.addMessage(messageData);
-      
-      // PRODUCTION FIX: Send to each user, queue for backgrounded clients
-      room.users.forEach(roomUser => {
-        const userSocket = findActiveSocketForUser(roomUser.userId);
-        
-        if (userSocket) {
-          if (backgroundClients.has(userSocket.id)) {
-            // Queue for background client
-            if (!messageQueues.has(userSocket.id)) {
-              messageQueues.set(userSocket.id, []);
-            }
-            messageQueues.get(userSocket.id).push(messageData);
-            console.log(`📦 Queued message for backgrounded user: ${roomUser.username}`);
-          } else {
-            // Send immediately
-            userSocket.emit('chat_message', messageData);
-          }
-        }
-      });
+      io.to(roomId).emit('chat_message', messageData);
       
     } catch (error) {
       console.error('Chat message error:', error);
@@ -842,12 +698,13 @@ io.on('connection', (socket) => {
 
       const callId = uuidv4();
       
+      // CRITICAL: Create call with 'pending' status
       const call = {
         callId,
         roomId,
         callType,
         participants: [user.userId],
-        status: 'pending',
+        status: 'pending', // pending, active, ended
         createdAt: Date.now(),
         initiator: user.userId
       };
@@ -896,11 +753,13 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // Add user to call participants
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
       }
       
+      // CRITICAL: Mark call as 'active'
       call.status = 'active';
 
       console.log(`✅ User ${user.username} accepted call ${callId} - now ACTIVE`);
@@ -913,6 +772,7 @@ io.on('connection', (socket) => {
 
       const callUsers = room.users.filter(u => call.participants.includes(u.userId));
       
+      // Notify ALL participants that call is accepted
       callUsers.forEach(roomUser => {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
         if (targetSocket) {
@@ -995,6 +855,7 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // CRITICAL: Clear any grace period timeout
       if (callGracePeriod.has(callId)) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
@@ -1063,10 +924,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // WebRTC Signaling
+  // WebRTC Signaling with enhanced logging
   socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     try {
       const user = socketUsers.get(socket.id);
+      
       if (!user) return;
 
       console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
@@ -1091,6 +953,7 @@ io.on('connection', (socket) => {
   socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
     try {
       const user = socketUsers.get(socket.id);
+      
       if (!user) return;
 
       console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
@@ -1115,7 +978,10 @@ io.on('connection', (socket) => {
   socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     try {
       const user = socketUsers.get(socket.id);
+      
       if (!user) return;
+
+      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}: type=${candidate.type}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1124,6 +990,8 @@ io.on('connection', (socket) => {
           fromUserId: user.userId,
           candidate
         });
+      } else {
+        console.warn(`⚠️ Target user ${targetUserId} not found for ICE candidate`);
       }
 
     } catch (error) {
@@ -1155,6 +1023,7 @@ io.on('connection', (socket) => {
   socket.on('audio_state_changed', ({ callId, enabled }) => {
     try {
       const user = socketUsers.get(socket.id);
+      
       if (!user) return;
 
       socket.to(`call-${callId}`).emit('audio_state_changed', {
@@ -1170,6 +1039,7 @@ io.on('connection', (socket) => {
   socket.on('video_state_changed', ({ callId, enabled }) => {
     try {
       const user = socketUsers.get(socket.id);
+      
       if (!user) return;
 
       socket.to(`call-${callId}`).emit('video_state_changed', {
@@ -1205,27 +1075,29 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PRODUCTION FIX: Enhanced disconnect handler
   socket.on('disconnect', () => {
     const user = socketUsers.get(socket.id);
     
     if (user) {
       console.log(`🔌 User ${user.username} disconnected`);
 
-      // Check if in active call - give EXTENDED grace
+      // Check if user is in a call
       const callId = userCalls.get(user.userId);
       if (callId) {
         const call = activeCalls.get(callId);
         if (call && call.status === 'active') {
-          console.log(`⏱️ User ${user.username} in active call ${callId} - EXTENDED grace period (20s)`);
+          // CRITICAL: Don't immediately destroy - give grace period for navigation
+          console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
           
+          // Set grace period (10 seconds for navigation)
           const graceTimeout = setTimeout(() => {
-            console.log(`⏱️ Extended grace period expired for ${user.username} in call ${callId}`);
+            console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
             
+            // Check if they actually reconnected
             const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
             
             if (!reconnected) {
-              console.log(`❌ User ${user.username} did not rejoin call`);
+              console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
               
               call.participants = call.participants.filter(p => p !== user.userId);
               userCalls.delete(user.userId);
@@ -1238,37 +1110,47 @@ io.on('connection', (socket) => {
               if (call.participants.length === 0) {
                 activeCalls.delete(callId);
                 callGracePeriod.delete(callId);
+                console.log(`🗑️ Call ${callId} ended (all participants left)`);
               }
-              
-              handleRoomCleanup(user.userId, socket.id);
             } else {
               console.log(`✅ User ${user.username} rejoined call`);
             }
-          }, 20000); // 20 seconds for call navigation
+          }, 10000); // 10 second grace period
           
           callGracePeriod.set(callId, graceTimeout);
-          return;
         }
       }
       
-      // Check if backgrounded - give EXTENDED grace
-      if (backgroundClients.has(socket.id)) {
-        console.log(`🌙 User ${user.username} disconnected while backgrounded - 60s grace`);
+      // Matchmaking cleanup
+      matchmaking.cancelMatchmaking(user.userId);
+      
+      // Room cleanup with grace period
+      const roomId = matchmaking.getRoomIdByUser(user.userId);
+      
+      if (roomId) {
+        console.log(`⏳ User ${user.username} disconnected but still in room ${roomId} (grace period)`);
         
         setTimeout(() => {
-          if (backgroundClients.has(socket.id)) {
-            console.log(`⏱️ Background grace expired for ${user.username}`);
-            handleRoomCleanup(user.userId, socket.id);
+          const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+          
+          if (stillDisconnected) {
+            console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
+            const result = matchmaking.leaveRoom(user.userId);
+            
+            if (result.roomId && !result.destroyed) {
+              io.to(result.roomId).emit('user_left', {
+                userId: user.userId,
+                username: user.username,
+                remainingUsers: result.remainingUsers
+              });
+            }
           } else {
-            console.log(`✅ User ${user.username} reconnected from background`);
+            console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
           }
-        }, 60000); // 60 seconds for backgrounded app
-        
-        return;
+        }, 5000);
       }
-      
-      // Normal cleanup
-      handleRoomCleanup(user.userId, socket.id);
+
+      socketUsers.delete(socket.id);
     } else {
       console.log('🔌 Unauthenticated client disconnected:', socket.id);
     }
@@ -1290,7 +1172,6 @@ async function startServer() {
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
       console.log(`🔌 Socket.IO ready for connections`);
       console.log(`📞 WebRTC signaling enabled`);
-      console.log(`✅ Production fixes applied: Message queuing, background handling, extended grace periods`);
       
       const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN);
       if (hasTurn) {
