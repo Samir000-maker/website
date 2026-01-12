@@ -9,29 +9,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols_Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-
-<script src="/state-manager.js"></script>
-<script src="/navigation-guard.js"></script>
-<script>
-// Enable navigation guard
-setTimeout(() => {
-  if (window.NavigationGuard) {
-    window.NavigationGuard.enable('discovery', () => {
-      // Cancel matchmaking
-      if (window.socketInstance) {
-        window.socketInstance.emit('cancel_matchmaking');
-      }
-      // Go to mood.html
-      window.NavigationGuard.navigateTo('/mood.html');
-    });
-  }
-}, 1000);
-</script>
-<script src="/discovery-integration.js"></script>
   
   <script id="tailwind-config">
     tailwind.config = {
@@ -171,7 +152,6 @@ setTimeout(() => {
         <div class="absolute inset-0 bg-primary/20 dark:bg-primary/10 rounded-full blur-2xl scale-150"></div>
         <div class="relative">
           <div id="userAvatar" class="h-24 w-24 rounded-full border-4 border-white dark:border-surface-dark shadow-2xl overflow-hidden ring-4 ring-primary/10 ring-offset-2 dark:ring-offset-surface-dark bg-slate-100 dark:bg-slate-800">
-            <!-- Profile picture will be loaded here -->
             <div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">U</div>
           </div>
           <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark py-1 px-3 rounded-full shadow-lg border border-slate-100 dark:border-slate-700 flex items-center gap-1.5 whitespace-nowrap z-40">
@@ -299,19 +279,13 @@ setTimeout(() => {
 <!-- App Core -->
 <script src="app.js"></script>
 
+<!-- PRODUCTION: State Management -->
+<script src="/state-manager.js"></script>
+<script src="/navigation-guard.js"></script>
+
 <!-- Page Logic -->
 <script>
 (async () => {
-
-  await new Promise(resolve => {
-    const checkManagers = setInterval(() => {
-      if (window.StateManager && window.NavigationGuard) {
-        clearInterval(checkManagers);
-        resolve();
-      }
-    }, 100);
-  });
-  
   const MoodApp = window.MoodApp || {};
   const _Auth = MoodApp.Auth;
   const _API = MoodApp.API;
@@ -330,10 +304,8 @@ setTimeout(() => {
     const initial = username ? username.charAt(0).toUpperCase() : 'U';
     
     if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-      // Use actual profile picture
       element.innerHTML = `<img src="${pfpUrl}" alt="${username}" class="h-full w-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold\\'>${initial}</div>'">`;
     } else {
-      // Fallback to initial
       element.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">${initial}</div>`;
     }
   }
@@ -377,21 +349,52 @@ setTimeout(() => {
   let socketInstance = null;
   let currentUser = null;
 
+  // Wait for StateManager and NavigationGuard to load
+  const waitForManagers = () => {
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (window.StateManager && window.NavigationGuard) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 100);
+    });
+  };
+
+  await waitForManagers();
+
+  // PRODUCTION: Enable navigation guard
+  if (window.NavigationGuard) {
+    window.NavigationGuard.enable('discovery', () => {
+      console.log('👋 User leaving discovery');
+      
+      // Cancel matchmaking
+      if (socketInstance && socketInstance.connected) {
+        socketInstance.emit('cancel_matchmaking');
+      }
+      
+      // Navigate to mood.html (NOT back to discovery!)
+      window.NavigationGuard.navigateTo('/mood.html');
+    });
+  }
+
+  // PRODUCTION: Set page in state manager
+  if (window.StateManager) {
+    window.StateManager.setPage('discover');
+  }
+
   // ============================================
   // SOCKET CONNECTION & MATCHMAKING
   // ============================================
   async function initializeSocket() {
     try {
-      // Get Firebase user
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
         throw new Error('Not authenticated');
       }
 
-      // Get ID token
       const idToken = await firebaseUser.getIdToken();
 
-      // Get user profile
       const userData = await _API.get('/api/users/me');
       currentUser = {
         userId: userData._id,
@@ -402,12 +405,10 @@ setTimeout(() => {
 
       console.log('✅ User loaded:', currentUser);
 
-      // Update avatars with profile picture
       displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
       displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-      // Connect socket to backend server
-      const socketUrl = 'https://website-hdem.onrender.com';
+      const socketUrl = window.location.origin;
       socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
@@ -418,6 +419,8 @@ setTimeout(() => {
         }
       });
 
+      window.socketInstance = socketInstance;
+
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Socket connection timeout'));
@@ -427,7 +430,6 @@ setTimeout(() => {
           console.log('🔌 Socket connected:', socketInstance.id);
           clearTimeout(timeout);
           
-          // Authenticate
           socketInstance.emit('authenticate', {
             token: idToken,
             userId: currentUser.userId
@@ -464,10 +466,8 @@ setTimeout(() => {
 
     console.log('🎮 Emitting join_matchmaking event with mood:', mood);
 
-    // Emit join_matchmaking
     socketInstance.emit('join_matchmaking', { mood });
 
-    // Listen for events
     socketInstance.on('queued', (data) => {
       console.log('📊 Queued:', data);
       const position = data.position || 0;
@@ -481,14 +481,17 @@ setTimeout(() => {
       console.log('🎉 Match found:', data);
       toast('Match found!', 'success');
       
-      // Store room data
       try {
         localStorage.setItem('currentRoom', JSON.stringify(data));
       } catch (e) {
         console.warn('Could not save room data:', e);
       }
 
-      // Navigate to chat
+      // Disable navigation guard before leaving
+      if (window.NavigationGuard) {
+        window.NavigationGuard.disable();
+      }
+
       setTimeout(() => {
         if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
           _PageTransition.navigateTo('/chat.html');
@@ -501,6 +504,12 @@ setTimeout(() => {
     socketInstance.on('matchmaking_cancelled', () => {
       console.log('❌ Matchmaking cancelled');
       toast('Search cancelled', 'success');
+      
+      // Disable guard before navigation
+      if (window.NavigationGuard) {
+        window.NavigationGuard.disable();
+      }
+      
       setTimeout(() => {
         if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
           _PageTransition.navigateTo('/mood.html');
@@ -521,14 +530,20 @@ setTimeout(() => {
   // ============================================
   function cancelMatchmaking() {
     console.log('❌ User cancelled matchmaking');
-    if (socketInstance && socketInstance.connected) {
-      socketInstance.emit('cancel_matchmaking');
+    
+    // Trigger back button (will show navigation guard dialog)
+    if (window.NavigationGuard && window.NavigationGuard.enabled) {
+      history.back();
     } else {
-      // Just go back if socket not connected
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/mood.html');
+      // Fallback if guard not enabled
+      if (socketInstance && socketInstance.connected) {
+        socketInstance.emit('cancel_matchmaking');
       } else {
-        window.location.href = '/mood.html';
+        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+          _PageTransition.navigateTo('/mood.html');
+        } else {
+          window.location.href = '/mood.html';
+        }
       }
     }
   }
@@ -546,11 +561,9 @@ setTimeout(() => {
   try {
     console.log('🚀 Initializing discovery mode...');
     
-    // Connect socket
     await initializeSocket();
     console.log('✅ Socket initialized');
 
-    // Join matchmaking
     await joinMatchmaking();
     console.log('✅ Matchmaking started');
 
