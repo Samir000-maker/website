@@ -900,6 +900,42 @@
 
       socketInstance.on('room_joined', (data) => {
         console.log('✅ Room joined successfully:', data);
+        
+        // Display chat history if available
+        if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+          console.log(`📜 Displaying ${data.chatHistory.length} chat history messages`);
+          
+          // Only display messages that aren't already in the cache
+          const existingMessageIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+          
+          data.chatHistory.forEach(msg => {
+            const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+            
+            // Skip if we already have this message
+            if (existingMessageIds.has(msgId)) {
+              return;
+            }
+            
+            const isCurrentUser = msg.userId === currentUser.userId;
+            const msgEl = createMessageElement(msg, isCurrentUser);
+            
+            if (messagesList) {
+              // Insert in chronological order
+              messagesList.appendChild(msgEl);
+            }
+            
+            // Add to cache
+            messagesCache.push(msg);
+          });
+          
+          // Scroll to bottom after loading history
+          if (messagesList) {
+            messagesList.scrollTop = messagesList.scrollHeight;
+          }
+          
+          // Save updated cache
+          saveChatState(roomData.roomId, messagesCache);
+        }
       });
 
       socketInstance.on('error', (data) => {
@@ -914,6 +950,11 @@
       });
 
       socketInstance.on('chat_message', (data) => {
+        // Ensure message has a unique ID
+        if (!data.messageId) {
+          data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+        }
+        
         const isCurrentUser = data.userId === currentUser.userId;
         const msgEl = createMessageElement(data, isCurrentUser);
         if (messagesList) {
