@@ -58,24 +58,23 @@
             transition: transform 0.3s ease;
         }
         
-        
         /* Fix for mobile navigation bars */
-.main-container {
-    height: 100vh;
-    height: 100dvh; /* Dynamic viewport height - excludes nav bars */
-}
+        .main-container {
+            height: 100vh;
+            height: 100dvh;
+        }
 
-.chat-main {
-    max-height: calc(100vh - 64px); /* 64px for header */
-    max-height: calc(100dvh - 64px);
-}
+        .chat-main {
+            max-height: calc(100vh - 64px);
+            max-height: calc(100dvh - 64px);
+        }
 
-@media (max-width: 768px) {
-    .chat-main {
-        max-height: calc(100vh - 56px); /* 56px for mobile header */
-        max-height: calc(100dvh - 56px);
-    }
-}
+        @media (max-width: 768px) {
+            .chat-main {
+                max-height: calc(100vh - 56px);
+                max-height: calc(100dvh - 56px);
+            }
+        }
         
         /* Mobile: sidebar overlay */
         @media (max-width: 768px) {
@@ -175,8 +174,8 @@
             }
             
             #messageInput {
-                font-size: 16px; /* Prevents zoom on iOS */
-                min-height: 44px; /* Touch target size */
+                font-size: 16px;
+                min-height: 44px;
             }
             
             #messageForm button[type="submit"] {
@@ -248,49 +247,49 @@
             </div>
         </aside>
 
-<!-- Main chat area -->
-<main class="flex-1 flex flex-col min-h-0 bg-white">
-    <!-- Messages list -->
-    <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
-        <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
-            Welcome to the safe space. Be kind and supportive.
-        </div>
-    </div>
-
-    <!-- Input area - MOBILE SAFE -->
-<div class="border-t border-gray-200 bg-white flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
-    <!-- Reply preview -->
-    <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
-        <div class="flex items-start justify-between gap-2">
-            <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5 mb-1">
-                    <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
-                    <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
+        <!-- Main chat area -->
+        <main class="flex-1 flex flex-col min-h-0 bg-white">
+            <!-- Messages list -->
+            <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
+                <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
+                    Welcome to the safe space. Be kind and supportive.
                 </div>
-                <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
             </div>
-            <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
-                <span class="material-symbols-outlined text-lg">close</span>
-            </button>
-        </div>
-    </div>
-    
-    <!-- Message form -->
-    <div class="p-3 pb-4">
-        <form id="messageForm" class="flex gap-2 items-center">
-            <input type="text" id="messageInput" required maxlength="500"
-                class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
-                placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
-            <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90 active:scale-95 transition-transform">
-                <span class="material-symbols-outlined">send</span>
-            </button>
-        </form>
-    </div>
-</div>
-</main>
+
+            <!-- Input area -->
+            <div class="border-t border-gray-200 bg-white flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+                <!-- Reply preview -->
+                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-1.5 mb-1">
+                                <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
+                                <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
+                            </div>
+                            <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
+                        </div>
+                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
+                            <span class="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Message form -->
+                <div class="p-3 pb-4">
+                    <form id="messageForm" class="flex gap-2 items-center">
+                        <input type="text" id="messageInput" required maxlength="500"
+                            class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
+                            placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
+                        <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90 active:scale-95 transition-transform">
+                            <span class="material-symbols-outlined">send</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
     </div>
 
-    <!-- Incoming call modal (responsive) -->
+    <!-- Incoming call modal -->
     <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full animate-fade-in">
             <div class="text-center">
@@ -318,12 +317,9 @@
         </div>
     </div>
 
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-
-    <script src="/state-manager.js"></script>
-    <script src="/navigation-guard.js"></script>
-    <script src="/chat-integration.js"></script>
 
     <script>
       const firebaseConfig = {
@@ -342,9 +338,18 @@
       firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     </script>
 
+    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    
+    <!-- App Core -->
     <script src="app.js"></script>
 
+    <!-- PRODUCTION: State Management (MUST LOAD IN ORDER) -->
+    <script src="/state-manager.js"></script>
+    <script src="/navigation-guard.js"></script>
+    <script src="/chat-integration.js"></script>
+
+    <!-- Main Chat Script -->
     <script>
     (async () => {
       const MoodApp = window.MoodApp || {};
@@ -363,52 +368,51 @@
       let pendingCallData = null;
       let navigatingToCall = false;
 
-// Mobile sidebar toggle - IMPROVED
-const sidebar = document.getElementById('sidebar');
-const sidebarToggle = document.getElementById('sidebarToggle');
-const sidebarClose = document.getElementById('sidebarClose');
-const sidebarOverlay = document.getElementById('sidebarOverlay');
+      // Mobile sidebar toggle
+      const sidebar = document.getElementById('sidebar');
+      const sidebarToggle = document.getElementById('sidebarToggle');
+      const sidebarClose = document.getElementById('sidebarClose');
+      const sidebarOverlay = document.getElementById('sidebarOverlay');
 
-function openSidebar() {
-  sidebar.classList.add('show');
-  sidebarOverlay.classList.add('active');
-  document.body.style.overflow = 'hidden';
-}
+      function openSidebar() {
+        sidebar.classList.add('show');
+        sidebarOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
 
-function closeSidebar() {
-  sidebar.classList.remove('show');
-  sidebarOverlay.classList.remove('active');
-  document.body.style.overflow = '';
-}
+      function closeSidebar() {
+        sidebar.classList.remove('show');
+        sidebarOverlay.classList.remove('active');
+        document.body.style.overflow = '';
+      }
 
-function toggleSidebar() {
-  if (sidebar.classList.contains('show')) {
-    closeSidebar();
-  } else {
-    openSidebar();
-  }
-}
+      function toggleSidebar() {
+        if (sidebar.classList.contains('show')) {
+          closeSidebar();
+        } else {
+          openSidebar();
+        }
+      }
 
-if (sidebarToggle) {
-  sidebarToggle.addEventListener('click', toggleSidebar); // Changed to toggleSidebar
-}
+      if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', toggleSidebar);
+      }
 
-if (sidebarClose) {
-  sidebarClose.addEventListener('click', closeSidebar);
-}
+      if (sidebarClose) {
+        sidebarClose.addEventListener('click', closeSidebar);
+      }
 
-if (sidebarOverlay) {
-  sidebarOverlay.addEventListener('click', closeSidebar);
-}
+      if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeSidebar);
+      }
 
-// Close sidebar when clicking a user (mobile)
-function setupUserCardClick() {
-  if (window.innerWidth <= 768) {
-    document.querySelectorAll('.user-card').forEach(card => {
-      card.addEventListener('click', closeSidebar);
-    });
-  }
-}
+      function setupUserCardClick() {
+        if (window.innerWidth <= 768) {
+          document.querySelectorAll('.user-card').forEach(card => {
+            card.addEventListener('click', closeSidebar);
+          });
+        }
+      }
 
       function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
@@ -557,8 +561,7 @@ function setupUserCardClick() {
         return messageItem;
       }
 
-
-
+      // PRODUCTION FIX: Make functions globally accessible
       window.createMessageElement = createMessageElement;
 
       try {
@@ -596,7 +599,8 @@ function setupUserCardClick() {
         pfpUrl: userData.pfpUrl
       };
 
-        window.currentUser = currentUser;
+      // PRODUCTION FIX: Make currentUser globally accessible
+      window.currentUser = currentUser;
 
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
@@ -679,27 +683,8 @@ function setupUserCardClick() {
         reconnectionAttempts: 10,
         auth: { token: idToken }
       });
-      
-      socketInstance.on('room_expired', (data) => {
-  console.log('⏱️ Room expired:', data.message);
-  toast(data.message, 'warning');
-  
-  // Clear state
-  if (window.StateManager) {
-    window.StateManager.clearRoom();
-  }
-  
-  // Redirect to mood page
-  setTimeout(() => {
-    window.location.href = '/mood.html';
-  }, 2000);
-});
 
-socketInstance.on('room_expiring_soon', (data) => {
-  console.log('⚠️ Room expiring in 1 minute');
-  toast('This conversation will end in 1 minute', 'warning');
-});
-      
+      window.socketInstance = socketInstance;
 
       socketInstance.on('connect', () => {
         console.log('🔌 Socket connected:', socketInstance.id);
@@ -896,11 +881,8 @@ socketInstance.on('room_expiring_soon', (data) => {
         });
       }
 
-      if (leaveBtn) {
-        leaveBtn.addEventListener('click', () => {
-          socketInstance.emit('leave_room');
-        });
-      }
+      // NOTE: Leave button is now handled by chat-integration.js
+      // It will trigger the navigation guard dialog
 
       window.addEventListener('beforeunload', (e) => {
         if (navigatingToCall) {
