@@ -1,1281 +1,280 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Active Call - MoodLog</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script src="/state-manager.js"></script>
-    <script src="/call-integration.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        "primary": "#33bfcc",
-                        "background-light": "#f2f2f3",
-                        "background-dark": "#1c1e22",
-                        "surface-dark": "#272A2E",
-                        "accent-red": "#ef4444",
-                    },
-                    fontFamily: {
-                        "display": ["Manrope", "sans-serif"]
-                    }
-                },
-            },
-        }
-    </script>
-    <style>
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-        
-        /* Active speaker highlight */
-        .active-speaker {
-            box-shadow: 0 0 0 4px #33bfcc;
-            animation: pulse-border 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes pulse-border {
-            0%, 100% {
-                box-shadow: 0 0 0 4px #33bfcc;
-            }
-            50% {
-                box-shadow: 0 0 0 4px rgba(51, 191, 204, 0.5);
-            }
-        }
-        
-        body {
-            font-family: 'Manrope', sans-serif;
-            overscroll-behavior: none;
-        }
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        .video-tile {
-            position: relative;
-            background: #1c1e22;
-            min-height: 200px;
-        }
-        
-        @media (max-width: 640px) {
-            .video-tile {
-                min-height: 150px;
-            }
-        }
-        
-        .debug-panel {
-            max-height: 200px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 10px;
-        }
-        
-        @media (min-width: 640px) {
-            .debug-panel {
-                max-height: 300px;
-                font-size: 11px;
-            }
-        }
-        
-        .debug-entry {
-            padding: 2px 4px;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        .debug-success { color: #10b981; }
-        .debug-error { color: #ef4444; }
-        .debug-warning { color: #f59e0b; }
-        .debug-info { color: #3b82f6; }
-        
-        /* Responsive grid for participants */
-        .participant-grid {
-            display: grid;
-            gap: 16px;
-            width: 100%;
-            height: 100%;
-        }
-        
-        /* 1 participant: full screen */
-        .participant-grid.count-1 {
-            grid-template-columns: 1fr;
-        }
-        
-        /* 2 participants: side by side on desktop, stacked on mobile */
-        .participant-grid.count-2 {
-            grid-template-columns: 1fr;
-        }
-        
-        @media (min-width: 640px) {
-            .participant-grid.count-2 {
-                grid-template-columns: 1fr 1fr;
-            }
-        }
-        
-        /* 3-4 participants: 2x2 grid */
-        .participant-grid.count-3,
-        .participant-grid.count-4 {
-            grid-template-columns: 1fr 1fr;
-        }
-        
-        /* 5-6 participants: 2x3 grid */
-        .participant-grid.count-5,
-        .participant-grid.count-6 {
-            grid-template-columns: 1fr 1fr;
-        }
-        
-        @media (min-width: 768px) {
-            .participant-grid.count-5,
-            .participant-grid.count-6 {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-        
-        /* 7+ participants: responsive grid */
-        .participant-grid.count-many {
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        }
-        
-        /* Safe area for notched devices */
-        @supports (padding: max(0px)) {
-            .header-safe {
-                padding-top: max(1rem, env(safe-area-inset-top));
-            }
-            
-            .bottom-safe {
-                padding-bottom: max(1rem, env(safe-area-inset-bottom));
-            }
-        }
-        
-        /* Mobile control bar */
-        @media (max-width: 640px) {
-            .control-bar {
-                padding: 8px 12px;
-            }
-            
-            .control-bar button {
-                width: 40px;
-                height: 40px;
-                min-width: 40px;
-                min-height: 40px;
-            }
-        }
-        
-        /* Speaking indicator */
-        .speaking-indicator {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            background: rgba(51, 191, 204, 0.9);
-            color: white;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: bold;
-            display: none;
-            align-items: center;
-            gap: 4px;
-            z-index: 10;
-        }
-        
-        .speaking-indicator.active {
-            display: flex;
-        }
-        
-        @media (min-width: 640px) {
-            .speaking-indicator {
-                top: 12px;
-                left: 12px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-        }
-        
-        /* Audio wave animation */
-        .audio-wave {
-            display: inline-flex;
-            gap: 2px;
-            align-items: center;
-            height: 12px;
-        }
-        
-        .audio-wave span {
-            width: 2px;
-            background: white;
-            border-radius: 2px;
-            animation: wave 0.6s ease-in-out infinite;
-        }
-        
-        .audio-wave span:nth-child(1) { animation-delay: 0s; }
-        .audio-wave span:nth-child(2) { animation-delay: 0.1s; }
-        .audio-wave span:nth-child(3) { animation-delay: 0.2s; }
-        
-        @keyframes wave {
-            0%, 100% { height: 4px; }
-            50% { height: 12px; }
-        }
-    </style>
-</head>
-<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display overflow-hidden">
-    <!-- Top Navigation Bar -->
-    <header class="sticky top-0 z-50 w-full border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-background-light dark:bg-background-dark header-safe">
-        <div class="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
-            <div class="bg-primary/20 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
-                <span class="material-symbols-outlined text-primary text-lg sm:text-2xl">graphic_eq</span>
-            </div>
-            <div class="min-w-0 flex-1">
-                <h1 class="text-sm sm:text-lg font-bold tracking-tight truncate" id="callTitle">Mindful Space Call</h1>
-                <p class="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate" id="callSubtitle">Connecting...</p>
-            </div>
-        </div>
-        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            <div class="flex items-center gap-1.5 sm:gap-2 bg-slate-200 dark:bg-surface-dark px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-700">
-                <span class="relative flex h-2 w-2">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                </span>
-                <span class="text-[10px] sm:text-sm font-bold font-mono" id="callDuration">00:00:00</span>
-            </div>
-            <button id="toggleDebug" class="p-1.5 sm:p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors hidden sm:block" title="Toggle Debug Panel">
-                <span class="material-symbols-outlined text-lg sm:text-2xl">bug_report</span>
-            </button>
-        </div>
-    </header>
+/**
+ * Chat Page Integration
+ * Integrates StateManager and NavigationGuard with message preservation
+ * 
+ * Features:
+ * - Full message history preservation
+ * - State restoration when returning from call
+ * - Android back button handling
+ * - 10-minute room expiration tracking
+ * - Seamless call transitions
+ */
 
-    <!-- Debug Panel (Collapsible) -->
-    <div id="debugPanel" class="hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-surface-dark">
-        <div class="p-2 sm:p-4">
-            <div class="flex items-center justify-between mb-2 sm:mb-3">
-                <h3 class="text-xs sm:text-sm font-bold">WebRTC Debug Console</h3>
-                <div class="flex gap-2">
-                    <span id="connectionQuality" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-1 rounded bg-gray-200 dark:bg-gray-700">Initializing...</span>
-                    <button id="clearDebug" class="text-[10px] sm:text-xs px-1.5 sm:px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600">Clear</button>
-                </div>
-            </div>
-            <div id="debugLogs" class="debug-panel bg-gray-50 dark:bg-gray-900 rounded p-2"></div>
-        </div>
-    </div>
+// Load dependencies
+const stateManagerScript = document.createElement('script');
+stateManagerScript.src = '/state-manager.js';
+document.head.appendChild(stateManagerScript);
 
-    <!-- Main Content: Participant Grid -->
-    <main class="flex-1 overflow-y-auto p-3 sm:p-6">
-        <div class="max-w-7xl mx-auto h-full">
-            <div id="participantGrid" class="participant-grid count-1">
-                <!-- Participant tiles will be dynamically generated here -->
-            </div>
-        </div>
-    </main>
+const navGuardScript = document.createElement('script');
+navGuardScript.src = '/navigation-guard.js';
+document.head.appendChild(navGuardScript);
 
-    <!-- Bottom Persistent Control Bar -->
-    <footer class="w-full px-3 sm:px-6 py-3 sm:py-4 flex justify-center sticky bottom-0 bg-gradient-to-t from-background-light dark:from-background-dark via-background-light/95 dark:via-background-dark/95 to-transparent bottom-safe">
-        <div class="control-bar bg-white dark:bg-surface-dark shadow-2xl rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 p-2 flex items-center gap-1 sm:gap-2 max-w-full overflow-x-auto">
-            <!-- Standard Controls -->
-            <div class="flex items-center gap-1 sm:gap-2 px-1 sm:px-2 border-r border-slate-200 dark:border-slate-700">
-                <button id="micBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-primary text-white hover:opacity-90 transition-all active:scale-95">
-                    <span class="material-symbols-outlined text-lg sm:text-2xl">mic</span>
-                </button>
-                <button id="videoBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all">
-                    <span class="material-symbols-outlined text-lg sm:text-2xl">videocam_off</span>
-                </button>
-                <button id="screenShareBtn" class="w-10 h-10 sm:w-12 sm:h-12 hidden sm:flex items-center justify-center rounded-lg sm:rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all">
-                    <span class="material-symbols-outlined text-lg sm:text-2xl">screen_share</span>
-                </button>
-            </div>
-            
-            <!-- Mood Control (Hidden on small mobile) -->
-            <div class="hidden sm:flex items-center gap-2 px-2 sm:px-4">
-                <button id="moodBtn" class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
-                    <span class="text-base sm:text-xl" id="currentMoodEmoji">😊</span>
-                    <span class="font-bold hidden md:inline">Update Mood</span>
-                </button>
-            </div>
-            
-            <!-- Leave Button -->
-            <div class="pl-1 sm:pl-2">
-                <button id="leaveCallBtn" class="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-accent-red text-white hover:brightness-110 shadow-lg shadow-accent-red/20 transition-all active:scale-95">
-                    <span class="material-symbols-outlined font-bold text-lg sm:text-2xl">call_end</span>
-                    <span class="font-bold text-xs sm:text-sm">Leave</span>
-                </button>
-            </div>
-        </div>
-    </footer>
+// Wait for scripts to load
+stateManagerScript.onload = () => {
+  navGuardScript.onload = () => {
+    initializeChatPage();
+  };
+};
 
-    <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+function initializeChatPage() {
+  const StateManager = window.StateManager;
+  const NavigationGuard = window.NavigationGuard;
 
+  if (!StateManager || !NavigationGuard) {
+    console.error('❌ Required managers not loaded');
+    return;
+  }
+
+  // Set current page
+  StateManager.setPage('chat');
+
+  // Check if room is expired
+  if (StateManager.isRoomExpired()) {
+    console.log('⏱️ Room expired - redirecting to mood page');
+    window.location.href = '/mood.html';
+    return;
+  }
+
+  // Restore messages from state
+  const state = StateManager.getState();
+  if (state.messages && state.messages.length > 0) {
+    restoreMessages(state.messages);
+  }
+
+  // Enable navigation guard
+  NavigationGuard.enable('chat', () => {
+    // On confirm leave
+    console.log('👋 User confirmed leaving chat');
     
+    // Leave room via socket
+    if (window.socketInstance && window.socketInstance.connected) {
+      window.socketInstance.emit('leave_room');
+    }
+    
+    // Clear room state
+    StateManager.clearRoom();
+    
+    // Navigate to mood page
+    NavigationGuard.navigateAway('/mood.html');
+  });
 
-    <script>
-      const firebaseConfig = {
-        apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
-        authDomain: "projectt3-8c55e.firebaseapp.com",
-        projectId: "projectt3-8c55e",
-        storageBucket: "projectt3-8c55e.firebasestorage.app",
-        messagingSenderId: "64611387728",
-        appId: "1:64611387728:web:2e53a18151ab3de1b60455",
-        measurementId: "G-0Z91D0Q6EE"
-      };
-
-      if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-      }
-      firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    </script>
-
-    <!-- Socket.IO -->
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-
-    <!-- App -->
-    <script src="app.js"></script>
-
-    <script>
-    (async () => {
-      const MoodApp = window.MoodApp || {};
-      const _Auth = MoodApp.Auth;
-      const _API = MoodApp.API;
-      const _Toast = MoodApp.Toast;
-
-      const toast = (m, t='success') => { 
-        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
-        console[t==='error'?'error':'log'](m); 
-      };
-
-      // ============================================
-      // DEBUG LOGGING SYSTEM
-      // ============================================
+  // Intercept socket chat messages and save to state
+  if (window.socketInstance) {
+    const originalOnChatMessage = window.socketInstance._callbacks?.$chat_message;
+    
+    window.socketInstance.on('chat_message', (data) => {
+      // Add to state manager
+      StateManager.addMessage(data);
       
-      const debugLogs = [];
-      const debugContainer = document.getElementById('debugLogs');
-      const debugPanel = document.getElementById('debugPanel');
-      
-      function debugLog(message, type = 'info') {
-        const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
-        const entry = { timestamp, message, type };
-        debugLogs.push(entry);
-        
-        if (debugContainer) {
-          const logDiv = document.createElement('div');
-          logDiv.className = `debug-entry debug-${type}`;
-          logDiv.textContent = `[${timestamp}] ${message}`;
-          debugContainer.appendChild(logDiv);
-          debugContainer.scrollTop = debugContainer.scrollHeight;
-        }
-        
-        console.log(`[WebRTC ${type.toUpperCase()}]`, message);
+      // Call original handler if it exists
+      if (originalOnChatMessage) {
+        originalOnChatMessage.forEach(fn => fn(data));
       }
+    });
 
-      document.getElementById('toggleDebug')?.addEventListener('click', () => {
-        debugPanel.classList.toggle('hidden');
+    // Track room state
+    window.socketInstance.on('room_joined', (data) => {
+      StateManager.setRoom(data);
+    });
+
+    window.socketInstance.on('user_left', (data) => {
+      // Update state if needed
+      const state = StateManager.getState();
+      if (state.room && data.remainingUsers !== undefined) {
+        state.room.remainingUsers = data.remainingUsers;
+        StateManager.setRoom(state.room);
+      }
+    });
+
+    window.socketInstance.on('left_room', () => {
+      StateManager.clearRoom();
+    });
+  }
+
+  // Setup room expiration timer
+  setupExpirationTimer();
+
+  // Save state on visibility change
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Save current messages
+      const messagesList = document.getElementById('messagesList');
+      if (messagesList) {
+        const messages = extractMessagesFromDOM();
+        StateManager.setMessages(messages);
+      }
+      
+      StateManager.forceSave();
+    } else {
+      // Check expiration on return
+      if (StateManager.isRoomExpired()) {
+        console.log('⏱️ Room expired while backgrounded');
+        window.location.href = '/mood.html';
+      }
+    }
+  });
+
+  // Handle call navigation
+  handleCallTransitions();
+
+  console.log('✅ Chat page integrated with StateManager and NavigationGuard');
+}
+
+/**
+ * Restore messages from state
+ */
+function restoreMessages(messages) {
+  const messagesList = document.getElementById('messagesList');
+  if (!messagesList) return;
+
+  console.log(`📨 Restoring ${messages.length} messages from state`);
+
+  messages.forEach(msgData => {
+    // Check if message already exists
+    const existingMsg = messagesList.querySelector(`[data-message-id="${msgData.messageId}"]`);
+    if (existingMsg) return;
+
+    // Create message element (reuse existing function)
+    if (typeof window.createMessageElement === 'function') {
+      const currentUser = window.currentUser || {};
+      const isCurrentUser = msgData.userId === currentUser.userId;
+      const msgEl = window.createMessageElement(msgData, isCurrentUser);
+      messagesList.appendChild(msgEl);
+    }
+  });
+
+  // Scroll to bottom
+  messagesList.scrollTop = messagesList.scrollHeight;
+}
+
+/**
+ * Extract messages from DOM
+ */
+function extractMessagesFromDOM() {
+  const messagesList = document.getElementById('messagesList');
+  if (!messagesList) return [];
+
+  const messages = [];
+  const messageElements = messagesList.querySelectorAll('.message-item');
+
+  messageElements.forEach(el => {
+    const messageId = el.dataset.messageId;
+    const usernameEl = el.querySelector('.font-semibold');
+    const messageTextEl = el.querySelector('.break-words');
+    
+    if (messageId && usernameEl && messageTextEl) {
+      messages.push({
+        messageId,
+        username: usernameEl.textContent,
+        message: messageTextEl.textContent,
+        timestamp: Date.now()
       });
+    }
+  });
 
-      document.getElementById('clearDebug')?.addEventListener('click', () => {
-        debugLogs.length = 0;
-        if (debugContainer) debugContainer.innerHTML = '';
-      });
+  return messages;
+}
 
-      // ============================================
-      // ENHANCED ICE CONFIGURATION
-      // ============================================
+/**
+ * Setup room expiration timer
+ */
+function setupExpirationTimer() {
+  const StateManager = window.StateManager;
+  
+  // Check every 30 seconds
+  const expirationCheck = setInterval(() => {
+    if (StateManager.isRoomExpired()) {
+      console.log('⏱️ Room expired - cleaning up');
       
-      let ICE_SERVERS = null;
-
-      async function fetchIceServers() {
-        try {
-          debugLog('Fetching ICE servers from backend...', 'info');
-          const response = await _API.get('/api/ice-servers');
-          ICE_SERVERS = response.iceServers;
-          
-          debugLog(`ICE servers loaded: ${ICE_SERVERS.length} configurations`, 'success');
-          ICE_SERVERS.forEach((server, idx) => {
-            if (server.urls) {
-              const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-              urls.forEach(url => {
-                const hasCredentials = !!(server.username && server.credential);
-                const serverType = url.startsWith('turn:') ? 'TURN' : 'STUN';
-                debugLog(`  [${idx}] ${serverType}: ${url} ${hasCredentials ? '(authenticated)' : ''}`, 'info');
-              });
-            }
-          });
-          
-          return ICE_SERVERS;
-        } catch (error) {
-          debugLog(`Failed to fetch ICE servers: ${error.message}`, 'error');
-          
-          ICE_SERVERS = [
-            {
-              urls: [
-                'stun:stun.cloudflare.com:3478',
-                'stun:stun.l.google.com:19302',
-                'stun:stun1.l.google.com:19302'
-              ]
-            }
-          ];
-          debugLog('Using fallback STUN-only configuration', 'warning');
-          return ICE_SERVERS;
-        }
-      }
-
-      const PEER_CONNECTION_CONFIG = {
-        iceCandidatePoolSize: 10,
-        iceTransportPolicy: 'all',
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
-      };
-
-      let localStream = null;
-      let peerConnections = new Map();
-      let audioContexts = new Map(); // For audio level detection
-      let socketInstance = null;
-      let callData = null;
-      let currentUser = null;
-      let isAudioEnabled = true;
-      let isVideoEnabled = false;
-      let callStartTime = null;
-      let durationInterval = null;
-      let isInitializing = false;
-      let hasJoinedCall = false;
+      // Clear interval
+      clearInterval(expirationCheck);
       
-      const connectionStats = new Map();
-
-      function createProfilePictureElement(pfpUrl, username, size = 'w-20 h-20 sm:w-24 sm:h-24') {
-        const initial = username ? username.charAt(0).toUpperCase() : 'U';
-        const container = document.createElement('div');
-        container.className = `${size} rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 sm:border-4 border-primary/30 flex-shrink-0`;
-        
-        if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-          const img = document.createElement('img');
-          img.src = pfpUrl;
-          img.alt = username;
-          img.className = 'h-full w-full object-cover';
-          img.onerror = function() {
-            this.onerror = null;
-            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-lg sm:text-2xl">${initial}</div>`;
-          };
-          container.appendChild(img);
-        } else {
-          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-lg sm:text-2xl">${initial}</div>`;
-        }
-        
-        return container;
+      // Show notification
+      if (window.MoodApp && window.MoodApp.Toast) {
+        window.MoodApp.Toast.warning('Room has expired');
       }
-
-      function updateGridLayout() {
-        const grid = document.getElementById('participantGrid');
-        if (!grid) return;
-        
-        const count = grid.children.length;
-        
-        // Remove all count classes
-        grid.className = 'participant-grid';
-        
-        // Add appropriate count class
-        if (count === 1) {
-          grid.classList.add('count-1');
-        } else if (count === 2) {
-          grid.classList.add('count-2');
-        } else if (count === 3 || count === 4) {
-          grid.classList.add(`count-${count}`);
-        } else if (count === 5 || count === 6) {
-          grid.classList.add(`count-${count}`);
-        } else {
-          grid.classList.add('count-many');
-        }
-      }
-
-      function createParticipantTile(user, isSelf = false) {
-        const tile = document.createElement('div');
-        tile.id = `participant-${user.userId}`;
-        tile.className = `video-tile relative group bg-slate-100 dark:bg-surface-dark rounded-lg sm:rounded-xl p-4 sm:p-6 flex flex-col items-center justify-center text-center border transition-all duration-300 ${isSelf ? 'border-2 border-dashed border-primary/40 bg-primary/10 dark:bg-primary/5' : 'border-transparent hover:border-slate-300 dark:hover:border-slate-600'}`;
-        
-        // Speaking indicator
-        const speakingIndicator = document.createElement('div');
-        speakingIndicator.className = 'speaking-indicator';
-        speakingIndicator.id = `speaking-${user.userId}`;
-        speakingIndicator.innerHTML = `
-          <div class="audio-wave">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-          <span>SPEAKING</span>
-        `;
-        tile.appendChild(speakingIndicator);
-        
-        const videoContainer = document.createElement('div');
-        videoContainer.className = 'relative mb-3 sm:mb-4';
-        
-        const videoElement = document.createElement('video');
-        videoElement.id = `video-${user.userId}`;
-        videoElement.className = 'w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover hidden';
-        videoElement.autoplay = true;
-        videoElement.playsInline = true;
-        if (isSelf) {
-          videoElement.muted = true;
-        }
-        
-        const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-20 h-20 sm:w-24 sm:h-24');
-        pfpElement.id = `pfp-${user.userId}`;
-        
-        videoContainer.appendChild(videoElement);
-        videoContainer.appendChild(pfpElement);
-        
-        const moodBadge = document.createElement('div');
-        moodBadge.className = 'absolute -bottom-1 -right-1 bg-white dark:bg-background-dark p-1 sm:p-1.5 rounded-full shadow-lg border border-slate-200 dark:border-slate-700';
-        moodBadge.innerHTML = '<span class="text-base sm:text-xl leading-none">😊</span>';
-        videoContainer.appendChild(moodBadge);
-        
-        const micIndicator = document.createElement('div');
-        micIndicator.id = `mic-${user.userId}`;
-        micIndicator.className = 'absolute top-0 right-0 bg-accent-red p-1 rounded-full text-white hidden';
-        micIndicator.innerHTML = '<span class="material-symbols-outlined text-[12px] sm:text-[14px] font-bold">mic_off</span>';
-        videoContainer.appendChild(micIndicator);
-        
-        tile.appendChild(videoContainer);
-        
-        const userInfo = document.createElement('div');
-        const username = document.createElement('p');
-        username.className = 'text-slate-900 dark:text-white text-sm sm:text-base font-bold truncate max-w-full';
-        username.textContent = isSelf ? 'You' : (user.username || 'User');
-        
-        const status = document.createElement('p');
-        status.id = `status-${user.userId}`;
-        status.className = 'text-slate-500 dark:text-slate-400 text-xs sm:text-sm';
-        status.textContent = 'Connecting...';
-        
-        userInfo.appendChild(username);
-        userInfo.appendChild(status);
-        tile.appendChild(userInfo);
-        
-        return tile;
-      }
-
-      // Audio level detection for speaking indicator
-      function setupAudioLevelDetection(userId, stream) {
-        try {
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const audioSource = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          audioSource.connect(analyser);
-          
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const speakingIndicator = document.getElementById(`speaking-${userId}`);
-          const participantTile = document.getElementById(`participant-${userId}`);
-          
-          let isSpeaking = false;
-          const SPEAKING_THRESHOLD = 30; // Adjust based on testing
-          const SPEAKING_TIMEOUT = 300; // ms
-          let lastSpeakingTime = 0;
-          
-          function detectSpeaking() {
-            if (!speakingIndicator || !participantTile) {
-              audioContext.close();
-              return;
-            }
-            
-            analyser.getByteFrequencyData(dataArray);
-            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-            
-            const now = Date.now();
-            if (average > SPEAKING_THRESHOLD) {
-              if (!isSpeaking) {
-                isSpeaking = true;
-                speakingIndicator.classList.add('active');
-                participantTile.classList.add('active-speaker');
-                
-                // Emit speaking state to other users
-                if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', {
-                    callId: callData.callId,
-                    speaking: true
-                  });
-                }
-              }
-              lastSpeakingTime = now;
-            } else if (isSpeaking && now - lastSpeakingTime > SPEAKING_TIMEOUT) {
-              isSpeaking = false;
-              speakingIndicator.classList.remove('active');
-              participantTile.classList.remove('active-speaker');
-              
-              // Emit speaking state to other users
-              if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', {
-                  callId: callData.callId,
-                  speaking: false
-                });
-              }
-            }
-            
-            requestAnimationFrame(detectSpeaking);
-          }
-          
-          detectSpeaking();
-          audioContexts.set(userId, audioContext);
-        } catch (error) {
-          debugLog(`Error setting up audio detection for ${userId}: ${error.message}`, 'error');
-        }
-      }
-
-      async function initializeLocalMedia() {
-        try {
-          debugLog(`Requesting local media (type: ${callData.callType})...`, 'info');
-          
-          const constraints = {
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true
-            },
-            video: callData.callType === 'video' ? {
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-              frameRate: { ideal: 30 }
-            } : false
-          };
-          
-          localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          const tracks = localStream.getTracks();
-          debugLog(`Local media initialized: ${tracks.map(t => `${t.kind}(${t.label})`).join(', ')}`, 'success');
-          
-          isVideoEnabled = callData.callType === 'video';
-          isAudioEnabled = true;
-          
-          // Setup audio level detection for local stream
-          const audioTrack = localStream.getAudioTracks()[0];
-          if (audioTrack) {
-            setupAudioLevelDetection(currentUser.userId, localStream);
-          }
-          
-          if (isVideoEnabled) {
-            const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
-            if (localVideo && localStream) {
-              localVideo.srcObject = localStream;
-              await localVideo.play().catch(e => debugLog(`Video play warning: ${e.message}`, 'warning'));
-              localVideo.classList.remove('hidden');
-              if (localPfp) localPfp.classList.add('hidden');
-            }
-          }
-          
-          return localStream;
-        } catch (error) {
-          debugLog(`Failed to get local media: ${error.name} - ${error.message}`, 'error');
-          toast('Failed to access camera/microphone', 'error');
-          throw error;
-        }
-      }
-
-      function createPeerConnection(userId) {
-        debugLog(`Creating peer connection for user: ${userId}`, 'info');
-        
-        const config = {
-          ...PEER_CONNECTION_CONFIG,
-          iceServers: ICE_SERVERS
-        };
-        
-        const pc = new RTCPeerConnection(config);
-        
-        connectionStats.set(userId, {
-          startTime: Date.now(),
-          iceState: 'new',
-          connectionState: 'new',
-          candidatesReceived: 0,
-          candidatesSent: 0,
-          selectedCandidate: null
-        });
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-            debugLog(`Added local ${track.kind} track to connection with ${userId}`, 'info');
-          });
-        }
-        
-        pc.ontrack = (event) => {
-          debugLog(`Received remote ${event.track.kind} from ${userId}`, 'success');
-          const remoteVideo = document.getElementById(`video-${userId}`);
-          const remotePfp = document.getElementById(`pfp-${userId}`);
-          
-          if (remoteVideo) {
-            if (!remoteVideo.srcObject) {
-              remoteVideo.srcObject = new MediaStream();
-            }
-            remoteVideo.srcObject.addTrack(event.track);
-            remoteVideo.play().catch(e => debugLog(`Remote video play warning: ${e.message}`, 'warning'));
-            
-            if (event.track.kind === 'video') {
-              event.track.onunmute = () => {
-                debugLog(`Video track unmuted for ${userId}`, 'info');
-                remoteVideo.classList.remove('hidden');
-                if (remotePfp) remotePfp.classList.add('hidden');
-              };
-            } else if (event.track.kind === 'audio') {
-              // Setup audio level detection for remote stream
-              const stream = new MediaStream([event.track]);
-              setupAudioLevelDetection(userId, stream);
-            }
-          }
-        };
-        
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            const stats = connectionStats.get(userId);
-            stats.candidatesSent++;
-            
-            const c = event.candidate;
-            debugLog(`ICE candidate for ${userId}: type=${c.type}, protocol=${c.protocol}`, 'info');
-            
-            socketInstance.emit('ice_candidate', {
-              callId: callData.callId,
-              targetUserId: userId,
-              candidate: c
-            });
-          } else {
-            debugLog(`ICE gathering completed for ${userId}`, 'success');
-          }
-        };
-        
-        pc.onicegatheringstatechange = () => {
-          const state = pc.iceGatheringState;
-          debugLog(`ICE gathering state for ${userId}: ${state}`, 'info');
-          connectionStats.get(userId).iceGatheringState = state;
-        };
-        
-        pc.onconnectionstatechange = () => {
-          const state = pc.connectionState;
-          const stats = connectionStats.get(userId);
-          stats.connectionState = state;
-          
-          debugLog(`Connection state with ${userId}: ${state}`, state === 'connected' ? 'success' : state === 'failed' ? 'error' : 'info');
-          
-          const statusEl = document.getElementById(`status-${userId}`);
-          const callSubtitle = document.getElementById('callSubtitle');
-          
-          if (statusEl) {
-            switch (state) {
-              case 'connected':
-                statusEl.textContent = 'Connected';
-                statusEl.className = 'text-primary text-xs sm:text-sm font-semibold uppercase tracking-wider';
-                
-                // Update subtitle
-                if (callSubtitle) {
-                  const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1; // +1 for self
-                  callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
-                }
-                
-                pc.getStats().then(stats => {
-                  stats.forEach(report => {
-                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                      const localCandidate = stats.get(report.localCandidateId);
-                      if (localCandidate) {
-                        debugLog(`Selected candidate for ${userId}: ${localCandidate.candidateType}`, 'success');
-                        connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
-                        updateConnectionQuality();
-                        
-                        socketInstance.emit('connection_state_update', {
-                          callId: callData.callId,
-                          state: 'connected',
-                          candidateType: localCandidate.candidateType
-                        });
-                      }
-                    }
-                  });
-                });
-                break;
-              case 'connecting':
-                statusEl.textContent = 'Connecting...';
-                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
-                break;
-              case 'disconnected':
-                statusEl.textContent = 'Reconnecting...';
-                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
-                break;
-              case 'failed':
-                debugLog(`Connection failed with ${userId} - attempting ICE restart`, 'error');
-                statusEl.textContent = 'Connection failed';
-                statusEl.className = 'text-red-500 text-xs sm:text-sm';
-                setTimeout(() => {
-                  if (pc.connectionState === 'failed') {
-                    debugLog(`Restarting ICE for ${userId}`, 'warning');
-                    pc.restartIce();
-                  }
-                }, 1000);
-                socketInstance.emit('connection_state_update', {
-                  callId: callData.callId,
-                  state: 'failed'
-                });
-                break;
-              case 'closed':
-                statusEl.textContent = 'Disconnected';
-                statusEl.className = 'text-slate-500 text-xs sm:text-sm';
-                break;
-            }
-          }
-        };
-        
-        pc.oniceconnectionstatechange = () => {
-          const state = pc.iceConnectionState;
-          debugLog(`ICE connection state with ${userId}: ${state}`, 'info');
-          connectionStats.get(userId).iceState = state;
-          
-          if (state === 'failed') {
-            debugLog(`ICE connection failed with ${userId} - attempting restart`, 'error');
-            pc.restartIce();
-          }
-        };
-        
-        peerConnections.set(userId, pc);
-        return pc;
-      }
-
-      function updateConnectionQuality() {
-        const qualityEl = document.getElementById('connectionQuality');
-        if (!qualityEl) return;
-        
-        let hasRelay = false;
-        let hasSrflx = false;
-        let hasHost = false;
-        let connectedCount = 0;
-        
-        connectionStats.forEach((stats, userId) => {
-          if (stats.connectionState === 'connected') {
-            connectedCount++;
-            if (stats.selectedCandidate === 'relay') hasRelay = true;
-            else if (stats.selectedCandidate === 'srflx') hasSrflx = true;
-            else if (stats.selectedCandidate === 'host') hasHost = true;
-          }
-        });
-        
-        let quality = 'Unknown';
-        let bgClass = 'bg-gray-200 dark:bg-gray-700';
-        
-        if (connectedCount > 0) {
-          if (hasRelay) {
-            quality = 'TURN';
-            bgClass = 'bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100';
-          } else if (hasSrflx) {
-            quality = 'P2P';
-            bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
-          } else if (hasHost) {
-            quality = 'Direct';
-            bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
-          }
-        }
-        
-        qualityEl.textContent = quality;
-        qualityEl.className = `text-[10px] sm:text-xs px-1.5 sm:px-2 py-1 rounded ${bgClass}`;
-      }
-
-      async function createOffer(userId) {
-        try {
-          debugLog(`Creating offer for ${userId}`, 'info');
-          const pc = createPeerConnection(userId);
-          
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: callData.callType === 'video'
-          });
-          
-          await pc.setLocalDescription(offer);
-          debugLog(`Offer created for ${userId}`, 'success');
-          
-          socketInstance.emit('webrtc_offer', {
-            callId: callData.callId,
-            targetUserId: userId,
-            offer: offer
-          });
-        } catch (error) {
-          debugLog(`Error creating offer for ${userId}: ${error.message}`, 'error');
-        }
-      }
-
-      async function handleOffer(fromUserId, offer) {
-        try {
-          debugLog(`Received offer from ${fromUserId}`, 'info');
-          const pc = createPeerConnection(fromUserId);
-          
-          await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          debugLog(`Remote description set from ${fromUserId}`, 'success');
-          
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          debugLog(`Answer created for ${fromUserId}`, 'success');
-          
-          socketInstance.emit('webrtc_answer', {
-            callId: callData.callId,
-            targetUserId: fromUserId,
-            answer: answer
-          });
-        } catch (error) {
-          debugLog(`Error handling offer from ${fromUserId}: ${error.message}`, 'error');
-        }
-      }
-
-      async function handleAnswer(fromUserId, answer) {
-        try {
-          debugLog(`Received answer from ${fromUserId}`, 'info');
-          const pc = peerConnections.get(fromUserId);
-          if (pc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            debugLog(`Remote description (answer) set from ${fromUserId}`, 'success');
-          }
-        } catch (error) {
-          debugLog(`Error handling answer from ${fromUserId}: ${error.message}`, 'error');
-        }
-      }
-
-      async function handleIceCandidate(fromUserId, candidate) {
-        try {
-          const pc = peerConnections.get(fromUserId);
-          if (pc && pc.remoteDescription) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            const stats = connectionStats.get(fromUserId);
-            stats.candidatesReceived++;
-            debugLog(`ICE candidate added from ${fromUserId}: type=${candidate.type}`, 'info');
-          }
-        } catch (error) {
-          debugLog(`Error adding ICE candidate from ${fromUserId}: ${error.message}`, 'error');
-        }
-      }
-
-      function toggleMicrophone() {
-        if (localStream) {
-          const audioTrack = localStream.getAudioTracks()[0];
-          if (audioTrack) {
-            audioTrack.enabled = !audioTrack.enabled;
-            isAudioEnabled = audioTrack.enabled;
-            
-            const micBtn = document.getElementById('micBtn');
-            const micIcon = micBtn.querySelector('.material-symbols-outlined');
-            const micIndicator = document.getElementById(`mic-${currentUser.userId}`);
-            
-            if (isAudioEnabled) {
-              micBtn.classList.add('bg-primary', 'text-white');
-              micBtn.classList.remove('bg-accent-red');
-              micIcon.textContent = 'mic';
-              if (micIndicator) micIndicator.classList.add('hidden');
-            } else {
-              micBtn.classList.remove('bg-primary', 'text-white');
-              micBtn.classList.add('bg-accent-red', 'text-white');
-              micIcon.textContent = 'mic_off';
-              if (micIndicator) micIndicator.classList.remove('hidden');
-            }
-            
-            debugLog(`Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`, 'info');
-            socketInstance.emit('audio_state_changed', {
-              callId: callData.callId,
-              enabled: isAudioEnabled
-            });
-          }
-        }
-      }
-
-      async function toggleVideo() {
-        if (callData.callType === 'audio') {
-          toast('Video not available in audio call', 'warning');
-          return;
-        }
-        
-        if (localStream) {
-          const videoTrack = localStream.getVideoTracks()[0];
-          if (videoTrack) {
-            videoTrack.enabled = !videoTrack.enabled;
-            isVideoEnabled = videoTrack.enabled;
-            
-            const videoBtn = document.getElementById('videoBtn');
-            const videoIcon = videoBtn.querySelector('.material-symbols-outlined');
-            const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
-            
-            if (isVideoEnabled) {
-              videoBtn.classList.remove('text-slate-500');
-              videoBtn.classList.add('bg-primary', 'text-white');
-              videoIcon.textContent = 'videocam';
-              if (localVideo) localVideo.classList.remove('hidden');
-              if (localPfp) localPfp.classList.add('hidden');
-            } else {
-              videoBtn.classList.add('text-slate-500');
-              videoBtn.classList.remove('bg-primary', 'text-white');
-              videoIcon.textContent = 'videocam_off';
-              if (localVideo) localVideo.classList.add('hidden');
-              if (localPfp) localPfp.classList.remove('hidden');
-            }
-            
-            debugLog(`Video ${isVideoEnabled ? 'enabled' : 'disabled'}`, 'info');
-            socketInstance.emit('video_state_changed', {
-              callId: callData.callId,
-              enabled: isVideoEnabled
-            });
-          }
-        }
-      }
-
-      function updateCallDuration() {
-        if (!callStartTime) return;
-        
-        const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
-        const hours = Math.floor(elapsed / 3600);
-        const minutes = Math.floor((elapsed % 3600) / 60);
-        const seconds = elapsed % 60;
-        
-        const durationEl = document.getElementById('callDuration');
-        if (durationEl) {
-          durationEl.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-      }
-
-      function leaveCall() {
-        if (isInitializing) return;
-        
-        debugLog('Leaving call...', 'info');
-        isInitializing = true;
-        
-        // Close all audio contexts
-        audioContexts.forEach((context, userId) => {
-          context.close();
-        });
-        audioContexts.clear();
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            track.stop();
-            debugLog(`Stopped ${track.kind} track`, 'info');
-          });
-        }
-        
-        peerConnections.forEach((pc, userId) => {
-          debugLog(`Closing connection to ${userId}`, 'info');
-          pc.close();
-        });
-        peerConnections.clear();
-        
-        if (socketInstance && socketInstance.connected) {
-          socketInstance.emit('leave_call', {
-            callId: callData.callId
-          });
-        }
-        
-        if (durationInterval) clearInterval(durationInterval);
-        
-        localStorage.removeItem('activeCall');
-        
-        setTimeout(() => {
-          window.location.href = '/chat.html';
-        }, 500);
-      }
-
-      async function initializeCall() {
-        if (isInitializing) return;
-        
-        isInitializing = true;
-        debugLog('=== Initializing Call ===', 'info');
-        
-        try {
-          await _Auth.requireAuth();
-          await fetchIceServers();
-          
-          const callDataStr = localStorage.getItem('activeCall');
-          if (!callDataStr) {
-            toast('No active call found', 'error');
-            setTimeout(() => window.location.href = '/chat.html', 1500);
-            return;
-          }
-          
-          callData = JSON.parse(callDataStr);
-          debugLog(`Call data loaded: ${JSON.stringify(callData)}`, 'info');
-          
-          const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) {
-            window.location.href = '/login.html';
-            return;
-          }
-          
-          const userData = await _API.get('/api/users/me');
-          currentUser = {
-            userId: userData._id,
-            username: userData.username,
-            pfpUrl: userData.pfpUrl
-          };
-          
-          debugLog(`Current user: ${currentUser.username}`, 'info');
-          
-          const callTitle = document.getElementById('callTitle');
-          const callSubtitle = document.getElementById('callSubtitle');
-          if (callTitle) callTitle.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
-          if (callSubtitle) callSubtitle.textContent = 'Connecting...';
-          
-          const idToken = await firebaseUser.getIdToken();
-          const socketUrl = window.location.origin;
-          socketInstance = io(socketUrl, {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            auth: { token: idToken }
-          });
-          
-          socketInstance.on('connect', () => {
-            debugLog(`Socket connected: ${socketInstance.id}`, 'success');
-            socketInstance.emit('authenticate', {
-              token: idToken,
-              userId: currentUser.userId
-            });
-          });
-          
-          socketInstance.on('authenticated', async () => {
-            debugLog('Socket authenticated', 'success');
-            
-            if (!hasJoinedCall) {
-              hasJoinedCall = true;
-              socketInstance.emit('join_call', {
-                callId: callData.callId
-              });
-            }
-          });
-          
-          socketInstance.on('call_joined', async (data) => {
-            debugLog(`Call joined: ${data.participants.length} participants`, 'success');
-            
-            const callSubtitle = document.getElementById('callSubtitle');
-            if (callSubtitle) callSubtitle.textContent = `${data.participants.length} participant${data.participants.length > 1 ? 's' : ''}`;
-            
-            await initializeLocalMedia();
-            
-            const participantGrid = document.getElementById('participantGrid');
-            if (participantGrid) {
-              participantGrid.innerHTML = '';
-              
-              data.participants.forEach(participant => {
-                const isSelf = participant.userId === currentUser.userId;
-                const tile = createParticipantTile(participant, isSelf);
-                participantGrid.appendChild(tile);
-                
-                if (!isSelf) {
-                  setTimeout(() => createOffer(participant.userId), 500);
-                }
-              });
-              
-              updateGridLayout();
-            }
-            
-            callStartTime = Date.now();
-            durationInterval = setInterval(updateCallDuration, 1000);
-            
-            isInitializing = false;
-            debugLog('=== Call Initialization Complete ===', 'success');
-          });
-          
-          socketInstance.on('user_joined_call', (data) => {
-            debugLog(`User joined: ${data.user.username}`, 'info');
-            
-            const participantGrid = document.getElementById('participantGrid');
-            if (participantGrid && !document.getElementById(`participant-${data.user.userId}`)) {
-              const tile = createParticipantTile(data.user, false);
-              participantGrid.appendChild(tile);
-              updateGridLayout();
-              setTimeout(() => createOffer(data.user.userId), 500);
-            }
-          });
-          
-          socketInstance.on('user_left_call', (data) => {
-            debugLog(`User left: ${data.userId}`, 'info');
-            
-            const tile = document.getElementById(`participant-${data.userId}`);
-            if (tile) {
-              tile.remove();
-              updateGridLayout();
-            }
-            
-            const pc = peerConnections.get(data.userId);
-            if (pc) {
-              pc.close();
-              peerConnections.delete(data.userId);
-            }
-            
-            // Close audio context
-            const audioContext = audioContexts.get(data.userId);
-            if (audioContext) {
-              audioContext.close();
-              audioContexts.delete(data.userId);
-            }
-            
-            connectionStats.delete(data.userId);
-            updateConnectionQuality();
-          });
-          
-          socketInstance.on('webrtc_offer', (data) => handleOffer(data.fromUserId, data.offer));
-          socketInstance.on('webrtc_answer', (data) => handleAnswer(data.fromUserId, data.answer));
-          socketInstance.on('ice_candidate', (data) => handleIceCandidate(data.fromUserId, data.candidate));
-          
-          // Handle speaking state from other users
-          socketInstance.on('speaking_state', (data) => {
-            const speakingIndicator = document.getElementById(`speaking-${data.userId}`);
-            const participantTile = document.getElementById(`participant-${data.userId}`);
-            
-            if (speakingIndicator && participantTile) {
-              if (data.speaking) {
-                speakingIndicator.classList.add('active');
-                participantTile.classList.add('active-speaker');
-              } else {
-                speakingIndicator.classList.remove('active');
-                participantTile.classList.remove('active-speaker');
-              }
-            }
-          });
-          
-          socketInstance.on('audio_state_changed', (data) => {
-            const micIndicator = document.getElementById(`mic-${data.userId}`);
-            if (micIndicator) {
-              data.enabled ? micIndicator.classList.add('hidden') : micIndicator.classList.remove('hidden');
-            }
-          });
-          
-          socketInstance.on('video_state_changed', (data) => {
-            const video = document.getElementById(`video-${data.userId}`);
-            const pfp = document.getElementById(`pfp-${data.userId}`);
-            if (video && pfp) {
-              if (data.enabled) {
-                video.classList.remove('hidden');
-                pfp.classList.add('hidden');
-              } else {
-                video.classList.add('hidden');
-                pfp.classList.remove('hidden');
-              }
-            }
-          });
-          
-          socketInstance.on('call_ended', () => {
-            debugLog('Call ended', 'warning');
-            toast('Call ended', 'warning');
-            leaveCall();
-          });
-          
-          const micBtn = document.getElementById('micBtn');
-          const videoBtn = document.getElementById('videoBtn');
-          const leaveCallBtn = document.getElementById('leaveCallBtn');
-          
-          if (micBtn) micBtn.addEventListener('click', toggleMicrophone);
-          if (videoBtn) videoBtn.addEventListener('click', toggleVideo);
-          if (leaveCallBtn) leaveCallBtn.addEventListener('click', leaveCall);
-          
-          window.addEventListener('beforeunload', () => leaveCall());
-          
-        } catch (error) {
-          debugLog(`Call initialization error: ${error.message}`, 'error');
-          toast('Failed to initialize call', 'error');
-          isInitializing = false;
-          setTimeout(() => window.location.href = '/chat.html', 2000);
-        }
-      }
-
-      debugLog('✅ Arrived at call page', 'success');
-      initializeCall();
       
-    })();
-    </script>
-</body>
-</html>
+      // Clear state
+      StateManager.clearRoom();
+      
+      // Redirect
+      setTimeout(() => {
+        window.location.href = '/mood.html';
+      }, 2000);
+    }
+  }, 30000);
+
+  // Clear on page unload
+  window.addEventListener('beforeunload', () => {
+    clearInterval(expirationCheck);
+  });
+}
+
+/**
+ * Handle call transitions
+ */
+function handleCallTransitions() {
+  const StateManager = window.StateManager;
+
+  // Before navigating to call, save full chat state
+  const audioCallBtn = document.getElementById('audioCallBtn');
+  const videoCallBtn = document.getElementById('videoCallBtn');
+
+  if (audioCallBtn) {
+    audioCallBtn.addEventListener('click', () => {
+      console.log('📞 Navigating to call - saving chat state');
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+
+  if (videoCallBtn) {
+    videoCallBtn.addEventListener('click', () => {
+      console.log('📞 Navigating to call - saving chat state');
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+
+  // Listen for call acceptance
+  if (window.socketInstance) {
+    window.socketInstance.on('call_accepted', (data) => {
+      console.log('✅ Call accepted - saving state before navigation');
+      
+      // Save call data
+      StateManager.setCall(data);
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+}
+
+// Alternative: If scripts are already loaded
+if (window.StateManager && window.NavigationGuard) {
+  initializeChatPage();
+}
