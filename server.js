@@ -712,7 +712,14 @@ io.on('connection', (socket) => {
         console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
       }
 
-      socket.emit('room_joined', { roomId });
+      // Get chat history from the room
+      const chatHistory = room.getMessages ? room.getMessages() : [];
+      console.log(`📜 Sending ${chatHistory.length} chat messages to ${user.username}`);
+
+      socket.emit('room_joined', { 
+        roomId,
+        chatHistory: chatHistory 
+      });
       
     } catch (error) {
       console.error('Join room error:', error);
@@ -753,12 +760,14 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const timestamp = Date.now();
       const messageData = {
+        messageId: `msg-${user.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
         userId: user.userId,
         username: user.username,
         pfpUrl: user.pfpUrl,
         message,
-        timestamp: Date.now()
+        timestamp
       };
 
       if (replyTo) {
@@ -767,6 +776,8 @@ io.on('connection', (socket) => {
 
       room.addMessage(messageData);
       io.to(roomId).emit('chat_message', messageData);
+      
+      console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
       
     } catch (error) {
       console.error('Chat message error:', error);
