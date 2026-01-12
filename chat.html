@@ -321,10 +321,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
-    <script src="/state-manager.js"></script>
-    <script src="/navigation-guard.js"></script>
-    <script src="/chat-integration.js"></script>
-
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
@@ -557,10 +553,6 @@ function setupUserCardClick() {
         return messageItem;
       }
 
-
-
-      window.createMessageElement = createMessageElement;
-
       try {
         await _Auth.requireAuth();
       } catch (err) {
@@ -595,8 +587,6 @@ function setupUserCardClick() {
         username: userData.username,
         pfpUrl: userData.pfpUrl
       };
-
-        window.currentUser = currentUser;
 
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
@@ -679,27 +669,6 @@ function setupUserCardClick() {
         reconnectionAttempts: 10,
         auth: { token: idToken }
       });
-      
-      socketInstance.on('room_expired', (data) => {
-  console.log('⏱️ Room expired:', data.message);
-  toast(data.message, 'warning');
-  
-  // Clear state
-  if (window.StateManager) {
-    window.StateManager.clearRoom();
-  }
-  
-  // Redirect to mood page
-  setTimeout(() => {
-    window.location.href = '/mood.html';
-  }, 2000);
-});
-
-socketInstance.on('room_expiring_soon', (data) => {
-  console.log('⚠️ Room expiring in 1 minute');
-  toast('This conversation will end in 1 minute', 'warning');
-});
-      
 
       socketInstance.on('connect', () => {
         console.log('🔌 Socket connected:', socketInstance.id);
