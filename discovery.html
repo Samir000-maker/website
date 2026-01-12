@@ -16,6 +16,21 @@
 
 <script src="/state-manager.js"></script>
 <script src="/navigation-guard.js"></script>
+<script>
+// Enable navigation guard
+setTimeout(() => {
+  if (window.NavigationGuard) {
+    window.NavigationGuard.enable('discovery', () => {
+      // Cancel matchmaking
+      if (window.socketInstance) {
+        window.socketInstance.emit('cancel_matchmaking');
+      }
+      // Go to mood.html
+      window.NavigationGuard.navigateTo('/mood.html');
+    });
+  }
+}, 1000);
+</script>
 <script src="/discovery-integration.js"></script>
   
   <script id="tailwind-config">
