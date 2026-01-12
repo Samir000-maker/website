@@ -325,6 +325,47 @@ app.post('/api/check-username', async (req, res) => {
   }
 });
 
+
+// NEW ENDPOINT: Check if user profile exists and has username
+app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
+  try {
+    const firebaseUser = req.firebaseUser;
+    const db = getDB();
+
+    // Find user in database by email
+    const user = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      { projection: { username: 1, pfpUrl: 1, _id: 1 } }
+    );
+
+    if (!user) {
+      // User doesn't exist in database yet
+      return res.json({
+        exists: false,
+        hasUsername: false
+      });
+    }
+
+    // Check if user has username
+    const hasUsername = !!(user.username && user.username.trim());
+
+    return res.json({
+      exists: true,
+      hasUsername: hasUsername,
+      username: user.username || null,
+      userId: user._id.toString()
+    });
+
+  } catch (error) {
+    console.error('Check profile error:', error);
+    return res.status(500).json({
+      error: 'Server Error',
+      message: 'Failed to check profile'
+    });
+  }
+});
+
+
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
@@ -348,11 +389,22 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
+    
+    // Check if user already exists by email
     const existingUser = await db.collection('users').findOne({ 
       email: firebaseUser.email 
     });
 
+    // Check if username is taken by someone else
     if (existingUser && existingUser.username !== trimmedUsername) {
+      const usernameExists = await db.collection('users').findOne({
+        username: trimmedUsername
+      });
+      if (usernameExists) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+    } else if (!existingUser) {
+      // New user - check if username is available
       const usernameExists = await db.collection('users').findOne({
         username: trimmedUsername
       });
@@ -363,12 +415,14 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
 
     const userData = {
       email: firebaseUser.email,
+      firebaseUid: firebaseUser.uid,
       username: trimmedUsername,
       pfpUrl: pfpUrl || getDefaultProfilePicture(),
       updatedAt: new Date()
     };
 
     if (existingUser) {
+      // Update existing user
       await db.collection('users').updateOne(
         { _id: existingUser._id },
         { $set: userData }
@@ -376,15 +430,16 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
       await invalidateUserProfileCache(existingUser._id.toString());
       res.json({ 
         success: true, 
-        userId: existingUser._id,
+        userId: existingUser._id.toString(),
         message: 'Profile updated' 
       });
     } else {
+      // Create new user
       userData.createdAt = new Date();
       const result = await db.collection('users').insertOne(userData);
       res.json({ 
         success: true, 
-        userId: result.insertedId,
+        userId: result.insertedId.toString(),
         message: 'Profile created' 
       });
     }
