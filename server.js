@@ -184,7 +184,7 @@ function handleRoomCleanup(userId, socketId) {
       } else {
         console.log(`✅ User reconnected, keeping in room ${roomId}`);
       }
-    }, 5000);
+    }, 5*60*100);
   }
   
   socketUsers.delete(socketId);
