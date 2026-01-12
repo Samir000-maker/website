@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat Room - MoodLog</title>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="global.css" rel="stylesheet">
     <style>
@@ -574,13 +574,17 @@
 
       const roomDataStr = localStorage.getItem('currentRoom');
       if (!roomDataStr) {
+        console.error('❌ No active room found in localStorage');
         toast('No active room found', 'error');
         setTimeout(() => window.location.href = '/mood.html', 1500);
         return;
       }
 
       const roomData = JSON.parse(roomDataStr);
+      console.log('📦 Room data loaded:', roomData);
+      
       if (!roomData.roomId) {
+        console.error('❌ Invalid room data - no roomId');
         toast('Invalid room data', 'error');
         setTimeout(() => window.location.href = '/mood.html', 1500);
         return;
@@ -696,11 +700,24 @@
 
       socketInstance.on('authenticated', (data) => {
         console.log('✅ Socket authenticated:', data);
+        
+        // CRITICAL: Join the room immediately after authentication
+        console.log('🚪 Attempting to join room:', roomData.roomId);
         socketInstance.emit('join_room', { roomId: roomData.roomId });
+        
+        // Timeout protection
+        setTimeout(() => {
+          if (!window.__roomJoined) {
+            console.error('⏱️ Timeout: Room join took too long');
+            toast('Failed to join room - please try again', 'error');
+            setTimeout(() => window.location.href = '/mood.html', 2000);
+          }
+        }, 10000); // 10 second timeout
       });
 
       socketInstance.on('room_joined', (data) => {
         console.log('✅ Room joined successfully:', data);
+        window.__roomJoined = true;
       });
 
       socketInstance.on('error', (data) => {
