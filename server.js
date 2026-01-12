@@ -165,13 +165,35 @@ function handleRoomCleanup(userId, socketId) {
   const roomId = matchmaking.getRoomIdByUser(userId);
   
   if (roomId) {
-    console.log(`⏳ User disconnected from room ${roomId} (grace period)`);
+    console.log(`⏳ User disconnected from room ${roomId} (grace period - keeping room alive)`);
     
+    // CRITICAL: Give 15 seconds for page navigation (discovery → chat)
     setTimeout(() => {
       const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === userId);
       
       if (stillDisconnected) {
-        console.log(`👋 User did not reconnect, removing from room ${roomId}`);
+        console.log(`👋 User ${userId} did not reconnect after 15s, checking room status`);
+        
+        const room = matchmaking.getRoom(roomId);
+        if (!room) {
+          console.log(`⚠️ Room ${roomId} no longer exists`);
+          return;
+        }
+        
+        // Check if ANY user is still connected via socket
+        const hasConnectedUsers = room.users.some(roomUser => {
+          return Array.from(socketUsers.values()).some(socketUser => 
+            socketUser.userId === roomUser.userId
+          );
+        });
+        
+        if (hasConnectedUsers) {
+          console.log(`✅ Room ${roomId} has connected users, keeping alive`);
+          return;
+        }
+        
+        // Only leave room if NO users are connected
+        console.log(`🚪 No users connected to room ${roomId}, user ${userId} leaving`);
         const result = matchmaking.leaveRoom(userId);
         
         if (result.roomId && !result.destroyed) {
@@ -182,9 +204,9 @@ function handleRoomCleanup(userId, socketId) {
           });
         }
       } else {
-        console.log(`✅ User reconnected, keeping in room ${roomId}`);
+        console.log(`✅ User ${userId} reconnected, keeping in room ${roomId}`);
       }
-    }, 5*60*100);
+    }, 15000*60); // INCREASED from 5000 to 15000
   }
   
   socketUsers.delete(socketId);
@@ -704,7 +726,19 @@ io.on('connection', (socket) => {
         console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
       }
 
-      socket.emit('room_joined', { roomId });
+      // CRITICAL: Mark user as actively in room
+      socket.data = socket.data || {};
+      socket.data.activeRoomId = roomId;
+      socket.data.joinedAt = Date.now();
+
+      socket.emit('room_joined', { 
+        roomId,
+        users: room.users.map(u => ({
+          userId: u.userId,
+          username: u.username,
+          pfpUrl: u.pfpUrl
+        }))
+      });
       
     } catch (error) {
       console.error('Join room error:', error);
