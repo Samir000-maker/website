@@ -91,11 +91,7 @@
     <script src="app.js"></script>
 
     <script>
-        // Instead of destructuring into names that may already exist globally,
-        // create a single reference to window.MoodApp and safe local aliases.
         const MoodApp = window.MoodApp || {};
-
-        // Local aliases (unlikely to collide with other global identifiers)
         const _Auth = MoodApp.Auth;
         const _API = MoodApp.API;
         const _Toast = MoodApp.Toast;
@@ -103,7 +99,6 @@
         const _PageTransition = MoodApp.PageTransition;
         const _Validator = MoodApp.Validator;
 
-        // Helpful diagnostic messages if something isn't available.
         if (!MoodApp || Object.keys(MoodApp).length === 0) {
             console.warn('Warning: window.MoodApp is not defined. Make sure app.js creates window.MoodApp before this script runs.');
         }
@@ -113,7 +108,6 @@
         if (!_Auth) console.warn('Auth helper not found (window.MoodApp.Auth). Authentication storage flows may fail.');
         if (!_PageTransition) console.warn('PageTransition helper not found (window.MoodApp.PageTransition).');
 
-        // Firebase config (preserved exactly as provided)
         const firebaseConfig = {
             apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
             authDomain: "projectt3-8c55e.firebaseapp.com",
@@ -125,7 +119,6 @@
         };
 
         try {
-            // If firebase already initialized elsewhere, this will throw; it's safe to ignore/init once.
             if (!firebase.apps?.length) {
                 firebase.initializeApp(firebaseConfig);
             } else {
@@ -135,7 +128,19 @@
             console.error('Firebase init error:', error);
         }
 
-        // Helper wrappers to gracefully handle missing UI helpers
+        // Check if user is already logged in
+        firebase.auth().onAuthStateChanged(async (user) => {
+            if (user) {
+                // User is signed in, redirect to mood page
+                console.log('User already signed in, redirecting...');
+                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                    _PageTransition.navigateTo('/mood.html');
+                } else {
+                    window.location.href = '/mood.html';
+                }
+            }
+        });
+
         const toastError = (msg) => {
             if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
             else console.error('Toast.error:', msg);
@@ -151,16 +156,25 @@
             if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
         };
 
-        // DOM elements
+        const getApiBaseUrl = () => {
+            try {
+                const { hostname, port } = window.location;
+                if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
+                    return 'http://localhost:3000';
+                }
+            } catch {}
+            return window.location.origin;
+        };
+
+        const API_BASE_URL = getApiBaseUrl();
+
         const signupForm = document.getElementById('signupForm');
         const googleBtn = document.getElementById('googleSignIn');
 
-        // Sign-up form submit handler
         if (signupForm) {
             signupForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
 
-                // get inputs
                 const emailEl = document.getElementById('email');
                 const passwordEl = document.getElementById('password');
                 const confirmEl = document.getElementById('confirmPassword');
@@ -169,7 +183,6 @@
                 const password = passwordEl ? passwordEl.value : '';
                 const confirmPassword = confirmEl ? confirmEl.value : '';
 
-                // Validation
                 if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
                     toastError('Validation helper unavailable. Cannot validate input.');
                     return;
@@ -190,11 +203,9 @@
                 loadingShow('Creating your account...');
 
                 try {
-                    // Create Firebase user (compat SDK)
                     const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
                     const idToken = await userCredential.user.getIdToken();
 
-                    // Store token via your Auth helper if available
                     if (_Auth && typeof _Auth.setAuth === 'function') {
                         _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
                     } else {
@@ -204,7 +215,6 @@
                     loadingHide();
                     toastSuccess('Account created successfully!');
 
-                    // Redirect to username setup (use PageTransition if available)
                     setTimeout(() => {
                         if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
                             _PageTransition.navigateTo('/username.html');
@@ -222,7 +232,6 @@
             console.warn('Signup form not found on page.');
         }
 
-        // Google sign-in handler
         if (googleBtn) {
             googleBtn.addEventListener('click', async () => {
                 loadingShow('Signing in with Google...');
@@ -232,6 +241,17 @@
                     const result = await firebase.auth().signInWithPopup(provider);
                     const idToken = await result.user.getIdToken();
 
+                    // Check if user profile exists in backend
+                    const checkResponse = await fetch(`${API_BASE_URL}/api/users/check-profile`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${idToken}`
+                        }
+                    });
+
+                    const checkData = await checkResponse.json();
+                    
                     if (_Auth && typeof _Auth.setAuth === 'function') {
                         _Auth.setAuth(idToken, {
                             email: result.user.email,
@@ -239,20 +259,32 @@
                             displayName: result.user.displayName,
                             photoURL: result.user.photoURL
                         });
-                    } else {
-                        console.warn('Auth.setAuth not available. Token not stored in app helper.');
                     }
 
                     loadingHide();
-                    toastSuccess('Signed in successfully!');
 
-                    setTimeout(() => {
-                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                            _PageTransition.navigateTo('/username.html');
-                        } else {
-                            window.location.href = '/username.html';
-                        }
-                    }, 1000);
+                    // If user profile exists (existing user), go to mood.html
+                    if (checkData.exists && checkData.hasUsername) {
+                        toastSuccess('Welcome back!');
+                        setTimeout(() => {
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/mood.html');
+                            } else {
+                                window.location.href = '/mood.html';
+                            }
+                        }, 1000);
+                    } 
+                    // New user - redirect to username page
+                    else {
+                        toastSuccess('Account created! Please set up your profile');
+                        setTimeout(() => {
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/username.html');
+                            } else {
+                                window.location.href = '/username.html';
+                            }
+                        }, 1000);
+                    }
                 } catch (error) {
                     loadingHide();
                     console.error('Google sign in error:', error);
