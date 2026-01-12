@@ -1,7 +1,9 @@
-// CRITICAL FIXES FOR CALL CONNECTIVITY
-// 1. Persist call state when users navigate to call page
-// 2. Allow users to rejoin active calls
-// 3. Don't destroy calls on temporary disconnection
+// ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
+// Features:
+// 1. Persistent call state with grace periods
+// 2. 10-minute room expiry with auto-cleanup
+// 3. Chat message preservation
+// 4. Background matchmaking support
 
 import express from 'express';
 import { createServer } from 'http';
@@ -119,13 +121,21 @@ const upload = multer({
   }
 });
 
-const matchmakingRateLimit = new Map();
+// ============================================
+// ENHANCED STATE MANAGEMENT
+// ============================================
 
-// CRITICAL: Enhanced call management with persistence
-const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], status, createdAt }
+// Active calls with persistence
+const activeCalls = new Map(); // callId -> { callId, roomId, callType, participants[], status, createdAt, lastActivity }
 const userCalls = new Map(); // userId -> callId
 const callGracePeriod = new Map(); // callId -> timeout
 
+// Room cleanup tracking
+const roomCleanupTimers = new Map(); // roomId -> timeout
+const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
+const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
+
+// WebRTC metrics
 const webrtcMetrics = {
   totalCalls: 0,
   successfulConnections: 0,
@@ -133,6 +143,94 @@ const webrtcMetrics = {
   turnUsage: 0,
   stunUsage: 0
 };
+
+// ============================================
+// ROOM CLEANUP SYSTEM
+// ============================================
+
+function scheduleRoomCleanup(roomId, expiresAt) {
+  // Clear existing timer if any
+  if (roomCleanupTimers.has(roomId)) {
+    clearTimeout(roomCleanupTimers.get(roomId));
+  }
+
+  const now = Date.now();
+  const timeUntilExpiry = expiresAt - now;
+
+  if (timeUntilExpiry <= 0) {
+    // Room already expired
+    console.log(`⏰ Room ${roomId} already expired, cleaning up immediately`);
+    performRoomCleanup(roomId);
+    return;
+  }
+
+  console.log(`⏰ Scheduled cleanup for room ${roomId} in ${Math.round(timeUntilExpiry / 1000)}s`);
+
+  const timer = setTimeout(() => {
+    console.log(`⏰ Room ${roomId} expiry timer triggered`);
+    performRoomCleanup(roomId);
+  }, timeUntilExpiry + ROOM_CLEANUP_GRACE);
+
+  roomCleanupTimers.set(roomId, timer);
+}
+
+function performRoomCleanup(roomId) {
+  const room = matchmaking.getRoom(roomId);
+  
+  if (!room) {
+    console.log(`🗑️ Room ${roomId} not found, already cleaned up`);
+    roomCleanupTimers.delete(roomId);
+    return;
+  }
+
+  console.log(`🗑️ Cleaning up room ${roomId} (${room.users.length} users)`);
+
+  // Notify all users in the room
+  room.users.forEach(user => {
+    const userSocket = findActiveSocketForUser(user.userId);
+    if (userSocket) {
+      userSocket.emit('room_expired', {
+        roomId,
+        message: 'Chat room has expired'
+      });
+      userSocket.leave(roomId);
+    }
+  });
+
+  // Clean up any active calls in this room
+  activeCalls.forEach((call, callId) => {
+    if (call.roomId === roomId) {
+      console.log(`🗑️ Cleaning up call ${callId} in expired room`);
+      
+      call.participants.forEach(userId => {
+        userCalls.delete(userId);
+      });
+      
+      activeCalls.delete(callId);
+      
+      if (callGracePeriod.has(callId)) {
+        clearTimeout(callGracePeriod.get(callId));
+        callGracePeriod.delete(callId);
+      }
+    }
+  });
+
+  // Remove the room from matchmaking
+  matchmaking.destroyRoom(roomId);
+
+  // Clear the cleanup timer
+  roomCleanupTimers.delete(roomId);
+
+  console.log(`✅ Room ${roomId} fully cleaned up and destroyed`);
+}
+
+function cancelRoomCleanup(roomId) {
+  if (roomCleanupTimers.has(roomId)) {
+    clearTimeout(roomCleanupTimers.get(roomId));
+    roomCleanupTimers.delete(roomId);
+    console.log(`❌ Cancelled cleanup timer for room ${roomId}`);
+  }
+}
 
 // ============================================
 // API ROUTES
@@ -522,6 +620,9 @@ io.on('connection', (socket) => {
       if (room) {
         console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
+        // Schedule room cleanup
+        scheduleRoomCleanup(room.id, room.expiresAt);
+
         room.users.forEach(roomUser => {
           const userSocket = findActiveSocketForUser(roomUser.userId);
           
@@ -696,14 +797,14 @@ io.on('connection', (socket) => {
 
       const callId = uuidv4();
       
-      // CRITICAL: Create call with 'pending' status
       const call = {
         callId,
         roomId,
         callType,
         participants: [user.userId],
-        status: 'pending', // pending, active, ended
+        status: 'pending',
         createdAt: Date.now(),
+        lastActivity: Date.now(),
         initiator: user.userId
       };
 
@@ -751,14 +852,13 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Add user to call participants
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
       }
       
-      // CRITICAL: Mark call as 'active'
       call.status = 'active';
+      call.lastActivity = Date.now();
 
       console.log(`✅ User ${user.username} accepted call ${callId} - now ACTIVE`);
 
@@ -770,7 +870,6 @@ io.on('connection', (socket) => {
 
       const callUsers = room.users.filter(u => call.participants.includes(u.userId));
       
-      // Notify ALL participants that call is accepted
       callUsers.forEach(roomUser => {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
         if (targetSocket) {
@@ -853,7 +952,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // CRITICAL: Clear any grace period timeout
+      // Update call activity
+      call.lastActivity = Date.now();
+
+      // Clear grace period
       if (callGracePeriod.has(callId)) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
@@ -922,7 +1024,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // WebRTC Signaling with enhanced logging
+  // WebRTC Signaling
   socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -1018,6 +1120,20 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('speaking_state', ({ callId, speaking }) => {
+    try {
+      const user = socketUsers.get(socket.id);
+      if (!user) return;
+
+      socket.to(`call-${callId}`).emit('speaking_state', {
+        userId: user.userId,
+        speaking
+      });
+    } catch (error) {
+      console.error('Speaking state error:', error);
+    }
+  });
+
   socket.on('audio_state_changed', ({ callId, enabled }) => {
     try {
       const user = socketUsers.get(socket.id);
@@ -1068,6 +1184,13 @@ io.on('connection', (socket) => {
         });
       }
 
+      // If room is destroyed, cancel cleanup timer and perform immediate cleanup
+      if (result.destroyed) {
+        console.log(`🗑️ Room ${result.roomId} destroyed by user leaving`);
+        cancelRoomCleanup(result.roomId);
+        performRoomCleanup(result.roomId);
+      }
+
       socket.emit('left_room', { roomId: result.roomId });
       console.log(`👋 ${user.username} left room ${result.roomId}`);
     }
@@ -1079,19 +1202,16 @@ io.on('connection', (socket) => {
     if (user) {
       console.log(`🔌 User ${user.username} disconnected`);
 
-      // Check if user is in a call
+      // Handle call disconnection with grace period
       const callId = userCalls.get(user.userId);
       if (callId) {
         const call = activeCalls.get(callId);
         if (call && call.status === 'active') {
-          // CRITICAL: Don't immediately destroy - give grace period for navigation
           console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
           
-          // Set grace period (10 seconds for navigation)
           const graceTimeout = setTimeout(() => {
             console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
             
-            // Check if they actually reconnected
             const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
             
             if (!reconnected) {
@@ -1113,7 +1233,7 @@ io.on('connection', (socket) => {
             } else {
               console.log(`✅ User ${user.username} rejoined call`);
             }
-          }, 10000); // 10 second grace period
+          }, 10000);
           
           callGracePeriod.set(callId, graceTimeout);
         }
@@ -1142,6 +1262,12 @@ io.on('connection', (socket) => {
                 remainingUsers: result.remainingUsers
               });
             }
+            
+            if (result.destroyed) {
+              console.log(`🗑️ Room ${result.roomId} destroyed after user disconnect`);
+              cancelRoomCleanup(result.roomId);
+              performRoomCleanup(result.roomId);
+            }
           } else {
             console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
           }
@@ -1154,6 +1280,23 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+// ============================================
+// PERIODIC CLEANUP
+// ============================================
+
+// Run cleanup every minute to catch any missed expirations
+setInterval(() => {
+  const now = Date.now();
+  const rooms = matchmaking.getActiveRooms();
+  
+  rooms.forEach(room => {
+    if (room.expiresAt <= now) {
+      console.log(`🕐 Periodic cleanup: Room ${room.id} has expired`);
+      performRoomCleanup(room.id);
+    }
+  });
+}, 60000);
 
 // ============================================
 // START SERVER
@@ -1170,6 +1313,7 @@ async function startServer() {
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
       console.log(`🔌 Socket.IO ready for connections`);
       console.log(`📞 WebRTC signaling enabled`);
+      console.log(`⏰ Room cleanup: ${ROOM_EXPIRY_TIME / 60000} minutes`);
       
       const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN);
       if (hasTurn) {
