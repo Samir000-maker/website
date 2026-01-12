@@ -307,9 +307,14 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
-    
+    <script src="/state-manager.js"></script>
 
     <script>
+
+        if (window.StateManager) {
+  window.StateManager.setPage('call');
+}
+        
       const firebaseConfig = {
         apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
         authDomain: "projectt3-8c55e.firebaseapp.com",
@@ -329,7 +334,6 @@
     <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
 
-    <!-- App -->
     <script src="app.js"></script>
 
     <script>
