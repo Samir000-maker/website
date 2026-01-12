@@ -82,6 +82,89 @@
     .animate-fade-in-up {
       animation: fadeInUp 0.6s ease-out;
     }
+    
+    /* Confirmation Dialog Styles */
+    .confirmation-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      opacity: 0;
+      animation: fadeIn 0.2s ease-out forwards;
+    }
+    
+    .confirmation-dialog {
+      background: white;
+      border-radius: 1.5rem;
+      padding: 2rem;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      transform: scale(0.9) translateY(20px);
+      animation: slideUp 0.3s ease-out forwards;
+    }
+    
+    .dark .confirmation-dialog {
+      background: #22252a;
+      border: 1px solid #374151;
+    }
+    
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+    
+    @keyframes slideUp {
+      to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    .confirmation-buttons {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    
+    .confirmation-buttons button {
+      flex: 1;
+      padding: 0.875rem 1.5rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+      border: none;
+      cursor: pointer;
+    }
+    
+    .btn-stay {
+      background: #367d7d;
+      color: white;
+    }
+    
+    .btn-stay:active {
+      transform: scale(0.97);
+    }
+    
+    .btn-leave {
+      background: #f3f4f6;
+      color: #374151;
+    }
+    
+    .dark .btn-leave {
+      background: #374151;
+      color: #e5e7eb;
+    }
+    
+    .btn-leave:active {
+      transform: scale(0.97);
+    }
   </style>
 </head>
 
@@ -152,7 +235,6 @@
         <div class="absolute inset-0 bg-primary/20 dark:bg-primary/10 rounded-full blur-2xl scale-150"></div>
         <div class="relative">
           <div id="userAvatar" class="h-24 w-24 rounded-full border-4 border-white dark:border-surface-dark shadow-2xl overflow-hidden ring-4 ring-primary/10 ring-offset-2 dark:ring-offset-surface-dark bg-slate-100 dark:bg-slate-800">
-            <!-- Profile picture will be loaded here -->
             <div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">U</div>
           </div>
           <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark py-1 px-3 rounded-full shadow-lg border border-slate-100 dark:border-slate-700 flex items-center gap-1.5 whitespace-nowrap z-40">
@@ -253,6 +335,9 @@
 
 </div>
 
+<!-- Confirmation Dialog (hidden by default) -->
+<div id="confirmationOverlay" style="display: none;"></div>
+
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -280,7 +365,7 @@
 <!-- App Core -->
 <script src="app.js"></script>
 
-<!-- Page Logic -->
+<!-- Page Logic with State Preservation -->
 <script>
 (async () => {
   const MoodApp = window.MoodApp || {};
@@ -294,33 +379,175 @@
     console[t==='error'?'error':'log'](m); 
   };
 
-  // Helper function to display profile picture
+  // ============================================
+  // STATE PRESERVATION SYSTEM
+  // ============================================
+  
+  const STATE_KEY = 'discovery_state';
+  const STATE_TIMESTAMP_KEY = 'discovery_state_timestamp';
+  const STATE_EXPIRY = 15 * 60 * 1000; // 15 minutes
+  
+  function saveState(state) {
+    try {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(STATE_TIMESTAMP_KEY, Date.now().toString());
+      console.log('✅ Discovery state saved:', state);
+    } catch (e) {
+      console.warn('Failed to save discovery state:', e);
+    }
+  }
+  
+  function loadState() {
+    try {
+      const stateStr = localStorage.getItem(STATE_KEY);
+      const timestamp = localStorage.getItem(STATE_TIMESTAMP_KEY);
+      
+      if (!stateStr || !timestamp) return null;
+      
+      const age = Date.now() - parseInt(timestamp);
+      if (age > STATE_EXPIRY) {
+        console.log('⏰ Discovery state expired, clearing');
+        clearState();
+        return null;
+      }
+      
+      const state = JSON.parse(stateStr);
+      console.log('✅ Discovery state loaded:', state);
+      return state;
+    } catch (e) {
+      console.warn('Failed to load discovery state:', e);
+      return null;
+    }
+  }
+  
+  function clearState() {
+    localStorage.removeItem(STATE_KEY);
+    localStorage.removeItem(STATE_TIMESTAMP_KEY);
+    console.log('🗑️ Discovery state cleared');
+  }
+
+  // ============================================
+  // BACK BUTTON CONFIRMATION DIALOG
+  // ============================================
+  
+  function showConfirmationDialog() {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('confirmationOverlay');
+      
+      const dialogHTML = `
+        <div class="confirmation-overlay">
+          <div class="confirmation-dialog">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <span class="material-symbols-outlined" style="font-size: 32px; color: #dc2626;">warning</span>
+              </div>
+              <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Leave Discovery?</h3>
+              <p style="color: #6b7280; font-size: 0.95rem; line-height: 1.5;">
+                You're currently searching for matches. If you leave now, your search will be cancelled.
+              </p>
+            </div>
+            <div class="confirmation-buttons">
+              <button class="btn-stay" id="btnStay">Stay Here</button>
+              <button class="btn-leave" id="btnLeave">Leave</button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      overlay.innerHTML = dialogHTML;
+      overlay.style.display = 'flex';
+      
+      const btnStay = document.getElementById('btnStay');
+      const btnLeave = document.getElementById('btnLeave');
+      
+      btnStay.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        resolve(false); // User wants to stay
+      });
+      
+      btnLeave.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        resolve(true); // User wants to leave
+      });
+    });
+  }
+
+  // ============================================
+  // BACK BUTTON HANDLING
+  // ============================================
+  
+  let backButtonHandled = false;
+  
+  function setupBackButtonHandler() {
+    // Push a state to history so we can intercept back button
+    history.pushState({ page: 'discovery' }, '', window.location.href);
+    
+    window.addEventListener('popstate', async (event) => {
+      if (backButtonHandled) return;
+      
+      console.log('⬅️ Back button pressed on discovery page');
+      
+      // Push state back so we stay on the page while showing dialog
+      history.pushState({ page: 'discovery' }, '', window.location.href);
+      
+      const shouldLeave = await showConfirmationDialog();
+      
+      if (shouldLeave) {
+        console.log('✅ User confirmed leaving discovery');
+        backButtonHandled = true;
+        
+        // Cancel matchmaking
+        if (socketInstance && socketInstance.connected) {
+          socketInstance.emit('cancel_matchmaking');
+        }
+        
+        // Clear state
+        clearState();
+        
+        // Navigate to mood page
+        window.location.href = '/mood.html';
+      } else {
+        console.log('❌ User chose to stay on discovery');
+      }
+    });
+  }
+
+  // ============================================
+  // PROFILE PICTURE HELPER
+  // ============================================
+  
   function displayProfilePicture(element, pfpUrl, username) {
     if (!element) return;
     
     const initial = username ? username.charAt(0).toUpperCase() : 'U';
     
     if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-      // Use actual profile picture
       element.innerHTML = `<img src="${pfpUrl}" alt="${username}" class="h-full w-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold\\'>${initial}</div>'">`;
     } else {
-      // Fallback to initial
       element.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">${initial}</div>`;
     }
   }
 
-  // Wait for auth
+  // ============================================
+  // MAIN INITIALIZATION
+  // ============================================
+  
+  // Check if we're restoring state
+  const restoredState = loadState();
+  
+  if (restoredState && restoredState.inMatchmaking) {
+    console.log('🔄 Restoring discovery state from background');
+  }
+
+  // Auth check
   try {
     await _Auth.requireAuth();
   } catch (err) {
     console.error('Auth required failed:', err);
     toast('Please log in first', 'error');
+    clearState();
     setTimeout(() => {
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/login.html');
-      } else {
-        window.location.href = '/login.html';
-      }
+      window.location.href = '/login.html';
     }, 1500);
     return;
   }
@@ -330,11 +557,8 @@
   if (!mood) {
     console.error('No mood selected');
     toast('Please select a mood first', 'error');
-    if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-      _PageTransition.navigateTo('/mood.html');
-    } else {
-      window.location.href = '/mood.html';
-    }
+    clearState();
+    window.location.href = '/mood.html';
     return;
   }
 
@@ -347,23 +571,22 @@
 
   let socketInstance = null;
   let currentUser = null;
+  let isInMatchmaking = false;
 
   // ============================================
   // SOCKET CONNECTION & MATCHMAKING
   // ============================================
+  
   async function initializeSocket() {
     try {
-      // Get Firebase user
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
         throw new Error('Not authenticated');
       }
 
-      // Get ID token
       const idToken = await firebaseUser.getIdToken();
-
-      // Get user profile
       const userData = await _API.get('/api/users/me');
+      
       currentUser = {
         userId: userData._id,
         username: userData.username,
@@ -373,20 +596,18 @@
 
       console.log('✅ User loaded:', currentUser);
 
-      // Update avatars with profile picture
+      // Update avatars
       displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
       displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-      // Connect socket to backend server
-      const socketUrl = 'https://website-hdem.onrender.com';
+      // Connect socket
+      const socketUrl = window.location.origin;
       socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
-        auth: {
-          token: idToken
-        }
+        auth: { token: idToken }
       });
 
       return new Promise((resolve, reject) => {
@@ -398,7 +619,6 @@
           console.log('🔌 Socket connected:', socketInstance.id);
           clearTimeout(timeout);
           
-          // Authenticate
           socketInstance.emit('authenticate', {
             token: idToken,
             userId: currentUser.userId
@@ -434,11 +654,12 @@
     }
 
     console.log('🎮 Emitting join_matchmaking event with mood:', mood);
+    
+    isInMatchmaking = true;
+    saveState({ inMatchmaking: true, mood, userId: currentUser.userId });
 
-    // Emit join_matchmaking
     socketInstance.emit('join_matchmaking', { mood });
 
-    // Listen for events
     socketInstance.on('queued', (data) => {
       console.log('📊 Queued:', data);
       const position = data.position || 0;
@@ -446,11 +667,20 @@
       if (statusText) {
         statusText.textContent = `Waiting for others (${position}/${total})...`;
       }
+      
+      saveState({ 
+        inMatchmaking: true, 
+        mood, 
+        userId: currentUser.userId,
+        position 
+      });
     });
 
     socketInstance.on('match_found', (data) => {
       console.log('🎉 Match found:', data);
       toast('Match found!', 'success');
+      
+      isInMatchmaking = false;
       
       // Store room data
       try {
@@ -459,25 +689,22 @@
         console.warn('Could not save room data:', e);
       }
 
-      // Navigate to chat
-      setTimeout(() => {
-        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/chat.html');
-        } else {
-          window.location.href = '/chat.html';
-        }
-      }, 1200);
+      // Clear discovery state
+      clearState();
+
+      // Navigate to chat - WORKS EVEN IN BACKGROUND
+      console.log('🚀 Navigating to chat.html');
+      window.location.href = '/chat.html';
     });
 
     socketInstance.on('matchmaking_cancelled', () => {
       console.log('❌ Matchmaking cancelled');
+      isInMatchmaking = false;
+      clearState();
       toast('Search cancelled', 'success');
+      
       setTimeout(() => {
-        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/mood.html');
-        } else {
-          window.location.href = '/mood.html';
-        }
+        window.location.href = '/mood.html';
       }, 1000);
     });
 
@@ -490,53 +717,90 @@
   // ============================================
   // CANCEL MATCHMAKING
   // ============================================
+  
   function cancelMatchmaking() {
     console.log('❌ User cancelled matchmaking');
+    
+    isInMatchmaking = false;
+    clearState();
+    
     if (socketInstance && socketInstance.connected) {
       socketInstance.emit('cancel_matchmaking');
     } else {
-      // Just go back if socket not connected
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/mood.html');
-      } else {
-        window.location.href = '/mood.html';
-      }
+      window.location.href = '/mood.html';
     }
   }
 
   // ============================================
   // EVENT LISTENERS
   // ============================================
+  
   if (cancelBtn) {
     cancelBtn.addEventListener('click', cancelMatchmaking);
   }
 
+  // Setup back button handler
+  setupBackButtonHandler();
+
+  // ============================================
+  // PAGE VISIBILITY HANDLING (Android Home Button)
+  // ============================================
+  
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      console.log('📱 Page hidden (app backgrounded)');
+      // Save state - matchmaking continues in background
+      if (isInMatchmaking) {
+        saveState({ 
+          inMatchmaking: true, 
+          mood, 
+          userId: currentUser?.userId 
+        });
+      }
+    } else {
+      console.log('📱 Page visible (app foregrounded)');
+      // State is automatically preserved
+    }
+  });
+
   // ============================================
   // INITIALIZATION
   // ============================================
+  
   try {
     console.log('🚀 Initializing discovery mode...');
     
-    // Connect socket
     await initializeSocket();
     console.log('✅ Socket initialized');
 
-    // Join matchmaking
     await joinMatchmaking();
     console.log('✅ Matchmaking started');
 
   } catch (error) {
     console.error('❌ Discovery initialization error:', error);
     toast(error.message || 'Failed to connect. Please try again.', 'error');
+    clearState();
     
     setTimeout(() => {
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/mood.html');
-      } else {
-        window.location.href = '/mood.html';
-      }
+      window.location.href = '/mood.html';
     }, 2000);
   }
+
+  // ============================================
+  // CLEANUP ON NAVIGATION
+  // ============================================
+  
+  window.addEventListener('beforeunload', () => {
+    // Only clear state if explicitly leaving (not backgrounding)
+    if (!document.hidden && isInMatchmaking) {
+      console.log('🚪 Page unloading while in matchmaking - preserving state');
+      saveState({ 
+        inMatchmaking: true, 
+        mood, 
+        userId: currentUser?.userId 
+      });
+    }
+  });
 })();
 </script>
 
