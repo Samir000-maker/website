@@ -252,7 +252,19 @@
   video.className = 'hidden';
   video.autoplay = true;
   video.playsInline = true;
-  if (isSelf) video.muted = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+  
+  if (isSelf) {
+    video.muted = true;
+    video.volume = 0;
+    console.log(`🔇 Self video will be muted (userId: ${user.userId})`);
+  } else {
+    video.muted = false;
+    video.volume = 1.0;
+    console.log(`🔊 Remote video will NOT be muted (userId: ${user.userId})`);
+  }
+  
   videoContainer.appendChild(video);
   
   const pfpOverlay = document.createElement('div');
@@ -456,47 +468,91 @@
     const localVid = document.getElementById(`video-${currentUser.userId}`);
     const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
     
+    console.log(`🔧 Setting up local video element for ${currentUser.username}`);
+    console.log(`   Video element found: ${!!localVid}`);
+    console.log(`   PFP element found: ${!!localPfp}`);
+    console.log(`   LocalStream exists: ${!!localStream}`);
+    console.log(`   Video tracks: ${localStream.getVideoTracks().length}`);
+    console.log(`   Audio tracks: ${localStream.getAudioTracks().length}`);
+    
     if (localVid && localStream) {
       localVid.srcObject = localStream;
       localVid.muted = true;
       localVid.volume = 0;
       
+      console.log(`✅ Local stream attached to video element`);
+      
       if (isVideoEnabled) {
-        await localVid.play().catch(e => console.warn('Local play:', e));
-        localVid.classList.remove('hidden');
-        if (localPfp) localPfp.classList.add('hidden');
-        console.log(`📹 Local video showing for ${currentUser.username}`);
+        console.log(`📹 Attempting to show local video...`);
+        
+        // CRITICAL: Wait for video to be ready before showing
+        localVid.onloadedmetadata = () => {
+          console.log(`📹 Video metadata loaded for ${currentUser.username}`);
+          console.log(`   Video dimensions: ${localVid.videoWidth}x${localVid.videoHeight}`);
+          
+          localVid.play()
+            .then(() => {
+              console.log(`▶️ Local video playback started successfully`);
+              localVid.classList.remove('hidden');
+              if (localPfp) localPfp.classList.add('hidden');
+              console.log(`✅ Local video now visible for ${currentUser.username}`);
+            })
+            .catch(e => {
+              console.error('❌ Local video play failed:', e);
+              // Fallback: show anyway
+              localVid.classList.remove('hidden');
+              if (localPfp) localPfp.classList.add('hidden');
+            });
+        };
+        
+        // Trigger load
+        localVid.load();
         
         const btn = document.getElementById('videoBtn');
-        const icon = btn.querySelector('.material-symbols-outlined');
-        btn.classList.add('bg-primary', 'text-white');
-        btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
-        icon.textContent = 'videocam';
+        const icon = btn?.querySelector('.material-symbols-outlined');
+        if (btn && icon) {
+          btn.classList.add('bg-primary', 'text-white');
+          btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
+          icon.textContent = 'videocam';
+          console.log(`✅ Video button set to ON state`);
+        }
       } else {
-        const btn = document.getElementById('videoBtn');
-        const icon = btn.querySelector('.material-symbols-outlined');
-        btn.classList.remove('bg-primary', 'text-white');
-        btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
-        icon.textContent = 'videocam_off';
         console.log(`📹 Video disabled for ${currentUser.username}`);
+        localVid.classList.add('hidden');
+        if (localPfp) localPfp.classList.remove('hidden');
+        
+        const btn = document.getElementById('videoBtn');
+        const icon = btn?.querySelector('.material-symbols-outlined');
+        if (btn && icon) {
+          btn.classList.remove('bg-primary', 'text-white');
+          btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
+          icon.textContent = 'videocam_off';
+          console.log(`✅ Video button set to OFF state`);
+        }
       }
       
       // Update mic button
       if (isAudioEnabled) {
         const micBtn = document.getElementById('micBtn');
-        const micIcon = micBtn.querySelector('.material-symbols-outlined');
-        micBtn.classList.add('bg-primary', 'text-white');
-        micBtn.classList.remove('bg-accent-red');
-        micIcon.textContent = 'mic';
-        console.log(`🎤 Mic enabled for ${currentUser.username}`);
+        const micIcon = micBtn?.querySelector('.material-symbols-outlined');
+        if (micBtn && micIcon) {
+          micBtn.classList.add('bg-primary', 'text-white');
+          micBtn.classList.remove('bg-accent-red');
+          micIcon.textContent = 'mic';
+          console.log(`✅ Mic button set to ON state`);
+        }
       } else {
         const micBtn = document.getElementById('micBtn');
-        const micIcon = micBtn.querySelector('.material-symbols-outlined');
-        micBtn.classList.remove('bg-primary');
-        micBtn.classList.add('bg-accent-red', 'text-white');
-        micIcon.textContent = 'mic_off';
-        console.log(`🎤 Mic disabled for ${currentUser.username}`);
+        const micIcon = micBtn?.querySelector('.material-symbols-outlined');
+        if (micBtn && micIcon) {
+          micBtn.classList.remove('bg-primary');
+          micBtn.classList.add('bg-accent-red', 'text-white');
+          micIcon.textContent = 'mic_off';
+          console.log(`✅ Mic button set to OFF state`);
+        }
       }
+    } else {
+      console.error(`❌ Cannot setup local video: localVid=${!!localVid}, localStream=${!!localStream}`);
     }
     
     console.log(`✅ initLocalMedia() complete - stream ready for PeerConnection`);
