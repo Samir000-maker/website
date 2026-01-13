@@ -338,47 +338,78 @@
       }
 
       async function initLocalMedia() {
-        try {
-          console.log(`🎥 Requesting media (${callData.callType})...`);
-          const constraints = {
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            video: callData.callType === 'video' ? { width: {ideal:640}, height: {ideal:480} } : false
-          };
-          localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          console.log(`✅ Media initialized`);
-          
-          isVideoEnabled = callData.callType === 'video';
-          isAudioEnabled = true;
-          
-          const audio = localStream.getAudioTracks()[0];
-          if (audio) setupAudioDetection(currentUser.userId, localStream);
-          
-          const callIcon = document.getElementById('callIcon');
-          if (callIcon) callIcon.textContent = callData.callType === 'video' ? 'videocam' : 'graphic_eq';
-          
-          if (isVideoEnabled) {
-            const vid = document.getElementById(`video-${currentUser.userId}`);
-            const pfp = document.getElementById(`pfp-${currentUser.userId}`);
-            if (vid && localStream) {
-              vid.srcObject = localStream;
-              await vid.play().catch(e => console.warn('Play:', e));
-              vid.classList.remove('hidden');
-              if (pfp) pfp.classList.add('hidden');
-              console.log(`📹 Local video showing for ${currentUser.username}`);
-            }
-            const btn = document.getElementById('videoBtn');
-            const icon = btn.querySelector('.material-symbols-outlined');
-            btn.classList.add('bg-primary', 'text-white');
-            btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
-            icon.textContent = 'videocam';
-          }
-          return localStream;
-        } catch (e) {
-          console.error('❌ Media error:', e);
-          toast('Failed to access camera/microphone', 'error');
-          throw e;
-        }
+  try {
+    console.log(`🎥 Requesting media (${callData.callType})...`);
+    const constraints = {
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: callData.callType === 'video' ? { 
+        width: {ideal:640}, 
+        height: {ideal:480},
+        facingMode: 'user'
+      } : false
+    };
+    
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log(`✅ Media initialized with video and audio`);
+    } catch (videoError) {
+      console.warn(`⚠️ Video failed (${videoError.name}), trying audio only...`);
+      // If video fails, try audio only
+      const audioOnlyConstraints = {
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      };
+      localStream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints);
+      console.log(`✅ Media initialized with audio only`);
+      toast('Camera not available, audio-only mode', 'warning');
+    }
+    
+    isVideoEnabled = localStream.getVideoTracks().length > 0;
+    isAudioEnabled = localStream.getAudioTracks().length > 0;
+    
+    console.log(`📊 Media tracks: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
+    
+    const audio = localStream.getAudioTracks()[0];
+    if (audio) {
+      setupAudioDetection(currentUser.userId, localStream);
+      console.log(`🎤 Audio detection setup for ${currentUser.username}`);
+    }
+    
+    const callIcon = document.getElementById('callIcon');
+    if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
+    
+    if (isVideoEnabled) {
+      const vid = document.getElementById(`video-${currentUser.userId}`);
+      const pfp = document.getElementById(`pfp-${currentUser.userId}`);
+      if (vid && localStream) {
+        vid.srcObject = localStream;
+        await vid.play().catch(e => console.warn('Play:', e));
+        vid.classList.remove('hidden');
+        if (pfp) pfp.classList.add('hidden');
+        console.log(`📹 Local video showing for ${currentUser.username}`);
       }
+      const btn = document.getElementById('videoBtn');
+      const icon = btn.querySelector('.material-symbols-outlined');
+      btn.classList.add('bg-primary', 'text-white');
+      btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
+      icon.textContent = 'videocam';
+    } else {
+      // Keep video off button state
+      const btn = document.getElementById('videoBtn');
+      const icon = btn.querySelector('.material-symbols-outlined');
+      btn.classList.remove('bg-primary', 'text-white');
+      btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
+      icon.textContent = 'videocam_off';
+      console.log(`📹 Video disabled for ${currentUser.username}`);
+    }
+    
+    return localStream;
+  } catch (e) {
+    console.error('❌ Media error:', e);
+    toast('Failed to access camera/microphone. Please check permissions.', 'error');
+    throw e;
+  }
+}
 
       function createPC(userId) {
         console.log(`🔗 Creating PC for ${userId}`);
@@ -679,6 +710,13 @@
   
   await initLocalMedia();
   
+  // Emit our initial media state to the server
+  if (socketInstance) {
+    console.log(`📡 Broadcasting initial state: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
+    socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+    socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+  }
+  
   const grid = document.getElementById('participantGrid');
   if (grid) {
     console.log(`🧹 Clearing grid and tracking before render`);
@@ -694,7 +732,10 @@
     
     sortedParticipants.forEach((p, index) => {
       const isSelf = p.userId === currentUser.userId;
-      console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${p.videoEnabled} audio=${p.audioEnabled}`);
+      const videoState = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
+      const audioState = p.audioEnabled !== undefined ? p.audioEnabled : true;
+      
+      console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${videoState} audio=${audioState}`);
       
       const tile = createParticipantTile(p, isSelf);
       if (tile) {
@@ -705,7 +746,7 @@
         if (!isSelf) {
           const micIndicator = document.getElementById(`mic-${p.userId}`);
           if (micIndicator) {
-            if (p.audioEnabled === false) {
+            if (audioState === false) {
               micIndicator.classList.remove('hidden');
               console.log(`🎤 [${index}] Initial audio OFF for ${p.username}`);
             } else {
@@ -715,7 +756,6 @@
           }
           
           // CRITICAL FIX: Only create offer if our userId is "smaller" than theirs
-          // This prevents both peers from creating offers to each other
           const shouldInitiateOffer = currentUser.userId < p.userId;
           console.log(`🔗 [${index}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer} (${currentUser.userId} < ${p.userId})`);
           
@@ -744,7 +784,10 @@
 });
           
           socketInstance.on('user_joined_call', (data) => {
-  console.log(`👋 User joined: ${data.user.username} (${data.user.userId}) video:${data.user.videoEnabled} audio:${data.user.audioEnabled}`);
+  const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
+  const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
+  
+  console.log(`👋 User joined: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
   
   const grid = document.getElementById('participantGrid');
   const existingTile = document.getElementById(`participant-${data.user.userId}`);
@@ -768,7 +811,7 @@
       
       // Apply initial audio state
       const micIndicator = document.getElementById(`mic-${data.user.userId}`);
-      if (micIndicator && data.user.audioEnabled === false) {
+      if (micIndicator && audioState === false) {
         micIndicator.classList.remove('hidden');
         console.log(`🎤 New user ${data.user.username} has audio OFF`);
       }
