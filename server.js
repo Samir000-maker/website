@@ -81,7 +81,6 @@ async function generateCloudTurnCredentials() {
     return null;
   }
 }
-
 async function getIceServers() {
   const iceServers = [
     {
@@ -101,45 +100,6 @@ async function getIceServers() {
     turnServers.forEach(server => {
       iceServers.push(server);
       
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-      urls.forEach(url => {
-        const hasAuth = !!(server.username && server.credential);
-        console.log(`   📡 TURN: ${url} ${hasAuth ? '(authenticated)' : ''}`);
-      });
-    });
-    
-    console.log(`✅ ICE configuration: ${iceServers.length} server groups (STUN + TURN)`);
-  } else {
-    console.warn('⚠️ Operating with STUN-only configuration');
-    console.warn('   Direct peer-to-peer connections will work for most users');
-    console.warn('   Users behind symmetric NATs may experience connection issues');
-  }
-
-  return iceServers;
-}
-
-async function getIceServers() {
-  // Start with STUN servers (always available, no authentication needed)
-  const iceServers = [
-    {
-      urls: [
-        'stun:stun.cloudflare.com:3478',
-        'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-        'stun:stun2.l.google.com:19302'
-      ]
-    }
-  ];
-
-  // Try to add Cloudflare TURN servers
-  const turnCreds = await generateCloudTurnCredentials();
-  
-  if (turnCreds && turnCreds.iceServers && turnCreds.iceServers.ice_servers) {
-    // Add TURN servers from Cloudflare
-    turnCreds.iceServers.ice_servers.forEach(server => {
-      iceServers.push(server);
-      
-      // Log TURN server details for debugging
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
       urls.forEach(url => {
         const hasAuth = !!(server.username && server.credential);
