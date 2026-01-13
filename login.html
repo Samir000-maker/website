@@ -99,6 +99,7 @@
   (function() {
       const MoodApp = window.MoodApp || {};
       const _Auth = MoodApp.Auth;
+      const _API = MoodApp.API;
       const _Toast = MoodApp.Toast;
       const _Loading = MoodApp.Loading;
       const _PageTransition = MoodApp.PageTransition;
@@ -134,9 +135,9 @@
           }
       });
 
-      // Use API helper to get base URL
+      // Use API helper to get base URL - FIXED
       const getApiBaseUrl = () => {
-          if (_API && _API.BASE_URL) {
+          if (_API && typeof _API.BASE_URL !== 'undefined') {
               return _API.BASE_URL;
           }
           try {
@@ -243,27 +244,28 @@
                         _PageTransition.navigateTo('/mood.html');
                     } else {
                         window.location.href = '/mood.html';
-                    }}, 1000);
-}
-// New user - redirect to username page
-else {
-toastSuccess('Please complete your profile setup');
-setTimeout(() => {
-if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-_PageTransition.navigateTo('/username.html');
-} else {
-window.location.href = '/username.html';
-}
-}, 1000);
-}
-} catch (error) {
-loadingHide();
-console.error('Google sign in error:', error);
-toastError(error?.message || 'Failed to sign in with Google');
-}
-});
-}
-})();
+                    }
+                }, 1000);
+            } 
+            // New user - redirect to username page
+            else {
+                toastSuccess('Please complete your profile setup');
+                setTimeout(() => {
+                    if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                        _PageTransition.navigateTo('/username.html');
+                    } else {
+                        window.location.href = '/username.html';
+                    }
+                }, 1000);
+            }
+          } catch (error) {
+            loadingHide();
+            console.error('Google sign in error:', error);
+            toastError(error?.message || 'Failed to sign in with Google');
+          }
+        });
+      }
+  })();
 </script>
 </body>
 </html>
