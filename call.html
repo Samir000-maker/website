@@ -667,7 +667,12 @@
           
           socketInstance.on('call_joined', async (data) => {
   console.log(`✅ Joined: ${data.participants.length} participants`);
-  console.log('Participants:', data.participants.map(p => `${p.username} (${p.userId}) - video:${p.videoEnabled}, audio:${p.audioEnabled}`).join(', '));
+  console.log('🔍 Full participant data:', JSON.stringify(data.participants.map(p => ({
+    userId: p.userId,
+    username: p.username,
+    videoEnabled: p.videoEnabled,
+    audioEnabled: p.audioEnabled
+  })), null, 2));
   
   const subtitle = document.getElementById('callSubtitle');
   if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
@@ -682,7 +687,12 @@
     
     console.log(`📋 Rendering ${data.participants.length} tiles`);
     
-    data.participants.forEach((p, index) => {
+    // Sort participants to ensure consistent ordering
+    const sortedParticipants = [...data.participants].sort((a, b) => 
+      a.userId.localeCompare(b.userId)
+    );
+    
+    sortedParticipants.forEach((p, index) => {
       const isSelf = p.userId === currentUser.userId;
       console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${p.videoEnabled} audio=${p.audioEnabled}`);
       
@@ -691,29 +701,32 @@
         grid.appendChild(tile);
         console.log(`✅ [${index}] Tile added to DOM for ${p.username}`);
         
-        // Apply initial video/audio state for remote users
+        // Apply initial audio state for remote users
         if (!isSelf) {
           const micIndicator = document.getElementById(`mic-${p.userId}`);
           if (micIndicator) {
             if (p.audioEnabled === false) {
               micIndicator.classList.remove('hidden');
-              console.log(`🎤 [${index}] Audio OFF for ${p.username}`);
+              console.log(`🎤 [${index}] Initial audio OFF for ${p.username}`);
             } else {
               micIndicator.classList.add('hidden');
-              console.log(`🎤 [${index}] Audio ON for ${p.username}`);
+              console.log(`🎤 [${index}] Initial audio ON for ${p.username}`);
             }
           }
           
-          // Video state will be handled by WebRTC track events
-          console.log(`📹 [${index}] Initial video state for ${p.username}: ${p.videoEnabled ? 'ON' : 'OFF'}`);
-        }
-        
-        // Create WebRTC connection for remote users
-        if (!isSelf) {
-          setTimeout(() => {
-            console.log(`🔗 [${index}] Creating offer for ${p.username} (${p.userId})`);
-            createOffer(p.userId);
-          }, 500);
+          // CRITICAL FIX: Only create offer if our userId is "smaller" than theirs
+          // This prevents both peers from creating offers to each other
+          const shouldInitiateOffer = currentUser.userId < p.userId;
+          console.log(`🔗 [${index}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer} (${currentUser.userId} < ${p.userId})`);
+          
+          if (shouldInitiateOffer) {
+            setTimeout(() => {
+              console.log(`📤 [${index}] INITIATING offer to ${p.username} (${p.userId})`);
+              createOffer(p.userId);
+            }, 500);
+          } else {
+            console.log(`⏸️ [${index}] WAITING for offer from ${p.username} (${p.userId})`);
+          }
         }
       } else {
         console.error(`❌ [${index}] Tile creation returned null for ${p.username}`);
@@ -760,10 +773,18 @@
         console.log(`🎤 New user ${data.user.username} has audio OFF`);
       }
       
-      setTimeout(() => {
-        console.log(`🔗 Creating WebRTC offer for new participant ${data.user.username}`);
-        createOffer(data.user.userId);
-      }, 500);
+      // CRITICAL FIX: Only create offer if we should be the initiator
+      const shouldInitiateOffer = currentUser.userId < data.user.userId;
+      console.log(`🔗 Offer decision for new user ${data.user.username}: shouldInitiate=${shouldInitiateOffer}`);
+      
+      if (shouldInitiateOffer) {
+        setTimeout(() => {
+          console.log(`📤 INITIATING offer to new user ${data.user.username}`);
+          createOffer(data.user.userId);
+        }, 500);
+      } else {
+        console.log(`⏸️ WAITING for offer from new user ${data.user.username}`);
+      }
     }
   }
   
