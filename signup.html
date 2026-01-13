@@ -90,7 +90,7 @@
 
     <script src="app.js"></script>
 
-    <script>
+<script>
     (function() {
         const MoodApp = window.MoodApp || {};
         const _Auth = MoodApp.Auth;
@@ -124,14 +124,47 @@
             console.error('Firebase init error:', error);
         }
 
+        // Flag to prevent auto-redirect during Google sign-in flow
+        let isGoogleSignInInProgress = false;
+
         // Check if user is already logged in
         firebase.auth().onAuthStateChanged(async (user) => {
-            if (user) {
-                console.log('User already signed in, redirecting...');
-                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                    _PageTransition.navigateTo('/mood.html');
-                } else {
-                    window.location.href = '/mood.html';
+            // Don't auto-redirect if Google sign-in is in progress
+            if (user && !isGoogleSignInInProgress) {
+                console.log('User already signed in, checking profile...');
+                
+                try {
+                    const idToken = await user.getIdToken();
+                    const apiBaseUrl = getApiBaseUrl();
+                    
+                    const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${idToken}`
+                        }
+                    });
+
+                    const checkData = await checkResponse.json();
+                    
+                    // Only redirect if user has completed profile
+                    if (checkData.exists && checkData.hasUsername) {
+                        console.log('User has profile, redirecting to mood...');
+                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                            _PageTransition.navigateTo('/mood.html');
+                        } else {
+                            window.location.href = '/mood.html';
+                        }
+                    } else {
+                        console.log('User profile incomplete, redirecting to username...');
+                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                            _PageTransition.navigateTo('/username.html');
+                        } else {
+                            window.location.href = '/username.html';
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking profile:', error);
                 }
             }
         });
@@ -151,7 +184,7 @@
             if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
         };
 
-        // Use API helper to get base URL - FIXED
+        // Use API helper to get base URL
         const getApiBaseUrl = () => {
             if (_API && typeof _API.BASE_URL !== 'undefined') {
                 return _API.BASE_URL;
@@ -227,6 +260,7 @@
 
         if (googleBtn) {
             googleBtn.addEventListener('click', async () => {
+                isGoogleSignInInProgress = true; // Set flag to prevent auto-redirect
                 loadingShow('Signing in with Google...');
 
                 try {
@@ -256,6 +290,7 @@
                     }
 
                     loadingHide();
+                    isGoogleSignInInProgress = false; // Reset flag
 
                     // If user profile exists (existing user), go to mood.html
                     if (checkData.exists && checkData.hasUsername) {
@@ -281,6 +316,7 @@
                     }
                 } catch (error) {
                     loadingHide();
+                    isGoogleSignInInProgress = false; // Reset flag on error
                     console.error('Google sign in error:', error);
                     toastError(error?.message || 'Failed to sign in with Google');
                 }
