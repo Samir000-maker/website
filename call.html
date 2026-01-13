@@ -379,48 +379,58 @@
       
       let ICE_SERVERS = null;
 
-      async function fetchIceServers() {
-        try {
-          debugLog('Fetching ICE servers from backend...', 'info');
-          const response = await _API.get('/api/ice-servers');
-          ICE_SERVERS = response.iceServers;
+async function fetchIceServers() {
+  try {
+    debugLog('Fetching ICE servers from backend...', 'info');
+    const response = await _API.get('/api/ice-servers');
+    ICE_SERVERS = response.iceServers;
+    
+    debugLog(`ICE servers loaded: ${ICE_SERVERS.length} server groups`, 'success');
+    ICE_SERVERS.forEach((server, idx) => {
+      if (server.urls) {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        urls.forEach(url => {
+          const hasCredentials = !!(server.username && server.credential);
+          let serverType = 'UNKNOWN';
           
-          debugLog(`ICE servers loaded: ${ICE_SERVERS.length} configurations`, 'success');
-          ICE_SERVERS.forEach((server, idx) => {
-            if (server.urls) {
-              const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-              urls.forEach(url => {
-                const hasCredentials = !!(server.username && server.credential);
-                const serverType = url.startsWith('turn:') ? 'TURN' : 'STUN';
-                debugLog(`  [${idx}] ${serverType}: ${url} ${hasCredentials ? '(authenticated)' : ''}`, 'info');
-              });
-            }
-          });
+          if (url.startsWith('stun:')) {
+            serverType = 'STUN';
+          } else if (url.startsWith('turn:')) {
+            serverType = 'TURN';
+          } else if (url.startsWith('turns:')) {
+            serverType = 'TURNS';
+          }
           
-          return ICE_SERVERS;
-        } catch (error) {
-          debugLog(`Failed to fetch ICE servers: ${error.message}`, 'error');
-          
-          ICE_SERVERS = [
-            {
-              urls: [
-                'stun:stun.cloudflare.com:3478',
-                'stun:stun.l.google.com:19302',
-                'stun:stun1.l.google.com:19302'
-              ]
-            }
-          ];
-          debugLog('Using fallback STUN-only configuration', 'warning');
-          return ICE_SERVERS;
-        }
+          debugLog(`  [${idx}] ${serverType}: ${url} ${hasCredentials ? '(authenticated)' : ''}`, 'info');
+        });
       }
+    });
+    
+    return ICE_SERVERS;
+  } catch (error) {
+    debugLog(`Failed to fetch ICE servers: ${error.message}`, 'error');
+    
+    // Fallback to Google's public STUN servers
+    ICE_SERVERS = [
+      {
+        urls: [
+          'stun:stun.cloudflare.com:3478',
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302'
+        ]
+      }
+    ];
+    debugLog('Using fallback STUN-only configuration', 'warning');
+    return ICE_SERVERS;
+  }
+}
 
       const PEER_CONNECTION_CONFIG = {
-        iceCandidatePoolSize: 10,
-        iceTransportPolicy: 'all',
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
-      };
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all', // CRITICAL: 'all' allows natural prioritization
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require'
+};
 
       let localStream = null;
       let peerConnections = new Map();
@@ -666,167 +676,238 @@
       }
 
       function createPeerConnection(userId) {
-        debugLog(`Creating peer connection for user: ${userId}`, 'info');
-        
-        const config = {
-          ...PEER_CONNECTION_CONFIG,
-          iceServers: ICE_SERVERS
-        };
-        
-        const pc = new RTCPeerConnection(config);
-        
-        connectionStats.set(userId, {
-          startTime: Date.now(),
-          iceState: 'new',
-          connectionState: 'new',
-          candidatesReceived: 0,
-          candidatesSent: 0,
-          selectedCandidate: null
-        });
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-            debugLog(`Added local ${track.kind} track to connection with ${userId}`, 'info');
-          });
-        }
-        
-        pc.ontrack = (event) => {
-          debugLog(`Received remote ${event.track.kind} from ${userId}`, 'success');
-          const remoteVideo = document.getElementById(`video-${userId}`);
-          const remotePfp = document.getElementById(`pfp-${userId}`);
-          
-          if (remoteVideo) {
-            if (!remoteVideo.srcObject) {
-              remoteVideo.srcObject = new MediaStream();
-            }
-            remoteVideo.srcObject.addTrack(event.track);
-            remoteVideo.play().catch(e => debugLog(`Remote video play warning: ${e.message}`, 'warning'));
-            
-            if (event.track.kind === 'video') {
-              event.track.onunmute = () => {
-                debugLog(`Video track unmuted for ${userId}`, 'info');
-                remoteVideo.classList.remove('hidden');
-                if (remotePfp) remotePfp.classList.add('hidden');
-              };
-            } else if (event.track.kind === 'audio') {
-              // Setup audio level detection for remote stream
-              const stream = new MediaStream([event.track]);
-              setupAudioLevelDetection(userId, stream);
-            }
-          }
-        };
-        
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            const stats = connectionStats.get(userId);
-            stats.candidatesSent++;
-            
-            const c = event.candidate;
-            debugLog(`ICE candidate for ${userId}: type=${c.type}, protocol=${c.protocol}`, 'info');
-            
-            socketInstance.emit('ice_candidate', {
-              callId: callData.callId,
-              targetUserId: userId,
-              candidate: c
-            });
-          } else {
-            debugLog(`ICE gathering completed for ${userId}`, 'success');
-          }
-        };
-        
-        pc.onicegatheringstatechange = () => {
-          const state = pc.iceGatheringState;
-          debugLog(`ICE gathering state for ${userId}: ${state}`, 'info');
-          connectionStats.get(userId).iceGatheringState = state;
-        };
-        
-        pc.onconnectionstatechange = () => {
-          const state = pc.connectionState;
-          const stats = connectionStats.get(userId);
-          stats.connectionState = state;
-          
-          debugLog(`Connection state with ${userId}: ${state}`, state === 'connected' ? 'success' : state === 'failed' ? 'error' : 'info');
-          
-          const statusEl = document.getElementById(`status-${userId}`);
-          const callSubtitle = document.getElementById('callSubtitle');
-          
-          if (statusEl) {
-            switch (state) {
-              case 'connected':
-                statusEl.textContent = 'Connected';
-                statusEl.className = 'text-primary text-xs sm:text-sm font-semibold uppercase tracking-wider';
-                
-                // Update subtitle
-                if (callSubtitle) {
-                  const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1; // +1 for self
-                  callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
-                }
-                
-                pc.getStats().then(stats => {
-                  stats.forEach(report => {
-                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                      const localCandidate = stats.get(report.localCandidateId);
-                      if (localCandidate) {
-                        debugLog(`Selected candidate for ${userId}: ${localCandidate.candidateType}`, 'success');
-                        connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
-                        updateConnectionQuality();
-                        
-                        socketInstance.emit('connection_state_update', {
-                          callId: callData.callId,
-                          state: 'connected',
-                          candidateType: localCandidate.candidateType
-                        });
-                      }
-                    }
-                  });
-                });
-                break;
-              case 'connecting':
-                statusEl.textContent = 'Connecting...';
-                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
-                break;
-              case 'disconnected':
-                statusEl.textContent = 'Reconnecting...';
-                statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
-                break;
-              case 'failed':
-                debugLog(`Connection failed with ${userId} - attempting ICE restart`, 'error');
-                statusEl.textContent = 'Connection failed';
-                statusEl.className = 'text-red-500 text-xs sm:text-sm';
-                setTimeout(() => {
-                  if (pc.connectionState === 'failed') {
-                    debugLog(`Restarting ICE for ${userId}`, 'warning');
-                    pc.restartIce();
-                  }
-                }, 1000);
-                socketInstance.emit('connection_state_update', {
-                  callId: callData.callId,
-                  state: 'failed'
-                });
-                break;
-              case 'closed':
-                statusEl.textContent = 'Disconnected';
-                statusEl.className = 'text-slate-500 text-xs sm:text-sm';
-                break;
-            }
-          }
-        };
-        
-        pc.oniceconnectionstatechange = () => {
-          const state = pc.iceConnectionState;
-          debugLog(`ICE connection state with ${userId}: ${state}`, 'info');
-          connectionStats.get(userId).iceState = state;
-          
-          if (state === 'failed') {
-            debugLog(`ICE connection failed with ${userId} - attempting restart`, 'error');
-            pc.restartIce();
-          }
-        };
-        
-        peerConnections.set(userId, pc);
-        return pc;
+  debugLog(`Creating peer connection for user: ${userId}`, 'info');
+  
+  const config = {
+    ...PEER_CONNECTION_CONFIG,
+    iceServers: ICE_SERVERS
+  };
+  
+  const pc = new RTCPeerConnection(config);
+  
+  connectionStats.set(userId, {
+    startTime: Date.now(),
+    iceState: 'new',
+    connectionState: 'new',
+    candidatesReceived: 0,
+    candidatesSent: 0,
+    selectedCandidate: null,
+    candidateTypes: {
+      host: 0,
+      srflx: 0,
+      relay: 0
+    }
+  });
+  
+  if (localStream) {
+    localStream.getTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+      debugLog(`Added local ${track.kind} track to connection with ${userId}`, 'info');
+    });
+  }
+  
+  pc.ontrack = (event) => {
+    debugLog(`Received remote ${event.track.kind} from ${userId}`, 'success');
+    const remoteVideo = document.getElementById(`video-${userId}`);
+    const remotePfp = document.getElementById(`pfp-${userId}`);
+    
+    if (remoteVideo) {
+      if (!remoteVideo.srcObject) {
+        remoteVideo.srcObject = new MediaStream();
       }
+      remoteVideo.srcObject.addTrack(event.track);
+      remoteVideo.play().catch(e => debugLog(`Remote video play warning: ${e.message}`, 'warning'));
+      
+      if (event.track.kind === 'video') {
+        event.track.onunmute = () => {
+          debugLog(`Video track unmuted for ${userId}`, 'info');
+          remoteVideo.classList.remove('hidden');
+          if (remotePfp) remotePfp.classList.add('hidden');
+        };
+      } else if (event.track.kind === 'audio') {
+        // Setup audio level detection for remote stream
+        const stream = new MediaStream([event.track]);
+        setupAudioLevelDetection(userId, stream);
+      }
+    }
+  };
+  
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      const stats = connectionStats.get(userId);
+      stats.candidatesSent++;
+      
+      const c = event.candidate;
+      
+      // Track candidate types
+      if (c.type === 'host') stats.candidateTypes.host++;
+      else if (c.type === 'srflx') stats.candidateTypes.srflx++;
+      else if (c.type === 'relay') stats.candidateTypes.relay++;
+      
+      debugLog(`ICE candidate for ${userId}: type=${c.type}, protocol=${c.protocol}, priority=${c.priority}`, 'info');
+      
+      socketInstance.emit('ice_candidate', {
+        callId: callData.callId,
+        targetUserId: userId,
+        candidate: c
+      });
+    } else {
+      debugLog(`ICE gathering completed for ${userId}`, 'success');
+      const stats = connectionStats.get(userId);
+      debugLog(`  Candidates sent - host: ${stats.candidateTypes.host}, srflx: ${stats.candidateTypes.srflx}, relay: ${stats.candidateTypes.relay}`, 'info');
+    }
+  };
+  
+  pc.onicegatheringstatechange = () => {
+    const state = pc.iceGatheringState;
+    debugLog(`ICE gathering state for ${userId}: ${state}`, 'info');
+    connectionStats.get(userId).iceGatheringState = state;
+  };
+  
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    const stats = connectionStats.get(userId);
+    stats.connectionState = state;
+    
+    debugLog(`Connection state with ${userId}: ${state}`, state === 'connected' ? 'success' : state === 'failed' ? 'error' : 'info');
+    
+    const statusEl = document.getElementById(`status-${userId}`);
+    const callSubtitle = document.getElementById('callSubtitle');
+    
+    if (statusEl) {
+      switch (state) {
+        case 'connected':
+          statusEl.textContent = 'Connected';
+          statusEl.className = 'text-primary text-xs sm:text-sm font-semibold uppercase tracking-wider';
+          
+          // Update subtitle
+          if (callSubtitle) {
+            const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
+            callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
+          }
+          
+          // Get the selected candidate pair to determine connection type
+          pc.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                const localCandidate = stats.get(report.localCandidateId);
+                const remoteCandidate = stats.get(report.remoteCandidateId);
+                
+                if (localCandidate) {
+                  const candidateType = localCandidate.candidateType;
+                  debugLog(`✅ Selected candidate for ${userId}: ${candidateType}`, 'success');
+                  connectionStats.get(userId).selectedCandidate = candidateType;
+                  updateConnectionQuality();
+                  
+                  // Notify server of connection type for metrics
+                  socketInstance.emit('connection_state_update', {
+                    callId: callData.callId,
+                    state: 'connected',
+                    candidateType: candidateType
+                  });
+                  
+                  // Log full connection details
+                  debugLog(`📊 Connection details:`, 'info');
+                  debugLog(`   Local: ${localCandidate.candidateType} ${localCandidate.ip}:${localCandidate.port}`, 'info');
+                  if (remoteCandidate) {
+                    debugLog(`   Remote: ${remoteCandidate.candidateType} ${remoteCandidate.ip}:${remoteCandidate.port}`, 'info');
+                  }
+                }
+              }
+            });
+          });
+          break;
+        case 'connecting':
+          statusEl.textContent = 'Connecting...';
+          statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
+          break;
+        case 'disconnected':
+          statusEl.textContent = 'Reconnecting...';
+          statusEl.className = 'text-yellow-500 text-xs sm:text-sm';
+          break;
+        case 'failed':
+          debugLog(`❌ Connection failed with ${userId} - attempting ICE restart`, 'error');
+          statusEl.textContent = 'Connection failed';
+          statusEl.className = 'text-red-500 text-xs sm:text-sm';
+          
+          // Wait a moment before ICE restart to avoid rapid cycling
+          setTimeout(() => {
+            if (pc.connectionState === 'failed') {
+              debugLog(`🔄 Restarting ICE for ${userId}`, 'warning');
+              pc.restartIce();
+            }
+          }, 1000);
+          
+          socketInstance.emit('connection_state_update', {
+            callId: callData.callId,
+            state: 'failed'
+          });
+          break;
+        case 'closed':
+          statusEl.textContent = 'Disconnected';
+          statusEl.className = 'text-slate-500 text-xs sm:text-sm';
+          break;
+      }
+    }
+  };
+  
+  pc.oniceconnectionstatechange = () => {
+    const state = pc.iceConnectionState;
+    debugLog(`ICE connection state with ${userId}: ${state}`, 'info');
+    connectionStats.get(userId).iceState = state;
+    
+    if (state === 'failed') {
+      debugLog(`❌ ICE connection failed with ${userId} - attempting restart`, 'error');
+      // ICE restart will be triggered by connection state handler
+    }
+  };
+  
+  peerConnections.set(userId, pc);
+  return pc;
+}
+
+function updateConnectionQuality() {
+  const qualityEl = document.getElementById('connectionQuality');
+  if (!qualityEl) return;
+  
+  let hasRelay = false;
+  let hasSrflx = false;
+  let hasHost = false;
+  let connectedCount = 0;
+  
+  connectionStats.forEach((stats, userId) => {
+    if (stats.connectionState === 'connected') {
+      connectedCount++;
+      if (stats.selectedCandidate === 'relay') hasRelay = true;
+      else if (stats.selectedCandidate === 'srflx') hasSrflx = true;
+      else if (stats.selectedCandidate === 'host') hasHost = true;
+    }
+  });
+  
+  let quality = 'Unknown';
+  let bgClass = 'bg-gray-200 dark:bg-gray-700';
+  let tooltip = '';
+  
+  if (connectedCount > 0) {
+    if (hasRelay) {
+      quality = 'TURN';
+      bgClass = 'bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100';
+      tooltip = 'Using TURN relay (higher latency)';
+    } else if (hasSrflx) {
+      quality = 'P2P/STUN';
+      bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
+      tooltip = 'Peer-to-peer via STUN (optimal)';
+    } else if (hasHost) {
+      quality = 'Direct';
+      bgClass = 'bg-green-200 dark:bg-green-800 text-green-900 dark:text-green-100';
+      tooltip = 'Direct connection (best)';
+    }
+  }
+  
+  qualityEl.textContent = quality;
+  qualityEl.className = `text-[10px] sm:text-xs px-1.5 sm:px-2 py-1 rounded ${bgClass}`;
+  qualityEl.title = tooltip;
+}
 
       function updateConnectionQuality() {
         const qualityEl = document.getElementById('connectionQuality');
