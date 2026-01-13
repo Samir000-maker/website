@@ -37,7 +37,6 @@
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
         
-        /* Active speaker highlight - CRITICAL */
         .active-speaker {
             box-shadow: 0 0 0 3px #33bfcc, 0 0 15px rgba(51, 191, 204, 0.4) !important;
             border-color: #33bfcc !important;
@@ -48,7 +47,7 @@
             overscroll-behavior: none;
         }
         
-        /* CRITICAL: Square aspect ratio for tiles */
+        /* CRITICAL: Square tiles */
         .video-tile {
             position: relative;
             background: #000;
@@ -58,14 +57,11 @@
             transition: all 0.3s ease;
         }
         
-        .video-feed {
+        .video-container {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
         
         video {
@@ -76,7 +72,7 @@
             object-fit: cover;
         }
         
-        .profile-picture-container {
+        .pfp-overlay {
             position: absolute;
             inset: 0;
             display: flex;
@@ -85,7 +81,7 @@
             background: #000;
         }
         
-        /* Grid layout: 3 columns, auto rows */
+        /* Grid: 3 columns */
         .participant-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -95,14 +91,12 @@
             margin: 0 auto;
         }
         
-        /* Responsive: 2 columns on tablet */
         @media (max-width: 1024px) {
             .participant-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
         }
         
-        /* Responsive: 1 column on mobile */
         @media (max-width: 640px) {
             .participant-grid {
                 grid-template-columns: 1fr;
@@ -112,14 +106,13 @@
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
-    <!-- Header -->
     <header class="w-full border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
         <div class="flex items-center gap-4">
             <div class="bg-primary/20 p-2 rounded-lg">
                 <span class="material-symbols-outlined text-primary" id="callIcon">videocam</span>
             </div>
             <div>
-                <h1 class="text-lg font-bold tracking-tight" id="callTitle">Mindful Space Call</h1>
+                <h1 class="text-lg font-bold tracking-tight" id="callTitle">Video Call</h1>
                 <p class="text-xs text-slate-500 dark:text-slate-400" id="callSubtitle">Connecting...</p>
             </div>
         </div>
@@ -131,26 +124,17 @@
                 </span>
                 <span class="text-sm font-bold font-mono" id="callDuration">00:00:00</span>
             </div>
-            <button class="p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors">
-                <span class="material-symbols-outlined">settings</span>
-            </button>
-            <button class="p-2 hover:bg-slate-200 dark:hover:bg-surface-dark rounded-lg transition-colors">
-                <span class="material-symbols-outlined">group</span>
-            </button>
         </div>
     </header>
 
-    <!-- Main Content: Participant Grid -->
     <main class="flex-1 overflow-y-auto p-4 md:p-6">
         <div id="participantGrid" class="participant-grid">
-            <!-- Participant tiles will be dynamically generated here -->
+            <!-- Tiles will be added here -->
         </div>
     </main>
 
-    <!-- Bottom Persistent Control Bar -->
     <footer class="w-full p-6 flex justify-center sticky bottom-0 z-20">
         <div class="bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800 p-2.5 flex items-center gap-2">
-            <!-- Standard Controls -->
             <div class="flex items-center gap-2 px-2 border-r border-slate-200 dark:border-slate-800">
                 <button id="micBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-white hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary/20">
                     <span class="material-symbols-outlined">mic</span>
@@ -158,20 +142,15 @@
                 <button id="videoBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
                     <span class="material-symbols-outlined">videocam_off</span>
                 </button>
-                <button id="screenShareBtn" class="w-12 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
-                    <span class="material-symbols-outlined">screen_share</span>
-                </button>
             </div>
             
-            <!-- Mood Control -->
             <div class="flex items-center gap-2 px-2">
                 <button id="moodBtn" class="flex items-center gap-2 px-4 h-12 rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all">
-                    <span class="text-xl" id="currentMoodEmoji">😊</span>
+                    <span class="text-xl">😊</span>
                     <span class="text-sm font-bold">Update Mood</span>
                 </button>
             </div>
             
-            <!-- Leave Button -->
             <div class="pl-2 border-l border-slate-200 dark:border-slate-800">
                 <button id="leaveCallBtn" class="flex items-center gap-2 px-6 h-12 rounded-xl bg-accent-red text-white hover:brightness-110 shadow-lg shadow-accent-red/30 transition-all active:scale-95">
                     <span class="material-symbols-outlined font-bold">call_end</span>
@@ -181,10 +160,8 @@
         </div>
     </footer>
 
-    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
@@ -195,17 +172,10 @@
         appId: "1:64611387728:web:2e53a18151ab3de1b60455",
         measurementId: "G-0Z91D0Q6EE"
       };
-
-      if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-      }
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
       firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     </script>
-
-    <!-- Socket.IO -->
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-
-    <!-- App -->
     <script src="app.js"></script>
 
     <script>
@@ -214,430 +184,269 @@
       const _Auth = MoodApp.Auth;
       const _API = MoodApp.API;
       const _Toast = MoodApp.Toast;
-
       const toast = (m, t='success') => { 
         if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
         console[t==='error'?'error':'log'](m); 
       };
 
-      // ============================================
-      // ICE CONFIGURATION
-      // ============================================
-      
       let ICE_SERVERS = null;
-
       async function fetchIceServers() {
         try {
-          console.log('📡 Fetching ICE servers...');
           const response = await _API.get('/api/ice-servers');
           ICE_SERVERS = response.iceServers;
-          console.log(`✅ ICE servers loaded: ${ICE_SERVERS.length} groups`);
+          console.log(`✅ ICE servers loaded`);
           return ICE_SERVERS;
         } catch (error) {
-          console.error('❌ Failed to fetch ICE servers:', error);
-          ICE_SERVERS = [
-            {
-              urls: [
-                'stun:stun.cloudflare.com:3478',
-                'stun:stun.l.google.com:19302',
-                'stun:stun1.l.google.com:19302'
-              ]
-            }
-          ];
-          console.warn('⚠️ Using fallback STUN-only configuration');
+          console.error('❌ ICE servers failed:', error);
+          ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
           return ICE_SERVERS;
         }
       }
 
-      const PEER_CONNECTION_CONFIG = {
-        iceCandidatePoolSize: 10,
-        iceTransportPolicy: 'all',
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
-      };
+      const PEER_CONNECTION_CONFIG = { iceCandidatePoolSize: 10, iceTransportPolicy: 'all', bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' };
+      let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
+      let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
+      let callStartTime = null, durationInterval = null, isInitializing = false, hasJoinedCall = false;
+      let pendingIceCandidates = new Map(), connectionStats = new Map();
 
-      let localStream = null;
-      let peerConnections = new Map();
-      let audioContexts = new Map();
-      let socketInstance = null;
-      let callData = null;
-      let currentUser = null;
-      let isAudioEnabled = true;
-      let isVideoEnabled = false;
-      let callStartTime = null;
-      let durationInterval = null;
-      let isInitializing = false;
-      let hasJoinedCall = false;
-      let pendingIceCandidates = new Map();
-      
-      const connectionStats = new Map();
-
-      function createProfilePictureElement(pfpUrl, username) {
+      function createProfilePicture(pfpUrl, username) {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
-        const container = document.createElement('div');
-        container.className = 'w-20 h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30 flex-shrink-0';
-        
+        const div = document.createElement('div');
+        div.className = 'w-20 h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30';
         if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
           const img = document.createElement('img');
           img.src = pfpUrl;
           img.alt = username;
-          img.className = 'h-full w-full object-cover';
-          img.onerror = function() {
-            this.onerror = null;
-            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`;
-          };
-          container.appendChild(img);
+          img.className = 'w-full h-full object-cover';
+          img.onerror = () => { div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`; };
+          div.appendChild(img);
         } else {
-          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`;
+          div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`;
         }
-        
-        return container;
+        return div;
       }
 
       function createParticipantTile(user, isSelf = false) {
+        console.log(`🎨 Creating tile for ${user.username} (isSelf: ${isSelf})`);
         const tile = document.createElement('div');
         tile.id = `participant-${user.userId}`;
-        tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'} group hover:border-white/20`;
+        tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'}`;
         
-        // Video feed container
-        const videoFeed = document.createElement('div');
-        videoFeed.className = 'video-feed';
+        // Video container
+        const videoContainer = document.createElement('div');
+        videoContainer.className = 'video-container';
         
-        // Video element (hidden by default)
-        const videoElement = document.createElement('video');
-        videoElement.id = `video-${user.userId}`;
-        videoElement.className = 'hidden';
-        videoElement.autoplay = true;
-        videoElement.playsInline = true;
-        if (isSelf) {
-          videoElement.muted = true;
-        }
-        videoFeed.appendChild(videoElement);
+        // Video element
+        const video = document.createElement('video');
+        video.id = `video-${user.userId}`;
+        video.className = 'hidden';
+        video.autoplay = true;
+        video.playsInline = true;
+        if (isSelf) video.muted = true;
+        videoContainer.appendChild(video);
         
-        // Profile picture container (shown by default)
-        const pfpContainer = document.createElement('div');
-        pfpContainer.id = `pfp-container-${user.userId}`;
-        pfpContainer.className = 'profile-picture-container';
-        const pfpElement = createProfilePictureElement(user.pfpUrl, user.username);
-        pfpContainer.appendChild(pfpElement);
-        videoFeed.appendChild(pfpContainer);
+        // Profile picture overlay
+        const pfpOverlay = document.createElement('div');
+        pfpOverlay.id = `pfp-${user.userId}`;
+        pfpOverlay.className = 'pfp-overlay';
+        pfpOverlay.appendChild(createProfilePicture(user.pfpUrl, user.username));
+        videoContainer.appendChild(pfpOverlay);
         
-        tile.appendChild(videoFeed);
+        tile.appendChild(videoContainer);
         
-        // Bottom label
-        const labelContainer = document.createElement('div');
-        labelContainer.className = 'absolute bottom-4 left-4 flex items-center gap-2 z-10';
-        
+        // Label
         const label = document.createElement('div');
-        label.className = `${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-3 py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-2`;
-        label.innerHTML = `
+        label.className = 'absolute bottom-4 left-4 z-10';
+        label.innerHTML = `<div class="${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-3 py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-2">
           <span class="text-white text-sm font-semibold">${isSelf ? 'You' : user.username}</span>
           <span class="text-lg">😊</span>
-        `;
-        labelContainer.appendChild(label);
-        tile.appendChild(labelContainer);
+        </div>`;
+        tile.appendChild(label);
         
-        // Speaking indicator (top right)
-        const speakingIndicator = document.createElement('div');
-        speakingIndicator.id = `speaking-${user.userId}`;
-        speakingIndicator.className = 'absolute top-4 right-4 bg-primary px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-widest hidden z-10';
-        speakingIndicator.textContent = 'Speaking';
-        tile.appendChild(speakingIndicator);
+        // Speaking indicator
+        const speaking = document.createElement('div');
+        speaking.id = `speaking-${user.userId}`;
+        speaking.className = 'absolute top-4 right-4 bg-primary px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase hidden z-10';
+        speaking.textContent = 'SPEAKING';
+        tile.appendChild(speaking);
         
-        // Mic muted indicator (top right, shown when speaking indicator is hidden)
-        const micIndicator = document.createElement('div');
-        micIndicator.id = `mic-${user.userId}`;
-        micIndicator.className = 'absolute top-4 right-4 bg-accent-red p-1.5 rounded-full text-white shadow-lg hidden z-10';
-        micIndicator.innerHTML = '<span class="material-symbols-outlined text-[16px] block">mic_off</span>';
-        tile.appendChild(micIndicator);
+        // Mic indicator
+        const micOff = document.createElement('div');
+        micOff.id = `mic-${user.userId}`;
+        micOff.className = 'absolute top-4 right-4 bg-accent-red p-1.5 rounded-full text-white shadow-lg hidden z-10';
+        micOff.innerHTML = '<span class="material-symbols-outlined text-[16px]">mic_off</span>';
+        tile.appendChild(micOff);
         
         if (isSelf) {
-          const selfOverlay = document.createElement('div');
-          selfOverlay.className = 'absolute inset-0 bg-primary/5 pointer-events-none';
-          tile.appendChild(selfOverlay);
+          const overlay = document.createElement('div');
+          overlay.className = 'absolute inset-0 bg-primary/5 pointer-events-none';
+          tile.appendChild(overlay);
         }
         
+        console.log(`✅ Tile created for ${user.username}`);
         return tile;
       }
 
-      // Audio level detection for speaking indicator
-      function setupAudioLevelDetection(userId, stream) {
+      function setupAudioDetection(userId, stream) {
         try {
           const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const audioSource = audioContext.createMediaStreamSource(stream);
+          const source = audioContext.createMediaStreamSource(stream);
           const analyser = audioContext.createAnalyser();
           analyser.fftSize = 256;
-          audioSource.connect(analyser);
-          
+          source.connect(analyser);
           const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const speakingIndicator = document.getElementById(`speaking-${userId}`);
-          const participantTile = document.getElementById(`participant-${userId}`);
+          let isSpeaking = false, lastSpeakTime = 0;
           
-          let isSpeaking = false;
-          const SPEAKING_THRESHOLD = 30;
-          const SPEAKING_TIMEOUT = 300;
-          let lastSpeakingTime = 0;
-          
-          function detectSpeaking() {
-            if (!speakingIndicator || !participantTile) {
-              audioContext.close();
-              return;
-            }
+          function detect() {
+            const speaking = document.getElementById(`speaking-${userId}`);
+            const tile = document.getElementById(`participant-${userId}`);
+            if (!speaking || !tile) { audioContext.close(); return; }
             
             analyser.getByteFrequencyData(dataArray);
-            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-            
+            const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
             const now = Date.now();
-            if (average > SPEAKING_THRESHOLD) {
+            
+            if (avg > 30) {
               if (!isSpeaking) {
                 isSpeaking = true;
-                speakingIndicator.classList.remove('hidden');
-                participantTile.classList.add('active-speaker');
-                console.log(`🗣️ ${userId} started speaking`);
-                
-                // Emit speaking state to other users
+                speaking.classList.remove('hidden');
+                tile.classList.add('active-speaker');
                 if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', {
-                    callId: callData.callId,
-                    speaking: true
-                  });
+                  socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
                 }
               }
-              lastSpeakingTime = now;
-            } else if (isSpeaking && now - lastSpeakingTime > SPEAKING_TIMEOUT) {
+              lastSpeakTime = now;
+            } else if (isSpeaking && now - lastSpeakTime > 300) {
               isSpeaking = false;
-              speakingIndicator.classList.add('hidden');
-              participantTile.classList.remove('active-speaker');
-              console.log(`🤐 ${userId} stopped speaking`);
-              
-              // Emit speaking state to other users
+              speaking.classList.add('hidden');
+              tile.classList.remove('active-speaker');
               if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', {
-                  callId: callData.callId,
-                  speaking: false
-                });
+                socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
               }
             }
-            
-            requestAnimationFrame(detectSpeaking);
+            requestAnimationFrame(detect);
           }
-          
-          detectSpeaking();
+          detect();
           audioContexts.set(userId, audioContext);
-        } catch (error) {
-          console.error(`Error setting up audio detection for ${userId}:`, error);
-        }
+        } catch (e) { console.error('Audio detection error:', e); }
       }
 
-      async function initializeLocalMedia() {
+      async function initLocalMedia() {
         try {
-          console.log(`🎥 Requesting local media (type: ${callData.callType})...`);
-          
+          console.log(`🎥 Requesting media (${callData.callType})...`);
           const constraints = {
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true
-            },
-            video: callData.callType === 'video' ? {
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-              frameRate: { ideal: 30 }
-            } : false
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: callData.callType === 'video' ? { width: {ideal:640}, height: {ideal:480} } : false
           };
-          
           localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          const tracks = localStream.getTracks();
-          console.log(`✅ Local media initialized: ${tracks.map(t => t.kind).join(', ')}`);
+          console.log(`✅ Media initialized`);
           
           isVideoEnabled = callData.callType === 'video';
           isAudioEnabled = true;
           
-          // Setup audio level detection for local stream
-          const audioTrack = localStream.getAudioTracks()[0];
-          if (audioTrack) {
-            setupAudioLevelDetection(currentUser.userId, localStream);
-          }
+          const audio = localStream.getAudioTracks()[0];
+          if (audio) setupAudioDetection(currentUser.userId, localStream);
           
-          // Update icon based on call type
           const callIcon = document.getElementById('callIcon');
-          if (callIcon) {
-            callIcon.textContent = callData.callType === 'video' ? 'videocam' : 'graphic_eq';
-          }
+          if (callIcon) callIcon.textContent = callData.callType === 'video' ? 'videocam' : 'graphic_eq';
           
           if (isVideoEnabled) {
-            const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfpContainer = document.getElementById(`pfp-container-${currentUser.userId}`);
-            if (localVideo && localStream) {
-              localVideo.srcObject = localStream;
-              await localVideo.play().catch(e => console.warn('Video play warning:', e));
-              localVideo.classList.remove('hidden');
-              if (localPfpContainer) localPfpContainer.classList.add('hidden');
-              console.log(`📹 Local video enabled for ${currentUser.username}`);
+            const vid = document.getElementById(`video-${currentUser.userId}`);
+            const pfp = document.getElementById(`pfp-${currentUser.userId}`);
+            if (vid && localStream) {
+              vid.srcObject = localStream;
+              await vid.play().catch(e => console.warn('Play:', e));
+              vid.classList.remove('hidden');
+              if (pfp) pfp.classList.add('hidden');
             }
-            
-            // Update video button state
-            const videoBtn = document.getElementById('videoBtn');
-            const videoIcon = videoBtn.querySelector('.material-symbols-outlined');
-            videoBtn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
-            videoBtn.classList.add('bg-primary', 'text-white');
-            videoIcon.textContent = 'videocam';
+            const btn = document.getElementById('videoBtn');
+            const icon = btn.querySelector('.material-symbols-outlined');
+            btn.classList.add('bg-primary', 'text-white');
+            icon.textContent = 'videocam';
           }
-          
           return localStream;
-        } catch (error) {
-          console.error('❌ Failed to get local media:', error);
+        } catch (e) {
+          console.error('❌ Media error:', e);
           toast('Failed to access camera/microphone', 'error');
-          throw error;
+          throw e;
         }
       }
 
-      function createPeerConnection(userId) {
-        console.log(`🔗 Creating peer connection for user: ${userId}`);
-        
-        const config = {
-          ...PEER_CONNECTION_CONFIG,
-          iceServers: ICE_SERVERS
-        };
-        
-        const pc = new RTCPeerConnection(config);
-        
-        connectionStats.set(userId, {
-          startTime: Date.now(),
-          iceState: 'new',
-          connectionState: 'new',
-          candidatesReceived: 0,
-          candidatesSent: 0,
-          selectedCandidate: null
-        });
+      function createPC(userId) {
+        console.log(`🔗 Creating PC for ${userId}`);
+        const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
+        connectionStats.set(userId, { startTime: Date.now(), iceState: 'new', connectionState: 'new', candidatesReceived: 0, candidatesSent: 0 });
         
         if (localStream) {
           localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
-            console.log(`➕ Added local ${track.kind} track to connection with ${userId}`);
+            console.log(`➕ Added ${track.kind} to ${userId}`);
           });
         }
         
-        pc.ontrack = (event) => {
-          console.log(`📥 Received remote ${event.track.kind} from ${userId}`);
-          const remoteVideo = document.getElementById(`video-${userId}`);
-          const remotePfpContainer = document.getElementById(`pfp-container-${userId}`);
+        pc.ontrack = (e) => {
+          console.log(`📥 Track ${e.track.kind} from ${userId}`);
+          const vid = document.getElementById(`video-${userId}`);
+          const pfp = document.getElementById(`pfp-${userId}`);
           
-          if (remoteVideo) {
-            if (!remoteVideo.srcObject) {
-              remoteVideo.srcObject = new MediaStream();
-            }
-            remoteVideo.srcObject.addTrack(event.track);
+          if (vid) {
+            if (!vid.srcObject) vid.srcObject = new MediaStream();
+            vid.srcObject.addTrack(e.track);
             
-            if (event.track.kind === 'video') {
-              // Video track received
-              remoteVideo.play().catch(e => console.warn('Remote video play warning:', e));
-              
-              event.track.onunmute = () => {
-                console.log(`📹 Video track unmuted for ${userId} - showing video`);
-                remoteVideo.classList.remove('hidden');
-                if (remotePfpContainer) remotePfpContainer.classList.add('hidden');
+            if (e.track.kind === 'video') {
+              vid.play().catch(e => console.warn('Play:', e));
+              e.track.onunmute = () => {
+                console.log(`📹 Video unmuted ${userId}`);
+                vid.classList.remove('hidden');
+                if (pfp) pfp.classList.add('hidden');
               };
-              
-              event.track.onmute = () => {
-                console.log(`📹 Video track muted for ${userId} - showing profile picture`);
-                remoteVideo.classList.add('hidden');
-                if (remotePfpContainer) remotePfpContainer.classList.remove('hidden');
+              e.track.onmute = () => {
+                console.log(`📹 Video muted ${userId}`);
+                vid.classList.add('hidden');
+                if (pfp) pfp.classList.remove('hidden');
               };
-              
-              event.track.onended = () => {
-                console.log(`📹 Video track ended for ${userId}`);
-                remoteVideo.classList.add('hidden');
-                if (remotePfpContainer) remotePfpContainer.classList.remove('hidden');
-              };
-            } else if (event.track.kind === 'audio') {
-              // Audio track received
-              remoteVideo.play().catch(e => console.warn('Remote audio play warning:', e));
-              
-              // Setup audio level detection for remote stream
-              const stream = new MediaStream([event.track]);
-              setupAudioLevelDetection(userId, stream);
+            } else if (e.track.kind === 'audio') {
+              vid.play().catch(e => console.warn('Play:', e));
+              setupAudioDetection(userId, new MediaStream([e.track]));
             }
           }
         };
         
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            const stats = connectionStats.get(userId);
-            stats.candidatesSent++;
-            
-            console.log(`🧊 ICE candidate for ${userId}: ${event.candidate.type}`);
-            
-            socketInstance.emit('ice_candidate', {
-              callId: callData.callId,
-              targetUserId: userId,
-              candidate: event.candidate
-            });
-          } else {
-            console.log(`✅ ICE gathering completed for ${userId}`);
+        pc.onicecandidate = (e) => {
+          if (e.candidate) {
+            connectionStats.get(userId).candidatesSent++;
+            socketInstance.emit('ice_candidate', { callId: callData.callId, targetUserId: userId, candidate: e.candidate });
           }
         };
         
         pc.oniceconnectionstatechange = () => {
-          const state = pc.iceConnectionState;
-          console.log(`🧊 ICE state with ${userId}: ${state}`);
-          connectionStats.get(userId).iceState = state;
-          
-          if (state === 'failed') {
-            console.warn(`⚠️ ICE connection failed with ${userId} - restarting`);
-            pc.restartIce();
-          }
+          connectionStats.get(userId).iceState = pc.iceConnectionState;
+          if (pc.iceConnectionState === 'failed') pc.restartIce();
         };
         
         pc.onconnectionstatechange = () => {
           const state = pc.connectionState;
-          const stats = connectionStats.get(userId);
-          stats.connectionState = state;
+          connectionStats.get(userId).connectionState = state;
+          console.log(`🔌 ${userId}: ${state}`);
           
-          console.log(`🔌 Connection state with ${userId}: ${state}`);
-          
-          const callSubtitle = document.getElementById('callSubtitle');
-          
-          switch (state) {
-            case 'connected':
-              if (callSubtitle) {
-                const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
-                callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
-              }
-              
-              pc.getStats().then(stats => {
-                stats.forEach(report => {
-                  if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                    const localCandidate = stats.get(report.localCandidateId);
-                    if (localCandidate) {
-                      console.log(`✅ Using ${localCandidate.candidateType} for ${userId}`);
-                      connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
-                      
-                      socketInstance.emit('connection_state_update', {
-                        callId: callData.callId,
-                        state: 'connected',
-                        candidateType: localCandidate.candidateType
-                      });
-                    }
+          const subtitle = document.getElementById('callSubtitle');
+          if (state === 'connected') {
+            const count = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
+            if (subtitle) subtitle.textContent = `${count} participant${count>1?'s':''} connected`;
+            
+            pc.getStats().then(stats => {
+              stats.forEach(r => {
+                if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+                  const local = stats.get(r.localCandidateId);
+                  if (local) {
+                    console.log(`✅ Using ${local.candidateType} for ${userId}`);
+                    socketInstance.emit('connection_state_update', { callId: callData.callId, state: 'connected', candidateType: local.candidateType });
                   }
-                });
-              });
-              break;
-              
-            case 'failed':
-              console.error(`❌ Connection failed with ${userId}`);
-              setTimeout(() => {
-                if (pc.connectionState === 'failed') {
-                  console.log(`🔄 Restarting ICE for ${userId}`);
-                  pc.restartIce();
                 }
-              }, 1000);
-              
-              socketInstance.emit('connection_state_update', {
-                callId: callData.callId,
-                state: 'failed'
               });
-              break;
+            });
+          } else if (state === 'failed') {
+            setTimeout(() => { if (pc.connectionState === 'failed') pc.restartIce(); }, 1000);
           }
         };
         
@@ -648,89 +457,43 @@
       async function createOffer(userId) {
         try {
           console.log(`📤 Creating offer for ${userId}`);
-          const pc = createPeerConnection(userId);
-          
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true // Always offer to receive video
-          });
-          
+          const pc = createPC(userId);
+          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
           await pc.setLocalDescription(offer);
-          console.log(`✅ Offer created for ${userId}`);
-          
-          socketInstance.emit('webrtc_offer', {
-            callId: callData.callId,
-            targetUserId: userId,
-            offer: offer
-          });
-        } catch (error) {
-          console.error(`❌ Error creating offer for ${userId}:`, error);
-        }
+          socketInstance.emit('webrtc_offer', { callId: callData.callId, targetUserId: userId, offer });
+        } catch (e) { console.error('Offer error:', e); }
       }
 
       async function handleOffer(fromUserId, offer) {
         try {
-          console.log(`📥 Received offer from ${fromUserId}`);
-          const pc = createPeerConnection(fromUserId);
-          
+          console.log(`📥 Offer from ${fromUserId}`);
+          const pc = createPC(fromUserId);
           await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          console.log(`✅ Remote description set from ${fromUserId}`);
           
-          // Process any pending ICE candidates
           if (pendingIceCandidates.has(fromUserId)) {
-            const candidates = pendingIceCandidates.get(fromUserId);
-            console.log(`📦 Processing ${candidates.length} pending ICE candidates from ${fromUserId}`);
-            for (const candidate of candidates) {
-              try {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (e) {
-                console.warn('Failed to add pending ICE candidate:', e);
-              }
-            }
+            const cands = pendingIceCandidates.get(fromUserId);
+            for (const c of cands) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
             pendingIceCandidates.delete(fromUserId);
           }
           
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          console.log(`✅ Answer created for ${fromUserId}`);
-          
-          socketInstance.emit('webrtc_answer', {
-            callId: callData.callId,
-            targetUserId: fromUserId,
-            answer: answer
-          });
-        } catch (error) {
-          console.error(`❌ Error handling offer from ${fromUserId}:`, error);
-        }
+          socketInstance.emit('webrtc_answer', { callId: callData.callId, targetUserId: fromUserId, answer });
+        } catch (e) { console.error('Handle offer error:', e); }
       }
 
       async function handleAnswer(fromUserId, answer) {
         try {
-          console.log(`📥 Received answer from ${fromUserId}`);
           const pc = peerConnections.get(fromUserId);
           if (pc && pc.signalingState !== 'stable') {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            console.log(`✅ Remote description (answer) set from ${fromUserId}`);
-            
-            // Process any pending ICE candidates
             if (pendingIceCandidates.has(fromUserId)) {
-              const candidates = pendingIceCandidates.get(fromUserId);
-              console.log(`📦 Processing ${candidates.length} pending ICE candidates from ${fromUserId}`);
-              for (const candidate of candidates) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                } catch (e) {
-                  console.warn('Failed to add pending ICE candidate:', e);
-                }
-              }
+              const cands = pendingIceCandidates.get(fromUserId);
+              for (const c of cands) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
               pendingIceCandidates.delete(fromUserId);
             }
-          } else {
-            console.warn(`⚠️ Cannot set remote description for ${fromUserId}: signaling state is ${pc?.signalingState}`);
           }
-        } catch (error) {
-          console.error(`❌ Error handling answer from ${fromUserId}:`, error);
-        }
+        } catch (e) { console.error('Handle answer error:', e); }
       }
 
       async function handleIceCandidate(fromUserId, candidate) {
@@ -738,352 +501,233 @@
           const pc = peerConnections.get(fromUserId);
           if (pc && pc.remoteDescription) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            const stats = connectionStats.get(fromUserId);
-            stats.candidatesReceived++;
-            console.log(`🧊 ICE candidate added from ${fromUserId}: ${candidate.type}`);
+            connectionStats.get(fromUserId).candidatesReceived++;
           } else {
-            // Queue ICE candidate if remote description not set yet
-            if (!pendingIceCandidates.has(fromUserId)) {
-              pendingIceCandidates.set(fromUserId, []);
-            }
+            if (!pendingIceCandidates.has(fromUserId)) pendingIceCandidates.set(fromUserId, []);
             pendingIceCandidates.get(fromUserId).push(candidate);
-            console.log(`📦 Queued ICE candidate from ${fromUserId} (waiting for remote description)`);
           }
-        } catch (error) {
-          console.error(`❌ Error adding ICE candidate from ${fromUserId}:`, error);
-        }
+        } catch (e) { console.error('ICE error:', e); }
       }
 
-      function toggleMicrophone() {
+      function toggleMic() {
         if (localStream) {
-          const audioTrack = localStream.getAudioTracks()[0];
-          if (audioTrack) {
-            audioTrack.enabled = !audioTrack.enabled;
-            isAudioEnabled = audioTrack.enabled;
-            
-            const micBtn = document.getElementById('micBtn');
-            const micIcon = micBtn.querySelector('.material-symbols-outlined');
-            const micIndicator = document.getElementById(`mic-${currentUser.userId}`);
-            
+          const track = localStream.getAudioTracks()[0];
+          if (track) {
+            track.enabled = !track.enabled;
+            isAudioEnabled = track.enabled;
+            const btn = document.getElementById('micBtn');
+            const icon = btn.querySelector('.material-symbols-outlined');
+            const mic = document.getElementById(`mic-${currentUser.userId}`);
             if (isAudioEnabled) {
-              micBtn.classList.add('bg-primary', 'text-white');
-              micBtn.classList.remove('bg-accent-red');
-              micIcon.textContent = 'mic';
-              if (micIndicator) micIndicator.classList.add('hidden');
+              btn.classList.add('bg-primary', 'text-white');
+              btn.classList.remove('bg-accent-red');
+              icon.textContent = 'mic';
+              if (mic) mic.classList.add('hidden');
             } else {
-              micBtn.classList.remove('bg-primary', 'text-white');
-              micBtn.classList.add('bg-accent-red', 'text-white');
-              micIcon.textContent = 'mic_off';
-              if (micIndicator) micIndicator.classList.remove('hidden');
+              btn.classList.remove('bg-primary');
+              btn.classList.add('bg-accent-red', 'text-white');
+              icon.textContent = 'mic_off';
+              if (mic) mic.classList.remove('hidden');
             }
-            
-            console.log(`🎤 Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`);
-            socketInstance.emit('audio_state_changed', {
-              callId: callData.callId,
-              enabled: isAudioEnabled
-            });
+            socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
           }
         }
       }
 
       async function toggleVideo() {
-        if (callData.callType === 'audio') {
-          toast('Video not available in audio call', 'warning');
-          return;
-        }
-        
+        if (callData.callType === 'audio') { toast('Video not available in audio call', 'warning'); return; }
         if (localStream) {
-          const videoTrack = localStream.getVideoTracks()[0];
-          if (videoTrack) {
-            videoTrack.enabled = !videoTrack.enabled;
-            isVideoEnabled = videoTrack.enabled;
-            
-            const videoBtn = document.getElementById('videoBtn');
-            const videoIcon = videoBtn.querySelector('.material-symbols-outlined');
-            const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfpContainer = document.getElementById(`pfp-container-${currentUser.userId}`);
-            
+          const track = localStream.getVideoTracks()[0];
+          if (track) {
+            track.enabled = !track.enabled;
+            isVideoEnabled = track.enabled;
+            const btn = document.getElementById('videoBtn');
+            const icon = btn.querySelector('.material-symbols-outlined');
+            const vid = document.getElementById(`video-${currentUser.userId}`);
+            const pfp = document.getElementById(`pfp-${currentUser.userId}`);
             if (isVideoEnabled) {
-              videoBtn.classList.remove('bg-slate-200', 'dark:bg-background-dark', 'text-slate-700', 'dark:text-white');
-              videoBtn.classList.add('bg-primary', 'text-white');
-              videoIcon.textContent = 'videocam';
-              if (localVideo) localVideo.classList.remove('hidden');
-              if (localPfpContainer) localPfpContainer.classList.add('hidden');
+              btn.classList.add('bg-primary', 'text-white');
+              icon.textContent = 'videocam';
+              if (vid) vid.classList.remove('hidden');
+              if (pfp) pfp.classList.add('hidden');
             } else {
-              videoBtn.classList.add('bg-slate-200', 'dark:bg-background-dark', 'text-slate-700', 'dark:text-white');
-              videoBtn.classList.remove('bg-primary', 'text-white');
-              videoIcon.textContent = 'videocam_off';
-              if (localVideo) localVideo.classList.add('hidden');
-              if (localPfpContainer) localPfpContainer.classList.remove('hidden');
+              btn.classList.remove('bg-primary', 'text-white');
+              icon.textContent = 'videocam_off';
+              if (vid) vid.classList.add('hidden');
+              if (pfp) pfp.classList.remove('hidden');
             }
-            
-            console.log(`📹 Video ${isVideoEnabled ? 'enabled' : 'disabled'}`);
-            socketInstance.emit('video_state_changed', {
-              callId: callData.callId,
-              enabled: isVideoEnabled
-            });
+            socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
           }
         }
       }
 
-      function updateCallDuration() {
+      function updateDuration() {
         if (!callStartTime) return;
-        
-        const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
-        const hours = Math.floor(elapsed / 3600);
-        const minutes = Math.floor((elapsed % 3600) / 60);
-        const seconds = elapsed % 60;
-        
-        const durationEl = document.getElementById('callDuration');
-        if (durationEl) {
-          durationEl.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
+        const e = Math.floor((Date.now() - callStartTime) / 1000);
+        const h = Math.floor(e / 3600), m = Math.floor((e % 3600) / 60), s = e % 60;
+        const el = document.getElementById('callDuration');
+        if (el) el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
       }
 
       function leaveCall() {
         if (isInitializing) return;
-        
-        console.log('🚪 Leaving call...');
         isInitializing = true;
-        
-        // Close all audio contexts
-        audioContexts.forEach((context, userId) => {
-          context.close();
-        });
+        audioContexts.forEach(c => c.close());
         audioContexts.clear();
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            track.stop();
-            console.log(`⏹️ Stopped ${track.kind} track`);
-          });
-        }
-        
-        peerConnections.forEach((pc, userId) => {
-          console.log(`🔌 Closing connection to ${userId}`);
-          pc.close();
-        });
+        if (localStream) localStream.getTracks().forEach(t => t.stop());
+        peerConnections.forEach(pc => pc.close());
         peerConnections.clear();
-        
-        if (socketInstance && socketInstance.connected) {
-          socketInstance.emit('leave_call', {
-            callId: callData.callId
-          });
-        }
-        
+        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
         if (durationInterval) clearInterval(durationInterval);
-        
         localStorage.removeItem('activeCall');
-        
-        setTimeout(() => {
-          window.location.href = '/chat.html';
-        }, 500);
+        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
       }
 
-      async function initializeCall() {
+      async function initCall() {
         if (isInitializing) return;
-        
         isInitializing = true;
-        console.log('=== Initializing Call ===');
+        console.log('=== INIT CALL ===');
         
         try {
           await _Auth.requireAuth();
           await fetchIceServers();
           
-          const callDataStr = localStorage.getItem('activeCall');
-          if (!callDataStr) {
-            toast('No active call found', 'error');
-            setTimeout(() => window.location.href = '/chat.html', 1500);
-            return;
-          }
+          const callStr = localStorage.getItem('activeCall');
+          if (!callStr) { toast('No active call', 'error'); setTimeout(() => window.location.href = '/chat.html', 1500); return; }
           
-          callData = JSON.parse(callDataStr);
-          console.log(`📞 Call data loaded: ${callData.callId} (${callData.callType})`);
+          callData = JSON.parse(callStr);
+          console.log(`📞 Call: ${callData.callId} (${callData.callType})`);
           
           const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) {
-            window.location.href = '/login.html';
-            return;
-          }
+          if (!firebaseUser) { window.location.href = '/login.html'; return; }
           
           const userData = await _API.get('/api/users/me');
-          currentUser = {
-            userId: userData._id,
-            username: userData.username,
-            pfpUrl: userData.pfpUrl
-          };
+          currentUser = { userId: userData._id, username: userData.username, pfpUrl: userData.pfpUrl };
+          console.log(`👤 User: ${currentUser.username}`);
           
-          console.log(`👤 Current user: ${currentUser.username}`);
+          const title = document.getElementById('callTitle');
+          if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
           
-          const callTitle = document.getElementById('callTitle');
-          if (callTitle) callTitle.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
-          
-          const idToken = await firebaseUser.getIdToken();
-          const socketUrl = window.location.origin;
-          socketInstance = io(socketUrl, {
+          const token = await firebaseUser.getIdToken();
+          socketInstance = io(window.location.origin, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
-            auth: { token: idToken }
+            auth: { token }
           });
           
           socketInstance.on('connect', () => {
-            console.log(`🔌 Socket connected: ${socketInstance.id}`);
-            socketInstance.emit('authenticate', {
-              token: idToken,
-              userId: currentUser.userId
-            });
+            console.log(`🔌 Connected: ${socketInstance.id}`);
+            socketInstance.emit('authenticate', { token, userId: currentUser.userId });
           });
           
           socketInstance.on('authenticated', async () => {
-            console.log('✅ Socket authenticated');
-            
+            console.log('✅ Authenticated');
             if (!hasJoinedCall) {
               hasJoinedCall = true;
-              socketInstance.emit('join_call', {
-                callId: callData.callId
-              });
+              socketInstance.emit('join_call', { callId: callData.callId });
             }
           });
           
           socketInstance.on('call_joined', async (data) => {
-            console.log(`✅ Call joined: ${data.participants.length} participants`);
+            console.log(`✅ Joined: ${data.participants.length} participants`);
+            const subtitle = document.getElementById('callSubtitle');
+            if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
             
-            const callSubtitle = document.getElementById('callSubtitle');
-            if (callSubtitle) callSubtitle.textContent = `${data.participants.length} participant${data.participants.length > 1 ? 's' : ''}`;
+            await initLocalMedia();
             
-            await initializeLocalMedia();
-            
-            const participantGrid = document.getElementById('participantGrid');
-            if (participantGrid) {
-              participantGrid.innerHTML = '';
+            const grid = document.getElementById('participantGrid');
+            if (grid) {
+              grid.innerHTML = '';
+              console.log(`📋 Rendering ${data.participants.length} tiles`);
               
-              data.participants.forEach(participant => {
-                const isSelf = participant.userId === currentUser.userId;
-                const tile = createParticipantTile(participant, isSelf);
-                participantGrid.appendChild(tile);
+              data.participants.forEach(p => {
+                const isSelf = p.userId === currentUser.userId;
+                const tile = createParticipantTile(p, isSelf);
+                grid.appendChild(tile);
+                console.log(`✅ Added tile for ${p.username}`);
                 
-                if (!isSelf) {
-                  setTimeout(() => createOffer(participant.userId), 500);
-                }
+                if (!isSelf) setTimeout(() => createOffer(p.userId), 500);
               });
+              
+              console.log(`🎨 Grid has ${grid.children.length} children`);
             }
             
             callStartTime = Date.now();
-            durationInterval = setInterval(updateCallDuration, 1000);
-            
+            durationInterval = setInterval(updateDuration, 1000);
             isInitializing = false;
-            console.log('=== Call Initialization Complete ===');
+            console.log('=== INIT COMPLETE ===');
           });
           
           socketInstance.on('user_joined_call', (data) => {
-            console.log(`👋 User joined: ${data.user.username}`);
-            
-            const participantGrid = document.getElementById('participantGrid');
-            if (participantGrid && !document.getElementById(`participant-${data.user.userId}`)) {
+            console.log(`👋 Joined: ${data.user.username}`);
+            const grid = document.getElementById('participantGrid');
+            if (grid && !document.getElementById(`participant-${data.user.userId}`)) {
               const tile = createParticipantTile(data.user, false);
-              participantGrid.appendChild(tile);
+              grid.appendChild(tile);
               setTimeout(() => createOffer(data.user.userId), 500);
             }
           });
           
           socketInstance.on('user_left_call', (data) => {
-            console.log(`👋 User left: ${data.userId}`);
-            
+            console.log(`👋 Left: ${data.userId}`);
             const tile = document.getElementById(`participant-${data.userId}`);
-            if (tile) {
-              tile.remove();
-            }
-            
+            if (tile) tile.remove();
             const pc = peerConnections.get(data.userId);
-            if (pc) {
-              pc.close();
-              peerConnections.delete(data.userId);
-            }
-            
-            // Close audio context
-            const audioContext = audioContexts.get(data.userId);
-            if (audioContext) {
-              audioContext.close();
-              audioContexts.delete(data.userId);
-            }
-            
+            if (pc) { pc.close(); peerConnections.delete(data.userId); }
+            const ac = audioContexts.get(data.userId);
+            if (ac) { ac.close(); audioContexts.delete(data.userId); }
             connectionStats.delete(data.userId);
             pendingIceCandidates.delete(data.userId);
           });
           
-          socketInstance.on('webrtc_offer', (data) => handleOffer(data.fromUserId, data.offer));
-          socketInstance.on('webrtc_answer', (data) => handleAnswer(data.fromUserId, data.answer));
-          socketInstance.on('ice_candidate', (data) => handleIceCandidate(data.fromUserId, data.candidate));
+          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
+          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
+          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
           
-          // Handle speaking state from other users
-          socketInstance.on('speaking_state', (data) => {
-            const speakingIndicator = document.getElementById(`speaking-${data.userId}`);
-            const participantTile = document.getElementById(`participant-${data.userId}`);
-            
-            if (speakingIndicator && participantTile) {
-              if (data.speaking) {
-                speakingIndicator.classList.remove('hidden');
-                participantTile.classList.add('active-speaker');
-              } else {
-                speakingIndicator.classList.add('hidden');
-                participantTile.classList.remove('active-speaker');
-              }
+          socketInstance.on('speaking_state', (d) => {
+            const s = document.getElementById(`speaking-${d.userId}`);
+            const t = document.getElementById(`participant-${d.userId}`);
+            if (s && t) {
+              if (d.speaking) { s.classList.remove('hidden'); t.classList.add('active-speaker'); }
+              else { s.classList.add('hidden'); t.classList.remove('active-speaker'); }
             }
           });
           
-          socketInstance.on('audio_state_changed', (data) => {
-            console.log(`🎤 Audio state changed for ${data.userId}: ${data.enabled}`);
-            const micIndicator = document.getElementById(`mic-${data.userId}`);
-            if (micIndicator) {
-              data.enabled ? micIndicator.classList.add('hidden') : micIndicator.classList.remove('hidden');
+          socketInstance.on('audio_state_changed', (d) => {
+            const m = document.getElementById(`mic-${d.userId}`);
+            if (m) d.enabled ? m.classList.add('hidden') : m.classList.remove('hidden');
+          });
+          
+          socketInstance.on('video_state_changed', (d) => {
+            const v = document.getElementById(`video-${d.userId}`);
+            const p = document.getElementById(`pfp-${d.userId}`);
+            if (v && p) {
+              if (!d.enabled) { v.classList.add('hidden'); p.classList.remove('hidden'); }
             }
           });
           
-          socketInstance.on('video_state_changed', (data) => {
-            console.log(`📹 Video state changed for ${data.userId}: ${data.enabled}`);
-            const video = document.getElementById(`video-${data.userId}`);
-            const pfpContainer = document.getElementById(`pfp-container-${data.userId}`);
-            if (video && pfpContainer) {
-              if (data.enabled) {
-                // User enabled video - but wait for actual video track
-                console.log(`📹 Waiting for video track from ${data.userId}`);
-              } else {
-                // User disabled video - show profile picture
-                video.classList.add('hidden');
-                pfpContainer.classList.remove('hidden');
-              }
-            }
-          });
+          socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
           
-          socketInstance.on('call_ended', () => {
-            console.log('📵 Call ended');
-            toast('Call ended', 'warning');
-            leaveCall();
-          });
-          
-          const micBtn = document.getElementById('micBtn');
-          const videoBtn = document.getElementById('videoBtn');
-          const leaveCallBtn = document.getElementById('leaveCallBtn');
-          
-          if (micBtn) micBtn.addEventListener('click', toggleMicrophone);
-          if (videoBtn) videoBtn.addEventListener('click', toggleVideo);
-          if (leaveCallBtn) leaveCallBtn.addEventListener('click', leaveCall);
-          
+          const mic = document.getElementById('micBtn');
+          const vid = document.getElementById('videoBtn');
+          const leave = document.getElementById('leaveCallBtn');
+          if (mic) mic.addEventListener('click', toggleMic);
+          if (vid) vid.addEventListener('click', toggleVideo);
+          if (leave) leave.addEventListener('click', leaveCall);
           window.addEventListener('beforeunload', () => leaveCall());
           
-        } catch (error) {
-          console.error('❌ Call initialization error:', error);
+        } catch (e) {
+          console.error('❌ Init error:', e);
           toast('Failed to initialize call', 'error');
           isInitializing = false;
           setTimeout(() => window.location.href = '/chat.html', 2000);
         }
       }
 
-      console.log('✅ Arrived at call page');
-      initializeCall();
-      
+      console.log('✅ Page loaded');
+      initCall();
     })();
     </script>
 </body>
