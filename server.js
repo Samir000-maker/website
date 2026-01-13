@@ -4,6 +4,7 @@
 // 2. 10-minute room expiry with auto-cleanup
 // 3. Chat message preservation
 // 4. Background matchmaking support
+// 5. Production-ready TURN server integration with Cloudflare
 
 import express from 'express';
 import { createServer } from 'http';
@@ -26,20 +27,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ============================================
-// TURN SERVER CONFIGURATION
+// CLOUDFLARE TURN SERVER CONFIGURATION
 // ============================================
 
-async function generateTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
+async function generateCloudTurnCredentials() {
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || '726fccae33334279a71e962da3d8e01c';
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || 'a074b71f6fa5853f4daff0fafb57c9bee54faae54f4012fab0b55720910440cf';
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
-    console.warn('⚠️ TURN credentials not configured - TURN server will not be available');
-    console.warn('Set CLOUDFLARE_TURN_TOKEN_ID and CLOUDFLARE_TURN_API_TOKEN environment variables');
+    console.warn('⚠️ TURN credentials not configured - operating with STUN only');
     return null;
   }
 
   try {
+    console.log('🔄 Generating Cloudflare TURN credentials...');
     const response = await fetch(
       `https://rtc.live.cloudflare.com/v1/turn/keys/${TURN_TOKEN_ID}/credentials/generate`,
       {
@@ -49,42 +50,62 @@ async function generateTurnCredentials() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          ttl: 86400
+          ttl: 86400 // 24 hours
         })
       }
     );
 
     if (!response.ok) {
-      console.error('❌ Failed to generate TURN credentials:', response.status);
+      const errorText = await response.text();
+      console.error('❌ Failed to generate TURN credentials:', response.status, errorText);
       return null;
     }
 
-    const credentials = await response.json();
-    console.log('✅ TURN credentials generated successfully');
-    return credentials;
+    const data = await response.json();
+    console.log('✅ Cloudflare TURN credentials generated successfully');
+    console.log(`   TTL: ${data.ttl}s, ICE Servers: ${data.iceServers?.ice_servers?.length || 0}`);
+    
+    return data;
   } catch (error) {
-    console.error('❌ Error generating TURN credentials:', error);
+    console.error('❌ Error generating TURN credentials:', error.message);
     return null;
   }
 }
 
 async function getIceServers() {
+  // Start with STUN servers (always available, no authentication needed)
   const iceServers = [
     {
       urls: [
         'stun:stun.cloudflare.com:3478',
         'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302'
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302'
       ]
     }
   ];
 
-  const turnCreds = await generateTurnCredentials();
-  if (turnCreds && turnCreds.iceServers) {
-    iceServers.push(...turnCreds.iceServers.ice_servers);
-    console.log('✅ TURN server added to ICE configuration');
+  // Try to add Cloudflare TURN servers
+  const turnCreds = await generateCloudTurnCredentials();
+  
+  if (turnCreds && turnCreds.iceServers && turnCreds.iceServers.ice_servers) {
+    // Add TURN servers from Cloudflare
+    turnCreds.iceServers.ice_servers.forEach(server => {
+      iceServers.push(server);
+      
+      // Log TURN server details for debugging
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      urls.forEach(url => {
+        const hasAuth = !!(server.username && server.credential);
+        console.log(`   📡 TURN: ${url} ${hasAuth ? '(authenticated)' : ''}`);
+      });
+    });
+    
+    console.log(`✅ ICE configuration: ${iceServers.length} server groups (STUN + TURN)`);
   } else {
-    console.warn('⚠️ Operating without TURN server - may fail in restrictive networks');
+    console.warn('⚠️ Operating with STUN-only configuration');
+    console.warn('   Direct peer-to-peer connections will work for most users');
+    console.warn('   Users behind symmetric NATs may experience connection issues');
   }
 
   return iceServers;
@@ -141,7 +162,8 @@ const webrtcMetrics = {
   successfulConnections: 0,
   failedConnections: 0,
   turnUsage: 0,
-  stunUsage: 0
+  stunUsage: 0,
+  directConnections: 0
 };
 
 // ============================================
@@ -254,7 +276,7 @@ app.get('/health', (req, res) => {
 
 app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
   try {
-    console.log('📡 ICE servers requested');
+    console.log('📡 ICE servers requested by client');
     const iceServers = await getIceServers();
     
     res.json({ 
@@ -1147,7 +1169,8 @@ io.on('connection', (socket) => {
       
       if (!user) return;
 
-      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}: type=${candidate.type}`);
+      const candidateType = candidate.type || 'unknown';
+      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}: type=${candidateType}`);
 
       const targetSocket = findActiveSocketForUser(targetUserId);
       
@@ -1172,17 +1195,26 @@ io.on('connection', (socket) => {
     console.log(`🔌 Connection state from ${user.username}: ${state}`);
     if (candidateType) {
       console.log(`   Using candidate type: ${candidateType}`);
+      
+      // Track metrics based on candidate type
       if (candidateType === 'relay') {
         webrtcMetrics.turnUsage++;
+        console.log('   📊 TURN relay connection established');
       } else if (candidateType === 'srflx') {
         webrtcMetrics.stunUsage++;
+        console.log('   📊 STUN server-reflexive connection established');
+      } else if (candidateType === 'host') {
+        webrtcMetrics.directConnections++;
+        console.log('   📊 Direct host connection established');
       }
     }
 
     if (state === 'connected') {
       webrtcMetrics.successfulConnections++;
+      console.log(`   ✅ Total successful connections: ${webrtcMetrics.successfulConnections}`);
     } else if (state === 'failed') {
       webrtcMetrics.failedConnections++;
+      console.log(`   ❌ Total failed connections: ${webrtcMetrics.failedConnections}`);
     }
   });
 
@@ -1378,14 +1410,15 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
       console.log(`🔌 Socket.IO ready for connections`);
-      console.log(`📞 WebRTC signaling enabled`);
+      console.log(`📞 WebRTC signaling enabled with ICE prioritization`);
       console.log(`⏰ Room cleanup: ${ROOM_EXPIRY_TIME / 60000} minutes`);
       
-      const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN);
+      const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID || '726fccae33334279a71e962da3d8e01c');
       if (hasTurn) {
-        console.log(`✅ TURN server configured (Cloudflare)`);
+        console.log(`✅ Cloudflare TURN server configured`);
+        console.log(`   Priority: host → srflx (STUN) → relay (TURN)`);
       } else {
-        console.log(`⚠️ TURN server NOT configured - set CLOUDFLARE_TURN_TOKEN_ID and CLOUDFLARE_TURN_API_TOKEN`);
+        console.log(`⚠️ TURN server NOT configured - STUN only mode`);
       }
     });
   } catch (error) {
