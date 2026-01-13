@@ -553,114 +553,189 @@
   return pc;
 }
 
-      async function createOffer(userId) {
-        try {
-          console.log(`📤 Creating offer for ${userId}`);
-          const pc = createPC(userId);
-          const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-          await pc.setLocalDescription(offer);
-          socketInstance.emit('webrtc_offer', { callId: callData.callId, targetUserId: userId, offer });
-        } catch (e) { console.error('Offer error:', e); }
-      }
+async function createOffer(userId) {
+  try {
+    console.log(`📤 Creating offer for ${userId}`);
+    
+    // Wait a bit to ensure remote peer has joined the call
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const pc = createPC(userId);
+    
+    // Ensure we have local stream before creating offer
+    if (!localStream || localStream.getTracks().length === 0) {
+      console.error(`❌ No local stream available when creating offer for ${userId}`);
+      return;
+    }
+    
+    console.log(`📊 Local stream for offer: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
+    
+    const offer = await pc.createOffer({ 
+      offerToReceiveAudio: true, 
+      offerToReceiveVideo: true 
+    });
+    await pc.setLocalDescription(offer);
+    
+    console.log(`✅ Offer created and set as local description for ${userId}`);
+    socketInstance.emit('webrtc_offer', { callId: callData.callId, targetUserId: userId, offer });
+  } catch (e) { 
+    console.error(`❌ Offer creation error for ${userId}:`, e); 
+  }
+}
 
-      async function handleOffer(fromUserId, offer) {
-        try {
-          console.log(`📥 Offer from ${fromUserId}`);
-          const pc = createPC(fromUserId);
-          await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          
-          if (pendingIceCandidates.has(fromUserId)) {
-            const cands = pendingIceCandidates.get(fromUserId);
-            for (const c of cands) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
-            pendingIceCandidates.delete(fromUserId);
-          }
-          
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socketInstance.emit('webrtc_answer', { callId: callData.callId, targetUserId: fromUserId, answer });
-        } catch (e) { console.error('Handle offer error:', e); }
+async function handleOffer(fromUserId, offer) {
+  try {
+    console.log(`📥 Received offer from ${fromUserId}`);
+    
+    let pc = peerConnections.get(fromUserId);
+    if (pc) {
+      console.log(`⚠️ PC already exists for ${fromUserId}, closing and recreating`);
+      pc.close();
+      peerConnections.delete(fromUserId);
+    }
+    
+    pc = createPC(fromUserId);
+    
+    console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    
+    if (pendingIceCandidates.has(fromUserId)) {
+      const cands = pendingIceCandidates.get(fromUserId);
+      console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+      for (const c of cands) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn(`ICE add failed:`, e));
       }
+      pendingIceCandidates.delete(fromUserId);
+    }
+    
+    console.log(`📤 Creating answer for ${fromUserId}`);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    
+    console.log(`✅ Answer created and set as local description for ${fromUserId}`);
+    socketInstance.emit('webrtc_answer', { callId: callData.callId, targetUserId: fromUserId, answer });
+  } catch (e) { 
+    console.error(`❌ Handle offer error for ${fromUserId}:`, e); 
+  }
+}
 
-      async function handleAnswer(fromUserId, answer) {
-        try {
-          const pc = peerConnections.get(fromUserId);
-          if (pc && pc.signalingState !== 'stable') {
-            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            if (pendingIceCandidates.has(fromUserId)) {
-              const cands = pendingIceCandidates.get(fromUserId);
-              for (const c of cands) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{});
-              pendingIceCandidates.delete(fromUserId);
-            }
-          }
-        } catch (e) { console.error('Handle answer error:', e); }
+async function handleAnswer(fromUserId, answer) {
+  try {
+    console.log(`📥 Received answer from ${fromUserId}`);
+    const pc = peerConnections.get(fromUserId);
+    
+    if (!pc) {
+      console.error(`❌ No PC found for ${fromUserId} when handling answer`);
+      return;
+    }
+    
+    if (pc.signalingState === 'stable') {
+      console.warn(`⚠️ PC already stable for ${fromUserId}, ignoring answer`);
+      return;
+    }
+    
+    console.log(`🔧 Setting remote description (answer) for ${fromUserId}, current state: ${pc.signalingState}`);
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log(`✅ Answer set as remote description for ${fromUserId}`);
+    
+    if (pendingIceCandidates.has(fromUserId)) {
+      const cands = pendingIceCandidates.get(fromUserId);
+      console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+      for (const c of cands) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn(`ICE add failed:`, e));
       }
+      pendingIceCandidates.delete(fromUserId);
+    }
+  } catch (e) { 
+    console.error(`❌ Handle answer error for ${fromUserId}:`, e); 
+  }
+}
 
-      async function handleIceCandidate(fromUserId, candidate) {
-        try {
-          const pc = peerConnections.get(fromUserId);
-          if (pc && pc.remoteDescription) {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            connectionStats.get(fromUserId).candidatesReceived++;
-          } else {
-            if (!pendingIceCandidates.has(fromUserId)) pendingIceCandidates.set(fromUserId, []);
-            pendingIceCandidates.get(fromUserId).push(candidate);
-          }
-        } catch (e) { console.error('ICE error:', e); }
-      }
+async function handleIceCandidate(fromUserId, candidate) {
+  try {
+    const pc = peerConnections.get(fromUserId);
+    if (pc && pc.remoteDescription) {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      const stats = connectionStats.get(fromUserId);
+      if (stats) stats.candidatesReceived++;
+      console.log(`🧊 Added ICE candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
+    } else {
+      if (!pendingIceCandidates.has(fromUserId)) pendingIceCandidates.set(fromUserId, []);
+      pendingIceCandidates.get(fromUserId).push(candidate);
+      console.log(`🧊 Queued ICE candidate from ${fromUserId} (pending: ${pendingIceCandidates.get(fromUserId).length})`);
+    }
+  } catch (e) { 
+    console.warn(`⚠️ ICE candidate error for ${fromUserId}:`, e.message); 
+  }
+}
 
-      function toggleMic() {
-        if (localStream) {
-          const track = localStream.getAudioTracks()[0];
-          if (track) {
-            track.enabled = !track.enabled;
-            isAudioEnabled = track.enabled;
-            const btn = document.getElementById('micBtn');
-            const icon = btn.querySelector('.material-symbols-outlined');
-            const mic = document.getElementById(`mic-${currentUser.userId}`);
-            if (isAudioEnabled) {
-              btn.classList.add('bg-primary', 'text-white');
-              btn.classList.remove('bg-accent-red');
-              icon.textContent = 'mic';
-              if (mic) mic.classList.add('hidden');
-            } else {
-              btn.classList.remove('bg-primary');
-              btn.classList.add('bg-accent-red', 'text-white');
-              icon.textContent = 'mic_off';
-              if (mic) mic.classList.remove('hidden');
-            }
-            socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
-          }
-        }
+function toggleMic() {
+  if (localStream) {
+    const track = localStream.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      isAudioEnabled = track.enabled;
+      const btn = document.getElementById('micBtn');
+      const icon = btn.querySelector('.material-symbols-outlined');
+      const mic = document.getElementById(`mic-${currentUser.userId}`);
+      
+      console.log(`🎤 Mic toggled: ${isAudioEnabled ? 'ON' : 'OFF'}`);
+      
+      if (isAudioEnabled) {
+        btn.classList.add('bg-primary', 'text-white');
+        btn.classList.remove('bg-accent-red');
+        icon.textContent = 'mic';
+        if (mic) mic.classList.add('hidden');
+      } else {
+        btn.classList.remove('bg-primary');
+        btn.classList.add('bg-accent-red', 'text-white');
+        icon.textContent = 'mic_off';
+        if (mic) mic.classList.remove('hidden');
       }
+      
+      socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+    }
+  }
+}
 
-      async function toggleVideo() {
-        if (callData.callType === 'audio') { toast('Video not available in audio call', 'warning'); return; }
-        if (localStream) {
-          const track = localStream.getVideoTracks()[0];
-          if (track) {
-            track.enabled = !track.enabled;
-            isVideoEnabled = track.enabled;
-            const btn = document.getElementById('videoBtn');
-            const icon = btn.querySelector('.material-symbols-outlined');
-            const vid = document.getElementById(`video-${currentUser.userId}`);
-            const pfp = document.getElementById(`pfp-${currentUser.userId}`);
-            if (isVideoEnabled) {
-              btn.classList.add('bg-primary', 'text-white');
-              btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
-              icon.textContent = 'videocam';
-              if (vid) vid.classList.remove('hidden');
-              if (pfp) pfp.classList.add('hidden');
-            } else {
-              btn.classList.remove('bg-primary', 'text-white');
-              btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
-              icon.textContent = 'videocam_off';
-              if (vid) vid.classList.add('hidden');
-              if (pfp) pfp.classList.remove('hidden');
-            }
-            socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
-          }
-        }
+async function toggleVideo() {
+  if (callData.callType === 'audio') { 
+    toast('Video not available in audio call', 'warning'); 
+    return; 
+  }
+  
+  if (localStream) {
+    const track = localStream.getVideoTracks()[0];
+    if (track) {
+      track.enabled = !track.enabled;
+      isVideoEnabled = track.enabled;
+      
+      const btn = document.getElementById('videoBtn');
+      const icon = btn.querySelector('.material-symbols-outlined');
+      const vid = document.getElementById(`video-${currentUser.userId}`);
+      const pfp = document.getElementById(`pfp-${currentUser.userId}`);
+      
+      console.log(`📹 Video toggled: ${isVideoEnabled ? 'ON' : 'OFF'}`);
+      
+      if (isVideoEnabled) {
+        btn.classList.add('bg-primary', 'text-white');
+        btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
+        icon.textContent = 'videocam';
+        if (vid) vid.classList.remove('hidden');
+        if (pfp) pfp.classList.add('hidden');
+      } else {
+        btn.classList.remove('bg-primary', 'text-white');
+        btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
+        icon.textContent = 'videocam_off';
+        if (vid) vid.classList.add('hidden');
+        if (pfp) pfp.classList.remove('hidden');
       }
+      
+      // Only emit ONCE after state is updated
+      socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+    }
+  }
+}
 
       function updateDuration() {
         if (!callStartTime) return;
@@ -745,9 +820,6 @@
   
   await initLocalMedia();
   
-  // DON'T broadcast state here - let the media tracks sync naturally through WebRTC
-  // The server already has the correct state from when we joined
-  
   const grid = document.getElementById('participantGrid');
   if (grid) {
     console.log(`🧹 Clearing grid and tracking before render`);
@@ -756,7 +828,6 @@
     
     console.log(`📋 Rendering ${data.participants.length} tiles`);
     
-    // Sort participants to ensure consistent ordering
     const sortedParticipants = [...data.participants].sort((a, b) => 
       a.userId.localeCompare(b.userId)
     );
@@ -773,7 +844,6 @@
         grid.appendChild(tile);
         console.log(`✅ [${index}] Tile added to DOM for ${p.username}`);
         
-        // Apply initial audio state for all users
         const micIndicator = document.getElementById(`mic-${p.userId}`);
         if (micIndicator) {
           if (audioState === false) {
@@ -785,7 +855,6 @@
           }
         }
         
-        // Apply initial video state for remote users
         if (!isSelf && videoState === false) {
           const vid = document.getElementById(`video-${p.userId}`);
           const pfp = document.getElementById(`pfp-${p.userId}`);
@@ -796,22 +865,20 @@
           }
         }
         
-        // CRITICAL FIX: Only create offer if our userId is "smaller" than theirs
         if (!isSelf) {
           const shouldInitiateOffer = currentUser.userId < p.userId;
-          console.log(`🔗 [${index}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer} (${currentUser.userId} < ${p.userId})`);
+          console.log(`🔗 [${index}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer}`);
           
           if (shouldInitiateOffer) {
+            // Longer delay to ensure both peers are ready
             setTimeout(() => {
               console.log(`📤 [${index}] INITIATING offer to ${p.username} (${p.userId})`);
               createOffer(p.userId);
-            }, 500);
+            }, 1500); // Increased from 500ms to 1500ms
           } else {
             console.log(`⏸️ [${index}] WAITING for offer from ${p.username} (${p.userId})`);
           }
         }
-      } else {
-        console.error(`❌ [${index}] Tile creation returned null for ${p.username}`);
       }
     });
     
@@ -835,49 +902,30 @@
   const existingTile = document.getElementById(`participant-${data.user.userId}`);
   
   if (existingTile) {
-    console.warn(`⚠️ Tile already exists for ${data.user.username}! Not creating duplicate.`);
+    console.warn(`⚠️ Tile already exists for ${data.user.username}! This is OK if both users joined simultaneously.`);
     return;
   }
   
-  if (renderedParticipants.has(data.user.userId)) {
-    console.warn(`⚠️ User ${data.user.userId} in tracking but no DOM element! Cleaning up.`);
-    renderedParticipants.delete(data.user.userId);
-  }
+  // This event fires when a NEW user joins AFTER we're already in the call
+  // In your case with 2 users, both join at the same time, so this won't fire
+  console.log(`➕ Adding NEW participant ${data.user.username} who joined after us`);
   
   if (grid) {
-    console.log(`➕ Creating new tile for ${data.user.username}`);
     const tile = createParticipantTile(data.user, false);
     if (tile) {
       grid.appendChild(tile);
-      console.log(`✅ Tile added for new participant ${data.user.username}`);
       
-      // Apply initial audio state
       const micIndicator = document.getElementById(`mic-${data.user.userId}`);
       if (micIndicator && audioState === false) {
         micIndicator.classList.remove('hidden');
-        console.log(`🎤 New user ${data.user.username} has audio OFF`);
       }
       
-      // CRITICAL FIX: Only create offer if we should be the initiator
+      // For truly late joiners, initiate connection
       const shouldInitiateOffer = currentUser.userId < data.user.userId;
-      console.log(`🔗 Offer decision for new user ${data.user.username}: shouldInitiate=${shouldInitiateOffer}`);
-      
       if (shouldInitiateOffer) {
-        setTimeout(() => {
-          console.log(`📤 INITIATING offer to new user ${data.user.username}`);
-          createOffer(data.user.userId);
-        }, 500);
-      } else {
-        console.log(`⏸️ WAITING for offer from new user ${data.user.username}`);
+        setTimeout(() => createOffer(data.user.userId), 1500);
       }
     }
-  }
-  
-  // Update participant count
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) {
-    const count = renderedParticipants.size;
-    subtitle.textContent = `${count} participant${count>1?'s':''}`;
   }
 });
           
@@ -908,9 +956,30 @@
           });
           
           socketInstance.on('audio_state_changed', (d) => {
-            const m = document.getElementById(`mic-${d.userId}`);
-            if (m) d.enabled ? m.classList.add('hidden') : m.classList.remove('hidden');
-          });
+  console.log(`🎤 Remote audio state changed: userId=${d.userId}, enabled=${d.enabled}`);
+  const m = document.getElementById(`mic-${d.userId}`);
+  if (m) {
+    if (d.enabled) {
+      m.classList.add('hidden');
+    } else {
+      m.classList.remove('hidden');
+    }
+  }
+});
+
+socketInstance.on('video_state_changed', (d) => {
+  console.log(`📹 Remote video state changed: userId=${d.userId}, enabled=${d.enabled}`);
+  
+  // Don't manipulate video visibility here - let the track events handle it
+  // Just log for debugging
+  const vid = document.getElementById(`video-${d.userId}`);
+  const pfp = document.getElementById(`pfp-${d.userId}`);
+  
+  if (vid && pfp) {
+    console.log(`📹 Video elements found for ${d.userId}`);
+    // The ontrack handler will manage visibility based on actual track state
+  }
+});
           
           socketInstance.on('video_state_changed', (d) => {
   console.log(`📹 Video state changed: userId=${d.userId}, enabled=${d.enabled}`);
