@@ -369,31 +369,104 @@ document.addEventListener('DOMContentLoaded', () => {
       } : false
     };
     
+    let mediaAttempt = 1;
+    let hasVideo = false;
+    let hasAudio = false;
+    
+    // ATTEMPT 1: Try full constraints
     try {
+      console.log(`🎬 [Attempt ${mediaAttempt}] Requesting video + audio...`);
       localStream = await navigator.mediaDevices.getUserMedia(constraints);
-      console.log(`✅ Media initialized with video and audio`);
+      hasVideo = localStream.getVideoTracks().length > 0;
+      hasAudio = localStream.getAudioTracks().length > 0;
+      console.log(`✅ [Attempt ${mediaAttempt}] SUCCESS: video=${hasVideo}, audio=${hasAudio}`);
     } catch (videoError) {
-      console.warn(`⚠️ Video failed (${videoError.name}), trying audio only...`);
-      const audioOnlyConstraints = {
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false
-      };
-      localStream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints);
-      console.log(`✅ Media initialized with audio only`);
-      toast('Camera not available, audio-only mode', 'warning');
+      console.warn(`⚠️ [Attempt ${mediaAttempt}] FAILED: ${videoError.name} - ${videoError.message}`);
+      
+      // ATTEMPT 2: Try audio only
+      mediaAttempt = 2;
+      try {
+        console.log(`🎬 [Attempt ${mediaAttempt}] Requesting audio only...`);
+        const audioOnlyConstraints = {
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false
+        };
+        localStream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints);
+        hasAudio = localStream.getAudioTracks().length > 0;
+        console.log(`✅ [Attempt ${mediaAttempt}] SUCCESS: audio=${hasAudio}`);
+        toast('Camera not available, using audio only', 'warning');
+      } catch (audioError) {
+        console.error(`❌ [Attempt ${mediaAttempt}] FAILED: ${audioError.name} - ${audioError.message}`);
+        
+        // ATTEMPT 3: Check what devices are available
+        mediaAttempt = 3;
+        try {
+          console.log(`🔍 [Attempt ${mediaAttempt}] Checking available devices...`);
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          const audioDevices = devices.filter(d => d.kind === 'audioinput');
+          
+          console.log(`📹 Video devices found: ${videoDevices.length}`);
+          videoDevices.forEach((d, i) => console.log(`   [${i}] ${d.label || 'Unknown'} (${d.deviceId.substring(0, 20)}...)`));
+          
+          console.log(`🎤 Audio devices found: ${audioDevices.length}`);
+          audioDevices.forEach((d, i) => console.log(`   [${i}] ${d.label || 'Unknown'} (${d.deviceId.substring(0, 20)}...)`));
+          
+          if (videoDevices.length === 0 && audioDevices.length === 0) {
+            throw new Error('No media devices found. Please check your browser permissions.');
+          }
+          
+          // ATTEMPT 4: Try with explicit device IDs
+          if (audioDevices.length > 0) {
+            mediaAttempt = 4;
+            console.log(`🎬 [Attempt ${mediaAttempt}] Trying with explicit audio device ID...`);
+            const explicitConstraints = {
+              audio: { 
+                deviceId: { exact: audioDevices[0].deviceId },
+                echoCancellation: true, 
+                noiseSuppression: true, 
+                autoGainControl: true 
+              },
+              video: false
+            };
+            localStream = await navigator.mediaDevices.getUserMedia(explicitConstraints);
+            hasAudio = localStream.getAudioTracks().length > 0;
+            console.log(`✅ [Attempt ${mediaAttempt}] SUCCESS with explicit device: audio=${hasAudio}`);
+            toast('Connected with audio only', 'warning');
+          } else {
+            throw new Error('No audio devices available');
+          }
+          
+        } catch (deviceError) {
+          console.error(`❌ [Attempt ${mediaAttempt}] Device enumeration failed:`, deviceError);
+          
+          // FINAL FALLBACK: Create empty stream (call will work but no media)
+          console.warn(`⚠️ FINAL FALLBACK: Creating empty MediaStream`);
+          localStream = new MediaStream();
+          hasVideo = false;
+          hasAudio = false;
+          toast('No media devices available. You can still join the call but others won\'t hear or see you.', 'error');
+        }
+      }
     }
     
-    isVideoEnabled = localStream.getVideoTracks().length > 0;
-    isAudioEnabled = localStream.getAudioTracks().length > 0;
+    // Set final states
+    isVideoEnabled = hasVideo;
+    isAudioEnabled = hasAudio;
     
-    console.log(`📊 Media tracks: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
+    console.log(`📊 Final media state: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
+    console.log(`📊 LocalStream tracks: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
     
-    const audio = localStream.getAudioTracks()[0];
-    if (audio) {
-      setupAudioDetection(currentUser.userId, localStream);
-      console.log(`🎤 Audio detection setup for ${currentUser.username}`);
+    // Setup audio detection if we have audio
+    if (hasAudio) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        setupAudioDetection(currentUser.userId, localStream);
+        console.log(`🎤 Audio detection setup for ${currentUser.username}`);
+      }
     }
     
+    // Update UI icon
     const callIcon = document.getElementById('callIcon');
     if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
     
@@ -403,8 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (localVid && localStream) {
       localVid.srcObject = localStream;
-      localVid.muted = true; // ALWAYS mute own video to prevent feedback
-      localVid.volume = 0; // Extra safety
+      localVid.muted = true;
+      localVid.volume = 0;
       
       if (isVideoEnabled) {
         await localVid.play().catch(e => console.warn('Local play:', e));
@@ -425,18 +498,74 @@ document.addEventListener('DOMContentLoaded', () => {
         icon.textContent = 'videocam_off';
         console.log(`📹 Video disabled for ${currentUser.username}`);
       }
+      
+      // Update mic button
+      if (isAudioEnabled) {
+        const micBtn = document.getElementById('micBtn');
+        const micIcon = micBtn.querySelector('.material-symbols-outlined');
+        micBtn.classList.add('bg-primary', 'text-white');
+        micBtn.classList.remove('bg-accent-red');
+        micIcon.textContent = 'mic';
+        console.log(`🎤 Mic enabled for ${currentUser.username}`);
+      } else {
+        const micBtn = document.getElementById('micBtn');
+        const micIcon = micBtn.querySelector('.material-symbols-outlined');
+        micBtn.classList.remove('bg-primary');
+        micBtn.classList.add('bg-accent-red', 'text-white');
+        micIcon.textContent = 'mic_off';
+        console.log(`🎤 Mic disabled for ${currentUser.username}`);
+      }
     }
     
+    console.log(`✅ initLocalMedia() complete - stream ready for PeerConnection`);
     return localStream;
+    
   } catch (e) {
-    console.error('❌ Media error:', e);
-    toast('Failed to access camera/microphone. Please check permissions.', 'error');
-    throw e;
+    console.error('❌ CRITICAL: Media initialization completely failed:', e);
+    console.error('❌ Error name:', e.name);
+    console.error('❌ Error message:', e.message);
+    console.error('❌ Error stack:', e.stack);
+    
+    // ABSOLUTE FINAL FALLBACK
+    localStream = new MediaStream();
+    isVideoEnabled = false;
+    isAudioEnabled = false;
+    
+    toast('Unable to access camera or microphone. Check browser permissions and try again.', 'error');
+    console.log(`⚠️ Created empty MediaStream as absolute fallback`);
+    return localStream;
   }
 }
 
       function createPC(userId) {
   console.log(`🔗 Creating PC for ${userId}`);
+
+  
+  // CRITICAL: Validate localStream exists
+  if (!localStream) {
+    console.error(`❌ CRITICAL: localStream is null when creating PC for ${userId}!`);
+    console.error(`❌ This should never happen. Stack trace:`);
+    console.trace();
+    throw new Error('Cannot create PeerConnection without localStream');
+  }
+  
+  console.log(`✅ localStream validated: ${localStream.getTracks().length} tracks`);
+  
+  const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
+  connectionStats.set(userId, { startTime: Date.now(), iceState: 'new', connectionState: 'new', candidatesReceived: 0, candidatesSent: 0 });
+  
+  const tracks = localStream.getTracks();
+  console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
+  
+  tracks.forEach(track => {
+    pc.addTrack(track, localStream);
+    console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled}, readyState=${track.readyState})`);
+  });
+  
+  if (tracks.length === 0) {
+    console.warn(`⚠️ WARNING: No tracks in localStream for ${userId} - peer will receive empty stream`);
+  }
+  
   const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
   connectionStats.set(userId, { startTime: Date.now(), iceState: 'new', connectionState: 'new', candidatesReceived: 0, candidatesSent: 0 });
   
@@ -909,6 +1038,29 @@ async function toggleVideo() {
   
   const subtitle = document.getElementById('callSubtitle');
   if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
+  
+  // CRITICAL: Initialize media BEFORE doing anything else
+  console.log(`🎬 Initializing local media...`);
+  try {
+    await initLocalMedia();
+    console.log(`✅ Local media initialized successfully`);
+  } catch (mediaError) {
+    console.error(`❌ Media initialization failed:`, mediaError);
+    toast('Failed to initialize media. You may not be able to communicate.', 'error');
+    // Continue anyway with empty stream
+  }
+  
+  // CRITICAL: Verify localStream exists
+  if (!localStream) {
+    console.error(`❌ CRITICAL: localStream is still null after initLocalMedia()!`);
+    console.error(`❌ Creating emergency empty stream...`);
+    localStream = new MediaStream();
+  }
+  
+  console.log(`📊 LocalStream validation: ${localStream.getTracks().length} tracks`);
+  localStream.getTracks().forEach(t => {
+    console.log(`   - ${t.kind}: id=${t.id.substring(0, 8)}..., enabled=${t.enabled}, readyState=${t.readyState}`);
+  });
   
   await initLocalMedia();
   
