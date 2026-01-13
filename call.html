@@ -412,111 +412,146 @@
 }
 
       function createPC(userId) {
-        console.log(`🔗 Creating PC for ${userId}`);
-        const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
-        connectionStats.set(userId, { startTime: Date.now(), iceState: 'new', connectionState: 'new', candidatesReceived: 0, candidatesSent: 0 });
-        
-        if (localStream) {
-          localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-            console.log(`➕ Added ${track.kind} to ${userId}`);
-          });
-        }
-        
-        pc.ontrack = (e) => {
-  console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}`);
-  const vid = document.getElementById(`video-${userId}`);
-  const pfp = document.getElementById(`pfp-${userId}`);
+  console.log(`🔗 Creating PC for ${userId}`);
+  const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
+  connectionStats.set(userId, { startTime: Date.now(), iceState: 'new', connectionState: 'new', candidatesReceived: 0, candidatesSent: 0 });
   
-  if (!vid) {
-    console.error(`❌ Video element not found for ${userId}`);
-    return;
+  if (localStream) {
+    localStream.getTracks().forEach(track => {
+      pc.addTrack(track, localStream);
+      console.log(`➕ Added ${track.kind} track (enabled=${track.enabled}) to PC for ${userId}`);
+    });
+  } else {
+    console.warn(`⚠️ No localStream available when creating PC for ${userId}`);
   }
   
-  if (!vid.srcObject) {
-    vid.srcObject = new MediaStream();
-    console.log(`📺 Created new MediaStream for ${userId}`);
-  }
-  vid.srcObject.addTrack(e.track);
-  console.log(`➕ Added ${e.track.kind} track to stream for ${userId}`);
-  
-  if (e.track.kind === 'video') {
-    console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}`);
+  pc.ontrack = (e) => {
+    console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
+    const vid = document.getElementById(`video-${userId}`);
+    const pfp = document.getElementById(`pfp-${userId}`);
     
-    vid.play().catch(err => console.warn(`⚠️ Video play error for ${userId}:`, err));
-    
-    // Show video immediately if track is enabled and not muted
-    if (e.track.enabled && !e.track.muted) {
-      console.log(`📹 Video track active - showing video for ${userId}`);
-      vid.classList.remove('hidden');
-      if (pfp) pfp.classList.add('hidden');
+    if (!vid) {
+      console.error(`❌ Video element not found for ${userId}`);
+      return;
     }
     
-    e.track.onunmute = () => {
-      console.log(`📹 Video UNMUTED for ${userId} - showing video`);
-      vid.classList.remove('hidden');
-      if (pfp) pfp.classList.add('hidden');
-    };
+    if (!vid.srcObject) {
+      vid.srcObject = new MediaStream();
+      console.log(`📺 Created new MediaStream for ${userId}`);
+    }
     
-    e.track.onmute = () => {
-      console.log(`📹 Video MUTED for ${userId} - showing pfp`);
-      vid.classList.add('hidden');
-      if (pfp) pfp.classList.remove('hidden');
-    };
+    // Check if track already exists in the stream
+    const existingTracks = vid.srcObject.getTracks().filter(t => t.kind === e.track.kind);
+    existingTracks.forEach(t => {
+      console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
+      vid.srcObject.removeTrack(t);
+    });
     
-    e.track.onended = () => {
-      console.log(`📹 Video ENDED for ${userId} - showing pfp`);
-      vid.classList.add('hidden');
-      if (pfp) pfp.classList.remove('hidden');
-    };
-  } else if (e.track.kind === 'audio') {
-    console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}`);
-    vid.play().catch(err => console.warn(`⚠️ Audio play error for ${userId}:`, err));
-    setupAudioDetection(userId, new MediaStream([e.track]));
-  }
-};
+    vid.srcObject.addTrack(e.track);
+    console.log(`➕ Added ${e.track.kind} track to MediaStream for ${userId}`);
+    console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks:`, vid.srcObject.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', '));
+    
+    if (e.track.kind === 'video') {
+      console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+      
+      // Start playing the video element
+      vid.play().catch(err => console.warn(`⚠️ Video play error for ${userId}:`, err));
+      
+      // Handle track state changes
+      const updateVideoVisibility = () => {
+        const shouldShowVideo = e.track.enabled && !e.track.muted && e.track.readyState === 'live';
+        console.log(`📹 Video visibility update for ${userId}: shouldShow=${shouldShowVideo} (enabled=${e.track.enabled}, muted=${e.track.muted}, ready=${e.track.readyState})`);
         
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            connectionStats.get(userId).candidatesSent++;
-            socketInstance.emit('ice_candidate', { callId: callData.callId, targetUserId: userId, candidate: e.candidate });
+        if (shouldShowVideo) {
+          vid.classList.remove('hidden');
+          if (pfp) pfp.classList.add('hidden');
+        } else {
+          vid.classList.add('hidden');
+          if (pfp) pfp.classList.remove('hidden');
+        }
+      };
+      
+      // Initial visibility check
+      setTimeout(updateVideoVisibility, 100);
+      
+      e.track.onunmute = () => {
+        console.log(`📹 Video UNMUTED for ${userId}`);
+        updateVideoVisibility();
+      };
+      
+      e.track.onmute = () => {
+        console.log(`📹 Video MUTED for ${userId}`);
+        updateVideoVisibility();
+      };
+      
+      e.track.onended = () => {
+        console.log(`📹 Video ENDED for ${userId}`);
+        vid.classList.add('hidden');
+        if (pfp) pfp.classList.remove('hidden');
+      };
+      
+    } else if (e.track.kind === 'audio') {
+      console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, readyState=${e.track.readyState}`);
+      
+      // Ensure audio playback
+      vid.muted = false; // Make sure we can hear remote audio
+      vid.play().catch(err => console.warn(`⚠️ Audio play error for ${userId}:`, err));
+      
+      // Setup audio detection
+      setupAudioDetection(userId, new MediaStream([e.track]));
+      
+      e.track.onended = () => {
+        console.log(`🔊 Audio track ended for ${userId}`);
+      };
+    }
+  };
+  
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      connectionStats.get(userId).candidatesSent++;
+      socketInstance.emit('ice_candidate', { callId: callData.callId, targetUserId: userId, candidate: e.candidate });
+    }
+  };
+  
+  pc.oniceconnectionstatechange = () => {
+    connectionStats.get(userId).iceState = pc.iceConnectionState;
+    console.log(`🧊 ICE state for ${userId}: ${pc.iceConnectionState}`);
+    if (pc.iceConnectionState === 'failed') {
+      console.warn(`⚠️ ICE failed for ${userId}, attempting restart`);
+      pc.restartIce();
+    }
+  };
+  
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    connectionStats.get(userId).connectionState = state;
+    console.log(`🔌 ${userId}: ${state}`);
+    
+    const subtitle = document.getElementById('callSubtitle');
+    if (state === 'connected') {
+      const count = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
+      if (subtitle) subtitle.textContent = `${count} participant${count>1?'s':''} connected`;
+      
+      pc.getStats().then(stats => {
+        stats.forEach(r => {
+          if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+            const local = stats.get(r.localCandidateId);
+            if (local) {
+              console.log(`✅ Using ${local.candidateType} for ${userId}`);
+              socketInstance.emit('connection_state_update', { callId: callData.callId, state: 'connected', candidateType: local.candidateType });
+            }
           }
-        };
-        
-        pc.oniceconnectionstatechange = () => {
-          connectionStats.get(userId).iceState = pc.iceConnectionState;
-          if (pc.iceConnectionState === 'failed') pc.restartIce();
-        };
-        
-        pc.onconnectionstatechange = () => {
-          const state = pc.connectionState;
-          connectionStats.get(userId).connectionState = state;
-          console.log(`🔌 ${userId}: ${state}`);
-          
-          const subtitle = document.getElementById('callSubtitle');
-          if (state === 'connected') {
-            const count = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
-            if (subtitle) subtitle.textContent = `${count} participant${count>1?'s':''} connected`;
-            
-            pc.getStats().then(stats => {
-              stats.forEach(r => {
-                if (r.type === 'candidate-pair' && r.state === 'succeeded') {
-                  const local = stats.get(r.localCandidateId);
-                  if (local) {
-                    console.log(`✅ Using ${local.candidateType} for ${userId}`);
-                    socketInstance.emit('connection_state_update', { callId: callData.callId, state: 'connected', candidateType: local.candidateType });
-                  }
-                }
-              });
-            });
-          } else if (state === 'failed') {
-            setTimeout(() => { if (pc.connectionState === 'failed') pc.restartIce(); }, 1000);
-          }
-        };
-        
-        peerConnections.set(userId, pc);
-        return pc;
-      }
+        });
+      });
+    } else if (state === 'failed') {
+      console.warn(`⚠️ Connection failed for ${userId}, will retry`);
+      setTimeout(() => { if (pc.connectionState === 'failed') pc.restartIce(); }, 1000);
+    }
+  };
+  
+  peerConnections.set(userId, pc);
+  return pc;
+}
 
       async function createOffer(userId) {
         try {
@@ -710,12 +745,8 @@
   
   await initLocalMedia();
   
-  // Emit our initial media state to the server
-  if (socketInstance) {
-    console.log(`📡 Broadcasting initial state: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
-    socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
-    socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
-  }
+  // DON'T broadcast state here - let the media tracks sync naturally through WebRTC
+  // The server already has the correct state from when we joined
   
   const grid = document.getElementById('participantGrid');
   if (grid) {
@@ -742,20 +773,31 @@
         grid.appendChild(tile);
         console.log(`✅ [${index}] Tile added to DOM for ${p.username}`);
         
-        // Apply initial audio state for remote users
-        if (!isSelf) {
-          const micIndicator = document.getElementById(`mic-${p.userId}`);
-          if (micIndicator) {
-            if (audioState === false) {
-              micIndicator.classList.remove('hidden');
-              console.log(`🎤 [${index}] Initial audio OFF for ${p.username}`);
-            } else {
-              micIndicator.classList.add('hidden');
-              console.log(`🎤 [${index}] Initial audio ON for ${p.username}`);
-            }
+        // Apply initial audio state for all users
+        const micIndicator = document.getElementById(`mic-${p.userId}`);
+        if (micIndicator) {
+          if (audioState === false) {
+            micIndicator.classList.remove('hidden');
+            console.log(`🎤 [${index}] Initial audio OFF for ${p.username}`);
+          } else {
+            micIndicator.classList.add('hidden');
+            console.log(`🎤 [${index}] Initial audio ON for ${p.username}`);
           }
-          
-          // CRITICAL FIX: Only create offer if our userId is "smaller" than theirs
+        }
+        
+        // Apply initial video state for remote users
+        if (!isSelf && videoState === false) {
+          const vid = document.getElementById(`video-${p.userId}`);
+          const pfp = document.getElementById(`pfp-${p.userId}`);
+          if (vid && pfp) {
+            vid.classList.add('hidden');
+            pfp.classList.remove('hidden');
+            console.log(`📹 [${index}] Initial video OFF for ${p.username}`);
+          }
+        }
+        
+        // CRITICAL FIX: Only create offer if our userId is "smaller" than theirs
+        if (!isSelf) {
           const shouldInitiateOffer = currentUser.userId < p.userId;
           console.log(`🔗 [${index}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer} (${currentUser.userId} < ${p.userId})`);
           
