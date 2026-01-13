@@ -128,41 +128,6 @@ async function getIceServers() {
 
   return iceServers;
 }
-async function getIceServers() {
-  const iceServers = [
-    {
-      urls: [
-        'stun:stun.cloudflare.com:3478',
-        'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-        'stun:stun2.l.google.com:19302'
-      ]
-    }
-  ];
-
-  console.log('🔧 Fetching TURN credentials from Cloudflare...');
-  const turnServers = await generateCloudTurnCredentials();
-  
-  if (turnServers && Array.isArray(turnServers) && turnServers.length > 0) {
-    turnServers.forEach(server => {
-      iceServers.push(server);
-      
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-      urls.forEach(url => {
-        const hasAuth = !!(server.username && server.credential);
-        console.log(`   📡 TURN: ${url} ${hasAuth ? '(authenticated)' : ''}`);
-      });
-    });
-    
-    console.log(`✅ ICE configuration: ${iceServers.length} server groups (STUN + TURN)`);
-  } else {
-    console.warn('⚠️ Operating with STUN-only configuration');
-    console.warn('   Direct peer-to-peer connections will work for most users');
-    console.warn('   Users behind symmetric NATs may experience connection issues');
-  }
-
-  return iceServers;
-}
 
 const app = express();
 const server = createServer(app);
