@@ -37,9 +37,10 @@
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
         
-        /* Active speaker highlight */
+        /* Active speaker highlight - CRITICAL */
         .active-speaker {
-            box-shadow: 0 0 0 3px #33bfcc, 0 0 15px rgba(51, 191, 204, 0.4);
+            box-shadow: 0 0 0 3px #33bfcc, 0 0 15px rgba(51, 191, 204, 0.4) !important;
+            border-color: #33bfcc !important;
         }
         
         body {
@@ -51,21 +52,37 @@
         .video-tile {
             position: relative;
             background: #000;
-            aspect-ratio: 1 / 1; /* Square tiles like reference */
+            aspect-ratio: 1 / 1;
             overflow: hidden;
             border-radius: 1rem;
+            transition: all 0.3s ease;
         }
         
         .video-feed {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        video {
+            position: absolute;
+            inset: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
         
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        .profile-picture-container {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
         }
         
         /* Grid layout: 3 columns, auto rows */
@@ -99,7 +116,7 @@
     <header class="w-full border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
         <div class="flex items-center gap-4">
             <div class="bg-primary/20 p-2 rounded-lg">
-                <span class="material-symbols-outlined text-primary">videocam</span>
+                <span class="material-symbols-outlined text-primary" id="callIcon">videocam</span>
             </div>
             <div>
                 <h1 class="text-lg font-bold tracking-tight" id="callTitle">Mindful Space Call</h1>
@@ -139,7 +156,7 @@
                     <span class="material-symbols-outlined">mic</span>
                 </button>
                 <button id="videoBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
-                    <span class="material-symbols-outlined">videocam</span>
+                    <span class="material-symbols-outlined">videocam_off</span>
                 </button>
                 <button id="screenShareBtn" class="w-12 h-12 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">
                     <span class="material-symbols-outlined">screen_share</span>
@@ -241,6 +258,7 @@
 
       let localStream = null;
       let peerConnections = new Map();
+      let audioContexts = new Map();
       let socketInstance = null;
       let callData = null;
       let currentUser = null;
@@ -250,14 +268,14 @@
       let durationInterval = null;
       let isInitializing = false;
       let hasJoinedCall = false;
-      let pendingIceCandidates = new Map(); // userId -> [candidates]
+      let pendingIceCandidates = new Map();
       
       const connectionStats = new Map();
 
-      function createProfilePictureElement(pfpUrl, username, size = 'w-20 h-20') {
+      function createProfilePictureElement(pfpUrl, username) {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
         const container = document.createElement('div');
-        container.className = `${size} rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30 flex-shrink-0`;
+        container.className = 'w-20 h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30 flex-shrink-0';
         
         if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
           const img = document.createElement('img');
@@ -279,29 +297,36 @@
       function createParticipantTile(user, isSelf = false) {
         const tile = document.createElement('div');
         tile.id = `participant-${user.userId}`;
-        tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'} group hover:border-white/20 transition-all`;
+        tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'} group hover:border-white/20`;
         
-        const videoContainer = document.createElement('div');
-        videoContainer.className = 'video-feed w-full h-full bg-center bg-cover flex items-center justify-center';
+        // Video feed container
+        const videoFeed = document.createElement('div');
+        videoFeed.className = 'video-feed';
         
+        // Video element (hidden by default)
         const videoElement = document.createElement('video');
         videoElement.id = `video-${user.userId}`;
-        videoElement.className = 'absolute inset-0 w-full h-full object-cover hidden';
+        videoElement.className = 'hidden';
         videoElement.autoplay = true;
         videoElement.playsInline = true;
         if (isSelf) {
           videoElement.muted = true;
         }
+        videoFeed.appendChild(videoElement);
         
-        const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-20 h-20');
-        pfpElement.id = `pfp-${user.userId}`;
+        // Profile picture container (shown by default)
+        const pfpContainer = document.createElement('div');
+        pfpContainer.id = `pfp-container-${user.userId}`;
+        pfpContainer.className = 'profile-picture-container';
+        const pfpElement = createProfilePictureElement(user.pfpUrl, user.username);
+        pfpContainer.appendChild(pfpElement);
+        videoFeed.appendChild(pfpContainer);
         
-        videoContainer.appendChild(videoElement);
-        videoContainer.appendChild(pfpElement);
+        tile.appendChild(videoFeed);
         
         // Bottom label
         const labelContainer = document.createElement('div');
-        labelContainer.className = 'absolute bottom-4 left-4 flex items-center gap-2';
+        labelContainer.className = 'absolute bottom-4 left-4 flex items-center gap-2 z-10';
         
         const label = document.createElement('div');
         label.className = `${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-3 py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-2`;
@@ -310,29 +335,20 @@
           <span class="text-lg">😊</span>
         `;
         labelContainer.appendChild(label);
+        tile.appendChild(labelContainer);
         
-        // Status text
-        const statusText = document.createElement('div');
-        statusText.id = `status-${user.userId}`;
-        statusText.className = 'absolute top-2 left-2 text-xs text-white/60 hidden';
-        statusText.textContent = 'Connecting...';
-        
-        // Speaking indicator
+        // Speaking indicator (top right)
         const speakingIndicator = document.createElement('div');
         speakingIndicator.id = `speaking-${user.userId}`;
-        speakingIndicator.className = 'absolute top-4 right-4 bg-primary px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-widest hidden';
+        speakingIndicator.className = 'absolute top-4 right-4 bg-primary px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-widest hidden z-10';
         speakingIndicator.textContent = 'Speaking';
+        tile.appendChild(speakingIndicator);
         
-        // Mic muted indicator
+        // Mic muted indicator (top right, shown when speaking indicator is hidden)
         const micIndicator = document.createElement('div');
         micIndicator.id = `mic-${user.userId}`;
-        micIndicator.className = 'absolute top-4 right-4 bg-accent-red p-1.5 rounded-full text-white shadow-lg hidden';
+        micIndicator.className = 'absolute top-4 right-4 bg-accent-red p-1.5 rounded-full text-white shadow-lg hidden z-10';
         micIndicator.innerHTML = '<span class="material-symbols-outlined text-[16px] block">mic_off</span>';
-        
-        tile.appendChild(videoContainer);
-        tile.appendChild(labelContainer);
-        tile.appendChild(statusText);
-        tile.appendChild(speakingIndicator);
         tile.appendChild(micIndicator);
         
         if (isSelf) {
@@ -342,6 +358,75 @@
         }
         
         return tile;
+      }
+
+      // Audio level detection for speaking indicator
+      function setupAudioLevelDetection(userId, stream) {
+        try {
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const audioSource = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          audioSource.connect(analyser);
+          
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          const speakingIndicator = document.getElementById(`speaking-${userId}`);
+          const participantTile = document.getElementById(`participant-${userId}`);
+          
+          let isSpeaking = false;
+          const SPEAKING_THRESHOLD = 30;
+          const SPEAKING_TIMEOUT = 300;
+          let lastSpeakingTime = 0;
+          
+          function detectSpeaking() {
+            if (!speakingIndicator || !participantTile) {
+              audioContext.close();
+              return;
+            }
+            
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            
+            const now = Date.now();
+            if (average > SPEAKING_THRESHOLD) {
+              if (!isSpeaking) {
+                isSpeaking = true;
+                speakingIndicator.classList.remove('hidden');
+                participantTile.classList.add('active-speaker');
+                console.log(`🗣️ ${userId} started speaking`);
+                
+                // Emit speaking state to other users
+                if (socketInstance && userId === currentUser.userId) {
+                  socketInstance.emit('speaking_state', {
+                    callId: callData.callId,
+                    speaking: true
+                  });
+                }
+              }
+              lastSpeakingTime = now;
+            } else if (isSpeaking && now - lastSpeakingTime > SPEAKING_TIMEOUT) {
+              isSpeaking = false;
+              speakingIndicator.classList.add('hidden');
+              participantTile.classList.remove('active-speaker');
+              console.log(`🤐 ${userId} stopped speaking`);
+              
+              // Emit speaking state to other users
+              if (socketInstance && userId === currentUser.userId) {
+                socketInstance.emit('speaking_state', {
+                  callId: callData.callId,
+                  speaking: false
+                });
+              }
+            }
+            
+            requestAnimationFrame(detectSpeaking);
+          }
+          
+          detectSpeaking();
+          audioContexts.set(userId, audioContext);
+        } catch (error) {
+          console.error(`Error setting up audio detection for ${userId}:`, error);
+        }
       }
 
       async function initializeLocalMedia() {
@@ -368,15 +453,35 @@
           isVideoEnabled = callData.callType === 'video';
           isAudioEnabled = true;
           
+          // Setup audio level detection for local stream
+          const audioTrack = localStream.getAudioTracks()[0];
+          if (audioTrack) {
+            setupAudioLevelDetection(currentUser.userId, localStream);
+          }
+          
+          // Update icon based on call type
+          const callIcon = document.getElementById('callIcon');
+          if (callIcon) {
+            callIcon.textContent = callData.callType === 'video' ? 'videocam' : 'graphic_eq';
+          }
+          
           if (isVideoEnabled) {
             const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
+            const localPfpContainer = document.getElementById(`pfp-container-${currentUser.userId}`);
             if (localVideo && localStream) {
               localVideo.srcObject = localStream;
               await localVideo.play().catch(e => console.warn('Video play warning:', e));
               localVideo.classList.remove('hidden');
-              if (localPfp) localPfp.classList.add('hidden');
+              if (localPfpContainer) localPfpContainer.classList.add('hidden');
+              console.log(`📹 Local video enabled for ${currentUser.username}`);
             }
+            
+            // Update video button state
+            const videoBtn = document.getElementById('videoBtn');
+            const videoIcon = videoBtn.querySelector('.material-symbols-outlined');
+            videoBtn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
+            videoBtn.classList.add('bg-primary', 'text-white');
+            videoIcon.textContent = 'videocam';
           }
           
           return localStream;
@@ -416,21 +521,42 @@
         pc.ontrack = (event) => {
           console.log(`📥 Received remote ${event.track.kind} from ${userId}`);
           const remoteVideo = document.getElementById(`video-${userId}`);
-          const remotePfp = document.getElementById(`pfp-${userId}`);
+          const remotePfpContainer = document.getElementById(`pfp-container-${userId}`);
           
           if (remoteVideo) {
             if (!remoteVideo.srcObject) {
               remoteVideo.srcObject = new MediaStream();
             }
             remoteVideo.srcObject.addTrack(event.track);
-            remoteVideo.play().catch(e => console.warn('Remote video play warning:', e));
             
             if (event.track.kind === 'video') {
+              // Video track received
+              remoteVideo.play().catch(e => console.warn('Remote video play warning:', e));
+              
               event.track.onunmute = () => {
-                console.log(`📹 Video track unmuted for ${userId}`);
+                console.log(`📹 Video track unmuted for ${userId} - showing video`);
                 remoteVideo.classList.remove('hidden');
-                if (remotePfp) remotePfp.classList.add('hidden');
+                if (remotePfpContainer) remotePfpContainer.classList.add('hidden');
               };
+              
+              event.track.onmute = () => {
+                console.log(`📹 Video track muted for ${userId} - showing profile picture`);
+                remoteVideo.classList.add('hidden');
+                if (remotePfpContainer) remotePfpContainer.classList.remove('hidden');
+              };
+              
+              event.track.onended = () => {
+                console.log(`📹 Video track ended for ${userId}`);
+                remoteVideo.classList.add('hidden');
+                if (remotePfpContainer) remotePfpContainer.classList.remove('hidden');
+              };
+            } else if (event.track.kind === 'audio') {
+              // Audio track received
+              remoteVideo.play().catch(e => console.warn('Remote audio play warning:', e));
+              
+              // Setup audio level detection for remote stream
+              const stream = new MediaStream([event.track]);
+              setupAudioLevelDetection(userId, stream);
             }
           }
         };
@@ -470,68 +596,48 @@
           
           console.log(`🔌 Connection state with ${userId}: ${state}`);
           
-          const statusEl = document.getElementById(`status-${userId}`);
           const callSubtitle = document.getElementById('callSubtitle');
           
-          if (statusEl) {
-            switch (state) {
-              case 'connected':
-                statusEl.textContent = 'Connected';
-                statusEl.classList.add('hidden'); // Hide status on success
-                
-                if (callSubtitle) {
-                  const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
-                  callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
-                }
-                
-                pc.getStats().then(stats => {
-                  stats.forEach(report => {
-                    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                      const localCandidate = stats.get(report.localCandidateId);
-                      if (localCandidate) {
-                        console.log(`✅ Using ${localCandidate.candidateType} for ${userId}`);
-                        connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
-                        
-                        socketInstance.emit('connection_state_update', {
-                          callId: callData.callId,
-                          state: 'connected',
-                          candidateType: localCandidate.candidateType
-                        });
-                      }
+          switch (state) {
+            case 'connected':
+              if (callSubtitle) {
+                const connectedCount = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
+                callSubtitle.textContent = `${connectedCount} participant${connectedCount > 1 ? 's' : ''} connected`;
+              }
+              
+              pc.getStats().then(stats => {
+                stats.forEach(report => {
+                  if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                    const localCandidate = stats.get(report.localCandidateId);
+                    if (localCandidate) {
+                      console.log(`✅ Using ${localCandidate.candidateType} for ${userId}`);
+                      connectionStats.get(userId).selectedCandidate = localCandidate.candidateType;
+                      
+                      socketInstance.emit('connection_state_update', {
+                        callId: callData.callId,
+                        state: 'connected',
+                        candidateType: localCandidate.candidateType
+                      });
                     }
-                  });
-                });
-                break;
-              case 'connecting':
-                statusEl.textContent = 'Connecting...';
-                statusEl.classList.remove('hidden');
-                break;
-              case 'disconnected':
-                statusEl.textContent = 'Reconnecting...';
-                statusEl.classList.remove('hidden');
-                break;
-              case 'failed':
-                console.error(`❌ Connection failed with ${userId}`);
-                statusEl.textContent = 'Connection failed';
-                statusEl.classList.remove('hidden');
-                
-                setTimeout(() => {
-                  if (pc.connectionState === 'failed') {
-                    console.log(`🔄 Restarting ICE for ${userId}`);
-                    pc.restartIce();
                   }
-                }, 1000);
-                
-                socketInstance.emit('connection_state_update', {
-                  callId: callData.callId,
-                  state: 'failed'
                 });
-                break;
-              case 'closed':
-                statusEl.textContent = 'Disconnected';
-                statusEl.classList.remove('hidden');
-                break;
-            }
+              });
+              break;
+              
+            case 'failed':
+              console.error(`❌ Connection failed with ${userId}`);
+              setTimeout(() => {
+                if (pc.connectionState === 'failed') {
+                  console.log(`🔄 Restarting ICE for ${userId}`);
+                  pc.restartIce();
+                }
+              }, 1000);
+              
+              socketInstance.emit('connection_state_update', {
+                callId: callData.callId,
+                state: 'failed'
+              });
+              break;
           }
         };
         
@@ -546,7 +652,7 @@
           
           const offer = await pc.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: callData.callType === 'video'
+            offerToReceiveVideo: true // Always offer to receive video
           });
           
           await pc.setLocalDescription(offer);
@@ -695,20 +801,20 @@
             const videoBtn = document.getElementById('videoBtn');
             const videoIcon = videoBtn.querySelector('.material-symbols-outlined');
             const localVideo = document.getElementById(`video-${currentUser.userId}`);
-            const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
+            const localPfpContainer = document.getElementById(`pfp-container-${currentUser.userId}`);
             
             if (isVideoEnabled) {
-              videoBtn.classList.remove('text-slate-500');
+              videoBtn.classList.remove('bg-slate-200', 'dark:bg-background-dark', 'text-slate-700', 'dark:text-white');
               videoBtn.classList.add('bg-primary', 'text-white');
               videoIcon.textContent = 'videocam';
               if (localVideo) localVideo.classList.remove('hidden');
-              if (localPfp) localPfp.classList.add('hidden');
+              if (localPfpContainer) localPfpContainer.classList.add('hidden');
             } else {
-              videoBtn.classList.add('text-slate-500');
+              videoBtn.classList.add('bg-slate-200', 'dark:bg-background-dark', 'text-slate-700', 'dark:text-white');
               videoBtn.classList.remove('bg-primary', 'text-white');
               videoIcon.textContent = 'videocam_off';
               if (localVideo) localVideo.classList.add('hidden');
-              if (localPfp) localPfp.classList.remove('hidden');
+              if (localPfpContainer) localPfpContainer.classList.remove('hidden');
             }
             
             console.log(`📹 Video ${isVideoEnabled ? 'enabled' : 'disabled'}`);
@@ -739,6 +845,12 @@
         
         console.log('🚪 Leaving call...');
         isInitializing = true;
+        
+        // Close all audio contexts
+        audioContexts.forEach((context, userId) => {
+          context.close();
+        });
+        audioContexts.clear();
         
         if (localStream) {
           localStream.getTracks().forEach(track => {
@@ -786,7 +898,7 @@
           }
           
           callData = JSON.parse(callDataStr);
-          console.log(`📞 Call data loaded: ${callData.callId}`);
+          console.log(`📞 Call data loaded: ${callData.callId} (${callData.callType})`);
           
           const firebaseUser = firebase.auth().currentUser;
           if (!firebaseUser) {
@@ -890,6 +1002,13 @@
               peerConnections.delete(data.userId);
             }
             
+            // Close audio context
+            const audioContext = audioContexts.get(data.userId);
+            if (audioContext) {
+              audioContext.close();
+              audioContexts.delete(data.userId);
+            }
+            
             connectionStats.delete(data.userId);
             pendingIceCandidates.delete(data.userId);
           });
@@ -898,7 +1017,24 @@
           socketInstance.on('webrtc_answer', (data) => handleAnswer(data.fromUserId, data.answer));
           socketInstance.on('ice_candidate', (data) => handleIceCandidate(data.fromUserId, data.candidate));
           
+          // Handle speaking state from other users
+          socketInstance.on('speaking_state', (data) => {
+            const speakingIndicator = document.getElementById(`speaking-${data.userId}`);
+            const participantTile = document.getElementById(`participant-${data.userId}`);
+            
+            if (speakingIndicator && participantTile) {
+              if (data.speaking) {
+                speakingIndicator.classList.remove('hidden');
+                participantTile.classList.add('active-speaker');
+              } else {
+                speakingIndicator.classList.add('hidden');
+                participantTile.classList.remove('active-speaker');
+              }
+            }
+          });
+          
           socketInstance.on('audio_state_changed', (data) => {
+            console.log(`🎤 Audio state changed for ${data.userId}: ${data.enabled}`);
             const micIndicator = document.getElementById(`mic-${data.userId}`);
             if (micIndicator) {
               data.enabled ? micIndicator.classList.add('hidden') : micIndicator.classList.remove('hidden');
@@ -906,15 +1042,17 @@
           });
           
           socketInstance.on('video_state_changed', (data) => {
+            console.log(`📹 Video state changed for ${data.userId}: ${data.enabled}`);
             const video = document.getElementById(`video-${data.userId}`);
-            const pfp = document.getElementById(`pfp-${data.userId}`);
-            if (video && pfp) {
+            const pfpContainer = document.getElementById(`pfp-container-${data.userId}`);
+            if (video && pfpContainer) {
               if (data.enabled) {
-                video.classList.remove('hidden');
-                pfp.classList.add('hidden');
+                // User enabled video - but wait for actual video track
+                console.log(`📹 Waiting for video track from ${data.userId}`);
               } else {
+                // User disabled video - show profile picture
                 video.classList.add('hidden');
-                pfp.classList.remove('hidden');
+                pfpContainer.classList.remove('hidden');
               }
             }
           });
