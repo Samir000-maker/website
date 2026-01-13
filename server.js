@@ -50,7 +50,7 @@ async function generateCloudTurnCredentials() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          ttl: 86400 // 24 hours
+          ttl: 86400
         })
       }
     );
@@ -62,14 +62,60 @@ async function generateCloudTurnCredentials() {
     }
 
     const data = await response.json();
-    console.log('✅ Cloudflare TURN credentials generated successfully');
-    console.log(`   TTL: ${data.ttl}s, ICE Servers: ${data.iceServers?.ice_servers?.length || 0}`);
     
-    return data;
+    // FIX: Check the actual response structure
+    console.log('📦 Raw TURN response:', JSON.stringify(data, null, 2));
+    
+    // Cloudflare returns { iceServers: { iceServers: [...], ttl: ... } }
+    // We need to extract the actual ice servers array
+    if (data.iceServers && data.iceServers.iceServers) {
+      console.log('✅ Cloudflare TURN credentials generated successfully');
+      console.log(`   TTL: ${data.iceServers.ttl}s, ICE Servers: ${data.iceServers.iceServers.length || 0}`);
+      return data.iceServers.iceServers; // Return the actual array
+    } else {
+      console.error('❌ Unexpected TURN response structure:', data);
+      return null;
+    }
   } catch (error) {
     console.error('❌ Error generating TURN credentials:', error.message);
     return null;
   }
+}
+
+async function getIceServers() {
+  const iceServers = [
+    {
+      urls: [
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302'
+      ]
+    }
+  ];
+
+  console.log('🔧 Fetching TURN credentials from Cloudflare...');
+  const turnServers = await generateCloudTurnCredentials();
+  
+  if (turnServers && Array.isArray(turnServers) && turnServers.length > 0) {
+    turnServers.forEach(server => {
+      iceServers.push(server);
+      
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      urls.forEach(url => {
+        const hasAuth = !!(server.username && server.credential);
+        console.log(`   📡 TURN: ${url} ${hasAuth ? '(authenticated)' : ''}`);
+      });
+    });
+    
+    console.log(`✅ ICE configuration: ${iceServers.length} server groups (STUN + TURN)`);
+  } else {
+    console.warn('⚠️ Operating with STUN-only configuration');
+    console.warn('   Direct peer-to-peer connections will work for most users');
+    console.warn('   Users behind symmetric NATs may experience connection issues');
+  }
+
+  return iceServers;
 }
 
 async function getIceServers() {
