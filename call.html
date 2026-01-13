@@ -21,13 +21,7 @@
                     },
                     fontFamily: {
                         "display": ["Manrope", "sans-serif"]
-                    },
-                    borderRadius: {
-                        "DEFAULT": "0.5rem",
-                        "lg": "1rem",
-                        "xl": "1.5rem",
-                        "full": "9999px"
-                    },
+                    }
                 },
             },
         }
@@ -47,21 +41,19 @@
             overscroll-behavior: none;
         }
         
-        /* CRITICAL: Square tiles */
         .video-tile {
             position: relative;
-            background: #000;
+            width: 100%;
             aspect-ratio: 1 / 1;
+            max-width: 400px;
+            background: #000;
             overflow: hidden;
             border-radius: 1rem;
-            transition: all 0.3s ease;
         }
         
         .video-container {
             position: absolute;
             inset: 0;
-            width: 100%;
-            height: 100%;
         }
         
         video {
@@ -81,80 +73,82 @@
             background: #000;
         }
         
-        /* Grid: 3 columns */
         .participant-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(250px, 400px));
+            justify-content: center;
             gap: 1rem;
             width: 100%;
-            max-width: 1600px;
+            padding: 1rem;
+            max-width: 1400px;
             margin: 0 auto;
         }
         
-        @media (max-width: 1024px) {
+        @media (min-width: 1024px) {
             .participant-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(auto-fit, minmax(300px, 400px));
             }
         }
         
         @media (max-width: 640px) {
             .participant-grid {
                 grid-template-columns: 1fr;
-                gap: 0.75rem;
+                padding: 0.75rem;
+            }
+            .video-tile {
+                max-width: 100%;
             }
         }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
-    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
-        <div class="flex items-center gap-4">
-            <div class="bg-primary/20 p-2 rounded-lg">
-                <span class="material-symbols-outlined text-primary" id="callIcon">videocam</span>
+    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
+        <div class="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+            <div class="bg-primary/20 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
+                <span class="material-symbols-outlined text-primary text-lg sm:text-2xl" id="callIcon">videocam</span>
             </div>
-            <div>
-                <h1 class="text-lg font-bold tracking-tight" id="callTitle">Video Call</h1>
-                <p class="text-xs text-slate-500 dark:text-slate-400" id="callSubtitle">Connecting...</p>
+            <div class="min-w-0">
+                <h1 class="text-sm sm:text-lg font-bold tracking-tight truncate" id="callTitle">Video Call</h1>
+                <p class="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate" id="callSubtitle">Connecting...</p>
             </div>
         </div>
-        <div class="flex items-center gap-3">
-            <div class="flex items-center gap-2 bg-slate-200 dark:bg-surface-dark px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700">
+        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div class="flex items-center gap-1.5 sm:gap-2 bg-slate-200 dark:bg-surface-dark px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-700">
                 <span class="relative flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                     <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                 </span>
-                <span class="text-sm font-bold font-mono" id="callDuration">00:00:00</span>
+                <span class="text-[10px] sm:text-sm font-bold font-mono" id="callDuration">00:00:00</span>
             </div>
         </div>
     </header>
 
-    <main class="flex-1 overflow-y-auto p-4 md:p-6">
-        <div id="participantGrid" class="participant-grid">
-            <!-- Tiles will be added here -->
-        </div>
+    <main class="flex-1 overflow-y-auto">
+        <div id="participantGrid" class="participant-grid"></div>
     </main>
 
-    <footer class="w-full p-6 flex justify-center sticky bottom-0 z-20">
-        <div class="bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg shadow-2xl rounded-2xl border border-slate-200 dark:border-slate-800 p-2.5 flex items-center gap-2">
-            <div class="flex items-center gap-2 px-2 border-r border-slate-200 dark:border-slate-800">
-                <button id="micBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-white hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary/20">
-                    <span class="material-symbols-outlined">mic</span>
+    <footer class="w-full px-3 sm:px-6 py-3 sm:py-4 flex justify-center sticky bottom-0 z-20">
+        <div class="bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg shadow-2xl rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 p-2 sm:p-2.5 flex items-center gap-1 sm:gap-2">
+            <div class="flex items-center gap-1 sm:gap-2 px-1 sm:px-2 border-r border-slate-200 dark:border-slate-800">
+                <button id="micBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-primary text-white hover:brightness-110 transition-all active:scale-95">
+                    <span class="material-symbols-outlined text-lg sm:text-2xl">mic</span>
                 </button>
-                <button id="videoBtn" class="w-12 h-12 flex items-center justify-center rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
-                    <span class="material-symbols-outlined">videocam_off</span>
-                </button>
-            </div>
-            
-            <div class="flex items-center gap-2 px-2">
-                <button id="moodBtn" class="flex items-center gap-2 px-4 h-12 rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all">
-                    <span class="text-xl">😊</span>
-                    <span class="text-sm font-bold">Update Mood</span>
+                <button id="videoBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
+                    <span class="material-symbols-outlined text-lg sm:text-2xl">videocam_off</span>
                 </button>
             </div>
             
-            <div class="pl-2 border-l border-slate-200 dark:border-slate-800">
-                <button id="leaveCallBtn" class="flex items-center gap-2 px-6 h-12 rounded-xl bg-accent-red text-white hover:brightness-110 shadow-lg shadow-accent-red/30 transition-all active:scale-95">
-                    <span class="material-symbols-outlined font-bold">call_end</span>
-                    <span class="font-bold text-sm">Leave Call</span>
+            <div class="hidden sm:flex items-center gap-2 px-2">
+                <button id="moodBtn" class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
+                    <span class="text-base sm:text-xl">😊</span>
+                    <span class="font-bold hidden md:inline">Update Mood</span>
+                </button>
+            </div>
+            
+            <div class="pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800">
+                <button id="leaveCallBtn" class="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-accent-red text-white hover:brightness-110 transition-all active:scale-95">
+                    <span class="material-symbols-outlined font-bold text-lg sm:text-2xl">call_end</span>
+                    <span class="font-bold text-xs sm:text-sm">Leave</span>
                 </button>
             </div>
         </div>
@@ -208,35 +202,41 @@
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let callStartTime = null, durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
+      let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
 
       function createProfilePicture(pfpUrl, username) {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
         const div = document.createElement('div');
-        div.className = 'w-20 h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30';
+        div.className = 'w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30';
         if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
           const img = document.createElement('img');
           img.src = pfpUrl;
           img.alt = username;
           img.className = 'w-full h-full object-cover';
-          img.onerror = () => { div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`; };
+          img.onerror = () => { div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-xl sm:text-2xl">${initial}</div>`; };
           div.appendChild(img);
         } else {
-          div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-2xl">${initial}</div>`;
+          div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-xl sm:text-2xl">${initial}</div>`;
         }
         return div;
       }
 
       function createParticipantTile(user, isSelf = false) {
-        console.log(`🎨 Creating tile for ${user.username} (isSelf: ${isSelf})`);
+        console.log(`🎨 Creating tile for ${user.username} (userId: ${user.userId}, isSelf: ${isSelf})`);
+        
+        // CRITICAL: Check if already rendered
+        if (renderedParticipants.has(user.userId)) {
+          console.warn(`⚠️ Tile for ${user.userId} already exists! Skipping.`);
+          return null;
+        }
+        
         const tile = document.createElement('div');
         tile.id = `participant-${user.userId}`;
         tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'}`;
         
-        // Video container
         const videoContainer = document.createElement('div');
         videoContainer.className = 'video-container';
         
-        // Video element
         const video = document.createElement('video');
         video.id = `video-${user.userId}`;
         video.className = 'hidden';
@@ -245,7 +245,6 @@
         if (isSelf) video.muted = true;
         videoContainer.appendChild(video);
         
-        // Profile picture overlay
         const pfpOverlay = document.createElement('div');
         pfpOverlay.id = `pfp-${user.userId}`;
         pfpOverlay.className = 'pfp-overlay';
@@ -254,27 +253,24 @@
         
         tile.appendChild(videoContainer);
         
-        // Label
         const label = document.createElement('div');
-        label.className = 'absolute bottom-4 left-4 z-10';
-        label.innerHTML = `<div class="${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-3 py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-2">
-          <span class="text-white text-sm font-semibold">${isSelf ? 'You' : user.username}</span>
-          <span class="text-lg">😊</span>
+        label.className = 'absolute bottom-3 sm:bottom-4 left-3 sm:left-4 z-10';
+        label.innerHTML = `<div class="${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-1.5 sm:gap-2">
+          <span class="text-white text-xs sm:text-sm font-semibold">${isSelf ? 'You' : user.username}</span>
+          <span class="text-base sm:text-lg">😊</span>
         </div>`;
         tile.appendChild(label);
         
-        // Speaking indicator
         const speaking = document.createElement('div');
         speaking.id = `speaking-${user.userId}`;
-        speaking.className = 'absolute top-4 right-4 bg-primary px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase hidden z-10';
+        speaking.className = 'absolute top-3 sm:top-4 right-3 sm:right-4 bg-primary px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold text-white uppercase hidden z-10';
         speaking.textContent = 'SPEAKING';
         tile.appendChild(speaking);
         
-        // Mic indicator
         const micOff = document.createElement('div');
         micOff.id = `mic-${user.userId}`;
-        micOff.className = 'absolute top-4 right-4 bg-accent-red p-1.5 rounded-full text-white shadow-lg hidden z-10';
-        micOff.innerHTML = '<span class="material-symbols-outlined text-[16px]">mic_off</span>';
+        micOff.className = 'absolute top-3 sm:top-4 right-3 sm:right-4 bg-accent-red p-1 sm:p-1.5 rounded-full text-white shadow-lg hidden z-10';
+        micOff.innerHTML = '<span class="material-symbols-outlined text-[14px] sm:text-[16px]">mic_off</span>';
         tile.appendChild(micOff);
         
         if (isSelf) {
@@ -283,7 +279,8 @@
           tile.appendChild(overlay);
         }
         
-        console.log(`✅ Tile created for ${user.username}`);
+        renderedParticipants.add(user.userId); // Mark as rendered
+        console.log(`✅ Tile created for ${user.username} (${user.userId})`);
         return tile;
       }
 
@@ -358,10 +355,12 @@
               await vid.play().catch(e => console.warn('Play:', e));
               vid.classList.remove('hidden');
               if (pfp) pfp.classList.add('hidden');
+              console.log(`📹 Local video showing for ${currentUser.username}`);
             }
             const btn = document.getElementById('videoBtn');
             const icon = btn.querySelector('.material-symbols-outlined');
             btn.classList.add('bg-primary', 'text-white');
+            btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
             icon.textContent = 'videocam';
           }
           return localStream;
@@ -396,12 +395,17 @@
             if (e.track.kind === 'video') {
               vid.play().catch(e => console.warn('Play:', e));
               e.track.onunmute = () => {
-                console.log(`📹 Video unmuted ${userId}`);
+                console.log(`📹 Video unmuted ${userId} - showing video`);
                 vid.classList.remove('hidden');
                 if (pfp) pfp.classList.add('hidden');
               };
               e.track.onmute = () => {
-                console.log(`📹 Video muted ${userId}`);
+                console.log(`📹 Video muted ${userId} - showing pfp`);
+                vid.classList.add('hidden');
+                if (pfp) pfp.classList.remove('hidden');
+              };
+              e.track.onended = () => {
+                console.log(`📹 Video ended ${userId} - showing pfp`);
                 vid.classList.add('hidden');
                 if (pfp) pfp.classList.remove('hidden');
               };
@@ -547,11 +551,13 @@
             const pfp = document.getElementById(`pfp-${currentUser.userId}`);
             if (isVideoEnabled) {
               btn.classList.add('bg-primary', 'text-white');
+              btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
               icon.textContent = 'videocam';
               if (vid) vid.classList.remove('hidden');
               if (pfp) pfp.classList.add('hidden');
             } else {
               btn.classList.remove('bg-primary', 'text-white');
+              btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
               icon.textContent = 'videocam_off';
               if (vid) vid.classList.add('hidden');
               if (pfp) pfp.classList.remove('hidden');
@@ -603,7 +609,7 @@
           
           const userData = await _API.get('/api/users/me');
           currentUser = { userId: userData._id, username: userData.username, pfpUrl: userData.pfpUrl };
-          console.log(`👤 User: ${currentUser.username}`);
+          console.log(`👤 Current user: ${currentUser.username} (${currentUser.userId})`);
           
           const title = document.getElementById('callTitle');
           if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
@@ -632,6 +638,8 @@
           
           socketInstance.on('call_joined', async (data) => {
             console.log(`✅ Joined: ${data.participants.length} participants`);
+            console.log('Participants:', data.participants.map(p => `${p.username} (${p.userId})`).join(', '));
+            
             const subtitle = document.getElementById('callSubtitle');
             if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
             
@@ -639,19 +647,28 @@
             
             const grid = document.getElementById('participantGrid');
             if (grid) {
-              grid.innerHTML = '';
+              grid.innerHTML = ''; // Clear grid
+              renderedParticipants.clear(); // Clear tracking
               console.log(`📋 Rendering ${data.participants.length} tiles`);
               
-              data.participants.forEach(p => {
+              data.participants.forEach((p, index) => {
                 const isSelf = p.userId === currentUser.userId;
+                console.log(`[${index}] Creating tile for ${p.username} (${p.userId}) isSelf=${isSelf}`);
                 const tile = createParticipantTile(p, isSelf);
-                grid.appendChild(tile);
-                console.log(`✅ Added tile for ${p.username}`);
+                if (tile) {
+                  grid.appendChild(tile);
+                  console.log(`✅ [${index}] Tile added to grid for ${p.username}`);
+                } else {
+                  console.error(`❌ [${index}] Tile creation returned null for ${p.username}`);
+                }
                 
-                if (!isSelf) setTimeout(() => createOffer(p.userId), 500);
+                if (!isSelf) {
+                  setTimeout(() => createOffer(p.userId), 500);
+                }
               });
               
-              console.log(`🎨 Grid has ${grid.children.length} children`);
+              console.log(`🎨 Grid now has ${grid.children.length} children (expected: ${data.participants.length})`);
+              console.log(`📊 Rendered participants:`, Array.from(renderedParticipants));
             }
             
             callStartTime = Date.now();
@@ -661,19 +678,22 @@
           });
           
           socketInstance.on('user_joined_call', (data) => {
-            console.log(`👋 Joined: ${data.user.username}`);
+            console.log(`👋 User joined: ${data.user.username} (${data.user.userId})`);
             const grid = document.getElementById('participantGrid');
             if (grid && !document.getElementById(`participant-${data.user.userId}`)) {
               const tile = createParticipantTile(data.user, false);
-              grid.appendChild(tile);
-              setTimeout(() => createOffer(data.user.userId), 500);
+              if (tile) {
+                grid.appendChild(tile);
+                setTimeout(() => createOffer(data.user.userId), 500);
+              }
             }
           });
           
           socketInstance.on('user_left_call', (data) => {
-            console.log(`👋 Left: ${data.userId}`);
+            console.log(`👋 User left: ${data.userId}`);
             const tile = document.getElementById(`participant-${data.userId}`);
             if (tile) tile.remove();
+            renderedParticipants.delete(data.userId);
             const pc = peerConnections.get(data.userId);
             if (pc) { pc.close(); peerConnections.delete(data.userId); }
             const ac = audioContexts.get(data.userId);
@@ -726,7 +746,7 @@
         }
       }
 
-      console.log('✅ Page loaded');
+      console.log('✅ Page loaded - starting initialization');
       initCall();
     })();
     </script>
