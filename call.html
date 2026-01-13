@@ -741,68 +741,126 @@ async function createOffer(userId) {
 async function handleOffer(fromUserId, offer) {
   try {
     console.log(`📥 Received offer from ${fromUserId}`);
+    console.log(`📊 Offer type: ${offer.type}, sdp length: ${offer.sdp?.length || 0}`);
+    
+    // Validate localStream exists before proceeding
+    if (!localStream) {
+      console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
+      console.error(`❌ Cannot create answer without local media`);
+      return;
+    }
+    
+    console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
     
     let pc = peerConnections.get(fromUserId);
     if (pc) {
-      console.log(`⚠️ PC already exists for ${fromUserId}, closing and recreating`);
+      console.log(`⚠️ PC already exists for ${fromUserId} (state: ${pc.signalingState}), closing and recreating`);
       pc.close();
       peerConnections.delete(fromUserId);
     }
     
+    console.log(`🔧 Creating new PeerConnection for ${fromUserId}...`);
     pc = createPC(fromUserId);
     
-    console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    if (!pc) {
+      console.error(`❌ Failed to create PeerConnection for ${fromUserId}`);
+      return;
+    }
     
+    console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
+    console.log(`📊 PC state before setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    console.log(`✅ Remote description set successfully`);
+    console.log(`📊 PC state after setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    // Process pending ICE candidates
     if (pendingIceCandidates.has(fromUserId)) {
       const cands = pendingIceCandidates.get(fromUserId);
       console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
       for (const c of cands) {
-        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn(`ICE add failed:`, e));
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+          console.log(`✅ Added pending ICE candidate (type: ${c.candidate?.split(' ')[7] || 'unknown'})`);
+        } catch (e) {
+          console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
+        }
       }
       pendingIceCandidates.delete(fromUserId);
     }
     
-    console.log(`📤 Creating answer for ${fromUserId}`);
+    console.log(`📤 Creating answer for ${fromUserId}...`);
     const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
     
-    console.log(`✅ Answer created and set as local description for ${fromUserId}`);
+    console.log(`📊 Answer created: type=${answer.type}, sdp length=${answer.sdp?.length || 0}`);
+    
+    await pc.setLocalDescription(answer);
+    console.log(`✅ Answer set as local description`);
+    console.log(`📊 PC state after setLocalDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    console.log(`📤 Sending answer to ${fromUserId} via socket...`);
     socketInstance.emit('webrtc_answer', { callId: callData.callId, targetUserId: fromUserId, answer });
+    console.log(`✅ Answer emitted successfully`);
+    
   } catch (e) { 
-    console.error(`❌ Handle offer error for ${fromUserId}:`, e); 
+    console.error(`❌ Handle offer error for ${fromUserId}:`, e);
+    console.error(`❌ Error name: ${e.name}`);
+    console.error(`❌ Error message: ${e.message}`);
+    console.error(`❌ Error stack:`, e.stack);
   }
 }
 
 async function handleAnswer(fromUserId, answer) {
   try {
     console.log(`📥 Received answer from ${fromUserId}`);
+    console.log(`📊 Answer type: ${answer.type}, sdp length: ${answer.sdp?.length || 0}`);
+    
     const pc = peerConnections.get(fromUserId);
     
     if (!pc) {
       console.error(`❌ No PC found for ${fromUserId} when handling answer`);
+      console.error(`❌ Available PCs:`, Array.from(peerConnections.keys()));
       return;
     }
+    
+    console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
     if (pc.signalingState === 'stable') {
       console.warn(`⚠️ PC already stable for ${fromUserId}, ignoring answer`);
       return;
     }
     
-    console.log(`🔧 Setting remote description (answer) for ${fromUserId}, current state: ${pc.signalingState}`);
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    console.log(`✅ Answer set as remote description for ${fromUserId}`);
+    if (pc.signalingState !== 'have-local-offer') {
+      console.warn(`⚠️ Unexpected signaling state '${pc.signalingState}' for ${fromUserId}, expected 'have-local-offer'`);
+    }
     
+    console.log(`🔧 Setting remote description (answer) for ${fromUserId}`);
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log(`✅ Answer set as remote description`);
+    console.log(`📊 PC state after setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    // Process pending ICE candidates
     if (pendingIceCandidates.has(fromUserId)) {
       const cands = pendingIceCandidates.get(fromUserId);
       console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
       for (const c of cands) {
-        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn(`ICE add failed:`, e));
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+          console.log(`✅ Added pending ICE candidate (type: ${c.candidate?.split(' ')[7] || 'unknown'})`);
+        } catch (e) {
+          console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
+        }
       }
       pendingIceCandidates.delete(fromUserId);
     }
+    
+    console.log(`✅ Answer handling complete for ${fromUserId}`);
+    
   } catch (e) { 
-    console.error(`❌ Handle answer error for ${fromUserId}:`, e); 
+    console.error(`❌ Handle answer error for ${fromUserId}:`, e);
+    console.error(`❌ Error name: ${e.name}`);
+    console.error(`❌ Error message: ${e.message}`);
+    console.error(`❌ Error stack:`, e.stack);
   }
 }
 
@@ -960,6 +1018,23 @@ async function toggleVideo() {
               socketInstance.emit('join_call', { callId: callData.callId });
             }
           });
+          
+          
+          socketInstance.on('webrtc_offer', (d) => {
+  console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
+  handleOffer(d.fromUserId, d.offer);
+});
+
+socketInstance.on('webrtc_answer', (d) => {
+  console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
+  handleAnswer(d.fromUserId, d.answer);
+});
+
+socketInstance.on('ice_candidate', (d) => {
+  console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
+  handleIceCandidate(d.fromUserId, d.candidate);
+});
+          
           
           socketInstance.on('call_joined', async (data) => {
   console.log(`✅ Joined: ${data.participants.length} participants`);
