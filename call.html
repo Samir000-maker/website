@@ -462,7 +462,6 @@ let isTogglingVideo = false;
 
 
 async function setupLocalVideo() {
-  // CRITICAL FIX: Wait for video element to exist in DOM
   const waitForElement = (id, maxWait = 5000) => {
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
@@ -499,15 +498,18 @@ async function setupLocalVideo() {
     localVid.muted = true;
     localVid.volume = 0;
     
+    // CRITICAL FIX: Remove mirror effect - show actual video
+    localVid.style.transform = 'scaleX(1)';
+    console.log(`✅ Mirror effect removed - showing actual video orientation`);
+    
     console.log(`✅ Local stream attached to video element`);
     
-    // CRITICAL FIX: Handle video visibility based on actual track state
     if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
       console.log(`📹 Waiting for local video to be ready...`);
       
       await new Promise((resolve) => {
         const checkReady = () => {
-          if (localVid.readyState >= 2) { // HAVE_CURRENT_DATA
+          if (localVid.readyState >= 2) {
             console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
             resolve();
           } else {
@@ -522,7 +524,7 @@ async function setupLocalVideo() {
       
       try {
         await localVid.play();
-        console.log(`▶️ Local video playback started`);
+        console.log(`▶️ Local video playback started (no mirror)`);
         updateVideoVisibility(currentUser.userId, true, true);
       } catch (e) {
         console.error('❌ Local video play failed:', e);
@@ -533,15 +535,13 @@ async function setupLocalVideo() {
       updateVideoVisibility(currentUser.userId, false, false);
     }
     
-    // Update control buttons to match actual state
     updateVideoButton();
     updateMicButton();
     
-    console.log(`✅ setupLocalVideo() complete for ${currentUser.username}`);
+    console.log(`✅ setupLocalVideo() complete for ${currentUser.username} (no mirror)`);
     
   } catch (error) {
     console.error(`❌ setupLocalVideo() failed:`, error);
-    // Elements don't exist yet - this is OK during initialization
     console.log(`⚠️ Will retry video setup when elements are available`);
   }
 }
