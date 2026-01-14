@@ -1058,17 +1058,15 @@ socket.on('join_call', ({ callId }) => {
       return;
     }
 
-    // Update call activity
     call.lastActivity = Date.now();
 
-    // CRITICAL FIX 1: Initialize userMediaStates if not present
+    // CRITICAL FIX: Initialize userMediaStates Map if missing
     if (!call.userMediaStates) {
       call.userMediaStates = new Map();
       console.log(`📊 Initialized userMediaStates Map for call ${callId}`);
     }
     
-    // CRITICAL FIX 2: Set default media state for this user BEFORE emitting to client
-    // Default: video enabled for video calls, audio always enabled
+    // CRITICAL FIX: Set default media state BEFORE emitting to client
     const defaultVideoState = call.callType === 'video';
     const defaultAudioState = true;
     
@@ -1093,7 +1091,7 @@ socket.on('join_call', ({ callId }) => {
     const room = matchmaking.getRoom(call.roomId);
     const participants = room ? room.users.filter(u => call.participants.includes(u.userId)) : [];
 
-    // CRITICAL FIX 3: Ensure ALL participants have media states before sending
+    // CRITICAL FIX: Ensure ALL participants have media states
     participants.forEach(p => {
       if (!call.userMediaStates.has(p.userId)) {
         const isVideoCall = call.callType === 'video';
@@ -1105,7 +1103,7 @@ socket.on('join_call', ({ callId }) => {
       }
     });
 
-    // Include media states in participant data
+    // CRITICAL FIX: Include media states in participant data
     const participantsWithMediaStates = participants.map(p => {
       const mediaState = call.userMediaStates.get(p.userId);
       return {
@@ -1121,7 +1119,7 @@ socket.on('join_call', ({ callId }) => {
       participantsWithMediaStates.map(p => `${p.username} (video=${p.videoEnabled}, audio=${p.audioEnabled})`).join(', ')
     );
 
-    // CRITICAL FIX 4: Send complete state to joining user
+    // Send complete state to joining user
     socket.emit('call_joined', {
       callId,
       callType: call.callType,
@@ -1131,7 +1129,7 @@ socket.on('join_call', ({ callId }) => {
     // Get current user's media state
     const userMediaState = call.userMediaStates.get(user.userId);
 
-    // CRITICAL FIX 5: Broadcast to OTHER users with complete state
+    // Broadcast to OTHER users with complete state
     socket.to(`call-${callId}`).emit('user_joined_call', {
       user: {
         userId: user.userId,
@@ -1336,26 +1334,40 @@ socket.on('video_state_changed', ({ callId, enabled }) => {
   try {
     const user = socketUsers.get(socket.id);
     
-    if (!user) return;
-
-    const call = activeCalls.get(callId);
-    if (call) {
-      // CRITICAL FIX 8: Always initialize Map if missing
-      if (!call.userMediaStates) call.userMediaStates = new Map();
-      
-      const currentState = call.userMediaStates.get(user.userId) || { videoEnabled: true, audioEnabled: true };
-      call.userMediaStates.set(user.userId, {
-        ...currentState,
-        videoEnabled: enabled
-      });
-      console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'}`);
+    if (!user) {
+      console.warn(`⚠️ Unauthenticated socket tried to change video state`);
+      return;
     }
 
-    // CRITICAL FIX 9: Broadcast to ALL users including sender (for confirmation)
+    const call = activeCalls.get(callId);
+    if (!call) {
+      console.warn(`⚠️ Call ${callId} not found for video state change`);
+      return;
+    }
+    
+    // Initialize Map if missing
+    if (!call.userMediaStates) {
+      call.userMediaStates = new Map();
+      console.log(`📊 Initialized userMediaStates Map for call ${callId}`);
+    }
+    
+    // Update state
+    const currentState = call.userMediaStates.get(user.userId) || { videoEnabled: true, audioEnabled: true };
+    call.userMediaStates.set(user.userId, {
+      ...currentState,
+      videoEnabled: enabled
+    });
+    
+    console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'}`);
+    console.log(`📹 Server state updated: userId=${user.userId}, videoEnabled=${enabled}`);
+
+    // CRITICAL FIX: Broadcast to ALL users in call room (including sender for confirmation)
     io.to(`call-${callId}`).emit('video_state_changed', {
       userId: user.userId,
-      enabled
+      enabled: enabled
     });
+    
+    console.log(`📤 Broadcasted video_state_changed to all participants in call-${callId}`);
 
   } catch (error) {
     console.error('Video state error:', error);
