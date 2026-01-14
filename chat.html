@@ -281,17 +281,24 @@
             
             <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
                 <div class="call-buttons-container">
-                    <button id="audioCallBtn" 
-                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
-                        title="Start Audio Call">
-                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
-                    </button>
-                    <button id="videoCallBtn" 
-                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
-                        title="Start Video Call">
-                        <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
-                    </button>
-                </div>
+    <button id="audioCallBtn" 
+        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+        title="Start Audio Call">
+        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
+    </button>
+    <button id="videoCallBtn" 
+        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+        title="Start Video Call">
+        <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
+    </button>
+    <button id="joinCallBtn" 
+        class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
+        title="Join Active Call">
+        <span class="material-symbols-outlined text-base sm:text-lg">login</span>
+        <span class="hidden sm:inline">Join Call</span>
+        <span class="sm:hidden">Join</span>
+    </button>
+</div>
                 
                 <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2 whitespace-nowrap">
                     <span class="hidden sm:inline">Leave Room</span>
@@ -514,6 +521,10 @@
       // ============================================
       
       let backButtonHandled = false;
+      
+      
+      let activeCallInRoom = null; // { callId, participantCount, callType }
+      const joinCallBtn = document.getElementById('joinCallBtn');
       
       function setupBackButtonHandler() {
         history.pushState({ page: 'chat' }, '', window.location.href);
@@ -884,6 +895,140 @@
         reconnectionAttempts: 10,
         auth: { token: idToken }
       });
+      
+      
+      socketInstance.on('call_state_update', (data) => {
+  console.log('📞 Call state update received:', data);
+  console.log(`   callId: ${data.callId}, active: ${data.isActive}, participants: ${data.participantCount}`);
+  
+  if (data.isActive && data.participantCount > 0) {
+    activeCallInRoom = {
+      callId: data.callId,
+      participantCount: data.participantCount,
+      callType: data.callType || 'video'
+    };
+    
+    console.log(`✅ Active call detected in room: ${data.callId} with ${data.participantCount} participant(s)`);
+    
+    // Check if current user is NOT in the call
+    const userInCall = userCalls && userCalls.has && userCalls.has(currentUser.userId);
+    
+    if (!userInCall) {
+      // Show join button, hide call initiation buttons
+      if (joinCallBtn) {
+        joinCallBtn.classList.remove('hidden');
+        joinCallBtn.classList.add('flex');
+        console.log('👁️ Join button shown');
+      }
+      if (audioCallBtn) {
+        audioCallBtn.classList.add('hidden');
+        console.log('🙈 Audio call button hidden');
+      }
+      if (videoCallBtn) {
+        videoCallBtn.classList.add('hidden');
+        console.log('🙈 Video call button hidden');
+      }
+    }
+  } else {
+    activeCallInRoom = null;
+    console.log('❌ No active call in room');
+    
+    // Hide join button, show call initiation buttons
+    if (joinCallBtn) {
+      joinCallBtn.classList.remove('flex');
+      joinCallBtn.classList.add('hidden');
+      console.log('🙈 Join button hidden');
+    }
+    if (audioCallBtn) {
+      audioCallBtn.classList.remove('hidden');
+      console.log('👁️ Audio call button shown');
+    }
+    if (videoCallBtn) {
+      videoCallBtn.classList.remove('hidden');
+      console.log('👁️ Video call button shown');
+    }
+  }
+});
+
+socketInstance.on('call_ended_notification', (data) => {
+  console.log('📞 Call ended notification received:', data.callId);
+  activeCallInRoom = null;
+  
+  // Reset button visibility
+  if (joinCallBtn) {
+    joinCallBtn.classList.remove('flex');
+    joinCallBtn.classList.add('hidden');
+    console.log('🙈 Join button hidden (call ended)');
+  }
+  if (audioCallBtn) {
+    audioCallBtn.classList.remove('hidden');
+    console.log('👁️ Audio call button shown (call ended)');
+  }
+  if (videoCallBtn) {
+    videoCallBtn.classList.remove('hidden');
+    console.log('👁️ Video call button shown (call ended)');
+  }
+});
+
+socketInstance.on('join_existing_call_success', (data) => {
+  console.log('✅ Join existing call success:', data);
+  navigatingToCall = true;
+  
+  // Save chat state before navigating
+  saveChatState(roomData.roomId, messagesCache);
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  localStorage.setItem('activeCall', JSON.stringify({
+    callId: data.callId,
+    roomId: data.roomId,
+    callType: data.callType,
+    users: [] // Will be populated on call page
+  }));
+  
+  console.log('🚀 Navigating to call page (joining existing call)');
+  window.location.href = '/call.html';
+});
+
+// Join call button click handler - add with other button handlers
+if (joinCallBtn) {
+  joinCallBtn.addEventListener('click', () => {
+    if (!activeCallInRoom) {
+      toast('No active call to join', 'warning');
+      return;
+    }
+    
+    console.log(`📞 Requesting to join call ${activeCallInRoom.callId}`);
+    
+    socketInstance.emit('join_existing_call', {
+      callId: activeCallInRoom.callId,
+      roomId: roomData.roomId
+    });
+    
+    toast('Joining call...', 'success');
+  });
+}
+
+// Update the existing socketInstance.on('call_accepted') handler
+socketInstance.on('call_accepted', (data) => {
+  console.log('✅ Call accepted:', data);
+  isInitiatingCall = false;
+  navigatingToCall = true;
+  
+  // Save chat state before navigating
+  saveChatState(roomData.roomId, messagesCache);
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  localStorage.setItem('activeCall', JSON.stringify({
+    callId: data.callId,
+    roomId: roomData.roomId,
+    callType: data.callType,
+    users: data.users
+  }));
+  
+  console.log('🚀 Navigating to call page');
+  window.location.href = '/call.html';
+});
+      
 
       socketInstance.on('connect', () => {
         console.log('🔌 Socket connected:', socketInstance.id);
