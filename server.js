@@ -769,58 +769,80 @@ io.on('connection', (socket) => {
   }
 
   socket.on('join_room', ({ roomId }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) {
-        console.error('❌ Unauthenticated socket tried to join room');
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      console.log(`🚪 User ${user.username} confirming room ${roomId}`);
-
-      const room = matchmaking.getRoom(roomId);
-      
-      if (!room) {
-        console.error(`❌ Room ${roomId} not found!`);
-        socket.emit('error', { 
-          message: 'Room not found. It may have expired or been closed.',
-          code: 'ROOM_NOT_FOUND'
-        });
-        return;
-      }
-
-      if (!room.hasUser(user.userId)) {
-        console.error(`❌ User ${user.username} (${user.userId}) not in room ${roomId}`);
-        socket.emit('error', { 
-          message: 'You are not a member of this room',
-          code: 'NOT_IN_ROOM'
-        });
-        return;
-      }
-
-      if (!socket.rooms.has(roomId)) {
-        socket.join(roomId);
-        console.log(`✅ User ${user.username} joined Socket.IO room ${roomId}`);
-      } else {
-        console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
-      }
-
-      // Get chat history from the room
-      const chatHistory = room.getMessages ? room.getMessages() : [];
-      console.log(`📜 Sending ${chatHistory.length} chat messages to ${user.username}`);
-
-      socket.emit('room_joined', { 
-        roomId,
-        chatHistory: chatHistory 
-      });
-      
-    } catch (error) {
-      console.error('Join room error:', error);
-      socket.emit('error', { message: 'Failed to join room' });
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.error('❌ Unauthenticated socket tried to join room');
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
+
+    console.log(`🚪 User ${user.username} confirming room ${roomId}`);
+
+    const room = matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found!`);
+      socket.emit('error', { 
+        message: 'Room not found. It may have expired or been closed.',
+        code: 'ROOM_NOT_FOUND'
+      });
+      return;
+    }
+
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} (${user.userId}) not in room ${roomId}`);
+      socket.emit('error', { 
+        message: 'You are not a member of this room',
+        code: 'NOT_IN_ROOM'
+      });
+      return;
+    }
+
+    if (!socket.rooms.has(roomId)) {
+      socket.join(roomId);
+      console.log(`✅ User ${user.username} joined Socket.IO room ${roomId}`);
+    } else {
+      console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
+    }
+
+    // Get chat history from the room
+    const chatHistory = room.getMessages ? room.getMessages() : [];
+    console.log(`📜 Sending ${chatHistory.length} chat messages to ${user.username}`);
+
+    // CRITICAL FIX: Check for active calls in this room and send state
+    let activeCallState = null;
+    activeCalls.forEach((call, callId) => {
+      if (call.roomId === roomId && call.participants.length > 0) {
+        activeCallState = {
+          callId: callId,
+          isActive: true,
+          participantCount: call.participants.length,
+          callType: call.callType
+        };
+        console.log(`📞 Active call detected in room ${roomId}: ${callId} with ${call.participants.length} participant(s)`);
+      }
+    });
+
+    // Send room joined confirmation with call state
+    const responseData = { 
+      roomId,
+      chatHistory: chatHistory 
+    };
+
+    if (activeCallState) {
+      responseData.activeCall = activeCallState;
+      console.log(`📤 Sending active call state to ${user.username}:`, activeCallState);
+    }
+
+    socket.emit('room_joined', responseData);
+    
+  } catch (error) {
+    console.error('Join room error:', error);
+    socket.emit('error', { message: 'Failed to join room' });
+  }
+});
 
   socket.on('cancel_matchmaking', () => {
     const user = socketUsers.get(socket.id);
