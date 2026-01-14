@@ -424,7 +424,7 @@ let isTogglingVideo = false;
       }
     }
     
-    // CRITICAL FIX 3: Set states BEFORE setting up UI
+    // Set states based on actual media acquired
     isVideoEnabled = hasVideo;
     isAudioEnabled = hasAudio;
     
@@ -440,12 +440,12 @@ let isTogglingVideo = false;
       }
     }
     
-    // Update call icon
+    // Update call icon based on actual capabilities
     const callIcon = document.getElementById('callIcon');
     if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
     
-    // CRITICAL FIX 4: Setup local video with proper async handling
-    await setupLocalVideo();
+    // REMOVED: Don't call setupLocalVideo() here - elements don't exist yet!
+    // Will be called after grid is rendered in call_joined handler
     
     console.log(`✅ initLocalMedia() complete - stream ready for PeerConnection`);
     return localStream;
@@ -462,59 +462,88 @@ let isTogglingVideo = false;
 
 
 async function setupLocalVideo() {
-  const localVid = document.getElementById(`video-${currentUser.userId}`);
-  const localPfp = document.getElementById(`pfp-${currentUser.userId}`);
-  
-  console.log(`🔧 Setting up local video element for ${currentUser.username}`);
-  console.log(`   Video element: ${!!localVid}, PFP element: ${!!localPfp}`);
-  console.log(`   LocalStream: ${!!localStream}, Video tracks: ${localStream.getVideoTracks().length}`);
-  
-  if (!localVid || !localStream) {
-    console.error(`❌ Cannot setup local video: missing elements`);
-    return;
-  }
-  
-  localVid.srcObject = localStream;
-  localVid.muted = true;
-  localVid.volume = 0;
-  
-  console.log(`✅ Local stream attached to video element`);
-  
-  // CRITICAL FIX 6: Wait for video to be actually ready
-  if (isVideoEnabled) {
-    console.log(`📹 Waiting for local video to be ready...`);
-    
-    await new Promise((resolve) => {
-      const checkReady = () => {
-        if (localVid.readyState >= 2) { // HAVE_CURRENT_DATA or better
-          console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
-          resolve();
+  // CRITICAL FIX: Wait for video element to exist in DOM
+  const waitForElement = (id, maxWait = 5000) => {
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      const checkElement = () => {
+        const element = document.getElementById(id);
+        if (element) {
+          resolve(element);
+        } else if (Date.now() - startTime > maxWait) {
+          reject(new Error(`Element ${id} not found after ${maxWait}ms`));
         } else {
-          localVid.addEventListener('loadedmetadata', () => {
-            console.log(`📹 Metadata loaded: ${localVid.videoWidth}x${localVid.videoHeight}`);
-            resolve();
-          }, { once: true });
+          requestAnimationFrame(checkElement);
         }
       };
-      checkReady();
+      checkElement();
     });
+  };
+
+  try {
+    console.log(`🔧 Waiting for local video elements for ${currentUser.username}...`);
     
-    try {
-      await localVid.play();
-      console.log(`▶️ Local video playback started`);
-      updateVideoVisibility(currentUser.userId, true, true);
-    } catch (e) {
-      console.error('❌ Local video play failed:', e);
+    const localVid = await waitForElement(`video-${currentUser.userId}`);
+    const localPfp = await waitForElement(`pfp-${currentUser.userId}`);
+    
+    console.log(`✅ Found video elements for ${currentUser.username}`);
+    console.log(`   Video element: ${!!localVid}, PFP element: ${!!localPfp}`);
+    console.log(`   LocalStream: ${!!localStream}, Video tracks: ${localStream.getVideoTracks().length}`);
+    
+    if (!localStream) {
+      console.error(`❌ No localStream available`);
+      return;
+    }
+    
+    localVid.srcObject = localStream;
+    localVid.muted = true;
+    localVid.volume = 0;
+    
+    console.log(`✅ Local stream attached to video element`);
+    
+    // CRITICAL FIX: Handle video visibility based on actual track state
+    if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
+      console.log(`📹 Waiting for local video to be ready...`);
+      
+      await new Promise((resolve) => {
+        const checkReady = () => {
+          if (localVid.readyState >= 2) { // HAVE_CURRENT_DATA
+            console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
+            resolve();
+          } else {
+            localVid.addEventListener('loadedmetadata', () => {
+              console.log(`📹 Metadata loaded: ${localVid.videoWidth}x${localVid.videoHeight}`);
+              resolve();
+            }, { once: true });
+          }
+        };
+        checkReady();
+      });
+      
+      try {
+        await localVid.play();
+        console.log(`▶️ Local video playback started`);
+        updateVideoVisibility(currentUser.userId, true, true);
+      } catch (e) {
+        console.error('❌ Local video play failed:', e);
+        updateVideoVisibility(currentUser.userId, false, false);
+      }
+    } else {
+      console.log(`📹 Video disabled or no video track for ${currentUser.username}`);
       updateVideoVisibility(currentUser.userId, false, false);
     }
-  } else {
-    console.log(`📹 Video disabled for ${currentUser.username}`);
-    updateVideoVisibility(currentUser.userId, false, false);
+    
+    // Update control buttons to match actual state
+    updateVideoButton();
+    updateMicButton();
+    
+    console.log(`✅ setupLocalVideo() complete for ${currentUser.username}`);
+    
+  } catch (error) {
+    console.error(`❌ setupLocalVideo() failed:`, error);
+    // Elements don't exist yet - this is OK during initialization
+    console.log(`⚠️ Will retry video setup when elements are available`);
   }
-  
-  // Update buttons
-  updateVideoButton();
-  updateMicButton();
 }
 
 
@@ -595,117 +624,140 @@ function createPC(userId) {
     audioEnabled: false
   };
   
-  pc.ontrack = (e) => {
-    console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
+ pc.ontrack = (e) => {
+  console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
+  
+  const vid = document.getElementById(`video-${userId}`);
+  
+  if (!vid) {
+    console.error(`❌ Video element not found for ${userId}`);
+    return;
+  }
+  
+  // Create or get MediaStream
+  if (!vid.srcObject) {
+    vid.srcObject = new MediaStream();
+    console.log(`📺 Created new MediaStream for ${userId}`);
+  }
+  
+  // Remove old tracks of same kind
+  const existingTracks = vid.srcObject.getTracks().filter(t => t.kind === e.track.kind);
+  existingTracks.forEach(t => {
+    console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
+    vid.srcObject.removeTrack(t);
+    t.stop();
+  });
+  
+  // Add new track
+  vid.srcObject.addTrack(e.track);
+  console.log(`➕ Added ${e.track.kind} track to MediaStream for ${userId}`);
+  console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks`);
+  
+  if (e.track.kind === 'video') {
+    remoteMediaState.videoTrackReady = true;
     
-    const vid = document.getElementById(`video-${userId}`);
+    console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
     
-    if (!vid) {
-      console.error(`❌ Video element not found for ${userId}`);
-      return;
-    }
+    // CRITICAL FIX: Video visibility logic that accounts for muted state
+    const updateVideoVisibilityForTrack = () => {
+      const isTrackLive = e.track.readyState === 'live';
+      const isTrackEnabled = e.track.enabled;
+      
+      // CRITICAL: Track can be enabled=true but muted=true (browser auto-mute)
+      // We need to check BOTH enabled state AND unmuted state
+      const isTrackUnmuted = !e.track.muted;
+      const shouldShow = isTrackLive && isTrackEnabled && isTrackUnmuted;
+      
+      console.log(`📹 Video visibility check for ${userId}: live=${isTrackLive}, enabled=${isTrackEnabled}, unmuted=${isTrackUnmuted}, shouldShow=${shouldShow}`);
+      
+      remoteMediaState.videoEnabled = shouldShow;
+      updateVideoVisibility(userId, shouldShow, true);
+    };
     
-    // Create or get MediaStream
-    if (!vid.srcObject) {
-      vid.srcObject = new MediaStream();
-      console.log(`📺 Created new MediaStream for ${userId}`);
-    }
-    
-    // Remove old tracks of same kind
-    const existingTracks = vid.srcObject.getTracks().filter(t => t.kind === e.track.kind);
-    existingTracks.forEach(t => {
-      console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
-      vid.srcObject.removeTrack(t);
-      t.stop();
-    });
-    
-    // Add new track
-    vid.srcObject.addTrack(e.track);
-    console.log(`➕ Added ${e.track.kind} track to MediaStream for ${userId}`);
-    console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks`);
-    
-    if (e.track.kind === 'video') {
-      remoteMediaState.videoTrackReady = true;
-      remoteMediaState.videoEnabled = e.track.enabled && !e.track.muted && e.track.readyState === 'live';
+    // CRITICAL FIX: Wait for unmute event before showing video
+    // Tracks often arrive muted and unmute shortly after
+    const handleLoadedMetadata = () => {
+      console.log(`📹 Video metadata loaded for ${userId}: ${vid.videoWidth}x${vid.videoHeight}`);
       
-      console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
-      console.log(`📹 Remote media state: trackReady=${remoteMediaState.videoTrackReady}, enabled=${remoteMediaState.videoEnabled}`);
-      
-      // CRITICAL FIX: Single source of truth for video visibility
-      const updateVideoVisibilityForTrack = () => {
-        const isTrackLive = e.track.readyState === 'live';
-        const isTrackEnabled = e.track.enabled && !e.track.muted;
-        const shouldShow = isTrackLive && isTrackEnabled;
-        
-        console.log(`📹 Video visibility check for ${userId}: live=${isTrackLive}, enabled=${isTrackEnabled}, shouldShow=${shouldShow}`);
-        updateVideoVisibility(userId, shouldShow, true);
-      };
-      
-      // Wait for video metadata before showing
-      const handleLoadedMetadata = () => {
-        console.log(`📹 Video metadata loaded for ${userId}: ${vid.videoWidth}x${vid.videoHeight}`);
-        setTimeout(updateVideoVisibilityForTrack, 100);
-      };
-      
-      if (vid.readyState >= 1) {
-        handleLoadedMetadata();
-      } else {
-        vid.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
-      }
-      
-      // Track state changes
-      e.track.onunmute = () => {
-        console.log(`📹 Video UNMUTED for ${userId}`);
-        remoteMediaState.videoEnabled = e.track.enabled && e.track.readyState === 'live';
-        setTimeout(updateVideoVisibilityForTrack, 50);
-      };
-      
-      e.track.onmute = () => {
-        console.log(`📹 Video MUTED for ${userId}`);
-        remoteMediaState.videoEnabled = false;
+      if (e.track.muted) {
+        console.log(`📹 Track initially muted, waiting for unmute event...`);
+        // Don't show video yet, wait for unmute
         updateVideoVisibility(userId, false, true);
-      };
-      
-      e.track.onended = () => {
-        console.log(`📹 Video ENDED for ${userId}`);
-        remoteMediaState.videoTrackReady = false;
-        remoteMediaState.videoEnabled = false;
-        updateVideoVisibility(userId, false, false);
-      };
-      
-    } else if (e.track.kind === 'audio') {
-      remoteMediaState.audioTrackReady = true;
-      remoteMediaState.audioEnabled = e.track.enabled && !e.track.muted;
-      
-      console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
-      
-      vid.volume = 1.0;
-      vid.muted = false;
-      
-      setupAudioDetection(userId, new MediaStream([e.track]));
-      
-      e.track.onended = () => {
-        console.log(`🔊 Audio track ended for ${userId}`);
-        remoteMediaState.audioTrackReady = false;
-        remoteMediaState.audioEnabled = false;
-      };
+      } else {
+        // Track is already unmuted, safe to show if enabled
+        setTimeout(updateVideoVisibilityForTrack, 100);
+      }
+    };
+    
+    if (vid.readyState >= 1) {
+      handleLoadedMetadata();
+    } else {
+      vid.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
     }
     
-    // Start playback
-    vid.play()
-      .then(() => {
-        console.log(`▶️ Playback started for ${userId} (${e.track.kind})`);
-      })
-      .catch(err => {
-        console.warn(`⚠️ Playback error for ${userId}:`, err.message);
-        if (err.name === 'NotAllowedError') {
-          console.log(`🔓 Adding click listener to retry playback for ${userId}`);
-          document.addEventListener('click', () => {
-            vid.play().catch(e => console.warn('Retry play failed:', e));
-          }, { once: true });
-        }
-      });
-  };
+    // CRITICAL FIX: Track unmute event is the KEY to showing video
+    e.track.onunmute = () => {
+      console.log(`📹 Video UNMUTED for ${userId} (this is when we should show it)`);
+      remoteMediaState.videoEnabled = e.track.enabled && e.track.readyState === 'live';
+      setTimeout(updateVideoVisibilityForTrack, 50);
+    };
+    
+    e.track.onmute = () => {
+      console.log(`📹 Video MUTED for ${userId}`);
+      remoteMediaState.videoEnabled = false;
+      updateVideoVisibility(userId, false, true);
+    };
+    
+    e.track.onended = () => {
+      console.log(`📹 Video ENDED for ${userId}`);
+      remoteMediaState.videoTrackReady = false;
+      remoteMediaState.videoEnabled = false;
+      updateVideoVisibility(userId, false, false);
+    };
+    
+  } else if (e.track.kind === 'audio') {
+    remoteMediaState.audioTrackReady = true;
+    
+    console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+    
+    vid.volume = 1.0;
+    vid.muted = false;
+    
+    setupAudioDetection(userId, new MediaStream([e.track]));
+    
+    // CRITICAL FIX: Handle audio unmute event
+    e.track.onunmute = () => {
+      console.log(`🔊 Audio UNMUTED for ${userId}`);
+      remoteMediaState.audioEnabled = e.track.enabled;
+    };
+    
+    e.track.onmute = () => {
+      console.log(`🔊 Audio MUTED for ${userId}`);
+      remoteMediaState.audioEnabled = false;
+    };
+    
+    e.track.onended = () => {
+      console.log(`🔊 Audio track ended for ${userId}`);
+      remoteMediaState.audioTrackReady = false;
+      remoteMediaState.audioEnabled = false;
+    };
+  }
+  
+  // Start playback
+  vid.play()
+    .then(() => {
+      console.log(`▶️ Playback started for ${userId} (${e.track.kind})`);
+    })
+    .catch(err => {
+      console.warn(`⚠️ Playback error for ${userId}:`, err.message);
+      if (err.name === 'NotAllowedError') {
+        console.log(`🔓 Adding click listener to retry playback for ${userId}`);
+        document.addEventListener('click', () => {
+          vid.play().catch(e => console.warn('Retry play failed:', e));
+        }, { once: true });
+      }
+    });
+};
   
   pc.onicecandidate = (e) => {
     if (e.candidate) {
@@ -995,17 +1047,23 @@ async function toggleVideo() {
     return;
   }
   
-  // Toggle the track
+  // Toggle the track enabled state
   const newState = !track.enabled;
   track.enabled = newState;
   isVideoEnabled = newState;
   
   console.log(`📹 Video toggled locally: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-  console.log(`📹 Track state: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
+  console.log(`📹 Track state after toggle: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
   
-  // Update local UI immediately
+  // CRITICAL FIX: Update local video visibility immediately
+  const localVid = document.getElementById(`video-${currentUser.userId}`);
+  if (localVid && localVid.srcObject) {
+    console.log(`📹 Updating local video element visibility`);
+    updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
+  }
+  
+  // Update button state
   updateVideoButton();
-  updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
   
   // Emit to server (server will broadcast to ALL including us for confirmation)
   socketInstance.emit('video_state_changed', { 
@@ -1174,6 +1232,7 @@ socketInstance.on('ice_candidate', (d) => {
           }
         }
         
+        // CRITICAL FIX: For remote users, set initial video visibility based on state
         if (!isSelf && videoState === false) {
           const vid = document.getElementById(`video-${p.userId}`);
           const pfp = document.getElementById(`pfp-${p.userId}`);
@@ -1203,6 +1262,10 @@ socketInstance.on('ice_candidate', (d) => {
     console.log(`🎨 Grid render complete. DOM children: ${grid.children.length}, Expected: ${data.participants.length}`);
     console.log(`📊 Tracked participants:`, Array.from(renderedParticipants));
   }
+  
+  // CRITICAL FIX: Setup local video AFTER grid is rendered (elements now exist)
+  console.log(`🎬 Setting up local video element (elements should exist now)...`);
+  await setupLocalVideo();
   
   callStartTime = Date.now();
   durationInterval = setInterval(updateDuration, 1000);
