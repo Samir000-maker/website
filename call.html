@@ -587,15 +587,18 @@ function createPC(userId) {
     console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   });
   
-  // CRITICAL FIX 9: Simplified and robust ontrack handler
-  let remoteVideoTrackReady = false;
-  let remoteAudioTrackReady = false;
+  // CRITICAL FIX: Robust ontrack handler with proper state tracking
+  const remoteMediaState = {
+    videoTrackReady: false,
+    audioTrackReady: false,
+    videoEnabled: false,
+    audioEnabled: false
+  };
   
   pc.ontrack = (e) => {
-    console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}`);
+    console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
     
     const vid = document.getElementById(`video-${userId}`);
-    const pfp = document.getElementById(`pfp-${userId}`);
     
     if (!vid) {
       console.error(`❌ Video element not found for ${userId}`);
@@ -613,6 +616,7 @@ function createPC(userId) {
     existingTracks.forEach(t => {
       console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
       vid.srcObject.removeTrack(t);
+      t.stop();
     });
     
     // Add new track
@@ -621,38 +625,59 @@ function createPC(userId) {
     console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks`);
     
     if (e.track.kind === 'video') {
-      remoteVideoTrackReady = true;
-      console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, readyState=${e.track.readyState}`);
+      remoteMediaState.videoTrackReady = true;
+      remoteMediaState.videoEnabled = e.track.enabled && !e.track.muted && e.track.readyState === 'live';
       
-      // CRITICAL FIX 10: Single function to handle video visibility
-      const handleVideoVisibility = () => {
-        const isEnabled = e.track.enabled && !e.track.muted && e.track.readyState === 'live';
-        updateVideoVisibility(userId, isEnabled, remoteVideoTrackReady);
+      console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+      console.log(`📹 Remote media state: trackReady=${remoteMediaState.videoTrackReady}, enabled=${remoteMediaState.videoEnabled}`);
+      
+      // CRITICAL FIX: Single source of truth for video visibility
+      const updateVideoVisibilityForTrack = () => {
+        const isTrackLive = e.track.readyState === 'live';
+        const isTrackEnabled = e.track.enabled && !e.track.muted;
+        const shouldShow = isTrackLive && isTrackEnabled;
+        
+        console.log(`📹 Video visibility check for ${userId}: live=${isTrackLive}, enabled=${isTrackEnabled}, shouldShow=${shouldShow}`);
+        updateVideoVisibility(userId, shouldShow, true);
       };
       
-      // Initial check after a small delay
-      setTimeout(handleVideoVisibility, 300);
+      // Wait for video metadata before showing
+      const handleLoadedMetadata = () => {
+        console.log(`📹 Video metadata loaded for ${userId}: ${vid.videoWidth}x${vid.videoHeight}`);
+        setTimeout(updateVideoVisibilityForTrack, 100);
+      };
       
-      // Track events
+      if (vid.readyState >= 1) {
+        handleLoadedMetadata();
+      } else {
+        vid.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+      }
+      
+      // Track state changes
       e.track.onunmute = () => {
         console.log(`📹 Video UNMUTED for ${userId}`);
-        setTimeout(handleVideoVisibility, 100);
+        remoteMediaState.videoEnabled = e.track.enabled && e.track.readyState === 'live';
+        setTimeout(updateVideoVisibilityForTrack, 50);
       };
       
       e.track.onmute = () => {
         console.log(`📹 Video MUTED for ${userId}`);
-        handleVideoVisibility();
+        remoteMediaState.videoEnabled = false;
+        updateVideoVisibility(userId, false, true);
       };
       
       e.track.onended = () => {
         console.log(`📹 Video ENDED for ${userId}`);
-        remoteVideoTrackReady = false;
+        remoteMediaState.videoTrackReady = false;
+        remoteMediaState.videoEnabled = false;
         updateVideoVisibility(userId, false, false);
       };
       
     } else if (e.track.kind === 'audio') {
-      remoteAudioTrackReady = true;
-      console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, readyState=${e.track.readyState}`);
+      remoteMediaState.audioTrackReady = true;
+      remoteMediaState.audioEnabled = e.track.enabled && !e.track.muted;
+      
+      console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
       
       vid.volume = 1.0;
       vid.muted = false;
@@ -661,7 +686,8 @@ function createPC(userId) {
       
       e.track.onended = () => {
         console.log(`🔊 Audio track ended for ${userId}`);
-        remoteAudioTrackReady = false;
+        remoteMediaState.audioTrackReady = false;
+        remoteMediaState.audioEnabled = false;
       };
     }
     
@@ -673,6 +699,7 @@ function createPC(userId) {
       .catch(err => {
         console.warn(`⚠️ Playback error for ${userId}:`, err.message);
         if (err.name === 'NotAllowedError') {
+          console.log(`🔓 Adding click listener to retry playback for ${userId}`);
           document.addEventListener('click', () => {
             vid.play().catch(e => console.warn('Retry play failed:', e));
           }, { once: true });
@@ -955,11 +982,6 @@ async function toggleVideo() {
   
   isTogglingVideo = true;
   
-  // Clear any pending timeout
-  if (videoStateChangeTimeout) {
-    clearTimeout(videoStateChangeTimeout);
-  }
-  
   if (!localStream) {
     console.error('❌ No localStream available');
     isTogglingVideo = false;
@@ -978,21 +1000,25 @@ async function toggleVideo() {
   track.enabled = newState;
   isVideoEnabled = newState;
   
-  console.log(`📹 Video toggled: ${isVideoEnabled ? 'ON' : 'OFF'}`);
+  console.log(`📹 Video toggled locally: ${isVideoEnabled ? 'ON' : 'OFF'}`);
+  console.log(`📹 Track state: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
   
   // Update local UI immediately
   updateVideoButton();
   updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
   
-  // Emit to server with debouncing
-  videoStateChangeTimeout = setTimeout(() => {
-    socketInstance.emit('video_state_changed', { 
-      callId: callData.callId, 
-      enabled: isVideoEnabled 
-    });
-    console.log(`📤 Emitted video_state_changed: ${isVideoEnabled}`);
+  // Emit to server (server will broadcast to ALL including us for confirmation)
+  socketInstance.emit('video_state_changed', { 
+    callId: callData.callId, 
+    enabled: isVideoEnabled 
+  });
+  console.log(`📤 Emitted video_state_changed to server: ${isVideoEnabled}`);
+  
+  // Clear toggle lock after a delay
+  setTimeout(() => {
     isTogglingVideo = false;
-  }, 100);
+    console.log(`🔓 Video toggle unlocked`);
+  }, 200);
 }
 
       function updateDuration() {
@@ -1261,16 +1287,23 @@ socketInstance.on('ice_candidate', (d) => {
 });
 
 socketInstance.on('video_state_changed', (data) => {
-  console.log(`📹 Received video_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
+  console.log(`📹 [SOCKET] Received video_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
   
-  // If it's for us, just confirm the state (already updated locally)
+  // CRITICAL FIX: Update visibility for BOTH self and remote users
   if (data.userId === currentUser.userId) {
-    console.log(`📹 Confirmed our own video state: ${data.enabled}`);
-    return;
+    console.log(`📹 Confirming our own video state from server: ${data.enabled}`);
+    // Server confirms our state - update UI if out of sync
+    if (isVideoEnabled !== data.enabled) {
+      console.warn(`⚠️ Local state (${isVideoEnabled}) out of sync with server (${data.enabled}), correcting...`);
+      isVideoEnabled = data.enabled;
+      updateVideoButton();
+    }
+    updateVideoVisibility(currentUser.userId, data.enabled, true);
+  } else {
+    // For remote users, update visibility
+    console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
+    updateVideoVisibility(data.userId, data.enabled, true);
   }
-  
-  // For remote users, update visibility
-  updateVideoVisibility(data.userId, data.enabled, true);
 });
           
           socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
