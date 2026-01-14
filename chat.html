@@ -434,6 +434,79 @@
   const CHAT_MESSAGES_KEY = 'chat_messages';
   const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
   
+  
+  // CRITICAL: Set initial button state from localStorage BEFORE socket connects
+function setInitialCallButtonState() {
+  console.log('🔍 Checking for active call in localStorage...');
+  
+  const activeCallStr = localStorage.getItem('activeCall');
+  
+  if (activeCallStr) {
+    try {
+      const activeCallData = JSON.parse(activeCallStr);
+      
+      // Check if this call belongs to the current room
+      if (activeCallData.roomId === roomData.roomId) {
+        console.log(`📞 Active call found in localStorage: ${activeCallData.callId}`);
+        console.log(`   Room matches: ${activeCallData.roomId} === ${roomData.roomId}`);
+        
+        // IMMEDIATELY show join button (optimistic UI)
+        if (joinCallBtn) {
+          joinCallBtn.classList.remove('hidden');
+          joinCallBtn.classList.add('flex');
+          console.log('👁️ Join button SHOWN (from localStorage, 0ms latency)');
+        }
+        if (audioCallBtn) {
+          audioCallBtn.classList.add('hidden');
+          console.log('🙈 Audio call button hidden (from localStorage)');
+        }
+        if (videoCallBtn) {
+          videoCallBtn.classList.add('hidden');
+          console.log('🙈 Video call button hidden (from localStorage)');
+        }
+        
+        // Set temporary activeCallInRoom state
+        activeCallInRoom = {
+          callId: activeCallData.callId,
+          participantCount: 1, // Will be updated from server
+          callType: activeCallData.callType
+        };
+        
+        console.log('✅ Initial call state set from localStorage (optimistic)');
+        return true;
+      } else {
+        console.log(`❌ Call room mismatch: ${activeCallData.roomId} !== ${roomData.roomId}`);
+      }
+    } catch (e) {
+      console.error('Failed to parse activeCall from localStorage:', e);
+    }
+  } else {
+    console.log('📞 No active call in localStorage');
+  }
+  
+  // Ensure default state (no active call)
+  if (joinCallBtn) {
+    joinCallBtn.classList.remove('flex');
+    joinCallBtn.classList.add('hidden');
+    console.log('🙈 Join button HIDDEN (no active call)');
+  }
+  if (audioCallBtn) {
+    audioCallBtn.classList.remove('hidden');
+    console.log('👁️ Audio call button shown (default state)');
+  }
+  if (videoCallBtn) {
+    videoCallBtn.classList.remove('hidden');
+    console.log('👁️ Video call button shown (default state)');
+  }
+  
+  return false;
+}
+
+// Call this IMMEDIATELY after getting DOM elements, BEFORE socket connection
+console.log('🚀 Setting initial call button state...');
+setInitialCallButtonState();
+  
+  
   function saveChatState(roomId, messages) {
     try {
       const state = {
@@ -884,6 +957,17 @@
 
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
+  
+  
+  const audioCallBtn = document.getElementById('audioCallBtn');
+const videoCallBtn = document.getElementById('videoCallBtn');
+
+// CRITICAL: Get join call button reference
+const joinCallBtn = document.getElementById('joinCallBtn');
+
+// CRITICAL: Set initial state from localStorage (0ms latency)
+console.log('🚀 Setting initial call button state...');
+setInitialCallButtonState();
 
   const idToken = await firebaseUser.getIdToken();
   const socketUrl = window.location.origin;
@@ -941,48 +1025,52 @@
     saveChatState(roomData.roomId, messagesCache);
   }
   
-  // CRITICAL FIX: Process active call state if present
+  // UPDATED: Verify/update call state from server (confirmation)
   if (data.activeCall) {
-    console.log('📞 Active call state received on room join:', data.activeCall);
+    console.log('📞 Server confirmed active call state:', data.activeCall);
     
+    // Update with accurate server data
     activeCallInRoom = {
       callId: data.activeCall.callId,
       participantCount: data.activeCall.participantCount,
       callType: data.activeCall.callType
     };
     
-    console.log(`✅ Active call detected: ${data.activeCall.callId} with ${data.activeCall.participantCount} participant(s)`);
+    console.log(`✅ Active call confirmed: ${data.activeCall.callId} with ${data.activeCall.participantCount} participant(s)`);
     
-    // Show join button, hide call initiation buttons
-    if (joinCallBtn) {
+    // Ensure buttons are in correct state (should already be from localStorage)
+    if (joinCallBtn && joinCallBtn.classList.contains('hidden')) {
       joinCallBtn.classList.remove('hidden');
       joinCallBtn.classList.add('flex');
-      console.log('👁️ Join button SHOWN (from room_joined)');
+      console.log('👁️ Join button SHOWN (server confirmation)');
     }
-    if (audioCallBtn) {
+    if (audioCallBtn && !audioCallBtn.classList.contains('hidden')) {
       audioCallBtn.classList.add('hidden');
-      console.log('🙈 Audio call button hidden (from room_joined)');
+      console.log('🙈 Audio call button hidden (server confirmation)');
     }
-    if (videoCallBtn) {
+    if (videoCallBtn && !videoCallBtn.classList.contains('hidden')) {
       videoCallBtn.classList.add('hidden');
-      console.log('🙈 Video call button hidden (from room_joined)');
+      console.log('🙈 Video call button hidden (server confirmation)');
     }
   } else {
-    console.log('📞 No active call in room');
+    console.log('📞 Server reports no active call');
     
-    // Ensure join button is hidden, call buttons are shown
+    // Clear optimistic state if server says no call
+    activeCallInRoom = null;
+    
+    // Reset to default state
     if (joinCallBtn) {
       joinCallBtn.classList.remove('flex');
       joinCallBtn.classList.add('hidden');
-      console.log('🙈 Join button HIDDEN (from room_joined)');
+      console.log('🙈 Join button HIDDEN (server says no call)');
     }
     if (audioCallBtn) {
       audioCallBtn.classList.remove('hidden');
-      console.log('👁️ Audio call button shown (from room_joined)');
+      console.log('👁️ Audio call button shown (server says no call)');
     }
     if (videoCallBtn) {
       videoCallBtn.classList.remove('hidden');
-      console.log('👁️ Video call button shown (from room_joined)');
+      console.log('👁️ Video call button shown (server says no call)');
     }
   }
 });
