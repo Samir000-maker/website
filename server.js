@@ -1061,17 +1061,23 @@ socket.on('join_call', ({ callId }) => {
     // Update call activity
     call.lastActivity = Date.now();
 
-    // Initialize user's media state if not present
+    // CRITICAL FIX 1: Initialize userMediaStates if not present
     if (!call.userMediaStates) {
       call.userMediaStates = new Map();
+      console.log(`📊 Initialized userMediaStates Map for call ${callId}`);
     }
     
-    // Set default media state for this user
+    // CRITICAL FIX 2: Set default media state for this user BEFORE emitting to client
+    // Default: video enabled for video calls, audio always enabled
+    const defaultVideoState = call.callType === 'video';
+    const defaultAudioState = true;
+    
     if (!call.userMediaStates.has(user.userId)) {
       call.userMediaStates.set(user.userId, {
-        videoEnabled: call.callType === 'video',
-        audioEnabled: true
+        videoEnabled: defaultVideoState,
+        audioEnabled: defaultAudioState
       });
+      console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=${defaultAudioState}`);
     }
 
     // Clear grace period
@@ -1087,12 +1093,21 @@ socket.on('join_call', ({ callId }) => {
     const room = matchmaking.getRoom(call.roomId);
     const participants = room ? room.users.filter(u => call.participants.includes(u.userId)) : [];
 
+    // CRITICAL FIX 3: Ensure ALL participants have media states before sending
+    participants.forEach(p => {
+      if (!call.userMediaStates.has(p.userId)) {
+        const isVideoCall = call.callType === 'video';
+        call.userMediaStates.set(p.userId, {
+          videoEnabled: isVideoCall,
+          audioEnabled: true
+        });
+        console.log(`📊 Initialized missing media state for ${p.username}: video=${isVideoCall}, audio=true`);
+      }
+    });
+
     // Include media states in participant data
     const participantsWithMediaStates = participants.map(p => {
-      const mediaState = call.userMediaStates.get(p.userId) || {
-        videoEnabled: call.callType === 'video',
-        audioEnabled: true
-      };
+      const mediaState = call.userMediaStates.get(p.userId);
       return {
         userId: p.userId,
         username: p.username,
@@ -1102,10 +1117,11 @@ socket.on('join_call', ({ callId }) => {
       };
     });
 
-    console.log(`📊 Participants with media states:`, participantsWithMediaStates.map(p => 
-      `${p.username} (video=${p.videoEnabled}, audio=${p.audioEnabled})`
-    ).join(', '));
+    console.log(`📊 Sending participants with media states to ${user.username}:`, 
+      participantsWithMediaStates.map(p => `${p.username} (video=${p.videoEnabled}, audio=${p.audioEnabled})`).join(', ')
+    );
 
+    // CRITICAL FIX 4: Send complete state to joining user
     socket.emit('call_joined', {
       callId,
       callType: call.callType,
@@ -1115,6 +1131,7 @@ socket.on('join_call', ({ callId }) => {
     // Get current user's media state
     const userMediaState = call.userMediaStates.get(user.userId);
 
+    // CRITICAL FIX 5: Broadcast to OTHER users with complete state
     socket.to(`call-${callId}`).emit('user_joined_call', {
       user: {
         userId: user.userId,
@@ -1124,6 +1141,8 @@ socket.on('join_call', ({ callId }) => {
         audioEnabled: userMediaState.audioEnabled
       }
     });
+
+    console.log(`✅ ${user.username} successfully joined call ${callId}`);
 
   } catch (error) {
     console.error('Join call error:', error);
@@ -1291,8 +1310,10 @@ socket.on('audio_state_changed', ({ callId, enabled }) => {
 
     const call = activeCalls.get(callId);
     if (call) {
+      // CRITICAL FIX 6: Always initialize Map if missing
       if (!call.userMediaStates) call.userMediaStates = new Map();
-      const currentState = call.userMediaStates.get(user.userId) || {};
+      
+      const currentState = call.userMediaStates.get(user.userId) || { videoEnabled: true, audioEnabled: true };
       call.userMediaStates.set(user.userId, {
         ...currentState,
         audioEnabled: enabled
@@ -1300,7 +1321,8 @@ socket.on('audio_state_changed', ({ callId, enabled }) => {
       console.log(`🎤 ${user.username} audio: ${enabled ? 'ON' : 'OFF'}`);
     }
 
-    socket.to(`call-${callId}`).emit('audio_state_changed', {
+    // CRITICAL FIX 7: Broadcast to ALL users including sender (for confirmation)
+    io.to(`call-${callId}`).emit('audio_state_changed', {
       userId: user.userId,
       enabled
     });
@@ -1318,67 +1340,30 @@ socket.on('video_state_changed', ({ callId, enabled }) => {
 
     const call = activeCalls.get(callId);
     if (call) {
+      // CRITICAL FIX 8: Always initialize Map if missing
       if (!call.userMediaStates) call.userMediaStates = new Map();
-      const currentState = call.userMediaStates.get(user.userId) || {};
-      call.userMediaStates.set(user.userId, {
-        ...currentState,
-        videoEnabled: enabled
-      });
-      console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'}`);
-    }
-
-    socket.to(`call-${callId}`).emit('video_state_changed', {
-      userId: user.userId,
-      enabled
-    });
-
-  } catch (error) {
-    console.error('Video state error:', error);
-  }
-});
-
-socket.on('video_state_changed', ({ callId, enabled }) => {
-  try {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) return;
-
-    const call = activeCalls.get(callId);
-    if (call) {
-      if (!call.userMediaStates) call.userMediaStates = new Map();
-      const currentState = call.userMediaStates.get(user.userId) || {};
-      call.userMediaStates.set(user.userId, {
-        ...currentState,
-        videoEnabled: enabled
-      });
-      console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'}`);
-    }
-
-    socket.to(`call-${callId}`).emit('video_state_changed', {
-      userId: user.userId,
-      enabled
-    });
-
-  } catch (error) {
-    console.error('Video state error:', error);
-  }
-});
-
-  socket.on('video_state_changed', ({ callId, enabled }) => {
-    try {
-      const user = socketUsers.get(socket.id);
       
-      if (!user) return;
-
-      socket.to(`call-${callId}`).emit('video_state_changed', {
-        userId: user.userId,
-        enabled
+      const currentState = call.userMediaStates.get(user.userId) || { videoEnabled: true, audioEnabled: true };
+      call.userMediaStates.set(user.userId, {
+        ...currentState,
+        videoEnabled: enabled
       });
-
-    } catch (error) {
-      console.error('Video state error:', error);
+      console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'}`);
     }
-  });
+
+    // CRITICAL FIX 9: Broadcast to ALL users including sender (for confirmation)
+    io.to(`call-${callId}`).emit('video_state_changed', {
+      userId: user.userId,
+      enabled
+    });
+
+  } catch (error) {
+    console.error('Video state error:', error);
+  }
+});
+
+
+
 
   socket.on('leave_room', () => {
     const user = socketUsers.get(socket.id);
