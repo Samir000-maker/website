@@ -909,37 +909,83 @@
   });
 
   socketInstance.on('room_joined', (data) => {
-    console.log('✅ Room joined successfully:', data);
+  console.log('✅ Room joined successfully:', data);
+  
+  // Display chat history if available
+  if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+    console.log(`📜 Displaying ${data.chatHistory.length} chat history messages`);
     
-    if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
-      console.log(`📜 Displaying ${data.chatHistory.length} chat history messages`);
+    const existingMessageIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+    
+    data.chatHistory.forEach(msg => {
+      const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
       
-      const existingMessageIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
-      
-      data.chatHistory.forEach(msg => {
-        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-        
-        if (existingMessageIds.has(msgId)) {
-          return;
-        }
-        
-        const isCurrentUser = msg.userId === currentUser.userId;
-        const msgEl = createMessageElement(msg, isCurrentUser);
-        
-        if (messagesList) {
-          messagesList.appendChild(msgEl);
-        }
-        
-        messagesCache.push(msg);
-      });
-      
-      if (messagesList) {
-        messagesList.scrollTop = messagesList.scrollHeight;
+      if (existingMessageIds.has(msgId)) {
+        return;
       }
       
-      saveChatState(roomData.roomId, messagesCache);
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      
+      if (messagesList) {
+        messagesList.appendChild(msgEl);
+      }
+      
+      messagesCache.push(msg);
+    });
+    
+    if (messagesList) {
+      messagesList.scrollTop = messagesList.scrollHeight;
     }
-  });
+    
+    saveChatState(roomData.roomId, messagesCache);
+  }
+  
+  // CRITICAL FIX: Process active call state if present
+  if (data.activeCall) {
+    console.log('📞 Active call state received on room join:', data.activeCall);
+    
+    activeCallInRoom = {
+      callId: data.activeCall.callId,
+      participantCount: data.activeCall.participantCount,
+      callType: data.activeCall.callType
+    };
+    
+    console.log(`✅ Active call detected: ${data.activeCall.callId} with ${data.activeCall.participantCount} participant(s)`);
+    
+    // Show join button, hide call initiation buttons
+    if (joinCallBtn) {
+      joinCallBtn.classList.remove('hidden');
+      joinCallBtn.classList.add('flex');
+      console.log('👁️ Join button SHOWN (from room_joined)');
+    }
+    if (audioCallBtn) {
+      audioCallBtn.classList.add('hidden');
+      console.log('🙈 Audio call button hidden (from room_joined)');
+    }
+    if (videoCallBtn) {
+      videoCallBtn.classList.add('hidden');
+      console.log('🙈 Video call button hidden (from room_joined)');
+    }
+  } else {
+    console.log('📞 No active call in room');
+    
+    // Ensure join button is hidden, call buttons are shown
+    if (joinCallBtn) {
+      joinCallBtn.classList.remove('flex');
+      joinCallBtn.classList.add('hidden');
+      console.log('🙈 Join button HIDDEN (from room_joined)');
+    }
+    if (audioCallBtn) {
+      audioCallBtn.classList.remove('hidden');
+      console.log('👁️ Audio call button shown (from room_joined)');
+    }
+    if (videoCallBtn) {
+      videoCallBtn.classList.remove('hidden');
+      console.log('👁️ Video call button shown (from room_joined)');
+    }
+  }
+});
 
   socketInstance.on('error', (data) => {
     console.error('❌ Socket error:', data);
