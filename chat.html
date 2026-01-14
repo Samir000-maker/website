@@ -414,511 +414,645 @@
     <script src="app.js"></script>
 
     <script>
-    (async () => {
-      const MoodApp = window.MoodApp || {};
-      const _Auth = MoodApp.Auth;
-      const _API = MoodApp.API;
-      const _Toast = MoodApp.Toast;
-      const _Utils = MoodApp.Utils;
+(async () => {
+  const MoodApp = window.MoodApp || {};
+  const _Auth = MoodApp.Auth;
+  const _API = MoodApp.API;
+  const _Toast = MoodApp.Toast;
+  const _Utils = MoodApp.Utils;
 
-      const toast = (m, t='success') => { 
-        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
-        console[t==='error'?'error':'log'](m); 
+  const toast = (m, t='success') => { 
+    if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
+    console[t==='error'?'error':'log'](m); 
+  };
+
+  // ============================================
+  // STATE PRESERVATION SYSTEM
+  // ============================================
+  
+  const CHAT_STATE_KEY = 'chat_state';
+  const CHAT_MESSAGES_KEY = 'chat_messages';
+  const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
+  
+  function saveChatState(roomId, messages) {
+    try {
+      const state = {
+        roomId,
+        messages: messages || [],
+        timestamp: Date.now()
       };
+      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+      console.log('✅ Chat state saved:', messages.length, 'messages');
+    } catch (e) {
+      console.warn('Failed to save chat state:', e);
+    }
+  }
+  
+  function loadChatState() {
+    try {
+      const stateStr = localStorage.getItem(CHAT_STATE_KEY);
+      if (!stateStr) return null;
+      
+      const state = JSON.parse(stateStr);
+      console.log('✅ Chat state loaded:', state.messages.length, 'messages');
+      return state;
+    } catch (e) {
+      console.warn('Failed to load chat state:', e);
+      return null;
+    }
+  }
+  
+  function clearChatState() {
+    localStorage.removeItem(CHAT_STATE_KEY);
+    localStorage.removeItem(CHAT_MESSAGES_KEY);
+    localStorage.removeItem(CHAT_TIMESTAMP_KEY);
+    console.log('🗑️ Chat state cleared');
+  }
 
-      // ============================================
-      // STATE PRESERVATION SYSTEM
-      // ============================================
+  // ============================================
+  // BACK BUTTON CONFIRMATION DIALOG
+  // ============================================
+  
+  function showConfirmationDialog() {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('confirmationOverlay');
       
-      const CHAT_STATE_KEY = 'chat_state';
-      const CHAT_MESSAGES_KEY = 'chat_messages';
-      const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
-      
-      function saveChatState(roomId, messages) {
-        try {
-          const state = {
-            roomId,
-            messages: messages || [],
-            timestamp: Date.now()
-          };
-          localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
-          localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-          console.log('✅ Chat state saved:', messages.length, 'messages');
-        } catch (e) {
-          console.warn('Failed to save chat state:', e);
-        }
-      }
-      
-      function loadChatState() {
-        try {
-          const stateStr = localStorage.getItem(CHAT_STATE_KEY);
-          if (!stateStr) return null;
-          
-          const state = JSON.parse(stateStr);
-          console.log('✅ Chat state loaded:', state.messages.length, 'messages');
-          return state;
-        } catch (e) {
-          console.warn('Failed to load chat state:', e);
-          return null;
-        }
-      }
-      
-      function clearChatState() {
-        localStorage.removeItem(CHAT_STATE_KEY);
-        localStorage.removeItem(CHAT_MESSAGES_KEY);
-        localStorage.removeItem(CHAT_TIMESTAMP_KEY);
-        console.log('🗑️ Chat state cleared');
-      }
-
-      // ============================================
-      // BACK BUTTON CONFIRMATION DIALOG
-      // ============================================
-      
-      function showConfirmationDialog() {
-        return new Promise((resolve) => {
-          const overlay = document.getElementById('confirmationOverlay');
-          
-          const dialogHTML = `
-            <div class="confirmation-overlay">
-              <div class="confirmation-dialog">
-                <div style="text-align: center; margin-bottom: 1rem;">
-                  <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                    <span class="material-symbols-outlined" style="font-size: 32px; color: #dc2626;">warning</span>
-                  </div>
-                  <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Leave Chat Room?</h3>
-                  <p style="color: #6b7280; font-size: 0.95rem; line-height: 1.5;">
-                    You're currently in an active chat room. If you leave, you'll be disconnected from the conversation.
-                  </p>
-                </div>
-                <div class="confirmation-buttons">
-                  <button class="btn-stay" id="btnStay">Stay Here</button>
-                  <button class="btn-leave" id="btnLeave">Leave</button>
-                </div>
+      const dialogHTML = `
+        <div class="confirmation-overlay">
+          <div class="confirmation-dialog">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <span class="material-symbols-outlined" style="font-size: 32px; color: #dc2626;">warning</span>
               </div>
+              <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Leave Chat Room?</h3>
+              <p style="color: #6b7280; font-size: 0.95rem; line-height: 1.5;">
+                You're currently in an active chat room. If you leave, you'll be disconnected from the conversation.
+              </p>
             </div>
-          `;
-          
-          overlay.innerHTML = dialogHTML;
-          overlay.style.display = 'flex';
-          
-          const btnStay = document.getElementById('btnStay');
-          const btnLeave = document.getElementById('btnLeave');
-          
-          btnStay.addEventListener('click', () => {
-            overlay.style.display = 'none';
-            resolve(false);
-          });
-          
-          btnLeave.addEventListener('click', () => {
-            overlay.style.display = 'none';
-            resolve(true);
-          });
-        });
-      }
-
-      // ============================================
-      // BACK BUTTON HANDLING
-      // ============================================
+            <div class="confirmation-buttons">
+              <button class="btn-stay" id="btnStay">Stay Here</button>
+              <button class="btn-leave" id="btnLeave">Leave</button>
+            </div>
+          </div>
+        </div>
+      `;
       
-      let backButtonHandled = false;
+      overlay.innerHTML = dialogHTML;
+      overlay.style.display = 'flex';
       
+      const btnStay = document.getElementById('btnStay');
+      const btnLeave = document.getElementById('btnLeave');
       
-      let activeCallInRoom = null; // { callId, participantCount, callType }
-      const joinCallBtn = document.getElementById('joinCallBtn');
-      
-      function setupBackButtonHandler() {
-        history.pushState({ page: 'chat' }, '', window.location.href);
-        
-        window.addEventListener('popstate', async (event) => {
-          if (backButtonHandled) return;
-          
-          console.log('⬅️ Back button pressed on chat page');
-          
-          history.pushState({ page: 'chat' }, '', window.location.href);
-          
-          const shouldLeave = await showConfirmationDialog();
-          
-          if (shouldLeave) {
-            console.log('✅ User confirmed leaving chat');
-            backButtonHandled = true;
-            
-            if (socketInstance && socketInstance.connected) {
-              socketInstance.emit('leave_room');
-            }
-            
-            clearChatState();
-            
-            // Navigate to MOOD page (not discover)
-            window.location.href = '/mood.html';
-          } else {
-            console.log('❌ User chose to stay in chat');
-          }
-        });
-      }
-
-      let replyingTo = null;
-      let isInitiatingCall = false;
-      let pendingCallData = null;
-      let navigatingToCall = false;
-      let messagesCache = [];
-
-      const sidebar = document.getElementById('sidebar');
-      const sidebarToggle = document.getElementById('sidebarToggle');
-      const sidebarClose = document.getElementById('sidebarClose');
-      const sidebarOverlay = document.getElementById('sidebarOverlay');
-
-      function openSidebar() {
-        sidebar.classList.add('show');
-        sidebarOverlay.classList.add('active');
-        document.body.style.overflow = 'hidden';
-      }
-
-      function closeSidebar() {
-        sidebar.classList.remove('show');
-        sidebarOverlay.classList.remove('active');
-        document.body.style.overflow = '';
-      }
-
-      function toggleSidebar() {
-        if (sidebar.classList.contains('show')) {
-          closeSidebar();
-        } else {
-          openSidebar();
-        }
-      }
-
-      if (sidebarToggle) {
-        sidebarToggle.addEventListener('click', toggleSidebar);
-      }
-
-      if (sidebarClose) {
-        sidebarClose.addEventListener('click', closeSidebar);
-      }
-
-      if (sidebarOverlay) {
-        sidebarOverlay.addEventListener('click', closeSidebar);
-      }
-
-      function setupUserCardClick() {
-        if (window.innerWidth <= 768) {
-          document.querySelectorAll('.user-card').forEach(card => {
-            card.addEventListener('click', closeSidebar);
-          });
-        }
-      }
-
-      function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
-        const initial = username ? username.charAt(0).toUpperCase() : 'U';
-        const container = document.createElement('div');
-        container.className = `${size} rounded-full overflow-hidden bg-slate-100 border-2 border-white shadow-sm flex-shrink-0`;
-        
-        if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-          const img = document.createElement('img');
-          img.src = pfpUrl;
-          img.alt = username;
-          img.className = 'h-full w-full object-cover';
-          img.onerror = function() {
-            this.onerror = null;
-            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
-          };
-          container.appendChild(img);
-        } else {
-          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
-        }
-        
-        return container;
-      }
-
-      function showReplyPreview(messageData) {
-        replyingTo = messageData;
-        const replyPreview = document.getElementById('replyPreview');
-        const replyToUsername = document.getElementById('replyToUsername');
-        const replyToMessage = document.getElementById('replyToMessage');
-        const messageInput = document.getElementById('messageInput');
-        
-        if (replyPreview && replyToUsername && replyToMessage) {
-          replyToUsername.textContent = `Replying to ${messageData.username}`;
-          replyToMessage.textContent = messageData.message;
-          replyPreview.classList.remove('hidden');
-          
-          if (messageInput) {
-            messageInput.focus();
-          }
-        }
-      }
-
-      function hideReplyPreview() {
-        replyingTo = null;
-        const replyPreview = document.getElementById('replyPreview');
-        if (replyPreview) {
-          replyPreview.classList.add('hidden');
-        }
-      }
-
-      function escapeHtml(text) {
-        if (_Utils && typeof _Utils.escapeHtml === 'function') {
-          return _Utils.escapeHtml(text);
-        }
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-      }
-
-      function formatTimestamp(timestamp) {
-        if (_Utils && typeof _Utils.formatDate === 'function') {
-          return _Utils.formatDate(timestamp);
-        }
-        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      }
-
-      function createMessageElement(data, isCurrentUser) {
-        const messageItem = document.createElement('div');
-        messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
-        messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
-        
-        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
-        const messageContent = document.createElement('div');
-        messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1 min-w-0`;
-
-        const headerDiv = document.createElement('div');
-        headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
-        
-        const usernameSpan = document.createElement('span');
-        usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900 truncate';
-        usernameSpan.textContent = data.username || 'User';
-        
-        const timestampSpan = document.createElement('span');
-        timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400 whitespace-nowrap';
-        timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
-        
-        headerDiv.appendChild(usernameSpan);
-        headerDiv.appendChild(timestampSpan);
-        messageContent.appendChild(headerDiv);
-
-        const bubbleWrapper = document.createElement('div');
-        bubbleWrapper.className = 'flex items-center gap-1';
-        if (isCurrentUser) {
-          bubbleWrapper.className += ' flex-row-reverse';
-        }
-
-        const messageBubble = document.createElement('div');
-        messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
-
-        if (data.replyTo) {
-          const quotedDiv = document.createElement('div');
-          quotedDiv.className = `quoted-message ${isCurrentUser ? '' : 'quoted-message-light'}`;
-          
-          const quotedUsername = document.createElement('div');
-          quotedUsername.className = `text-xs font-semibold mb-1 ${isCurrentUser ? 'text-blue-200' : 'text-primary'}`;
-          quotedUsername.textContent = data.replyTo.username;
-          
-          const quotedText = document.createElement('div');
-          quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'} break-words`;
-          quotedText.textContent = data.replyTo.message;
-          
-          quotedDiv.appendChild(quotedUsername);
-          quotedDiv.appendChild(quotedText);
-          messageBubble.appendChild(quotedDiv);
-        }
-
-        const messageText = document.createElement('div');
-        messageText.className = 'text-sm sm:text-base break-words';
-        messageText.innerHTML = escapeHtml(data.message || '');
-        messageBubble.appendChild(messageText);
-
-        const replyBtn = document.createElement('button');
-        replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0';
-        replyBtn.title = 'Reply';
-        replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400 text-base sm:text-lg">reply</span>';
-        replyBtn.addEventListener('click', () => {
-          showReplyPreview({
-            messageId: messageItem.dataset.messageId,
-            username: data.username,
-            message: data.message,
-            userId: data.userId
-          });
-        });
-
-        if (isCurrentUser) {
-          bubbleWrapper.appendChild(replyBtn);
-          bubbleWrapper.appendChild(messageBubble);
-        } else {
-          bubbleWrapper.appendChild(messageBubble);
-          bubbleWrapper.appendChild(replyBtn);
-        }
-
-        messageContent.appendChild(bubbleWrapper);
-        messageItem.appendChild(pfpContainer);
-        messageItem.appendChild(messageContent);
-        
-        return messageItem;
-      }
-
-      try {
-        await _Auth.requireAuth();
-      } catch (err) {
-        console.error('Auth required failed:', err);
-        window.location.href = '/login.html';
-        return;
-      }
-
-      // Check if we're restoring from a call
-      const returningFromCall = sessionStorage.getItem('returningFromCall');
-      if (returningFromCall === 'true') {
-        console.log('🔄 Returning from call, restoring chat state');
-        sessionStorage.removeItem('returningFromCall');
-      }
-
-      const roomDataStr = localStorage.getItem('currentRoom');
-      if (!roomDataStr) {
-        toast('No active room found', 'error');
-        setTimeout(() => window.location.href = '/mood.html', 1500);
-        return;
-      }
-
-      const roomData = JSON.parse(roomDataStr);
-      if (!roomData.roomId) {
-        toast('Invalid room data', 'error');
-        setTimeout(() => window.location.href = '/mood.html', 1500);
-        return;
-      }
-
-      const firebaseUser = firebase.auth().currentUser;
-      if (!firebaseUser) {
-        window.location.href = '/login.html';
-        return;
-      }
-
-      const userData = await _API.get('/api/users/me');
-      const currentUser = {
-        userId: userData._id,
-        username: userData.username,
-        pfpUrl: userData.pfpUrl
-      };
-
-      const messagesList = document.getElementById('messagesList');
-      const messageForm = document.getElementById('messageForm');
-      const messageInput = document.getElementById('messageInput');
-      const usersList = document.getElementById('usersList');
-      const onlineCount = document.getElementById('onlineCount');
-      const timeRemaining = document.getElementById('timeRemaining');
-      const leaveBtn = document.getElementById('leaveBtn');
-      const cancelReplyBtn = document.getElementById('cancelReply');
-      const audioCallBtn = document.getElementById('audioCallBtn');
-      const videoCallBtn = document.getElementById('videoCallBtn');
-      const incomingCallModal = document.getElementById('incomingCallModal');
-      const acceptCallBtn = document.getElementById('acceptCallBtn');
-      const declineCallBtn = document.getElementById('declineCallBtn');
-
-      if (cancelReplyBtn) {
-        cancelReplyBtn.addEventListener('click', hideReplyPreview);
-      }
-
-      // Restore previous messages if available
-      const previousState = loadChatState();
-      if (previousState && previousState.roomId === roomData.roomId && previousState.messages) {
-        console.log('🔄 Restoring', previousState.messages.length, 'previous messages');
-        previousState.messages.forEach(msg => {
-          const isCurrentUser = msg.userId === currentUser.userId;
-          const msgEl = createMessageElement(msg, isCurrentUser);
-          if (messagesList) {
-            messagesList.appendChild(msgEl);
-          }
-        });
-        messagesCache = previousState.messages;
-        if (messagesList) {
-          messagesList.scrollTop = messagesList.scrollHeight;
-        }
-      }
-
-      if (usersList && Array.isArray(roomData.users)) {
-        roomData.users.forEach(user => {
-          const userCard = document.createElement('div');
-          userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-          
-          const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-          
-          const userInfo = document.createElement('div');
-          userInfo.className = 'flex-1 min-w-0';
-          
-          const nameSpan = document.createElement('div');
-          nameSpan.className = 'text-sm font-semibold truncate';
-          nameSpan.textContent = user.username || 'User';
-          
-          const statusSpan = document.createElement('div');
-          statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-          statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-          
-          userInfo.appendChild(nameSpan);
-          userInfo.appendChild(statusSpan);
-          
-          userCard.appendChild(pfpElement);
-          userCard.appendChild(userInfo);
-          usersList.appendChild(userCard);
-        });
-
-        setupUserCardClick();
-
-        if (onlineCount) {
-          onlineCount.textContent = `${roomData.users.length} Online`;
-        }
-      }
-
-      let timerInterval = null;
-      const updateTimer = () => {
-        const now = Date.now();
-        const remaining = Math.max(0, roomData.expiresAt - now);
-        const minutes = Math.floor(remaining / 60000);
-        const seconds = Math.floor((remaining % 60000) / 1000);
-        
-        if (timeRemaining) {
-          timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
-        }
-
-        if (remaining === 0) {
-          if (timerInterval) clearInterval(timerInterval);
-          toast('Room has expired', 'warning');
-          clearChatState();
-          setTimeout(() => window.location.href = '/mood.html', 2000);
-        }
-      };
-
-      timerInterval = setInterval(updateTimer, 1000);
-      updateTimer();
-
-      const idToken = await firebaseUser.getIdToken();
-      const socketUrl = window.location.origin;
-      const socketInstance = io(socketUrl, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionDelay: 500,
-        reconnectionAttempts: 10,
-        auth: { token: idToken }
+      btnStay.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        resolve(false);
       });
       
-      
-      socketInstance.on('call_state_update', (data) => {
-  console.log('📞 Call state update received:', data);
-  console.log(`   callId: ${data.callId}, active: ${data.isActive}, participants: ${data.participantCount}`);
+      btnLeave.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        resolve(true);
+      });
+    });
+  }
+
+  // ============================================
+  // BACK BUTTON HANDLING
+  // ============================================
   
-  if (data.isActive && data.participantCount > 0) {
-    activeCallInRoom = {
+  let backButtonHandled = false;
+  
+  function setupBackButtonHandler() {
+    history.pushState({ page: 'chat' }, '', window.location.href);
+    
+    window.addEventListener('popstate', async (event) => {
+      if (backButtonHandled) return;
+      
+      console.log('⬅️ Back button pressed on chat page');
+      
+      history.pushState({ page: 'chat' }, '', window.location.href);
+      
+      const shouldLeave = await showConfirmationDialog();
+      
+      if (shouldLeave) {
+        console.log('✅ User confirmed leaving chat');
+        backButtonHandled = true;
+        
+        if (socketInstance && socketInstance.connected) {
+          socketInstance.emit('leave_room');
+        }
+        
+        clearChatState();
+        
+        window.location.href = '/mood.html';
+      } else {
+        console.log('❌ User chose to stay in chat');
+      }
+    });
+  }
+
+  let replyingTo = null;
+  let isInitiatingCall = false;
+  let pendingCallData = null;
+  let navigatingToCall = false;
+  let messagesCache = [];
+  
+  // CRITICAL: Add active call tracking
+  let activeCallInRoom = null; // { callId, participantCount, callType }
+
+  const sidebar = document.getElementById('sidebar');
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebarClose = document.getElementById('sidebarClose');
+  const sidebarOverlay = document.getElementById('sidebarOverlay');
+  
+  // CRITICAL: Get join call button reference
+  const joinCallBtn = document.getElementById('joinCallBtn');
+
+  function openSidebar() {
+    sidebar.classList.add('show');
+    sidebarOverlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebar() {
+    sidebar.classList.remove('show');
+    sidebarOverlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function toggleSidebar() {
+    if (sidebar.classList.contains('show')) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  }
+
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', toggleSidebar);
+  }
+
+  if (sidebarClose) {
+    sidebarClose.addEventListener('click', closeSidebar);
+  }
+
+  if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', closeSidebar);
+  }
+
+  function setupUserCardClick() {
+    if (window.innerWidth <= 768) {
+      document.querySelectorAll('.user-card').forEach(card => {
+        card.addEventListener('click', closeSidebar);
+      });
+    }
+  }
+
+  function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
+    const initial = username ? username.charAt(0).toUpperCase() : 'U';
+    const container = document.createElement('div');
+    container.className = `${size} rounded-full overflow-hidden bg-slate-100 border-2 border-white shadow-sm flex-shrink-0`;
+    
+    if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
+      const img = document.createElement('img');
+      img.src = pfpUrl;
+      img.alt = username;
+      img.className = 'h-full w-full object-cover';
+      img.onerror = function() {
+        this.onerror = null;
+        container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+      };
+      container.appendChild(img);
+    } else {
+      container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+    }
+    
+    return container;
+  }
+
+  function showReplyPreview(messageData) {
+    replyingTo = messageData;
+    const replyPreview = document.getElementById('replyPreview');
+    const replyToUsername = document.getElementById('replyToUsername');
+    const replyToMessage = document.getElementById('replyToMessage');
+    const messageInput = document.getElementById('messageInput');
+    
+    if (replyPreview && replyToUsername && replyToMessage) {
+      replyToUsername.textContent = `Replying to ${messageData.username}`;
+      replyToMessage.textContent = messageData.message;
+      replyPreview.classList.remove('hidden');
+      
+      if (messageInput) {
+        messageInput.focus();
+      }
+    }
+  }
+
+  function hideReplyPreview() {
+    replyingTo = null;
+    const replyPreview = document.getElementById('replyPreview');
+    if (replyPreview) {
+      replyPreview.classList.add('hidden');
+    }
+  }
+
+  function escapeHtml(text) {
+    if (_Utils && typeof _Utils.escapeHtml === 'function') {
+      return _Utils.escapeHtml(text);
+    }
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function formatTimestamp(timestamp) {
+    if (_Utils && typeof _Utils.formatDate === 'function') {
+      return _Utils.formatDate(timestamp);
+    }
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function createMessageElement(data, isCurrentUser) {
+    const messageItem = document.createElement('div');
+    messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
+    messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
+    
+    const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
+    const messageContent = document.createElement('div');
+    messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1 min-w-0`;
+
+    const headerDiv = document.createElement('div');
+    headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+    
+    const usernameSpan = document.createElement('span');
+    usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900 truncate';
+    usernameSpan.textContent = data.username || 'User';
+    
+    const timestampSpan = document.createElement('span');
+    timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400 whitespace-nowrap';
+    timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
+    
+    headerDiv.appendChild(usernameSpan);
+    headerDiv.appendChild(timestampSpan);
+    messageContent.appendChild(headerDiv);
+
+    const bubbleWrapper = document.createElement('div');
+    bubbleWrapper.className = 'flex items-center gap-1';
+    if (isCurrentUser) {
+      bubbleWrapper.className += ' flex-row-reverse';
+    }
+
+    const messageBubble = document.createElement('div');
+    messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
+
+    if (data.replyTo) {
+      const quotedDiv = document.createElement('div');
+      quotedDiv.className = `quoted-message ${isCurrentUser ? '' : 'quoted-message-light'}`;
+      
+      const quotedUsername = document.createElement('div');
+      quotedUsername.className = `text-xs font-semibold mb-1 ${isCurrentUser ? 'text-blue-200' : 'text-primary'}`;
+      quotedUsername.textContent = data.replyTo.username;
+      
+      const quotedText = document.createElement('div');
+      quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'} break-words`;
+      quotedText.textContent = data.replyTo.message;
+      
+      quotedDiv.appendChild(quotedUsername);
+      quotedDiv.appendChild(quotedText);
+      messageBubble.appendChild(quotedDiv);
+    }
+
+    const messageText = document.createElement('div');
+    messageText.className = 'text-sm sm:text-base break-words';
+    messageText.innerHTML = escapeHtml(data.message || '');
+    messageBubble.appendChild(messageText);
+
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0';
+    replyBtn.title = 'Reply';
+    replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400 text-base sm:text-lg">reply</span>';
+    replyBtn.addEventListener('click', () => {
+      showReplyPreview({
+        messageId: messageItem.dataset.messageId,
+        username: data.username,
+        message: data.message,
+        userId: data.userId
+      });
+    });
+
+    if (isCurrentUser) {
+      bubbleWrapper.appendChild(replyBtn);
+      bubbleWrapper.appendChild(messageBubble);
+    } else {
+      bubbleWrapper.appendChild(messageBubble);
+      bubbleWrapper.appendChild(replyBtn);
+    }
+
+    messageContent.appendChild(bubbleWrapper);
+    messageItem.appendChild(pfpContainer);
+    messageItem.appendChild(messageContent);
+    
+    return messageItem;
+  }
+
+  try {
+    await _Auth.requireAuth();
+  } catch (err) {
+    console.error('Auth required failed:', err);
+    window.location.href = '/login.html';
+    return;
+  }
+
+  const returningFromCall = sessionStorage.getItem('returningFromCall');
+  if (returningFromCall === 'true') {
+    console.log('🔄 Returning from call, restoring chat state');
+    sessionStorage.removeItem('returningFromCall');
+  }
+
+  const roomDataStr = localStorage.getItem('currentRoom');
+  if (!roomDataStr) {
+    toast('No active room found', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 1500);
+    return;
+  }
+
+  const roomData = JSON.parse(roomDataStr);
+  if (!roomData.roomId) {
+    toast('Invalid room data', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 1500);
+    return;
+  }
+
+  const firebaseUser = firebase.auth().currentUser;
+  if (!firebaseUser) {
+    window.location.href = '/login.html';
+    return;
+  }
+
+  const userData = await _API.get('/api/users/me');
+  const currentUser = {
+    userId: userData._id,
+    username: userData.username,
+    pfpUrl: userData.pfpUrl
+  };
+
+  const messagesList = document.getElementById('messagesList');
+  const messageForm = document.getElementById('messageForm');
+  const messageInput = document.getElementById('messageInput');
+  const usersList = document.getElementById('usersList');
+  const onlineCount = document.getElementById('onlineCount');
+  const timeRemaining = document.getElementById('timeRemaining');
+  const leaveBtn = document.getElementById('leaveBtn');
+  const cancelReplyBtn = document.getElementById('cancelReply');
+  const audioCallBtn = document.getElementById('audioCallBtn');
+  const videoCallBtn = document.getElementById('videoCallBtn');
+  const incomingCallModal = document.getElementById('incomingCallModal');
+  const acceptCallBtn = document.getElementById('acceptCallBtn');
+  const declineCallBtn = document.getElementById('declineCallBtn');
+
+  if (cancelReplyBtn) {
+    cancelReplyBtn.addEventListener('click', hideReplyPreview);
+  }
+
+  const previousState = loadChatState();
+  if (previousState && previousState.roomId === roomData.roomId && previousState.messages) {
+    console.log('🔄 Restoring', previousState.messages.length, 'previous messages');
+    previousState.messages.forEach(msg => {
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      if (messagesList) {
+        messagesList.appendChild(msgEl);
+      }
+    });
+    messagesCache = previousState.messages;
+    if (messagesList) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+  }
+
+  if (usersList && Array.isArray(roomData.users)) {
+    roomData.users.forEach(user => {
+      const userCard = document.createElement('div');
+      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+      
+      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
+      
+      const userInfo = document.createElement('div');
+      userInfo.className = 'flex-1 min-w-0';
+      
+      const nameSpan = document.createElement('div');
+      nameSpan.className = 'text-sm font-semibold truncate';
+      nameSpan.textContent = user.username || 'User';
+      
+      const statusSpan = document.createElement('div');
+      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
+      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
+      
+      userInfo.appendChild(nameSpan);
+      userInfo.appendChild(statusSpan);
+      
+      userCard.appendChild(pfpElement);
+      userCard.appendChild(userInfo);
+      usersList.appendChild(userCard);
+    });
+
+    setupUserCardClick();
+
+    if (onlineCount) {
+      onlineCount.textContent = `${roomData.users.length} Online`;
+    }
+  }
+
+  let timerInterval = null;
+  const updateTimer = () => {
+    const now = Date.now();
+    const remaining = Math.max(0, roomData.expiresAt - now);
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    
+    if (timeRemaining) {
+      timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+    }
+
+    if (remaining === 0) {
+      if (timerInterval) clearInterval(timerInterval);
+      toast('Room has expired', 'warning');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    }
+  };
+
+  timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+
+  const idToken = await firebaseUser.getIdToken();
+  const socketUrl = window.location.origin;
+  const socketInstance = io(socketUrl, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 500,
+    reconnectionAttempts: 10,
+    auth: { token: idToken }
+  });
+
+  socketInstance.on('connect', () => {
+    console.log('🔌 Socket connected:', socketInstance.id);
+    socketInstance.emit('authenticate', {
+      token: idToken,
+      userId: currentUser.userId
+    });
+  });
+
+  socketInstance.on('authenticated', (data) => {
+    console.log('✅ Socket authenticated:', data);
+    socketInstance.emit('join_room', { roomId: roomData.roomId });
+  });
+
+  socketInstance.on('room_joined', (data) => {
+    console.log('✅ Room joined successfully:', data);
+    
+    if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
+      console.log(`📜 Displaying ${data.chatHistory.length} chat history messages`);
+      
+      const existingMessageIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+      
+      data.chatHistory.forEach(msg => {
+        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+        
+        if (existingMessageIds.has(msgId)) {
+          return;
+        }
+        
+        const isCurrentUser = msg.userId === currentUser.userId;
+        const msgEl = createMessageElement(msg, isCurrentUser);
+        
+        if (messagesList) {
+          messagesList.appendChild(msgEl);
+        }
+        
+        messagesCache.push(msg);
+      });
+      
+      if (messagesList) {
+        messagesList.scrollTop = messagesList.scrollHeight;
+      }
+      
+      saveChatState(roomData.roomId, messagesCache);
+    }
+  });
+
+  socketInstance.on('error', (data) => {
+    console.error('❌ Socket error:', data);
+    if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
+      toast('Room no longer available', 'error');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    } else {
+      toast(data.message || 'An error occurred', 'error');
+    }
+  });
+
+  socketInstance.on('chat_message', (data) => {
+    if (!data.messageId) {
+      data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+    }
+    
+    const isCurrentUser = data.userId === currentUser.userId;
+    const msgEl = createMessageElement(data, isCurrentUser);
+    if (messagesList) {
+      messagesList.appendChild(msgEl);
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+    
+    messagesCache.push(data);
+    saveChatState(roomData.roomId, messagesCache);
+  });
+
+  socketInstance.on('user_left', (data) => {
+    const msgEl = document.createElement('div');
+    msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+    msgEl.textContent = `${data.username || 'A user'} left the room`;
+    if (messagesList) messagesList.appendChild(msgEl);
+
+    if (onlineCount && data.remainingUsers !== undefined) {
+      onlineCount.textContent = `${data.remainingUsers} Online`;
+    }
+
+    if (data.remainingUsers <= 1) {
+      toast('Room closing...', 'warning');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    }
+  });
+
+  socketInstance.on('left_room', (data) => {
+    toast('Left room', 'success');
+    clearChatState();
+    setTimeout(() => window.location.href = '/mood.html', 1000);
+  });
+
+  socketInstance.on('incoming_call', (data) => {
+    pendingCallData = data;
+    const callerName = document.getElementById('callerName');
+    const callType = document.getElementById('callType');
+    const callerAvatar = document.getElementById('callerAvatar');
+    
+    if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+    if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+    if (callerAvatar) {
+      callerAvatar.innerHTML = '';
+      const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+      callerAvatar.appendChild(pfp);
+    }
+    
+    incomingCallModal.classList.remove('hidden');
+  });
+
+  socketInstance.on('call_accepted', (data) => {
+    console.log('✅ Call accepted:', data);
+    isInitiatingCall = false;
+    navigatingToCall = true;
+    
+    saveChatState(roomData.roomId, messagesCache);
+    sessionStorage.setItem('returningFromCall', 'true');
+    
+    localStorage.setItem('activeCall', JSON.stringify({
       callId: data.callId,
-      participantCount: data.participantCount,
-      callType: data.callType || 'video'
-    };
+      roomId: roomData.roomId,
+      callType: data.callType,
+      users: data.users
+    }));
     
-    console.log(`✅ Active call detected in room: ${data.callId} with ${data.participantCount} participant(s)`);
+    console.log('🚀 Navigating to call page');
+    window.location.href = '/call.html';
+  });
+
+  socketInstance.on('call_declined', (data) => {
+    toast('Call was declined', 'warning');
+    isInitiatingCall = false;
+    if (audioCallBtn) audioCallBtn.classList.remove('calling');
+    if (videoCallBtn) videoCallBtn.classList.remove('calling');
+  });
+  
+  // CRITICAL: Add call state update listener
+  socketInstance.on('call_state_update', (data) => {
+    console.log('📞 Call state update received:', data);
+    console.log(`   callId: ${data.callId}, active: ${data.isActive}, participants: ${data.participantCount}`);
     
-    // Check if current user is NOT in the call
-    const userInCall = userCalls && userCalls.has && userCalls.has(currentUser.userId);
-    
-    if (!userInCall) {
+    if (data.isActive && data.participantCount > 0) {
+      activeCallInRoom = {
+        callId: data.callId,
+        participantCount: data.participantCount,
+        callType: data.callType || 'video'
+      };
+      
+      console.log(`✅ Active call detected in room: ${data.callId} with ${data.participantCount} participant(s)`);
+      
       // Show join button, hide call initiation buttons
       if (joinCallBtn) {
         joinCallBtn.classList.remove('hidden');
         joinCallBtn.classList.add('flex');
-        console.log('👁️ Join button shown');
+        console.log('👁️ Join button SHOWN');
       }
       if (audioCallBtn) {
         audioCallBtn.classList.add('hidden');
@@ -928,392 +1062,223 @@
         videoCallBtn.classList.add('hidden');
         console.log('🙈 Video call button hidden');
       }
+    } else {
+      activeCallInRoom = null;
+      console.log('❌ No active call in room');
+      
+      // Hide join button, show call initiation buttons
+      if (joinCallBtn) {
+        joinCallBtn.classList.remove('flex');
+        joinCallBtn.classList.add('hidden');
+        console.log('🙈 Join button HIDDEN');
+      }
+      if (audioCallBtn) {
+        audioCallBtn.classList.remove('hidden');
+        console.log('👁️ Audio call button shown');
+      }
+      if (videoCallBtn) {
+        videoCallBtn.classList.remove('hidden');
+        console.log('👁️ Video call button shown');
+      }
     }
-  } else {
+  });
+
+  // CRITICAL: Add call ended notification listener
+  socketInstance.on('call_ended_notification', (data) => {
+    console.log('📞 Call ended notification received:', data.callId);
     activeCallInRoom = null;
-    console.log('❌ No active call in room');
     
-    // Hide join button, show call initiation buttons
+    // Reset button visibility
     if (joinCallBtn) {
       joinCallBtn.classList.remove('flex');
       joinCallBtn.classList.add('hidden');
-      console.log('🙈 Join button hidden');
+      console.log('🙈 Join button hidden (call ended)');
     }
     if (audioCallBtn) {
       audioCallBtn.classList.remove('hidden');
-      console.log('👁️ Audio call button shown');
+      console.log('👁️ Audio call button shown (call ended)');
     }
     if (videoCallBtn) {
       videoCallBtn.classList.remove('hidden');
-      console.log('👁️ Video call button shown');
+      console.log('👁️ Video call button shown (call ended)');
     }
-  }
-});
+  });
 
-socketInstance.on('call_ended_notification', (data) => {
-  console.log('📞 Call ended notification received:', data.callId);
-  activeCallInRoom = null;
-  
-  // Reset button visibility
+  // CRITICAL: Add join existing call success listener
+  socketInstance.on('join_existing_call_success', (data) => {
+    console.log('✅ Join existing call success:', data);
+    navigatingToCall = true;
+    
+    saveChatState(roomData.roomId, messagesCache);
+    sessionStorage.setItem('returningFromCall', 'true');
+    
+    localStorage.setItem('activeCall', JSON.stringify({
+      callId: data.callId,
+      roomId: data.roomId,
+      callType: data.callType,
+      users: []
+    }));
+    
+    console.log('🚀 Navigating to call page (joining existing call)');
+    window.location.href = '/call.html';
+  });
+
+  // CRITICAL: Join call button click handler
   if (joinCallBtn) {
-    joinCallBtn.classList.remove('flex');
-    joinCallBtn.classList.add('hidden');
-    console.log('🙈 Join button hidden (call ended)');
+    joinCallBtn.addEventListener('click', () => {
+      if (!activeCallInRoom) {
+        toast('No active call to join', 'warning');
+        console.warn('⚠️ Join button clicked but no active call');
+        return;
+      }
+      
+      console.log(`📞 Requesting to join call ${activeCallInRoom.callId}`);
+      
+      socketInstance.emit('join_existing_call', {
+        callId: activeCallInRoom.callId,
+        roomId: roomData.roomId
+      });
+      
+      toast('Joining call...', 'success');
+    });
+    console.log('✅ Join call button listener attached');
+  } else {
+    console.error('❌ Join call button not found in DOM!');
   }
+
   if (audioCallBtn) {
-    audioCallBtn.classList.remove('hidden');
-    console.log('👁️ Audio call button shown (call ended)');
+    audioCallBtn.addEventListener('click', () => {
+      if (isInitiatingCall) return;
+      isInitiatingCall = true;
+      audioCallBtn.classList.add('calling');
+      videoCallBtn.classList.add('calling');
+      
+      socketInstance.emit('initiate_call', {
+        roomId: roomData.roomId,
+        callType: 'audio'
+      });
+      toast('Calling...', 'success');
+      
+      setTimeout(() => {
+        if (isInitiatingCall) {
+          isInitiatingCall = false;
+          audioCallBtn.classList.remove('calling');
+          videoCallBtn.classList.remove('calling');
+        }
+      }, 30000);
+    });
   }
+
   if (videoCallBtn) {
-    videoCallBtn.classList.remove('hidden');
-    console.log('👁️ Video call button shown (call ended)');
+    videoCallBtn.addEventListener('click', () => {
+      if (isInitiatingCall) return;
+      isInitiatingCall = true;
+      audioCallBtn.classList.add('calling');
+      videoCallBtn.classList.add('calling');
+      
+      socketInstance.emit('initiate_call', {
+        roomId: roomData.roomId,
+        callType: 'video'
+      });
+      toast('Calling...', 'success');
+      
+      setTimeout(() => {
+        if (isInitiatingCall) {
+          isInitiatingCall = false;
+          audioCallBtn.classList.remove('calling');
+          videoCallBtn.classList.remove('calling');
+        }
+      }, 30000);
+    });
   }
-});
 
-socketInstance.on('join_existing_call_success', (data) => {
-  console.log('✅ Join existing call success:', data);
-  navigatingToCall = true;
-  
-  // Save chat state before navigating
-  saveChatState(roomData.roomId, messagesCache);
-  sessionStorage.setItem('returningFromCall', 'true');
-  
-  localStorage.setItem('activeCall', JSON.stringify({
-    callId: data.callId,
-    roomId: data.roomId,
-    callType: data.callType,
-    users: [] // Will be populated on call page
-  }));
-  
-  console.log('🚀 Navigating to call page (joining existing call)');
-  window.location.href = '/call.html';
-});
+  if (acceptCallBtn) {
+    acceptCallBtn.addEventListener('click', () => {
+      if (pendingCallData) {
+        socketInstance.emit('accept_call', {
+          callId: pendingCallData.callId,
+          roomId: roomData.roomId
+        });
+        incomingCallModal.classList.add('hidden');
+        pendingCallData = null;
+      }
+    });
+  }
 
-// Join call button click handler - add with other button handlers
-if (joinCallBtn) {
-  joinCallBtn.addEventListener('click', () => {
-    if (!activeCallInRoom) {
-      toast('No active call to join', 'warning');
+  if (declineCallBtn) {
+    declineCallBtn.addEventListener('click', () => {
+      if (pendingCallData) {
+        socketInstance.emit('decline_call', {
+          callId: pendingCallData.callId,
+          roomId: roomData.roomId
+        });
+        incomingCallModal.classList.add('hidden');
+        pendingCallData = null;
+      }
+    });
+  }
+
+  if (messageForm) {
+    messageForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const message = messageInput ? messageInput.value.trim() : '';
+      if (!message) return;
+
+      const messageData = {
+        roomId: roomData.roomId,
+        message: message
+      };
+
+      if (replyingTo) {
+        messageData.replyTo = {
+          messageId: replyingTo.messageId,
+          username: replyingTo.username,
+          message: replyingTo.message,
+          userId: replyingTo.userId
+        };
+        hideReplyPreview();
+      }
+
+      socketInstance.emit('chat_message', messageData);
+      if (messageInput) messageInput.value = '';
+    });
+  }
+
+  if (leaveBtn) {
+    leaveBtn.addEventListener('click', () => {
+      socketInstance.emit('leave_room');
+    });
+  }
+
+  setupBackButtonHandler();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      console.log('📱 Chat page hidden (backgrounded)');
+      saveChatState(roomData.roomId, messagesCache);
+    } else {
+      console.log('📱 Chat page visible (foregrounded)');
+    }
+  });
+
+  window.addEventListener('beforeunload', (e) => {
+    if (navigatingToCall) {
+      console.log('🔒 Socket kept alive - navigating to call');
+      saveChatState(roomData.roomId, messagesCache);
       return;
     }
     
-    console.log(`📞 Requesting to join call ${activeCallInRoom.callId}`);
-    
-    socketInstance.emit('join_existing_call', {
-      callId: activeCallInRoom.callId,
-      roomId: roomData.roomId
-    });
-    
-    toast('Joining call...', 'success');
+    console.log('🚪 Normal page close - cleaning up');
+    if (socketInstance) {
+      socketInstance.emit('leave_room');
+      socketInstance.disconnect();
+    }
+    if (timerInterval) {
+      clearInterval(timerInterval);
+    }
   });
-}
 
-// Update the existing socketInstance.on('call_accepted') handler
-socketInstance.on('call_accepted', (data) => {
-  console.log('✅ Call accepted:', data);
-  isInitiatingCall = false;
-  navigatingToCall = true;
-  
-  // Save chat state before navigating
-  saveChatState(roomData.roomId, messagesCache);
-  sessionStorage.setItem('returningFromCall', 'true');
-  
-  localStorage.setItem('activeCall', JSON.stringify({
-    callId: data.callId,
-    roomId: roomData.roomId,
-    callType: data.callType,
-    users: data.users
-  }));
-  
-  console.log('🚀 Navigating to call page');
-  window.location.href = '/call.html';
-});
-      
-
-      socketInstance.on('connect', () => {
-        console.log('🔌 Socket connected:', socketInstance.id);
-        socketInstance.emit('authenticate', {
-          token: idToken,
-          userId: currentUser.userId
-        });
-      });
-
-      socketInstance.on('authenticated', (data) => {
-        console.log('✅ Socket authenticated:', data);
-        socketInstance.emit('join_room', { roomId: roomData.roomId });
-      });
-
-      socketInstance.on('room_joined', (data) => {
-        console.log('✅ Room joined successfully:', data);
-        
-        // Display chat history if available
-        if (data.chatHistory && Array.isArray(data.chatHistory) && data.chatHistory.length > 0) {
-          console.log(`📜 Displaying ${data.chatHistory.length} chat history messages`);
-          
-          // Only display messages that aren't already in the cache
-          const existingMessageIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
-          
-          data.chatHistory.forEach(msg => {
-            const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-            
-            // Skip if we already have this message
-            if (existingMessageIds.has(msgId)) {
-              return;
-            }
-            
-            const isCurrentUser = msg.userId === currentUser.userId;
-            const msgEl = createMessageElement(msg, isCurrentUser);
-            
-            if (messagesList) {
-              // Insert in chronological order
-              messagesList.appendChild(msgEl);
-            }
-            
-            // Add to cache
-            messagesCache.push(msg);
-          });
-          
-          // Scroll to bottom after loading history
-          if (messagesList) {
-            messagesList.scrollTop = messagesList.scrollHeight;
-          }
-          
-          // Save updated cache
-          saveChatState(roomData.roomId, messagesCache);
-        }
-      });
-
-      socketInstance.on('error', (data) => {
-        console.error('❌ Socket error:', data);
-        if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
-          toast('Room no longer available', 'error');
-          clearChatState();
-          setTimeout(() => window.location.href = '/mood.html', 2000);
-        } else {
-          toast(data.message || 'An error occurred', 'error');
-        }
-      });
-
-      socketInstance.on('chat_message', (data) => {
-        // Ensure message has a unique ID
-        if (!data.messageId) {
-          data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
-        }
-        
-        const isCurrentUser = data.userId === currentUser.userId;
-        const msgEl = createMessageElement(data, isCurrentUser);
-        if (messagesList) {
-          messagesList.appendChild(msgEl);
-          messagesList.scrollTop = messagesList.scrollHeight;
-        }
-        
-        // Cache message
-        messagesCache.push(data);
-        saveChatState(roomData.roomId, messagesCache);
-      });
-
-      socketInstance.on('user_left', (data) => {
-        const msgEl = document.createElement('div');
-        msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-        msgEl.textContent = `${data.username || 'A user'} left the room`;
-        if (messagesList) messagesList.appendChild(msgEl);
-
-        if (onlineCount && data.remainingUsers !== undefined) {
-          onlineCount.textContent = `${data.remainingUsers} Online`;
-        }
-
-        if (data.remainingUsers <= 1) {
-          toast('Room closing...', 'warning');
-          clearChatState();
-          setTimeout(() => window.location.href = '/mood.html', 2000);
-        }
-      });
-
-      socketInstance.on('left_room', (data) => {
-        toast('Left room', 'success');
-        clearChatState();
-        setTimeout(() => window.location.href = '/mood.html', 1000);
-      });
-
-      socketInstance.on('incoming_call', (data) => {
-        pendingCallData = data;
-        const callerName = document.getElementById('callerName');
-        const callType = document.getElementById('callType');
-        const callerAvatar = document.getElementById('callerAvatar');
-        
-        if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-        if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
-        if (callerAvatar) {
-          callerAvatar.innerHTML = '';
-          const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
-          callerAvatar.appendChild(pfp);
-        }
-        
-        incomingCallModal.classList.remove('hidden');
-      });
-
-      socketInstance.on('call_accepted', (data) => {
-        console.log('✅ Call accepted:', data);
-        isInitiatingCall = false;
-        navigatingToCall = true;
-        
-        // Save chat state before navigating
-        saveChatState(roomData.roomId, messagesCache);
-        sessionStorage.setItem('returningFromCall', 'true');
-        
-        localStorage.setItem('activeCall', JSON.stringify({
-          callId: data.callId,
-          roomId: roomData.roomId,
-          callType: data.callType,
-          users: data.users
-        }));
-        
-        console.log('🚀 Navigating to call page');
-        window.location.href = '/call.html';
-      });
-
-      socketInstance.on('call_declined', (data) => {
-        toast('Call was declined', 'warning');
-        isInitiatingCall = false;
-        if (audioCallBtn) audioCallBtn.classList.remove('calling');
-        if (videoCallBtn) videoCallBtn.classList.remove('calling');
-      });
-
-      if (audioCallBtn) {
-        audioCallBtn.addEventListener('click', () => {
-          if (isInitiatingCall) return;
-          isInitiatingCall = true;
-          audioCallBtn.classList.add('calling');
-          videoCallBtn.classList.add('calling');
-          
-          socketInstance.emit('initiate_call', {
-            roomId: roomData.roomId,
-            callType: 'audio'
-          });
-          toast('Calling...', 'success');
-          
-          setTimeout(() => {
-            if (isInitiatingCall) {
-              isInitiatingCall = false;
-              audioCallBtn.classList.remove('calling');
-              videoCallBtn.classList.remove('calling');
-            }
-          }, 30000);
-        });
-      }
-
-      if (videoCallBtn) {
-        videoCallBtn.addEventListener('click', () => {
-          if (isInitiatingCall) return;
-          isInitiatingCall = true;
-          audioCallBtn.classList.add('calling');
-          videoCallBtn.classList.add('calling');
-          
-          socketInstance.emit('initiate_call', {
-            roomId: roomData.roomId,
-            callType: 'video'
-          });
-          toast('Calling...', 'success');
-          
-          setTimeout(() => {
-            if (isInitiatingCall) {
-              isInitiatingCall = false;
-              audioCallBtn.classList.remove('calling');
-              videoCallBtn.classList.remove('calling');
-            }
-          }, 30000);
-        });
-      }
-
-      if (acceptCallBtn) {
-        acceptCallBtn.addEventListener('click', () => {
-          if (pendingCallData) {
-            socketInstance.emit('accept_call', {
-              callId: pendingCallData.callId,
-              roomId: roomData.roomId
-            });
-            incomingCallModal.classList.add('hidden');
-            pendingCallData = null;
-          }
-        });
-      }
-
-      if (declineCallBtn) {
-        declineCallBtn.addEventListener('click', () => {
-          if (pendingCallData) {
-            socketInstance.emit('decline_call', {
-              callId: pendingCallData.callId,
-              roomId: roomData.roomId
-            });
-            incomingCallModal.classList.add('hidden');
-            pendingCallData = null;
-          }
-        });
-      }
-
-      if (messageForm) {
-        messageForm.addEventListener('submit', (e) => {
-          e.preventDefault();
-          const message = messageInput ? messageInput.value.trim() : '';
-          if (!message) return;
-
-          const messageData = {
-            roomId: roomData.roomId,
-            message: message
-          };
-
-          if (replyingTo) {
-            messageData.replyTo = {
-              messageId: replyingTo.messageId,
-              username: replyingTo.username,
-              message: replyingTo.message,
-              userId: replyingTo.userId
-            };
-            hideReplyPreview();
-          }
-
-          socketInstance.emit('chat_message', messageData);
-          if (messageInput) messageInput.value = '';
-        });
-      }
-
-      if (leaveBtn) {
-        leaveBtn.addEventListener('click', () => {
-          socketInstance.emit('leave_room');
-        });
-      }
-
-      // Setup back button handler
-      setupBackButtonHandler();
-
-      // Page visibility handling
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          console.log('📱 Chat page hidden (backgrounded)');
-          saveChatState(roomData.roomId, messagesCache);
-        } else {
-          console.log('📱 Chat page visible (foregrounded)');
-        }
-      });
-
-      window.addEventListener('beforeunload', (e) => {
-        if (navigatingToCall) {
-          console.log('🔒 Socket kept alive - navigating to call');
-          saveChatState(roomData.roomId, messagesCache);
-          return;
-        }
-        
-        console.log('🚪 Normal page close - cleaning up');
-        if (socketInstance) {
-          socketInstance.emit('leave_room');
-          socketInstance.disconnect();
-        }
-        if (timerInterval) {
-          clearInterval(timerInterval);
-        }
-      });
-
-    })();
-    </script>
+})();
+</script>
 </body>
 </html>
