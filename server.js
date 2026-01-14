@@ -943,59 +943,67 @@ io.on('connection', (socket) => {
   });
 
   socket.on('accept_call', ({ callId, roomId }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      const call = activeCalls.get(callId);
-      
-      if (!call) {
-        socket.emit('error', { message: 'Call not found' });
-        return;
-      }
-
-      if (!call.participants.includes(user.userId)) {
-        call.participants.push(user.userId);
-        userCalls.set(user.userId, callId);
-      }
-      
-      call.status = 'active';
-      call.lastActivity = Date.now();
-
-      console.log(`✅ User ${user.username} accepted call ${callId} - now ACTIVE`);
-
-      const room = matchmaking.getRoom(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      const callUsers = room.users.filter(u => call.participants.includes(u.userId));
-      
-      callUsers.forEach(roomUser => {
-        const targetSocket = findActiveSocketForUser(roomUser.userId);
-        if (targetSocket) {
-          targetSocket.emit('call_accepted', {
-            callId,
-            callType: call.callType,
-            users: callUsers.map(u => ({
-              userId: u.userId,
-              username: u.username,
-              pfpUrl: u.pfpUrl
-            }))
-          });
-        }
-      });
-
-    } catch (error) {
-      console.error('Accept call error:', error);
-      socket.emit('error', { message: 'Failed to accept call' });
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
+
+    const call = activeCalls.get(callId);
+    
+    if (!call) {
+      socket.emit('error', { message: 'Call not found' });
+      return;
+    }
+
+    if (!call.participants.includes(user.userId)) {
+      call.participants.push(user.userId);
+      userCalls.set(user.userId, callId);
+    }
+    
+    call.status = 'active';
+    call.lastActivity = Date.now();
+
+    console.log(`✅ User ${user.username} accepted call ${callId} - now ACTIVE`);
+
+    const room = matchmaking.getRoom(roomId);
+    if (!room) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    const callUsers = room.users.filter(u => call.participants.includes(u.userId));
+    
+    callUsers.forEach(roomUser => {
+      const targetSocket = findActiveSocketForUser(roomUser.userId);
+      if (targetSocket) {
+        targetSocket.emit('call_accepted', {
+          callId,
+          callType: call.callType,
+          users: callUsers.map(u => ({
+            userId: u.userId,
+            username: u.username,
+            pfpUrl: u.pfpUrl
+          }))
+        });
+      }
+    });
+
+    // Broadcast call state to room for join button visibility
+    io.to(roomId).emit('call_state_update', {
+      callId: callId,
+      isActive: true,
+      participantCount: call.participants.length
+    });
+    console.log(`📢 Broadcasted call_state_update to room ${roomId}: active=true, count=${call.participants.length}`);
+
+  } catch (error) {
+    console.error('Accept call error:', error);
+    socket.emit('error', { message: 'Failed to accept call' });
+  }
+});
 
   socket.on('decline_call', ({ callId, roomId }) => {
     try {
@@ -1149,36 +1157,128 @@ socket.on('join_call', ({ callId }) => {
 });
 
   socket.on('leave_call', ({ callId }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) return;
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) return;
 
-      const call = activeCalls.get(callId);
-      
-      if (!call) return;
+    const call = activeCalls.get(callId);
+    
+    if (!call) return;
 
-      call.participants = call.participants.filter(p => p !== user.userId);
-      userCalls.delete(user.userId);
+    call.participants = call.participants.filter(p => p !== user.userId);
+    userCalls.delete(user.userId);
 
-      console.log(`📵 User ${user.username} left call ${callId}`);
+    console.log(`📵 User ${user.username} left call ${callId}`);
+    console.log(`📊 Remaining participants in call ${callId}:`, call.participants.length);
 
-      socket.leave(`call-${callId}`);
+    socket.leave(`call-${callId}`);
 
-      io.to(`call-${callId}`).emit('user_left_call', {
-        userId: user.userId,
-        username: user.username
+    // Notify others that user left
+    io.to(`call-${callId}`).emit('user_left_call', {
+      userId: user.userId,
+      username: user.username
+    });
+
+    // Broadcast updated call state to the room (for join button visibility)
+    const room = matchmaking.getRoom(call.roomId);
+    if (room) {
+      io.to(call.roomId).emit('call_state_update', {
+        callId: callId,
+        isActive: call.participants.length > 0,
+        participantCount: call.participants.length
       });
-
-      if (call.participants.length === 0) {
-        activeCalls.delete(callId);
-        console.log(`🗑️ Call ${callId} ended (no participants)`);
-      }
-
-    } catch (error) {
-      console.error('Leave call error:', error);
+      console.log(`📢 Broadcasted call_state_update to room ${call.roomId}: active=${call.participants.length > 0}, count=${call.participants.length}`);
     }
-  });
+
+    // Only delete call if NO participants remain
+    if (call.participants.length === 0) {
+      activeCalls.delete(callId);
+      console.log(`🗑️ Call ${callId} ended (no participants)`);
+      
+      // Notify room that call has ended
+      if (room) {
+        io.to(call.roomId).emit('call_ended_notification', {
+          callId: callId
+        });
+        console.log(`📢 Call ${callId} completely ended, notified room`);
+      }
+    } else {
+      console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
+    }
+
+  } catch (error) {
+    console.error('Leave call error:', error);
+  }
+});
+
+
+socket.on('join_existing_call', ({ callId, roomId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    const call = activeCalls.get(callId);
+    
+    if (!call) {
+      console.error(`❌ Call ${callId} not found for join request from ${user.username}`);
+      socket.emit('error', { message: 'Call not found or has ended' });
+      return;
+    }
+
+    if (call.participants.length === 0) {
+      console.error(`❌ Call ${callId} has no active participants`);
+      socket.emit('error', { message: 'Call has no active participants' });
+      return;
+    }
+
+    console.log(`🔄 User ${user.username} joining existing call ${callId} with ${call.participants.length} participants`);
+
+    // Add user to participants if not already in
+    if (!call.participants.includes(user.userId)) {
+      call.participants.push(user.userId);
+      userCalls.set(user.userId, callId);
+      console.log(`➕ Added ${user.username} to call ${callId}`);
+    } else {
+      console.log(`ℹ️ User ${user.username} already in call ${callId}`);
+    }
+
+    call.lastActivity = Date.now();
+
+    // Initialize media state for joining user if not present
+    if (!call.userMediaStates) {
+      call.userMediaStates = new Map();
+      console.log(`📊 Initialized userMediaStates Map for call ${callId}`);
+    }
+    
+    if (!call.userMediaStates.has(user.userId)) {
+      const defaultVideoState = call.callType === 'video';
+      call.userMediaStates.set(user.userId, {
+        videoEnabled: defaultVideoState,
+        audioEnabled: true
+      });
+      console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=true`);
+    }
+
+    // Navigate user to call page
+    socket.emit('join_existing_call_success', {
+      callId,
+      callType: call.callType,
+      roomId: call.roomId
+    });
+
+    console.log(`✅ User ${user.username} successfully joining call ${callId}`);
+
+  } catch (error) {
+    console.error('Join existing call error:', error);
+    socket.emit('error', { message: 'Failed to join call' });
+  }
+});
+
 
   // WebRTC Signaling
   socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
