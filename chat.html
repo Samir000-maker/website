@@ -957,17 +957,6 @@ setInitialCallButtonState();
 
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
-  
-  
-  const audioCallBtn = document.getElementById('audioCallBtn');
-const videoCallBtn = document.getElementById('videoCallBtn');
-
-// CRITICAL: Get join call button reference
-const joinCallBtn = document.getElementById('joinCallBtn');
-
-// CRITICAL: Set initial state from localStorage (0ms latency)
-console.log('🚀 Setting initial call button state...');
-setInitialCallButtonState();
 
   const idToken = await firebaseUser.getIdToken();
   const socketUrl = window.location.origin;
