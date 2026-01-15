@@ -228,6 +228,10 @@ const webrtcMetrics = {
   directConnections: 0
 };
 
+
+const activeOffers = new Map(); // callId:userId -> offerTimestamp
+const OFFER_DEDUPE_WINDOW = 2000; // 2 seconds
+
 // ============================================
 // ROOM CLEANUP SYSTEM
 // ============================================
@@ -1407,55 +1411,77 @@ socket.on('join_existing_call', ({ callId, roomId }) => {
 
 
   // WebRTC Signaling
-  socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) return;
+socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) return;
 
-      console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
-
-      const targetSocket = findActiveSocketForUser(targetUserId);
-      
-      if (targetSocket) {
-        targetSocket.emit('webrtc_offer', {
-          fromUserId: user.userId,
-          offer
-        });
-        console.log(`✅ Offer forwarded to ${targetUserId}`);
-      } else {
-        console.warn(`⚠️ Target user ${targetUserId} not found for offer`);
+    const offerKey = `${callId}:${user.userId}:${targetUserId}`;
+    const now = Date.now();
+    
+    // Check for duplicate offer within time window
+    if (activeOffers.has(offerKey)) {
+      const lastOfferTime = activeOffers.get(offerKey);
+      if (now - lastOfferTime < OFFER_DEDUPE_WINDOW) {
+        console.warn(`⚠️ Duplicate offer from ${user.username} to ${targetUserId} within ${now - lastOfferTime}ms, ignoring`);
+        return;
       }
-
-    } catch (error) {
-      console.error('WebRTC offer error:', error);
     }
-  });
+    
+    // Track this offer
+    activeOffers.set(offerKey, now);
+    
+    console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
+    console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
 
-  socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) return;
-
-      console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
-
-      const targetSocket = findActiveSocketForUser(targetUserId);
-      
-      if (targetSocket) {
-        targetSocket.emit('webrtc_answer', {
-          fromUserId: user.userId,
-          answer
-        });
-        console.log(`✅ Answer forwarded to ${targetUserId}`);
-      } else {
-        console.warn(`⚠️ Target user ${targetUserId} not found for answer`);
-      }
-
-    } catch (error) {
-      console.error('WebRTC answer error:', error);
+    const targetSocket = findActiveSocketForUser(targetUserId);
+    
+    if (targetSocket) {
+      targetSocket.emit('webrtc_offer', {
+        fromUserId: user.userId,
+        offer
+      });
+      console.log(`✅ Offer forwarded to ${targetUserId}`);
+    } else {
+      console.warn(`⚠️ Target user ${targetUserId} not found for offer`);
     }
-  });
+    
+    // Clean up old offers after window expires
+    setTimeout(() => {
+      activeOffers.delete(offerKey);
+    }, OFFER_DEDUPE_WINDOW);
+
+  } catch (error) {
+    console.error('❌ WebRTC offer error:', error);
+  }
+});
+
+socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) return;
+
+    console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
+    console.log(`   Answer SDP length: ${answer.sdp?.length || 0} bytes`);
+
+    const targetSocket = findActiveSocketForUser(targetUserId);
+    
+    if (targetSocket) {
+      targetSocket.emit('webrtc_answer', {
+        fromUserId: user.userId,
+        answer
+      });
+      console.log(`✅ Answer forwarded to ${targetUserId}`);
+    } else {
+      console.warn(`⚠️ Target user ${targetUserId} not found for answer`);
+    }
+
+  } catch (error) {
+    console.error('❌ WebRTC answer error:', error);
+  }
+});
 
   socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     try {
