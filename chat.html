@@ -1209,12 +1209,11 @@ function updateCallButtonState(isActive, callData = null) {
 socketInstance.on('call_state_update', (data) => {
   console.log('📞 Call state update:', data);
   
-  // Update cache immediately
-  if (data.isActive && data.participantCount > 0) {
-    setCachedCallState(roomData.roomId, true, data);
+  if (data.isActive) {
+    setCachedCallState(roomData.roomId, true, data); // Cache it!
     updateCallButtonState(true, data);
   } else {
-    setCachedCallState(roomData.roomId, false);
+    clearCachedCallState(); // Clear cache
     updateCallButtonState(false);
   }
 });
