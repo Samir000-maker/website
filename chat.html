@@ -596,74 +596,60 @@
   // CALL STATE MANAGEMENT
   // ============================================
   
-  
-  const CALL_STATE_CACHE_KEY = 'callStateCache';
-const CALL_CACHE_TTL = 30000; // 30 seconds validity
-
-function getCachedCallState(roomId) {
-  try {
-    const cacheStr = localStorage.getItem(CALL_STATE_CACHE_KEY);
-    if (!cacheStr) return null;
+  function setInitialCallButtonState() {
+    console.log('🔍 Checking for active call in localStorage...');
     
-    const cache = JSON.parse(cacheStr);
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     
-    // Check if cache is for current room and still valid
-    if (cache.roomId === roomId && 
-        Date.now() - cache.timestamp < CALL_CACHE_TTL) {
-      console.log(`✅ Using cached call state: active=${cache.isActive}, callId=${cache.callId}`);
-      return cache;
+    if (activeCallStr) {
+      try {
+        const activeCallData = JSON.parse(activeCallStr);
+        
+        if (activeCallData.roomId === roomData?.roomId) {
+          console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
+          
+          // Optimistic UI update
+          if (joinCallBtn) {
+            joinCallBtn.classList.remove('hidden');
+            joinCallBtn.classList.add('flex');
+          }
+          if (audioCallBtn) audioCallBtn.classList.add('hidden');
+          if (videoCallBtn) videoCallBtn.classList.add('hidden');
+          
+          activeCallInRoom = {
+            callId: activeCallData.callId,
+            participantCount: 1,
+            callType: activeCallData.callType
+          };
+          
+          console.log('✅ Initial call state set (optimistic)');
+          return true;
+        } else {
+          console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
+        }
+      } catch (e) {
+        console.error('❌ Failed to parse activeCall:', e);
+        localStorage.removeItem(ACTIVE_CALL_KEY);
+      }
     }
     
-    // Cache expired or wrong room
-    localStorage.removeItem(CALL_STATE_CACHE_KEY);
-    return null;
-  } catch (e) {
-    console.warn('⚠️ Failed to read call cache:', e);
-    localStorage.removeItem(CALL_STATE_CACHE_KEY);
-    return null;
-  }
-}
-
-function setCachedCallState(roomId, isActive, callData = null) {
-  try {
-    const cache = {
-      roomId,
-      isActive,
-      callId: callData?.callId || null,
-      callType: callData?.callType || null,
-      participantCount: callData?.participantCount || 0,
-      timestamp: Date.now()
-    };
-    localStorage.setItem(CALL_STATE_CACHE_KEY, JSON.stringify(cache));
-    console.log(`💾 Cached call state: active=${isActive}, callId=${cache.callId}`);
-  } catch (e) {
-    console.warn('⚠️ Failed to cache call state:', e);
-  }
-}
-
-function clearCachedCallState() {
-  localStorage.removeItem(CALL_STATE_CACHE_KEY);
-  console.log('🗑️ Cleared call state cache');
-}
-  
-function setInitialCallButtonState() {
-  console.log('🔍 Setting initial call button state...');
-  
-  if (!roomData?.roomId) {
-    console.warn('⚠️ No roomData available yet');
+    // Default state
+    if (joinCallBtn) {
+      joinCallBtn.classList.remove('flex');
+      joinCallBtn.classList.add('hidden');
+    }
+    if (audioCallBtn) audioCallBtn.classList.remove('hidden');
+    if (videoCallBtn) videoCallBtn.classList.remove('hidden');
+    
     return false;
   }
   
-  // PRIORITY 1: Check cache first (instant)
-  const cachedState = getCachedCallState(roomData.roomId);
-  if (cachedState) {
-    if (cachedState.isActive && cachedState.callId) {
-      console.log(`⚡ INSTANT: Using cached active call state`);
-      
+  function updateCallButtonState(isActive, callData = null) {
+    if (isActive && callData) {
       activeCallInRoom = {
-        callId: cachedState.callId,
-        participantCount: cachedState.participantCount,
-        callType: cachedState.callType
+        callId: callData.callId,
+        participantCount: callData.participantCount || 1,
+        callType: callData.callType || 'video'
       };
       
       if (joinCallBtn) {
@@ -673,10 +659,8 @@ function setInitialCallButtonState() {
       if (audioCallBtn) audioCallBtn.classList.add('hidden');
       if (videoCallBtn) videoCallBtn.classList.add('hidden');
       
-      return true;
+      console.log(`✅ Call buttons updated: JOIN visible`);
     } else {
-      console.log(`⚡ INSTANT: Using cached no-call state`);
-      
       activeCallInRoom = null;
       
       if (joinCallBtn) {
@@ -686,96 +670,9 @@ function setInitialCallButtonState() {
       if (audioCallBtn) audioCallBtn.classList.remove('hidden');
       if (videoCallBtn) videoCallBtn.classList.remove('hidden');
       
-      return true;
+      console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
     }
   }
-  
-  // PRIORITY 2: Check localStorage activeCall (fallback)
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  if (activeCallStr) {
-    try {
-      const activeCallData = JSON.parse(activeCallStr);
-      
-      if (activeCallData.roomId === roomData.roomId) {
-        console.log(`📞 Using localStorage active call: ${activeCallData.callId}`);
-        
-        activeCallInRoom = {
-          callId: activeCallData.callId,
-          participantCount: 1,
-          callType: activeCallData.callType
-        };
-        
-        if (joinCallBtn) {
-          joinCallBtn.classList.remove('hidden');
-          joinCallBtn.classList.add('flex');
-        }
-        if (audioCallBtn) audioCallBtn.classList.add('hidden');
-        if (videoCallBtn) videoCallBtn.classList.add('hidden');
-        
-        // Cache this state for next time
-        setCachedCallState(roomData.roomId, true, activeCallInRoom);
-        
-        return true;
-      }
-    } catch (e) {
-      console.error('❌ Failed to parse activeCall:', e);
-      localStorage.removeItem(ACTIVE_CALL_KEY);
-    }
-  }
-  
-  // PRIORITY 3: Default no-call state
-  console.log('📞 No active call detected - showing audio/video buttons');
-  
-  activeCallInRoom = null;
-  
-  if (joinCallBtn) {
-    joinCallBtn.classList.remove('flex');
-    joinCallBtn.classList.add('hidden');
-  }
-  if (audioCallBtn) audioCallBtn.classList.remove('hidden');
-  if (videoCallBtn) videoCallBtn.classList.remove('hidden');
-  
-  // Cache the no-call state
-  setCachedCallState(roomData.roomId, false);
-  
-  return false;
-}
-  
-function updateCallButtonState(isActive, callData = null) {
-  if (isActive && callData) {
-    activeCallInRoom = {
-      callId: callData.callId,
-      participantCount: callData.participantCount || 1,
-      callType: callData.callType || 'video'
-    };
-    
-    if (joinCallBtn) {
-      joinCallBtn.classList.remove('hidden');
-      joinCallBtn.classList.add('flex');
-    }
-    if (audioCallBtn) audioCallBtn.classList.add('hidden');
-    if (videoCallBtn) videoCallBtn.classList.add('hidden');
-    
-    // Update cache
-    setCachedCallState(roomData.roomId, true, activeCallInRoom);
-    
-    console.log(`✅ JOIN button visible (cached)`);
-  } else {
-    activeCallInRoom = null;
-    
-    if (joinCallBtn) {
-      joinCallBtn.classList.remove('flex');
-      joinCallBtn.classList.add('hidden');
-    }
-    if (audioCallBtn) audioCallBtn.classList.remove('hidden');
-    if (videoCallBtn) videoCallBtn.classList.remove('hidden');
-    
-    // Update cache
-    setCachedCallState(roomData.roomId, false);
-    
-    console.log(`✅ AUDIO/VIDEO buttons visible (cached)`);
-  }
-}
 
   // ============================================
   // UI FUNCTIONS
@@ -1090,19 +987,13 @@ function updateCallButtonState(isActive, callData = null) {
       }
       
       // Handle active call state
-  if (data.activeCall) {
-    console.log('📞 Active call confirmed:', data.activeCall);
-    
-    // Cache the confirmed state
-    setCachedCallState(roomData.roomId, true, data.activeCall);
-    updateCallButtonState(true, data.activeCall);
-  } else {
-    console.log('📞 No active call');
-    
-    // Cache the no-call state
-    setCachedCallState(roomData.roomId, false);
-    updateCallButtonState(false);
-  }
+      if (data.activeCall) {
+        console.log('📞 Active call confirmed:', data.activeCall);
+        updateCallButtonState(true, data.activeCall);
+      } else {
+        console.log('📞 No active call');
+        updateCallButtonState(false);
+      }
     });
 
     socketInstance.on('error', (data) => {
@@ -1174,30 +1065,23 @@ function updateCallButtonState(isActive, callData = null) {
     });
 
     socketInstance.on('call_accepted', (data) => {
-  console.log('✅ Call accepted:', data);
-  isInitiatingCall = false;
-  navigatingToCall = true;
-  
-  saveChatState(roomData.roomId, messagesCache);
-  sessionStorage.setItem('returningFromCall', 'true');
-  
-  // Cache the active call state BEFORE navigation
-  setCachedCallState(roomData.roomId, true, {
-    callId: data.callId,
-    callType: data.callType,
-    participantCount: data.users.length
-  });
-  
-  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-    callId: data.callId,
-    roomId: roomData.roomId,
-    callType: data.callType,
-    users: data.users
-  }));
-  
-  console.log('🚀 Navigating to call with cached state');
-  window.location.href = '/call.html';
-});
+      console.log('✅ Call accepted:', data);
+      isInitiatingCall = false;
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: roomData.roomId,
+        callType: data.callType,
+        users: data.users
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
 
     socketInstance.on('call_declined', (data) => {
       toast('Call was declined', 'warning');
@@ -1206,50 +1090,38 @@ function updateCallButtonState(isActive, callData = null) {
       videoCallBtn?.classList.remove('calling');
     });
     
-socketInstance.on('call_state_update', (data) => {
-  console.log('📞 Call state update:', data);
-  
-  if (data.isActive) {
-    setCachedCallState(roomData.roomId, true, data); // Cache it!
-    updateCallButtonState(true, data);
-  } else {
-    clearCachedCallState(); // Clear cache
-    updateCallButtonState(false);
-  }
-});
+    socketInstance.on('call_state_update', (data) => {
+      console.log('📞 Call state update:', data);
+      
+      if (data.isActive && data.participantCount > 0) {
+        updateCallButtonState(true, data);
+      } else {
+        updateCallButtonState(false);
+      }
+    });
 
-socketInstance.on('call_ended_notification', (data) => {
-  console.log('📞 Call ended:', data.callId);
-  
-  // Clear cache immediately
-  clearCachedCallState();
-  updateCallButtonState(false);
-});
+    socketInstance.on('call_ended_notification', (data) => {
+      console.log('📞 Call ended:', data.callId);
+      updateCallButtonState(false);
+    });
 
     socketInstance.on('join_existing_call_success', (data) => {
-  console.log('✅ Joining existing call:', data);
-  navigatingToCall = true;
-  
-  saveChatState(roomData.roomId, messagesCache);
-  sessionStorage.setItem('returningFromCall', 'true');
-  
-  // Cache the active call state BEFORE navigation
-  setCachedCallState(data.roomId, true, {
-    callId: data.callId,
-    callType: data.callType,
-    participantCount: 1 // Will be updated by server
-  });
-  
-  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-    callId: data.callId,
-    roomId: data.roomId,
-    callType: data.callType,
-    users: []
-  }));
-  
-  console.log('🚀 Navigating to call with cached state');
-  window.location.href = '/call.html';
-});
+      console.log('✅ Joining existing call:', data);
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: data.roomId,
+        callType: data.callType,
+        users: []
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
   }
 
   // ============================================
