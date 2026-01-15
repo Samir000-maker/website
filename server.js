@@ -1061,10 +1061,39 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       // Check if already in call
       if (call.participants.includes(user.userId)) {
         console.log(`⚠️ User ${user.username} already in call ${callId}`);
-        socket.emit('error', { 
-          message: 'You are already in this call',
-          code: 'ALREADY_IN_CALL'
+        
+        // CRITICAL FIX: Even if already in call, send them the full state
+        const room = matchmaking.getRoom(roomId);
+        if (!room) {
+          socket.emit('error', { message: 'Room not found' });
+          return;
+        }
+
+        // Get all participants with media states
+        const callUsers = room.users
+          .filter(u => call.participants.includes(u.userId))
+          .map(u => {
+            const mediaState = call.userMediaStates.get(u.userId) || {
+              videoEnabled: call.callType === 'video',
+              audioEnabled: true
+            };
+            return {
+              userId: u.userId,
+              username: u.username,
+              pfpUrl: u.pfpUrl,
+              videoEnabled: mediaState.videoEnabled,
+              audioEnabled: mediaState.audioEnabled
+            };
+          });
+
+        // Send state to THIS user
+        socket.emit('call_accepted', {
+          callId,
+          callType: call.callType,
+          users: callUsers
         });
+        
+        console.log(`✅ Re-sent call state to ${user.username} (already in participants)`);
         return;
       }
 
@@ -1113,18 +1142,26 @@ socket.on('accept_call', async ({ callId, roomId }) => {
 
       console.log(`📊 Broadcasting to ${callUsers.length} participants`);
 
-      // Notify ALL participants (including the one who just accepted)
-      callUsers.forEach(roomUser => {
-        const targetSocket = findActiveSocketForUser(roomUser.userId);
-        if (targetSocket) {
-          targetSocket.emit('call_accepted', {
-            callId,
-            callType: call.callType,
-            users: callUsers
-          });
-          console.log(`📤 Sent call_accepted to ${roomUser.username}`);
-        }
+      // CRITICAL FIX: Use Promise.all to emit to all participants simultaneously
+      const emitPromises = callUsers.map(roomUser => {
+        return new Promise((resolve) => {
+          const targetSocket = findActiveSocketForUser(roomUser.userId);
+          if (targetSocket) {
+            targetSocket.emit('call_accepted', {
+              callId,
+              callType: call.callType,
+              users: callUsers
+            });
+            console.log(`📤 Sent call_accepted to ${roomUser.username}`);
+            resolve();
+          } else {
+            console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
+            resolve();
+          }
+        });
       });
+
+      await Promise.all(emitPromises);
 
       // Broadcast call state to entire room
       io.to(roomId).emit('call_state_update', {
