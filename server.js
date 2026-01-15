@@ -1217,6 +1217,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
     }
   });
 
+// Replace join_call handler
 socket.on('join_call', async ({ callId }) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -1264,6 +1265,8 @@ socket.on('join_call', async ({ callId }) => {
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
       const room = matchmaking.getRoom(call.roomId);
+      
+      // CRITICAL FIX: Include ALL participants (including self)
       const participants = room ? room.users.filter(u => call.participants.includes(u.userId)) : [];
 
       // Ensure ALL participants have media states
@@ -1288,7 +1291,7 @@ socket.on('join_call', async ({ callId }) => {
         };
       });
 
-      console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username}`);
+      console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username} (including self)`);
       participantsWithMediaStates.forEach(p => {
         console.log(`   - ${p.username}: video=${p.videoEnabled}, audio=${p.audioEnabled}`);
       });
@@ -1297,7 +1300,7 @@ socket.on('join_call', async ({ callId }) => {
       socket.emit('call_joined', {
         callId,
         callType: call.callType,
-        participants: participantsWithMediaStates
+        participants: participantsWithMediaStates // Now includes self!
       });
 
       // Get current user's media state
