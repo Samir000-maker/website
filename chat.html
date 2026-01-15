@@ -311,6 +311,64 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        
+        /* Call Button Loading States */
+.call-btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.call-btn-loading .material-symbols-outlined {
+    opacity: 0;
+}
+
+.call-btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 2.5px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: spin 0.8s linear infinite;
+}
+
+.join-btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.join-btn-loading .material-symbols-outlined,
+.join-btn-loading span:not(.loader) {
+    opacity: 0;
+}
+
+.join-btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    top: 50%;
+    left: 50%;
+    margin-left: -9px;
+    margin-top: -9px;
+    border: 2.5px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+        
     </style>
 </head>
 <body class="bg-background-light main-container flex flex-col overflow-hidden">
@@ -596,83 +654,87 @@
   // CALL STATE MANAGEMENT
   // ============================================
   
-  function setInitialCallButtonState() {
+ function setInitialCallButtonState() {
     console.log('🔍 Checking for active call in localStorage...');
+    
+    // Show loading state initially
+    if (joinCallBtn) {
+        joinCallBtn.classList.add('join-btn-loading');
+        joinCallBtn.classList.add('flex');
+        joinCallBtn.classList.remove('hidden');
+    }
+    if (audioCallBtn) {
+        audioCallBtn.classList.add('call-btn-loading');
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.add('call-btn-loading');
+    }
     
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     
     if (activeCallStr) {
-      try {
-        const activeCallData = JSON.parse(activeCallStr);
-        
-        if (activeCallData.roomId === roomData?.roomId) {
-          console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
-          
-          // Optimistic UI update
-          if (joinCallBtn) {
-            joinCallBtn.classList.remove('hidden');
-            joinCallBtn.classList.add('flex');
-          }
-          if (audioCallBtn) audioCallBtn.classList.add('hidden');
-          if (videoCallBtn) videoCallBtn.classList.add('hidden');
-          
-          activeCallInRoom = {
-            callId: activeCallData.callId,
-            participantCount: 1,
-            callType: activeCallData.callType
-          };
-          
-          console.log('✅ Initial call state set (optimistic)');
-          return true;
-        } else {
-          console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
+        try {
+            const activeCallData = JSON.parse(activeCallStr);
+            
+            if (activeCallData.roomId === roomData?.roomId) {
+                console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
+                
+                activeCallInRoom = {
+                    callId: activeCallData.callId,
+                    participantCount: 1,
+                    callType: activeCallData.callType
+                };
+                
+                // Keep loading state - will be removed when socket confirms
+                console.log('✅ Initial call state set (waiting for socket confirmation)');
+                return true;
+            } else {
+                console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
+            }
+        } catch (e) {
+            console.error('❌ Failed to parse activeCall:', e);
+            localStorage.removeItem(ACTIVE_CALL_KEY);
         }
-      } catch (e) {
-        console.error('❌ Failed to parse activeCall:', e);
-        localStorage.removeItem(ACTIVE_CALL_KEY);
-      }
     }
     
-    // Default state
-    if (joinCallBtn) {
-      joinCallBtn.classList.remove('flex');
-      joinCallBtn.classList.add('hidden');
-    }
-    if (audioCallBtn) audioCallBtn.classList.remove('hidden');
-    if (videoCallBtn) videoCallBtn.classList.remove('hidden');
-    
+    // Keep loading state - will be removed when socket confirms no active call
     return false;
-  }
+}
   
   function updateCallButtonState(isActive, callData = null) {
+    // Remove loading states
+    if (audioCallBtn) audioCallBtn.classList.remove('call-btn-loading');
+    if (videoCallBtn) videoCallBtn.classList.remove('call-btn-loading');
+    if (joinCallBtn) joinCallBtn.classList.remove('join-btn-loading');
+    
     if (isActive && callData) {
-      activeCallInRoom = {
-        callId: callData.callId,
-        participantCount: callData.participantCount || 1,
-        callType: callData.callType || 'video'
-      };
-      
-      if (joinCallBtn) {
-        joinCallBtn.classList.remove('hidden');
-        joinCallBtn.classList.add('flex');
-      }
-      if (audioCallBtn) audioCallBtn.classList.add('hidden');
-      if (videoCallBtn) videoCallBtn.classList.add('hidden');
-      
-      console.log(`✅ Call buttons updated: JOIN visible`);
+        activeCallInRoom = {
+            callId: callData.callId,
+            participantCount: callData.participantCount || 1,
+            callType: callData.callType || 'video'
+        };
+        
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('hidden');
+            joinCallBtn.classList.add('flex');
+        }
+        if (audioCallBtn) audioCallBtn.classList.add('hidden');
+        if (videoCallBtn) videoCallBtn.classList.add('hidden');
+        
+        console.log(`✅ Call buttons updated: JOIN visible`);
     } else {
-      activeCallInRoom = null;
-      
-      if (joinCallBtn) {
-        joinCallBtn.classList.remove('flex');
-        joinCallBtn.classList.add('hidden');
-      }
-      if (audioCallBtn) audioCallBtn.classList.remove('hidden');
-      if (videoCallBtn) videoCallBtn.classList.remove('hidden');
-      
-      console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
+        activeCallInRoom = null;
+        
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('flex');
+            joinCallBtn.classList.add('hidden');
+        }
+        if (audioCallBtn) audioCallBtn.classList.remove('hidden');
+        if (videoCallBtn) videoCallBtn.classList.remove('hidden');
+        
+        console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
     }
-  }
+}
 
   // ============================================
   // UI FUNCTIONS
@@ -774,7 +836,7 @@
     messageContent.appendChild(headerDiv);
 
     const bubbleWrapper = document.createElement('div');
-    bubbleWrapper.className = `flex items-center gap-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+    bubbleWrapper.className = `flex items-center gap-1 w-full ${isCurrentUser ? 'justify-end' : 'justify-start'}`;
 
     const messageBubble = document.createElement('div');
     messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
@@ -814,13 +876,9 @@
       });
     }, { passive: true });
 
-    if (isCurrentUser) {
-      bubbleWrapper.appendChild(replyBtn);
-      bubbleWrapper.appendChild(messageBubble);
-    } else {
-      bubbleWrapper.appendChild(messageBubble);
-      bubbleWrapper.appendChild(replyBtn);
-    }
+    // Always put reply button on the left, message bubble on the right for current user's messages
+    bubbleWrapper.appendChild(replyBtn);
+    bubbleWrapper.appendChild(messageBubble);
 
     messageContent.appendChild(bubbleWrapper);
     messageItem.appendChild(pfpContainer);
@@ -1185,22 +1243,25 @@
     }
 
     if (joinCallBtn) {
-      joinCallBtn.addEventListener('click', () => {
+    joinCallBtn.addEventListener('click', () => {
         if (!activeCallInRoom) {
-          toast('No active call to join', 'warning');
-          return;
+            toast('No active call to join', 'warning');
+            return;
         }
+        
+        // Add loading state
+        joinCallBtn.classList.add('join-btn-loading');
         
         console.log(`📞 Joining call ${activeCallInRoom.callId}`);
         
         socketInstance?.emit('join_existing_call', {
-          callId: activeCallInRoom.callId,
-          roomId: roomData.roomId
+            callId: activeCallInRoom.callId,
+            roomId: roomData.roomId
         });
         
         toast('Joining call...', 'success');
-      }, { passive: true });
-    }
+    }, { passive: true });
+}
 
     if (acceptCallBtn) {
       acceptCallBtn.addEventListener('click', () => {
