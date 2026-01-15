@@ -646,7 +646,50 @@ function createPC(userId) {
     console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   });
   
-  // Enhanced track handling with proper unmute detection
+  // CRITICAL: ICE candidate handler MUST be set up before any SDP operations
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      const stats = connectionStats.get(userId);
+      if (stats) stats.candidatesSent++;
+      
+      const candidateType = e.candidate.type || 'unknown';
+      const candidateProtocol = e.candidate.protocol || 'unknown';
+      
+      console.log(`🧊 [ICE] Generated ${candidateType} candidate for ${userId} (protocol: ${candidateProtocol})`);
+      console.log(`   Candidate: ${e.candidate.candidate.substring(0, 80)}...`);
+      
+      // CRITICAL: Send candidate immediately via socket
+      socketInstance.emit('ice_candidate', { 
+        callId: callData.callId, 
+        targetUserId: userId, 
+        candidate: e.candidate 
+      });
+      
+      console.log(`📤 [ICE] Sent candidate #${stats.candidatesSent} to ${userId}`);
+    } else {
+      // Null candidate = end of candidates
+      console.log(`🧊 [ICE] End of candidates for ${userId}`);
+      
+      // Send null candidate to signal completion
+      socketInstance.emit('ice_candidate', { 
+        callId: callData.callId, 
+        targetUserId: userId, 
+        candidate: null 
+      });
+    }
+  };
+  
+  // ICE gathering state monitoring
+  pc.onicegatheringstatechange = () => {
+    console.log(`🧊 [ICE] Gathering state for ${userId}: ${pc.iceGatheringState}`);
+    
+    if (pc.iceGatheringState === 'complete') {
+      const stats = connectionStats.get(userId);
+      console.log(`✅ [ICE] Gathering complete for ${userId} - sent ${stats?.candidatesSent || 0} candidates`);
+    }
+  };
+  
+  // Enhanced track handling (your existing code)
   const remoteMediaState = {
     videoTrackReady: false,
     audioTrackReady: false,
@@ -690,16 +733,14 @@ function createPC(userId) {
       
       console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
       
-      // CRITICAL: Handle video unmute event
+      // Handle video unmute event
       const handleVideoUnmute = () => {
         console.log(`📹 [UNMUTE EVENT] Video UNMUTED for ${userId}`);
         
-        // Clear any pending unmute timer
         if (remoteMediaState.unmuteTimers.video) {
           clearTimeout(remoteMediaState.unmuteTimers.video);
         }
         
-        // Wait for metadata and then show video
         const showVideo = () => {
           if (vid.readyState >= 1 && e.track.enabled && !e.track.muted) {
             remoteMediaState.videoEnabled = true;
@@ -715,13 +756,11 @@ function createPC(userId) {
         }
       };
       
-      // CRITICAL: If track arrives muted, wait for unmute
       if (e.track.muted) {
         console.log(`📹 Track initially muted for ${userId}, waiting for unmute...`);
         updateVideoVisibility(userId, false, true);
         e.track.onunmute = handleVideoUnmute;
         
-        // Fallback: check periodically if track becomes unmuted
         remoteMediaState.unmuteTimers.video = setInterval(() => {
           if (!e.track.muted && e.track.enabled) {
             clearInterval(remoteMediaState.unmuteTimers.video);
@@ -729,14 +768,12 @@ function createPC(userId) {
           }
         }, 100);
         
-        // Clear fallback after 5 seconds
         setTimeout(() => {
           if (remoteMediaState.unmuteTimers.video) {
             clearInterval(remoteMediaState.unmuteTimers.video);
           }
         }, 5000);
       } else {
-        // Track is already unmuted
         console.log(`📹 Track arrived unmuted for ${userId}`);
         e.track.onunmute = handleVideoUnmute;
         
@@ -780,7 +817,6 @@ function createPC(userId) {
       
       setupAudioDetection(userId, new MediaStream([e.track]));
       
-      // Handle audio unmute
       e.track.onunmute = () => {
         console.log(`🔊 Audio UNMUTED for ${userId}`);
         remoteMediaState.audioEnabled = e.track.enabled;
@@ -814,30 +850,26 @@ function createPC(userId) {
       });
   };
   
-  // ... rest of PC setup (ICE handlers, etc.) ...
-  
   // ICE connection state with restart logic
   pc.oniceconnectionstatechange = () => {
     const state = pc.iceConnectionState;
     connectionStats.get(userId).iceState = state;
-    console.log(`🧊 ICE state for ${userId}: ${state}`);
+    console.log(`🧊 [ICE] Connection state for ${userId}: ${state}`);
     
     if (state === 'connected' || state === 'completed') {
-      console.log(`✅ ICE connection established for ${userId}`);
-      // Reset restart count on success
+      console.log(`✅ [ICE] Connection established for ${userId}`);
       connectionStats.get(userId).iceRestartCount = 0;
     } else if (state === 'failed') {
       const stats = connectionStats.get(userId);
       if (stats.iceRestartCount < 3) {
         stats.iceRestartCount++;
-        console.warn(`⚠️ ICE failed for ${userId}, attempting restart #${stats.iceRestartCount}`);
+        console.warn(`⚠️ [ICE] Failed for ${userId}, attempting restart #${stats.iceRestartCount}`);
         pc.restartIce();
       } else {
-        console.error(`❌ ICE failed permanently for ${userId} after 3 restart attempts`);
+        console.error(`❌ [ICE] Failed permanently for ${userId} after 3 restart attempts`);
       }
     } else if (state === 'disconnected') {
-      console.warn(`⚠️ ICE disconnected for ${userId}, monitoring for reconnection`);
-      // Give it 5 seconds to reconnect before restarting
+      console.warn(`⚠️ [ICE] Disconnected for ${userId}, monitoring for reconnection`);
       setTimeout(() => {
         if (pc.iceConnectionState === 'disconnected') {
           console.warn(`⚠️ Still disconnected after 5s, restarting ICE for ${userId}`);
@@ -847,7 +879,7 @@ function createPC(userId) {
     }
   };
 
-  // Connection state with timeout detection
+  // Connection state monitoring
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
     connectionStats.get(userId).connectionState = state;
@@ -856,12 +888,10 @@ function createPC(userId) {
     if (state === 'connected') {
       console.log(`✅✅✅ PEER CONNECTION ESTABLISHED for ${userId} ✅✅✅`);
       
-      // Update subtitle
       const subtitle = document.getElementById('callSubtitle');
       const count = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
       if (subtitle) subtitle.textContent = `${count} participant${count>1?'s':''} connected`;
       
-      // Log connection type
       pc.getStats().then(stats => {
         stats.forEach(r => {
           if (r.type === 'candidate-pair' && r.state === 'succeeded') {
@@ -879,7 +909,6 @@ function createPC(userId) {
       });
     } else if (state === 'failed') {
       console.error(`❌ Connection FAILED for ${userId}`);
-      // Attempt ICE restart
       setTimeout(() => { 
         if (pc.connectionState === 'failed') {
           console.warn(`⚠️ Connection still failed, restarting ICE for ${userId}`);
@@ -887,7 +916,6 @@ function createPC(userId) {
         }
       }, 1000);
     } else if (state === 'connecting') {
-      // Set a timeout - if not connected within 10 seconds, something's wrong
       setTimeout(() => {
         if (pc.connectionState === 'connecting') {
           console.warn(`⚠️ Connection still in 'connecting' state after 10s for ${userId}, restarting ICE`);
@@ -898,6 +926,7 @@ function createPC(userId) {
   };
   
   peerConnections.set(userId, pc);
+  console.log(`✅ PeerConnection created for ${userId} with ICE candidate handler`);
   return pc;
 }
 
@@ -1122,6 +1151,12 @@ async function handleAnswer(fromUserId, answer) {
 
 async function handleIceCandidate(fromUserId, candidate) {
   try {
+    // Handle null candidate (end-of-candidates)
+    if (!candidate) {
+      console.log(`🧊 [ICE] Received end-of-candidates from ${fromUserId}`);
+      return;
+    }
+    
     const pc = peerConnections.get(fromUserId);
     
     // Queue candidates if no PC yet OR if remote description not set
@@ -1130,7 +1165,7 @@ async function handleIceCandidate(fromUserId, candidate) {
         pendingIceCandidates.set(fromUserId, []);
       }
       pendingIceCandidates.get(fromUserId).push(candidate);
-      console.log(`🧊 Queued ICE candidate from ${fromUserId} (pending: ${pendingIceCandidates.get(fromUserId).length})`);
+      console.log(`🧊 [ICE] Queued candidate from ${fromUserId} (pending: ${pendingIceCandidates.get(fromUserId).length})`);
       return;
     }
     
@@ -1138,10 +1173,12 @@ async function handleIceCandidate(fromUserId, candidate) {
     await pc.addIceCandidate(new RTCIceCandidate(candidate));
     const stats = connectionStats.get(fromUserId);
     if (stats) stats.candidatesReceived++;
-    console.log(`🧊 Added ICE candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
+    
+    const candidateType = candidate.type || candidate.candidate?.split(' ')[7] || 'unknown';
+    console.log(`🧊 [ICE] Added ${candidateType} candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
     
   } catch (e) { 
-    console.warn(`⚠️ ICE candidate error for ${fromUserId}:`, e.message);
+    console.warn(`⚠️ [ICE] Candidate error for ${fromUserId}:`, e.message);
   }
 }
 
