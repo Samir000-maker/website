@@ -362,6 +362,66 @@ let makingOffer = new Map();
   return tile;
 }
 
+
+// Add after createPC function to monitor connection quality
+function monitorConnectionQuality(userId, pc) {
+  const monitorInterval = setInterval(async () => {
+    if (!pc || pc.connectionState === 'closed') {
+      clearInterval(monitorInterval);
+      return;
+    }
+    
+    try {
+      const stats = await pc.getStats();
+      let connectionInfo = {
+        candidateType: 'unknown',
+        bytesReceived: 0,
+        bytesSent: 0,
+        packetsLost: 0
+      };
+      
+      stats.forEach(report => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          const localCandidate = stats.get(report.localCandidateId);
+          if (localCandidate) {
+            connectionInfo.candidateType = localCandidate.candidateType;
+          }
+        }
+        
+        if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+          connectionInfo.bytesReceived = report.bytesReceived || 0;
+          connectionInfo.packetsLost = report.packetsLost || 0;
+        }
+        
+        if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+          connectionInfo.bytesSent = report.bytesSent || 0;
+        }
+      });
+      
+      // Only log significant changes or issues
+      if (connectionInfo.packetsLost > 10) {
+        console.warn(`⚠️ [Quality] Packet loss detected for ${userId}: ${connectionInfo.packetsLost} packets`);
+      }
+      
+      // Update connection stats
+      const connStats = connectionStats.get(userId);
+      if (connStats) {
+        connStats.lastQualityCheck = Date.now();
+        connStats.connectionType = connectionInfo.candidateType;
+      }
+      
+    } catch (e) {
+      console.warn(`⚠️ Failed to get stats for ${userId}:`, e.message);
+    }
+  }, 5000); // Check every 5 seconds
+  
+  // Store interval for cleanup
+  if (!connectionStats.has(userId)) {
+    connectionStats.set(userId, {});
+  }
+  connectionStats.get(userId).monitorInterval = monitorInterval;
+}
+
       function setupAudioDetection(userId, stream) {
         try {
           const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -733,6 +793,8 @@ function createPC(userId) {
   // Rest of the PC setup (ontrack, oniceconnectionstatechange, etc.) remains the same...
   // [Keep existing code for pc.ontrack, pc.oniceconnectionstatechange, pc.onconnectionstatechange]
   
+  monitorConnectionQuality(userId, pc);
+  
   peerConnections.set(userId, pc);
   console.log(`✅ PeerConnection created for ${userId} with ICE candidate handler`);
   return pc;
@@ -857,21 +919,37 @@ async function handleOffer(fromUserId, offer) {
       console.log(`✅ Remote description set successfully`);
       console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
       
-      // Process pending ICE candidates AFTER remote description is set
-      if (pendingIceCandidates.has(fromUserId)) {
-        const cands = pendingIceCandidates.get(fromUserId);
-        console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
-        
-        for (const c of cands) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(c));
-            console.log(`✅ Added pending ICE candidate`);
-          } catch (e) {
-            console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
-          }
-        }
-        pendingIceCandidates.delete(fromUserId);
+      // Inside handleOffer function, replace the pending candidates section:
+
+// Process pending ICE candidates AFTER remote description is set
+if (pendingIceCandidates.has(fromUserId)) {
+  const cands = pendingIceCandidates.get(fromUserId);
+  console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+  
+  for (const item of cands) {
+    try {
+      const c = item.candidate;
+      
+      // Validate before adding
+      if (!c.candidate || typeof c.candidate !== 'string') {
+        console.warn(`⚠️ Skipping invalid queued candidate`);
+        continue;
       }
+      
+      if (c.sdpMid === null && c.sdpMLineIndex === null) {
+        console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
+        continue;
+      }
+      
+      await pc.addIceCandidate(new RTCIceCandidate(c));
+      console.log(`✅ Added pending ICE candidate`);
+    } catch (e) {
+      console.warn(`⚠️ Failed to add queued candidate:`, e.message);
+      // Continue with next candidate
+    }
+  }
+  pendingIceCandidates.delete(fromUserId);
+}
       
       console.log(`📤 Creating answer for ${fromUserId}...`);
       
@@ -932,21 +1010,37 @@ async function handleAnswer(fromUserId, answer) {
     console.log(`✅ Answer set as remote description`);
     console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
-    // Process pending ICE candidates
-    if (pendingIceCandidates.has(fromUserId)) {
-      const cands = pendingIceCandidates.get(fromUserId);
-      console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+   // Inside handleAnswer function, replace the pending candidates section:
+
+// Process pending ICE candidates
+if (pendingIceCandidates.has(fromUserId)) {
+  const cands = pendingIceCandidates.get(fromUserId);
+  console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+  
+  for (const item of cands) {
+    try {
+      const c = item.candidate;
       
-      for (const c of cands) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(c));
-          console.log(`✅ Added pending ICE candidate`);
-        } catch (e) {
-          console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
-        }
+      // Validate before adding
+      if (!c.candidate || typeof c.candidate !== 'string') {
+        console.warn(`⚠️ Skipping invalid queued candidate`);
+        continue;
       }
-      pendingIceCandidates.delete(fromUserId);
+      
+      if (c.sdpMid === null && c.sdpMLineIndex === null) {
+        console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
+        continue;
+      }
+      
+      await pc.addIceCandidate(new RTCIceCandidate(c));
+      console.log(`✅ Added pending ICE candidate`);
+    } catch (e) {
+      console.warn(`⚠️ Failed to add queued candidate:`, e.message);
+      // Continue with next candidate
     }
+  }
+  pendingIceCandidates.delete(fromUserId);
+}
     
     console.log(`✅ Answer handling complete for ${fromUserId}`);
     
@@ -965,9 +1059,21 @@ async function handleIceCandidate(fromUserId, candidate) {
       return;
     }
     
+    // CRITICAL FIX: Validate candidate structure before queuing/adding
+    if (!candidate.candidate || typeof candidate.candidate !== 'string') {
+      console.warn(`⚠️ [ICE] Invalid candidate structure from ${fromUserId}:`, candidate);
+      return;
+    }
+    
+    // Additional validation for required fields
+    if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
+      console.warn(`⚠️ [ICE] Candidate missing both sdpMid and sdpMLineIndex from ${fromUserId}, skipping`);
+      return;
+    }
+    
     const pc = peerConnections.get(fromUserId);
     
-    // CRITICAL FIX: Queue candidates with timestamp
+    // Queue candidates if no PC yet OR if remote description not set
     if (!pc || !pc.remoteDescription) {
       if (!pendingIceCandidates.has(fromUserId)) {
         pendingIceCandidates.set(fromUserId, []);
@@ -997,15 +1103,20 @@ async function handleIceCandidate(fromUserId, candidate) {
     }
     
     // Add candidate if PC is ready
-    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-    const stats = connectionStats.get(fromUserId);
-    if (stats) stats.candidatesReceived++;
-    
-    const candidateType = candidate.type || candidate.candidate?.split(' ')[7] || 'unknown';
-    console.log(`🧊 [ICE] Added ${candidateType} candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      const stats = connectionStats.get(fromUserId);
+      if (stats) stats.candidatesReceived++;
+      
+      const candidateType = candidate.type || candidate.candidate?.split(' ')[7] || 'unknown';
+      console.log(`🧊 [ICE] Added ${candidateType} candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
+    } catch (addError) {
+      console.warn(`⚠️ [ICE] Failed to add candidate from ${fromUserId}:`, addError.message);
+      // Don't throw - continue processing other candidates
+    }
     
   } catch (e) { 
-    console.warn(`⚠️ [ICE] Candidate error for ${fromUserId}:`, e.message);
+    console.warn(`⚠️ [ICE] Candidate processing error for ${fromUserId}:`, e.message);
   }
 }
 
@@ -1423,18 +1534,45 @@ socketInstance.on('user_joined_call', (data) => {
   }
 });
           
-          socketInstance.on('user_left_call', (data) => {
-            console.log(`👋 User left: ${data.userId}`);
-            const tile = document.getElementById(`participant-${data.userId}`);
-            if (tile) tile.remove();
-            renderedParticipants.delete(data.userId);
-            const pc = peerConnections.get(data.userId);
-            if (pc) { pc.close(); peerConnections.delete(data.userId); }
-            const ac = audioContexts.get(data.userId);
-            if (ac) { ac.close(); audioContexts.delete(data.userId); }
-            connectionStats.delete(data.userId);
-            pendingIceCandidates.delete(data.userId);
-          });
+         // Replace user_left_call handler
+socketInstance.on('user_left_call', (data) => {
+  console.log(`👋 User left: ${data.userId}`);
+  
+  // Remove tile
+  const tile = document.getElementById(`participant-${data.userId}`);
+  if (tile) tile.remove();
+  renderedParticipants.delete(data.userId);
+  
+  // Clean up peer connection
+  const pc = peerConnections.get(data.userId);
+  if (pc) { 
+    pc.close(); 
+    peerConnections.delete(data.userId); 
+  }
+  
+  // Clean up audio context
+  const ac = audioContexts.get(data.userId);
+  if (ac) { 
+    ac.close(); 
+    audioContexts.delete(data.userId); 
+  }
+  
+  // Clean up connection stats and monitoring
+  const stats = connectionStats.get(data.userId);
+  if (stats && stats.monitorInterval) {
+    clearInterval(stats.monitorInterval);
+  }
+  connectionStats.delete(data.userId);
+  
+  // Clean up pending candidates
+  pendingIceCandidates.delete(data.userId);
+  
+  // Clean up negotiation mutex
+  negotiationMutex.delete(data.userId);
+  makingOffer.delete(data.userId);
+  
+  console.log(`✅ Fully cleaned up resources for ${data.userId}`);
+});
           
           socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
           socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
