@@ -645,15 +645,6 @@ function clearCachedCallState() {
   localStorage.removeItem(CALL_STATE_CACHE_KEY);
   console.log('🗑️ Cleared call state cache');
 }
-
-function setInitialCallButtonState() {
-  console.log('🔍 Setting initial call button state...');
-  
-  if (!roomData?.roomId) {
-    console.warn('⚠️ No roomData available yet');
-    return false;
-  }
-  
   
 function setInitialCallButtonState() {
   console.log('🔍 Setting initial call button state...');
