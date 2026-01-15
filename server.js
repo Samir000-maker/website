@@ -1240,7 +1240,9 @@ const callUsers = call.participants.map(participantId => {
     }
   });
 
-// Replace the join_call handler completely
+// Add at top with other Maps
+const joinCallDebounce = new Map(); // userId -> timestamp
+
 socket.on('join_call', async ({ callId }) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -1250,12 +1252,22 @@ socket.on('join_call', async ({ callId }) => {
       return;
     }
 
+    // CRITICAL FIX: Debounce rapid join_call requests
+    const lastJoinTime = joinCallDebounce.get(user.userId);
+    const now = Date.now();
+    if (lastJoinTime && now - lastJoinTime < 2000) {
+      console.warn(`⚠️ Ignoring duplicate join_call from ${user.username} (${now - lastJoinTime}ms since last)`);
+      return;
+    }
+    joinCallDebounce.set(user.userId, now);
+
     await withCallMutex(callId, async () => {
       const call = activeCalls.get(callId);
       
       const validation = validateCallState(call, 'join_call');
       if (!validation.valid) {
         socket.emit('error', { message: validation.error });
+        joinCallDebounce.delete(user.userId); // Clear on error
         return;
       }
 
@@ -1264,6 +1276,7 @@ socket.on('join_call', async ({ callId }) => {
         console.error(`❌ User ${user.username} not authorized for call ${callId}`);
         console.error(`   Participants: [${call.participants.join(', ')}]`);
         socket.emit('error', { message: 'You are not in this call' });
+        joinCallDebounce.delete(user.userId);
         return;
       }
 
@@ -1288,27 +1301,22 @@ socket.on('join_call', async ({ callId }) => {
       socket.join(`call-${callId}`);
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
-      // CRITICAL FIX: Get ALL participants from call.participants (authoritative source)
-      // Build participant data from call state, not room state
-      // In join_call handler, replace the participant mapping:
-
-// Build participant data from call.participants (authoritative source)
-const participantsWithMediaStates = call.participants.map(participantId => {
-  const userData = getUserDataForParticipant(participantId, socketUsers, matchmaking.getRoom(call.roomId));
-  
-  const mediaState = call.userMediaStates.get(participantId) || {
-    videoEnabled: call.callType === 'video',
-    audioEnabled: true
-  };
-  
-  return {
-    userId: userData.userId,
-    username: userData.username,
-    pfpUrl: userData.pfpUrl,
-    videoEnabled: mediaState.videoEnabled,
-    audioEnabled: mediaState.audioEnabled
-  };
-});
+      const participantsWithMediaStates = call.participants.map(participantId => {
+        const userData = getUserDataForParticipant(participantId, socketUsers, matchmaking.getRoom(call.roomId));
+        
+        const mediaState = call.userMediaStates.get(participantId) || {
+          videoEnabled: call.callType === 'video',
+          audioEnabled: true
+        };
+        
+        return {
+          userId: userData.userId,
+          username: userData.username,
+          pfpUrl: userData.pfpUrl,
+          videoEnabled: mediaState.videoEnabled,
+          audioEnabled: mediaState.audioEnabled
+        };
+      });
 
       console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username}`);
       participantsWithMediaStates.forEach((p, idx) => {
@@ -1337,11 +1345,17 @@ const participantsWithMediaStates = call.participants.map(participantId => {
       });
 
       console.log(`✅ ${user.username} successfully joined call ${callId} with ${call.participants.length} total participants`);
+      
+      // Clear debounce after successful join
+      setTimeout(() => {
+        joinCallDebounce.delete(user.userId);
+      }, 2000);
     });
 
   } catch (error) {
     console.error('❌ Join call error:', error);
     socket.emit('error', { message: 'Failed to join call' });
+    joinCallDebounce.delete(user.userId);
   }
 });
 
