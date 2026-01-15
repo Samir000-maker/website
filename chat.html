@@ -1276,7 +1276,7 @@ socketInstance.on('authenticated', (data) => {
         });
         
         toast('Joining call...', 'success');
-    }, { passive: true });
+    }, { passive: false });
 }
 
     if (acceptCallBtn) {
@@ -1335,7 +1335,7 @@ socketInstance.on('authenticated', (data) => {
     // Leave button
     leaveBtn?.addEventListener('click', () => {
       socketInstance?.emit('leave_room');
-    }, { passive: true });
+    }, { passive: false });
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
