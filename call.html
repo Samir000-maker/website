@@ -191,6 +191,9 @@ let videoStateChangeTimeout = null;
 let isTogglingVideo = false;
 
 
+let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
+let makingOffer = new Map();
+        
       let ICE_SERVERS = null;
       async function fetchIceServers() {
   try {
