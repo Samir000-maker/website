@@ -1179,11 +1179,18 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         audioEnabled: true
       });
       
-      // Mark as active when first user accepts
-      if (call.status === 'pending') {
-        call.status = 'active';
-        console.log(`📊 Call status changed: pending → active`);
-      }
+      // Inside accept_call handler, after marking call as active:
+if (call.status === 'pending') {
+  call.status = 'active';
+  console.log(`📊 Call status changed: pending → active`);
+  
+  // CRITICAL: Mark room as having active call and extend expiry
+  const room = matchmaking.getRoom(roomId);
+  if (room) {
+    room.setActiveCall(true);
+    room.extendExpiry(15); // Extend by 15 minutes
+  }
+}
       
       call.lastActivity = Date.now();
 
@@ -1526,8 +1533,22 @@ socket.on('leave_call', ({ callId }) => {
       console.warn(`⚠️ Room ${call.roomId} not found when broadcasting call state update`);
     }
 
-    // CRITICAL FIX: Only delete call after grace period if truly empty
-    if (call.participants.length === 0) {
+    // Inside leave_call handler, when call becomes empty:
+if (call.participants.length === 0) {
+  console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
+  
+  // CRITICAL: Mark room as no longer having active call
+  const room = matchmaking.getRoom(call.roomId);
+  if (room) {
+    room.setActiveCall(false);
+    console.log(`📞 Room ${call.roomId} marked as call-free`);
+  }
+  
+  setTimeout(() => {
+    // ... rest of cleanup logic
+  }, 5000);
+}
+    
       console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
       
       setTimeout(() => {
