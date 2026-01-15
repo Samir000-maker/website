@@ -423,48 +423,68 @@ function monitorConnectionQuality(userId, pc) {
 }
 
       function setupAudioDetection(userId, stream) {
-        try {
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          let isSpeaking = false, lastSpeakTime = 0;
-          
-          function detect() {
-            const speaking = document.getElementById(`speaking-${userId}`);
-            const tile = document.getElementById(`participant-${userId}`);
-            if (!speaking || !tile) { audioContext.close(); return; }
-            
-            analyser.getByteFrequencyData(dataArray);
-            const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
-            const now = Date.now();
-            
-            if (avg > 30) {
-              if (!isSpeaking) {
-                isSpeaking = true;
-                speaking.classList.remove('hidden');
-                tile.classList.add('active-speaker');
-                if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
-                }
-              }
-              lastSpeakTime = now;
-            } else if (isSpeaking && now - lastSpeakTime > 300) {
-              isSpeaking = false;
-              speaking.classList.add('hidden');
-              tile.classList.remove('active-speaker');
-              if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
-              }
-            }
-            requestAnimationFrame(detect);
-          }
-          detect();
-          audioContexts.set(userId, audioContext);
-        } catch (e) { console.error('Audio detection error:', e); }
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let isSpeaking = false, lastSpeakTime = 0;
+    let isRunning = true; // CRITICAL FIX: Add flag to stop detection
+    
+    function detect() {
+      // CRITICAL FIX: Check if still running and context is valid
+      if (!isRunning || audioContext.state === 'closed') {
+        console.log(`🔇 Audio detection stopped for ${userId}`);
+        return;
       }
+      
+      const speaking = document.getElementById(`speaking-${userId}`);
+      const tile = document.getElementById(`participant-${userId}`);
+      
+      if (!speaking || !tile) {
+        console.log(`🔇 Audio detection elements missing for ${userId}, stopping`);
+        isRunning = false;
+        if (audioContext.state !== 'closed') {
+          audioContext.close().catch(e => console.warn('AudioContext close error:', e));
+        }
+        return;
+      }
+      
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
+      const now = Date.now();
+      
+      if (avg > 30) {
+        if (!isSpeaking) {
+          isSpeaking = true;
+          speaking.classList.remove('hidden');
+          tile.classList.add('active-speaker');
+          if (socketInstance && userId === currentUser.userId) {
+            socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
+          }
+        }
+        lastSpeakTime = now;
+      } else if (isSpeaking && now - lastSpeakTime > 300) {
+        isSpeaking = false;
+        speaking.classList.add('hidden');
+        tile.classList.remove('active-speaker');
+        if (socketInstance && userId === currentUser.userId) {
+          socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
+        }
+      }
+      requestAnimationFrame(detect);
+    }
+    detect();
+    
+    // Store context with cleanup flag
+    audioContexts.set(userId, { context: audioContext, stopDetection: () => { isRunning = false; } });
+    
+  } catch (e) { 
+    console.error('Audio detection error:', e); 
+  }
+}
 
       // Replace initLocalMedia function
 async function initLocalMedia() {
@@ -1366,25 +1386,52 @@ async function toggleVideo() {
       }
 
       function leaveCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-        audioContexts.forEach(c => c.close());
-        audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
-        peerConnections.clear();
-        
-          if (socketInstance && socketInstance.connected) {
+  if (isInitializing) return;
+  isInitializing = true;
+  
+  // CRITICAL FIX: Stop all audio detection first
+  audioContexts.forEach((audioContextData, userId) => {
+    if (audioContextData.stopDetection) {
+      audioContextData.stopDetection();
+    }
+    const context = audioContextData.context || audioContextData;
+    if (context && context.state !== 'closed') {
+      context.close().catch(e => {
+        console.warn(`⚠️ AudioContext close warning:`, e.message);
+      });
+    }
+  });
+  audioContexts.clear();
+  
+  // Stop local tracks
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+  }
+  
+  // Close peer connections
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  
+  // Stop monitoring intervals
+  connectionStats.forEach(stats => {
+    if (stats.monitorInterval) {
+      clearInterval(stats.monitorInterval);
+    }
+  });
+  connectionStats.clear();
+  
+  // Emit leave event
+  if (socketInstance && socketInstance.connected) {
     socketInstance.emit('leave_call', { callId: callData.callId });
   }
   
   if (durationInterval) clearInterval(durationInterval);
-  localStorage.removeItem('activeCall'); // This will be cleared by server response
+  localStorage.removeItem('activeCall');
   
   setTimeout(() => { 
     window.location.href = '/chat.html'; 
   }, 500);
-      }
+}
       
       
       
@@ -1710,8 +1757,7 @@ socketInstance.on('user_joined_call', (data) => {
   }
 });
           
-         // Replace user_left_call handler
-socketInstance.on('user_left_call', (data) => {
+socket.on('user_left_call', (data) => {
   console.log(`👋 User left: ${data.userId}`);
   
   // Remove tile
@@ -1726,11 +1772,23 @@ socketInstance.on('user_left_call', (data) => {
     peerConnections.delete(data.userId); 
   }
   
-  // Clean up audio context
-  const ac = audioContexts.get(data.userId);
-  if (ac) { 
-    ac.close(); 
-    audioContexts.delete(data.userId); 
+  // CRITICAL FIX: Clean up audio context properly
+  const audioContextData = audioContexts.get(data.userId);
+  if (audioContextData) {
+    // Stop detection first
+    if (audioContextData.stopDetection) {
+      audioContextData.stopDetection();
+    }
+    
+    // Close context safely
+    const context = audioContextData.context || audioContextData;
+    if (context && context.state !== 'closed') {
+      context.close().catch(e => {
+        console.warn(`⚠️ AudioContext close warning for ${data.userId}:`, e.message);
+      });
+    }
+    
+    audioContexts.delete(data.userId);
   }
   
   // Clean up connection stats and monitoring
