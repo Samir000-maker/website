@@ -1117,6 +1117,55 @@ async function toggleVideo() {
         localStorage.removeItem('activeCall');
         setTimeout(() => { window.location.href = '/chat.html'; }, 500);
       }
+      
+      
+      
+      // Add this helper function before initCall()
+let joinCallRetryCount = 0;
+const MAX_JOIN_RETRIES = 3;
+
+async function attemptJoinCall(callId, retryDelay = 1000) {
+  return new Promise((resolve, reject) => {
+    console.log(`🔄 Attempting to join call (attempt ${joinCallRetryCount + 1}/${MAX_JOIN_RETRIES})`);
+    
+    socketInstance.emit('join_call', { callId });
+    
+    // Set timeout for response
+    const timeout = setTimeout(() => {
+      joinCallRetryCount++;
+      
+      if (joinCallRetryCount < MAX_JOIN_RETRIES) {
+        console.warn(`⚠️ Join call timeout, retrying in ${retryDelay}ms...`);
+        setTimeout(() => {
+          attemptJoinCall(callId, retryDelay * 1.5).then(resolve).catch(reject);
+        }, retryDelay);
+      } else {
+        reject(new Error('Failed to join call after maximum retries'));
+      }
+    }, 5000); // 5 second timeout per attempt
+    
+    // Listen for successful join (one-time)
+    const handleJoined = (data) => {
+      clearTimeout(timeout);
+      joinCallRetryCount = 0; // Reset on success
+      console.log(`✅ Join call succeeded on attempt ${joinCallRetryCount + 1}`);
+      socketInstance.off('call_joined', handleJoined);
+      socketInstance.off('error', handleError);
+      resolve(data);
+    };
+    
+    const handleError = (errorData) => {
+      clearTimeout(timeout);
+      socketInstance.off('call_joined', handleJoined);
+      socketInstance.off('error', handleError);
+      reject(new Error(errorData.message || 'Join call failed'));
+    };
+    
+    socketInstance.once('call_joined', handleJoined);
+    socketInstance.once('error', handleError);
+  });
+}
+      
 
       async function initCall() {
         if (isInitializing) return;
@@ -1157,13 +1206,26 @@ async function toggleVideo() {
             socketInstance.emit('authenticate', { token, userId: currentUser.userId });
           });
           
-          socketInstance.on('authenticated', async () => {
-            console.log('✅ Authenticated');
-            if (!hasJoinedCall) {
-              hasJoinedCall = true;
-              socketInstance.emit('join_call', { callId: callData.callId });
-            }
-          });
+          // Inside initCall() function, replace the 'authenticated' handler:
+
+socketInstance.on('authenticated', async () => {
+  console.log('✅ Authenticated');
+  if (!hasJoinedCall) {
+    hasJoinedCall = true;
+    
+    try {
+      console.log(`📞 Attempting to join call ${callData.callId}...`);
+      await attemptJoinCall(callData.callId);
+      console.log(`✅ Successfully joined call ${callData.callId}`);
+    } catch (error) {
+      console.error('❌ Failed to join call:', error);
+      toast('Failed to join call. Returning to chat...', 'error');
+      setTimeout(() => {
+        window.location.href = '/chat.html';
+      }, 2000);
+    }
+  }
+});
           
           
 socketInstance.on('webrtc_offer', (d) => {
@@ -1184,13 +1246,25 @@ socketInstance.on('ice_candidate', (d) => {
           
 // Replace call_joined handler
 socketInstance.on('call_joined', async (data) => {
-  console.log(`✅ Joined: ${data.participants.length} participants`);
+  console.log(`✅ Call joined event received`);
+  console.log(`📊 Participants: ${data.participants.length}`);
   console.log('🔍 Full participant data:', JSON.stringify(data.participants.map(p => ({
     userId: p.userId,
     username: p.username,
     videoEnabled: p.videoEnabled,
     audioEnabled: p.audioEnabled
   })), null, 2));
+  
+  // CRITICAL FIX: Validate we have participants
+  if (!data.participants || data.participants.length === 0) {
+    console.error('❌ Received call_joined with 0 participants!');
+    console.error('❌ This indicates a server-side state issue');
+    toast('Call state error. Please try again.', 'error');
+    setTimeout(() => {
+      window.location.href = '/chat.html';
+    }, 2000);
+    return;
+  }
   
   const subtitle = document.getElementById('callSubtitle');
   if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
@@ -1205,11 +1279,11 @@ socketInstance.on('call_joined', async (data) => {
   }
   
   if (!localStream) {
-    console.error(`❌ CRITICAL: localStream is still null after initLocalMedia()!`);
+    console.error(`❌ CRITICAL: localStream is still null!`);
     localStream = new MediaStream();
   }
   
-  console.log(`📊 LocalStream validation: ${localStream.getTracks().length} tracks`);
+  console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
   localStream.getTracks().forEach(t => {
     console.log(`   - ${t.kind}: id=${t.id.substring(0, 8)}..., enabled=${t.enabled}, readyState=${t.readyState}`);
   });
@@ -1222,7 +1296,7 @@ socketInstance.on('call_joined', async (data) => {
   
   const fragment = document.createDocumentFragment();
   
-  console.log(`🧹 Clearing grid and tracking before render`);
+  console.log(`🧹 Clearing grid and tracking`);
   grid.innerHTML = '';
   renderedParticipants.clear();
   
@@ -1232,7 +1306,6 @@ socketInstance.on('call_joined', async (data) => {
     a.userId.localeCompare(b.userId)
   );
   
-  // CRITICAL FIX: Track if we rendered our own tile
   let selfTileRendered = false;
   
   sortedParticipants.forEach((p, index) => {
@@ -1247,16 +1320,11 @@ socketInstance.on('call_joined', async (data) => {
       fragment.appendChild(tile);
       console.log(`✅ [${index}] Tile created for ${p.username}`);
       
-      if (isSelf) {
-        selfTileRendered = true;
-      }
+      if (isSelf) selfTileRendered = true;
       
       if (audioState === false) {
         const micIndicator = tile.querySelector(`#mic-${p.userId}`);
-        if (micIndicator) {
-          micIndicator.classList.remove('hidden');
-          console.log(`🎤 [${index}] Initial audio OFF for ${p.username}`);
-        }
+        if (micIndicator) micIndicator.classList.remove('hidden');
       }
       
       if (!isSelf && videoState === false) {
@@ -1265,7 +1333,6 @@ socketInstance.on('call_joined', async (data) => {
         if (vid && pfp) {
           vid.classList.add('hidden');
           pfp.classList.remove('hidden');
-          console.log(`📹 [${index}] Initial video OFF for ${p.username}`);
         }
       }
     }
@@ -1273,34 +1340,31 @@ socketInstance.on('call_joined', async (data) => {
   
   grid.appendChild(fragment);
   
-  console.log(`🎨 Grid render complete. DOM children: ${grid.children.length}, Expected: ${data.participants.length}`);
-  console.log(`📊 Tracked participants:`, Array.from(renderedParticipants));
+  console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
+  console.log(`📊 Self rendered: ${selfTileRendered}`);
   
-  // CRITICAL FIX: Only setup local video if we actually rendered our tile
   if (selfTileRendered) {
-    console.log(`🎬 Self tile rendered - setting up local video element...`);
+    console.log(`🎬 Setting up local video...`);
     await setupLocalVideo();
   } else {
-    console.log(`⚠️ Self tile NOT in initial render - will setup when user_joined_call fires`);
+    console.warn(`⚠️ Self NOT in participants - will setup on user_joined_call`);
   }
   
-  // Setup offers for remote participants
+  // Setup WebRTC offers
   const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
   
   for (let i = 0; i < remoteParticipants.length; i++) {
     const p = remoteParticipants[i];
     const shouldInitiateOffer = currentUser.userId < p.userId;
     
-    console.log(`🔗 [${i}] Offer decision for ${p.username}: shouldInitiate=${shouldInitiateOffer}`);
+    console.log(`🔗 [${i}] ${p.username}: shouldInitiate=${shouldInitiateOffer}`);
     
     if (shouldInitiateOffer) {
       const delay = 1000 + (i * 500);
       setTimeout(() => {
-        console.log(`📤 [${i}] INITIATING offer to ${p.username} (${p.userId})`);
+        console.log(`📤 [${i}] Creating offer to ${p.username}`);
         createOffer(p.userId);
       }, delay);
-    } else {
-      console.log(`⏸️ [${i}] WAITING for offer from ${p.username} (${p.userId})`);
     }
   }
   
