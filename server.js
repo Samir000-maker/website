@@ -1483,30 +1483,36 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
   }
 });
 
-  socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) return;
+socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) return;
 
+    // Log candidate details
+    if (candidate) {
       const candidateType = candidate.type || 'unknown';
-      console.log(`🧊 ICE candidate from ${user.username} to ${targetUserId}: type=${candidateType}`);
-
-      const targetSocket = findActiveSocketForUser(targetUserId);
-      
-      if (targetSocket) {
-        targetSocket.emit('ice_candidate', {
-          fromUserId: user.userId,
-          candidate
-        });
-      } else {
-        console.warn(`⚠️ Target user ${targetUserId} not found for ICE candidate`);
-      }
-
-    } catch (error) {
-      console.error('ICE candidate error:', error);
+      console.log(`🧊 [ICE] Candidate from ${user.username} to ${targetUserId}: type=${candidateType}`);
+    } else {
+      console.log(`🧊 [ICE] End-of-candidates from ${user.username} to ${targetUserId}`);
     }
-  });
+
+    const targetSocket = findActiveSocketForUser(targetUserId);
+    
+    if (targetSocket) {
+      targetSocket.emit('ice_candidate', {
+        fromUserId: user.userId,
+        candidate
+      });
+      console.log(`✅ [ICE] Candidate forwarded to ${targetUserId}`);
+    } else {
+      console.warn(`⚠️ [ICE] Target user ${targetUserId} not found for ICE candidate`);
+    }
+
+  } catch (error) {
+    console.error('❌ [ICE] Candidate error:', error);
+  }
+});
 
   socket.on('connection_state_update', ({ callId, state, candidateType }) => {
     const user = socketUsers.get(socket.id);
