@@ -1373,10 +1373,17 @@ async function toggleVideo() {
         if (localStream) localStream.getTracks().forEach(t => t.stop());
         peerConnections.forEach(pc => pc.close());
         peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-        if (durationInterval) clearInterval(durationInterval);
-        localStorage.removeItem('activeCall');
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+        
+          if (socketInstance && socketInstance.connected) {
+    socketInstance.emit('leave_call', { callId: callData.callId });
+  }
+  
+  if (durationInterval) clearInterval(durationInterval);
+  localStorage.removeItem('activeCall'); // This will be cleared by server response
+  
+  setTimeout(() => { 
+    window.location.href = '/chat.html'; 
+  }, 500);
       }
       
       
