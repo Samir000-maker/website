@@ -1,162 +1,509 @@
-
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Active Call - MoodLog</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <title>Chat Room - MoodLog</title>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        "primary": "#33bfcc",
-                        "background-light": "#f2f2f3",
-                        "background-dark": "#121417",
-                        "surface-dark": "#1e2124",
-                        "accent-red": "#ef4444",
-                    },
-                    fontFamily: {
-                        "display": ["Manrope", "sans-serif"]
-                    }
-                },
-            },
-        }
-    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="global.css" rel="stylesheet">
     <style>
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-        
-        .active-speaker {
-            box-shadow: 0 0 0 3px #33bfcc, 0 0 15px rgba(51, 191, 204, 0.4) !important;
-            border-color: #33bfcc !important;
-        }
-        
         body {
             font-family: 'Manrope', sans-serif;
-            overscroll-behavior: none;
         }
         
-        .video-tile {
+        .reply-btn {
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            cursor: pointer;
+        }
+        .message-item:hover .reply-btn {
+            opacity: 1;
+        }
+        
+        .reply-preview {
+            animation: slideUp 0.15s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from {
+                transform: translateY(10px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .quoted-message {
+            border-left: 3px solid #93c5fd;
+            padding-left: 8px;
+            margin-bottom: 6px;
+            background-color: rgba(255, 255, 255, 0.15);
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 0.813rem;
+        }
+        
+        .quoted-message-light {
+            background-color: rgba(0, 0, 0, 0.05);
+            border-left-color: #4a9d9d;
+        }
+
+        .sidebar {
+            transition: transform 0.2s ease;
+        }
+        
+        .main-container {
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        .chat-main {
+            max-height: calc(100vh - 64px);
+            max-height: calc(100dvh - 64px);
+        }
+
+        @media (max-width: 768px) {
+            .chat-main {
+                max-height: calc(100vh - 56px);
+                max-height: calc(100dvh - 56px);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                height: 100vh;
+                width: 280px;
+                z-index: 40;
+                box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+                transform: translateX(-100%);
+            }
+            
+            .sidebar.show {
+                transform: translateX(0);
+            }
+            
+            .sidebar-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 30;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s ease;
+            }
+            
+            .sidebar-overlay.active {
+                opacity: 1;
+                pointer-events: auto;
+            }
+        }
+        
+        @media (min-width: 769px) {
+            .sidebar {
+                position: relative;
+                width: 280px;
+                min-width: 280px;
+                display: block !important;
+            }
+            
+            .sidebar-toggle {
+                display: none;
+            }
+            
+            .sidebar-overlay {
+                display: none;
+            }
+        }
+
+        .user-card {
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .user-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .calling {
+            opacity: 0.6;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        
+        .call-buttons-container {
             position: relative;
-            width: 100%;
-            aspect-ratio: 1 / 1;
-            max-width: 400px;
-            background: #000;
-            overflow: hidden;
-            border-radius: 1rem;
-        }
-        
-        .video-container {
-            position: absolute;
-            inset: 0;
-        }
-        
-        video {
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .pfp-overlay {
-            position: absolute;
-            inset: 0;
             display: flex;
+            gap: 12px;
             align-items: center;
-            justify-content: center;
-            background: #000;
         }
         
-        .participant-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 400px));
-            justify-content: center;
-            gap: 1rem;
-            width: 100%;
-            padding: 1rem;
-            max-width: 1400px;
-            margin: 0 auto;
+        @media (max-width: 640px) {
+            .call-buttons-container {
+                gap: 8px;
+            }
         }
         
-        @media (min-width: 1024px) {
-            .participant-grid {
-                grid-template-columns: repeat(auto-fit, minmax(300px, 400px));
+        @supports (padding: max(0px)) {
+            .header-safe {
+                padding-top: max(1rem, env(safe-area-inset-top));
+            }
+            
+            .bottom-safe {
+                padding-bottom: max(1rem, env(safe-area-inset-bottom));
             }
         }
         
         @media (max-width: 640px) {
-            .participant-grid {
-                grid-template-columns: 1fr;
-                padding: 0.75rem;
+            #messageForm {
+                gap: 8px;
             }
-            .video-tile {
-                max-width: 100%;
+            
+            #messageInput {
+                font-size: 16px;
+                min-height: 44px;
+            }
+            
+            #messageForm button[type="submit"] {
+                min-width: 44px;
+                min-height: 44px;
             }
         }
+        
+        /* Confirmation Dialog Styles */
+        .confirmation-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            opacity: 0;
+            animation: fadeIn 0.15s ease-out forwards;
+        }
+        
+        .confirmation-dialog {
+            background: white;
+            border-radius: 1.5rem;
+            padding: 2rem;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            transform: scale(0.95) translateY(10px);
+            animation: slideUpDialog 0.2s ease-out forwards;
+        }
+        
+        .dark .confirmation-dialog {
+            background: #22252a;
+            border: 1px solid #374151;
+        }
+        
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUpDialog {
+            to {
+                transform: scale(1) translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .confirmation-buttons {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+        
+        .confirmation-buttons button {
+            flex: 1;
+            padding: 0.875rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.15s ease;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .btn-stay {
+            background: #367d7d;
+            color: white;
+        }
+        
+        .btn-stay:hover {
+            background: #2d6666;
+        }
+        
+        .btn-stay:active {
+            transform: scale(0.97);
+        }
+        
+        .btn-leave {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .dark .btn-leave {
+            background: #374151;
+            color: #e5e7eb;
+        }
+        
+        .btn-leave:hover {
+            background: #e5e7eb;
+        }
+        
+        .dark .btn-leave:hover {
+            background: #4b5563;
+        }
+        
+        .btn-leave:active {
+            transform: scale(0.97);
+        }
+        
+        /* Animate message appearance */
+        .animate-fade-in-up {
+            animation: fadeInUp 0.2s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* Loading state for buttons */
+        .btn-loading {
+            position: relative;
+            pointer-events: none;
+        }
+        
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        
+        /* Call Button Loading States */
+.call-btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.call-btn-loading .material-symbols-outlined {
+    opacity: 0;
+}
+
+.call-btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 2.5px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: spin 0.8s linear infinite;
+}
+
+.join-btn-loading {
+    position: relative;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.join-btn-loading .material-symbols-outlined,
+.join-btn-loading span:not(.loader) {
+    opacity: 0;
+}
+
+.join-btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    top: 50%;
+    left: 50%;
+    margin-left: -9px;
+    margin-top: -9px;
+    border: 2.5px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+        
     </style>
 </head>
-<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
-    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
-        <div class="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-            <div class="bg-primary/20 p-1.5 sm:p-2 rounded-lg flex-shrink-0">
-                <span class="material-symbols-outlined text-primary text-lg sm:text-2xl" id="callIcon">videocam</span>
+<body class="bg-background-light main-container flex flex-col overflow-hidden">
+    <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
+        <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
+            <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-100 rounded-lg md:hidden flex-shrink-0">
+                    <span class="material-symbols-outlined text-gray-700">menu</span>
+                </button>
+                
+                <div class="min-w-0 flex-1">
+                    <h2 class="text-base sm:text-lg font-bold truncate">Mindful Space</h2>
+                    <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-500">
+                        <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
+                        <span id="onlineCount" class="truncate">Loading...</span>
+                        <span class="hidden sm:inline">•</span>
+                        <span id="timeRemaining" class="hidden sm:inline truncate">--:-- remaining</span>
+                    </div>
+                </div>
             </div>
-            <div class="min-w-0">
-                <h1 class="text-sm sm:text-lg font-bold tracking-tight truncate" id="callTitle">Video Call</h1>
-                <p class="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate" id="callSubtitle">Connecting...</p>
-            </div>
-        </div>
-        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            <div class="flex items-center gap-1.5 sm:gap-2 bg-slate-200 dark:bg-surface-dark px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-700">
-                <span class="relative flex h-2 w-2">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                </span>
-                <span class="text-[10px] sm:text-sm font-bold font-mono" id="callDuration">00:00:00</span>
+            
+            <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                <div class="call-buttons-container">
+                    <button id="audioCallBtn" 
+                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+                        title="Start Audio Call">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
+                    </button>
+                    <button id="videoCallBtn" 
+                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
+                        title="Start Video Call">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
+                    </button>
+                    <button id="joinCallBtn" 
+                        class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
+                        title="Join Active Call">
+                        <span class="material-symbols-outlined text-base sm:text-lg">login</span>
+                        <span class="hidden sm:inline">Join Call</span>
+                        <span class="sm:hidden">Join</span>
+                    </button>
+                </div>
+                
+                <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2 whitespace-nowrap">
+                    <span class="hidden sm:inline">Leave Room</span>
+                    <span class="sm:hidden material-symbols-outlined text-xl">logout</span>
+                </button>
             </div>
         </div>
     </header>
 
-    <main class="flex-1 overflow-y-auto">
-        <div id="participantGrid" class="participant-grid"></div>
-    </main>
+    <div class="flex flex-1 overflow-hidden relative chat-main">
+        <div id="sidebarOverlay" class="sidebar-overlay"></div>
+        
+        <aside id="sidebar" class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
+            <div class="p-3 sm:p-4">
+                <div class="flex items-center justify-between mb-3 sm:mb-4">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase">Active Users</h3>
+                    <button id="sidebarClose" class="md:hidden p-1 hover:bg-gray-100 rounded">
+                        <span class="material-symbols-outlined text-gray-500 text-xl">close</span>
+                    </button>
+                </div>
+                <div id="usersList" class="space-y-2 sm:space-y-3"></div>
+            </div>
+        </aside>
 
-    <footer class="w-full px-3 sm:px-6 py-3 sm:py-4 flex justify-center sticky bottom-0 z-20">
-        <div class="bg-white/95 dark:bg-surface-dark/95 backdrop-blur-lg shadow-2xl rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 p-2 sm:p-2.5 flex items-center gap-1 sm:gap-2">
-            <div class="flex items-center gap-1 sm:gap-2 px-1 sm:px-2 border-r border-slate-200 dark:border-slate-800">
-                <button id="micBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-primary text-white hover:brightness-110 transition-all active:scale-95">
-                    <span class="material-symbols-outlined text-lg sm:text-2xl">mic</span>
-                </button>
-                <button id="videoBtn" class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
-                    <span class="material-symbols-outlined text-lg sm:text-2xl">videocam_off</span>
-                </button>
+        <main class="flex-1 flex flex-col min-h-0 bg-white">
+            <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
+                <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
+                    Welcome to the safe space. Be kind and supportive.
+                </div>
             </div>
-            
-            <div class="hidden sm:flex items-center gap-2 px-2">
-                <button id="moodBtn" class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
-                    <span class="text-base sm:text-xl">😊</span>
-                    <span class="font-bold hidden md:inline">Update Mood</span>
-                </button>
+
+            <div class="border-t border-gray-200 bg-white flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-1.5 mb-1">
+                                <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
+                                <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
+                            </div>
+                            <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
+                        </div>
+                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
+                            <span class="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-3 pb-4">
+                    <form id="messageForm" class="flex gap-2 items-center">
+                        <input type="text" id="messageInput" required maxlength="500"
+                            class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
+                            placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
+                        <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90 active:scale-95 transition-transform">
+                            <span class="material-symbols-outlined">send</span>
+                        </button>
+                    </form>
+                </div>
             </div>
-            
-            <div class="pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800">
-                <button id="leaveCallBtn" class="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-accent-red text-white hover:brightness-110 transition-all active:scale-95">
-                    <span class="material-symbols-outlined font-bold text-lg sm:text-2xl">call_end</span>
-                    <span class="font-bold text-xs sm:text-sm">Leave</span>
-                </button>
+        </main>
+    </div>
+
+    <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full animate-fade-in">
+            <div class="text-center">
+                <div class="mb-4 sm:mb-6">
+                    <div id="callerAvatar" class="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-full overflow-hidden bg-primary/20 flex items-center justify-center">
+                        <span class="text-3xl sm:text-4xl">📞</span>
+                    </div>
+                </div>
+                <h3 class="text-lg sm:text-xl font-bold mb-2" id="callerName">Incoming Call</h3>
+                <p class="text-sm sm:text-base text-gray-600 mb-6 sm:mb-8" id="callType">Audio Call</p>
+                
+                <div class="flex gap-3 sm:gap-4 justify-center">
+                    <button id="declineCallBtn" 
+                        class="flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-all text-sm sm:text-base">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call_end</span>
+                        <span class="font-medium">Decline</span>
+                    </button>
+                    <button id="acceptCallBtn" 
+                        class="flex items-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 transition-all text-sm sm:text-base">
+                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
+                        <span class="font-medium">Accept</span>
+                    </button>
+                </div>
             </div>
         </div>
-    </footer>
+    </div>
+
+    <!-- Confirmation Dialog (hidden by default) -->
+    <div id="confirmationOverlay" style="display: none;"></div>
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+
     <script>
       const firebaseConfig = {
         apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
@@ -167,1650 +514,992 @@
         appId: "1:64611387728:web:2e53a18151ab3de1b60455",
         measurementId: "G-0Z91D0Q6EE"
       };
-      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
       firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     </script>
+
     <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
     <script src="app.js"></script>
 
-
-
     <script>
-    (async () => {
-      const MoodApp = window.MoodApp || {};
-      const _Auth = MoodApp.Auth;
-      const _API = MoodApp.API;
-      const _Toast = MoodApp.Toast;
-      const toast = (m, t='success') => { 
-        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
-        console[t==='error'?'error':'log'](m); 
-      };
+(async () => {
+  const MoodApp = window.MoodApp || {};
+  const _Auth = MoodApp.Auth;
+  const _API = MoodApp.API;
+  const _Toast = MoodApp.Toast;
+  const _Utils = MoodApp.Utils;
 
-
-
-let videoStateChangeTimeout = null;
-let isTogglingVideo = false;
-let isJoiningCall = false;
-
-let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
-let makingOffer = new Map();
-        
-      let ICE_SERVERS = null;
-      async function fetchIceServers() {
-  try {
-    const response = await _API.get('/api/ice-servers');
-    
-    // CRITICAL: Ensure STUN servers come FIRST for proper prioritization
-    const stunServers = response.iceServers.filter(server => 
-      server.urls.some(url => url.startsWith('stun:'))
-    );
-    
-    const turnServers = response.iceServers.filter(server => 
-      server.urls.some(url => url.startsWith('turn:') || url.startsWith('turns:'))
-    );
-    
-    // Put STUN first, TURN second - ICE will prioritize in this order
-    ICE_SERVERS = [...stunServers, ...turnServers];
-    
-    console.log(`✅ ICE servers loaded in priority order:`);
-    console.log(`   - ${stunServers.length} STUN server group(s)`);
-    console.log(`   - ${turnServers.length} TURN server group(s)`);
-    
-    return ICE_SERVERS;
-  } catch (error) {
-    console.error('❌ ICE servers failed:', error);
-    ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
-    return ICE_SERVERS;
-  }
-}
-
-      const PEER_CONNECTION_CONFIG = { 
-  iceCandidatePoolSize: 10,
-  iceTransportPolicy: 'all', // MUST be 'all' to try STUN first, NOT 'relay'
-  bundlePolicy: 'max-bundle', 
-  rtcpMuxPolicy: 'require',
-  // Enable ICE restart for failed connections
-  iceRestart: false
-};
-      let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
-      let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
-      let callStartTime = null, durationInterval = null, isInitializing = false, hasJoinedCall = false;
-      let pendingIceCandidates = new Map(), connectionStats = new Map();
-      let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
-
-      function createProfilePicture(pfpUrl, username) {
-        const initial = username ? username.charAt(0).toUpperCase() : 'U';
-        const div = document.createElement('div');
-        div.className = 'w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border-2 border-primary/30';
-        if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-          const img = document.createElement('img');
-          img.src = pfpUrl;
-          img.alt = username;
-          img.className = 'w-full h-full object-cover';
-          img.onerror = () => { div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-xl sm:text-2xl">${initial}</div>`; };
-          div.appendChild(img);
-        } else {
-          div.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-xl sm:text-2xl">${initial}</div>`;
-        }
-        return div;
-      }
-      
-      
-      function updateVideoVisibility(userId, enabled, trackReady = true) {
-  const vid = document.getElementById(`video-${userId}`);
-  const pfp = document.getElementById(`pfp-${userId}`);
-  
-  if (!vid || !pfp) {
-    console.warn(`⚠️ Video elements not found for ${userId}`);
-    return;
-  }
-  
-  const shouldShowVideo = enabled && trackReady && vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
-  
-  console.log(`📹 updateVideoVisibility(${userId}): enabled=${enabled}, trackReady=${trackReady}, shouldShow=${shouldShowVideo}`);
-  
-  if (shouldShowVideo) {
-    vid.classList.remove('hidden');
-    pfp.classList.add('hidden');
-  } else {
-    vid.classList.add('hidden');
-    pfp.classList.remove('hidden');
-  }
-}
-      
-
-      function createParticipantTile(user, isSelf = false) {
-  console.log(`🎨 Creating tile for ${user.username} (userId: ${user.userId}, isSelf: ${isSelf})`);
-  
-  // CRITICAL: Check if tile already exists in DOM
-  const existingTile = document.getElementById(`participant-${user.userId}`);
-  if (existingTile) {
-    console.warn(`⚠️ Tile for ${user.userId} already exists in DOM! Removing old tile.`);
-    existingTile.remove();
-    renderedParticipants.delete(user.userId);
-  }
-  
-  // Double-check tracking set
-  if (renderedParticipants.has(user.userId)) {
-    console.warn(`⚠️ Tile for ${user.userId} in tracking set but not in DOM! Clearing.`);
-    renderedParticipants.delete(user.userId);
-  }
-  
-  const tile = document.createElement('div');
-  tile.id = `participant-${user.userId}`;
-  tile.className = `video-tile ${isSelf ? 'border-2 border-dashed border-primary/30' : 'border border-white/5'}`;
-  
-  const videoContainer = document.createElement('div');
-  videoContainer.className = 'video-container';
-  
-  const video = document.createElement('video');
-  video.id = `video-${user.userId}`;
-  video.className = 'hidden';
-  video.autoplay = true;
-  video.playsInline = true;
-  video.setAttribute('playsinline', '');
-  video.setAttribute('webkit-playsinline', '');
-  
-  if (isSelf) {
-    video.muted = true;
-    video.volume = 0;
-    console.log(`🔇 Self video will be muted (userId: ${user.userId})`);
-  } else {
-    video.muted = false;
-    video.volume = 1.0;
-    console.log(`🔊 Remote video will NOT be muted (userId: ${user.userId})`);
-  }
-  
-  videoContainer.appendChild(video);
-  
-  const pfpOverlay = document.createElement('div');
-  pfpOverlay.id = `pfp-${user.userId}`;
-  pfpOverlay.className = 'pfp-overlay';
-  pfpOverlay.appendChild(createProfilePicture(user.pfpUrl, user.username));
-  videoContainer.appendChild(pfpOverlay);
-  
-  tile.appendChild(videoContainer);
-  
-  const label = document.createElement('div');
-  label.className = 'absolute bottom-3 sm:bottom-4 left-3 sm:left-4 z-10';
-  label.innerHTML = `<div class="${isSelf ? 'bg-primary/80' : 'bg-black/60'} backdrop-blur-md px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border ${isSelf ? 'border-primary/20' : 'border-white/10'} flex items-center gap-1.5 sm:gap-2">
-    <span class="text-white text-xs sm:text-sm font-semibold">${isSelf ? 'You' : user.username}</span>
-    <span class="text-base sm:text-lg">😊</span>
-  </div>`;
-  tile.appendChild(label);
-  
-  const speaking = document.createElement('div');
-  speaking.id = `speaking-${user.userId}`;
-  speaking.className = 'absolute top-3 sm:top-4 right-3 sm:right-4 bg-primary px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold text-white uppercase hidden z-10';
-  speaking.textContent = 'SPEAKING';
-  tile.appendChild(speaking);
-  
-  const micOff = document.createElement('div');
-  micOff.id = `mic-${user.userId}`;
-  micOff.className = 'absolute top-3 sm:top-4 right-3 sm:right-4 bg-accent-red p-1 sm:p-1.5 rounded-full text-white shadow-lg hidden z-10';
-  micOff.innerHTML = '<span class="material-symbols-outlined text-[14px] sm:text-[16px]">mic_off</span>';
-  tile.appendChild(micOff);
-  
-  if (isSelf) {
-    const overlay = document.createElement('div');
-    overlay.className = 'absolute inset-0 bg-primary/5 pointer-events-none';
-    tile.appendChild(overlay);
-  }
-  
-  renderedParticipants.add(user.userId);
-  console.log(`✅ Tile created for ${user.username} (${user.userId})`);
-  console.log(`📊 Rendered participants now:`, Array.from(renderedParticipants));
-  return tile;
-}
-
-
-// Add after createPC function to monitor connection quality
-function monitorConnectionQuality(userId, pc) {
-  const monitorInterval = setInterval(async () => {
-    if (!pc || pc.connectionState === 'closed') {
-      clearInterval(monitorInterval);
-      return;
-    }
-    
-    try {
-      const stats = await pc.getStats();
-      let connectionInfo = {
-        candidateType: 'unknown',
-        bytesReceived: 0,
-        bytesSent: 0,
-        packetsLost: 0
-      };
-      
-      stats.forEach(report => {
-        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-          const localCandidate = stats.get(report.localCandidateId);
-          if (localCandidate) {
-            connectionInfo.candidateType = localCandidate.candidateType;
-          }
-        }
-        
-        if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-          connectionInfo.bytesReceived = report.bytesReceived || 0;
-          connectionInfo.packetsLost = report.packetsLost || 0;
-        }
-        
-        if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-          connectionInfo.bytesSent = report.bytesSent || 0;
-        }
-      });
-      
-      // Only log significant changes or issues
-      if (connectionInfo.packetsLost > 10) {
-        console.warn(`⚠️ [Quality] Packet loss detected for ${userId}: ${connectionInfo.packetsLost} packets`);
-      }
-      
-      // Update connection stats
-      const connStats = connectionStats.get(userId);
-      if (connStats) {
-        connStats.lastQualityCheck = Date.now();
-        connStats.connectionType = connectionInfo.candidateType;
-      }
-      
-    } catch (e) {
-      console.warn(`⚠️ Failed to get stats for ${userId}:`, e.message);
-    }
-  }, 5000); // Check every 5 seconds
-  
-  // Store interval for cleanup
-  if (!connectionStats.has(userId)) {
-    connectionStats.set(userId, {});
-  }
-  connectionStats.get(userId).monitorInterval = monitorInterval;
-}
-
-      function setupAudioDetection(userId, stream) {
-        try {
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          let isSpeaking = false, lastSpeakTime = 0;
-          
-          function detect() {
-            const speaking = document.getElementById(`speaking-${userId}`);
-            const tile = document.getElementById(`participant-${userId}`);
-            if (!speaking || !tile) { audioContext.close(); return; }
-            
-            analyser.getByteFrequencyData(dataArray);
-            const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
-            const now = Date.now();
-            
-            if (avg > 30) {
-              if (!isSpeaking) {
-                isSpeaking = true;
-                speaking.classList.remove('hidden');
-                tile.classList.add('active-speaker');
-                if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
-                }
-              }
-              lastSpeakTime = now;
-            } else if (isSpeaking && now - lastSpeakTime > 300) {
-              isSpeaking = false;
-              speaking.classList.add('hidden');
-              tile.classList.remove('active-speaker');
-              if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
-              }
-            }
-            requestAnimationFrame(detect);
-          }
-          detect();
-          audioContexts.set(userId, audioContext);
-        } catch (e) { console.error('Audio detection error:', e); }
-      }
-
-      // Replace initLocalMedia function
-async function initLocalMedia() {
-  const MAX_RETRIES = 3;
-  let attempt = 0;
-  
-  while (attempt < MAX_RETRIES) {
-    try {
-      attempt++;
-      console.log(`🎥 [Attempt ${attempt}/${MAX_RETRIES}] Requesting media (${callData.callType})...`);
-      
-      const constraints = {
-        audio: { 
-          echoCancellation: true, 
-          noiseSuppression: true, 
-          autoGainControl: true 
-        },
-        video: callData.callType === 'video' ? { 
-          width: {ideal:640}, 
-          height: {ideal:480},
-          facingMode: 'user'
-        } : false
-      };
-      
-      let hasVideo = false;
-      let hasAudio = false;
-      
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
-        hasVideo = localStream.getVideoTracks().length > 0;
-        hasAudio = localStream.getAudioTracks().length > 0;
-        console.log(`✅ [Attempt ${attempt}] SUCCESS: video=${hasVideo}, audio=${hasAudio}`);
-        break; // Success, exit retry loop
-      } catch (videoError) {
-        console.warn(`⚠️ [Attempt ${attempt}] Video failed: ${videoError.name}`);
-        
-        // Try audio-only
-        try {
-          const audioOnlyConstraints = {
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            video: false
-          };
-          localStream = await navigator.mediaDevices.getUserMedia(audioOnlyConstraints);
-          hasAudio = localStream.getAudioTracks().length > 0;
-          console.log(`✅ [Attempt ${attempt}] Audio-only SUCCESS: audio=${hasAudio}`);
-          
-          if (attempt === 1) {
-            toast('Camera not available, using audio only', 'warning');
-          }
-          break; // Success, exit retry loop
-        } catch (audioError) {
-          console.error(`❌ [Attempt ${attempt}] Both failed: ${audioError.name}`);
-          
-          if (attempt === MAX_RETRIES) {
-            localStream = new MediaStream();
-            toast('No media devices available. You can still join the call.', 'error');
-          } else {
-            await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
-            continue;
-          }
-        }
-      }
-      
-      // Set states based on actual media acquired
-      isVideoEnabled = hasVideo;
-      isAudioEnabled = hasAudio;
-      
-      console.log(`📊 Final media state: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
-      console.log(`📊 LocalStream tracks: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
-      
-      // Setup audio detection if we have audio
-      if (hasAudio) {
-        const audioTrack = localStream.getAudioTracks()[0];
-        if (audioTrack) {
-          setupAudioDetection(currentUser.userId, localStream);
-          console.log(`🎤 Audio detection setup for ${currentUser.username}`);
-        }
-      }
-      
-      // Update call icon
-      const callIcon = document.getElementById('callIcon');
-      if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
-      
-      console.log(`✅ initLocalMedia() complete - stream ready`);
-      return localStream;
-      
-    } catch (e) {
-      console.error(`❌ [Attempt ${attempt}] Critical error:`, e);
-      if (attempt === MAX_RETRIES) {
-        localStream = new MediaStream();
-        isVideoEnabled = false;
-        isAudioEnabled = false;
-        toast('Unable to access media devices.', 'error');
-        return localStream;
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  }
-  
-  return localStream;
-}
-
-
-// Replace setupLocalVideo function
-async function setupLocalVideo() {
-  const waitForElement = (id, maxWait = 5000) => {
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-      const checkElement = () => {
-        const element = document.getElementById(id);
-        if (element) {
-          resolve(element);
-        } else if (Date.now() - startTime > maxWait) {
-          reject(new Error(`Element ${id} not found after ${maxWait}ms`));
-        } else {
-          requestAnimationFrame(checkElement);
-        }
-      };
-      checkElement();
-    });
+  const toast = (m, t='success') => { 
+    if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
+    console[t==='error'?'error':'log'](m); 
   };
 
-  try {
-    console.log(`🔧 Waiting for local video elements for ${currentUser.username}...`);
-    
-    // CRITICAL FIX: Check if tile exists first
-    const localTile = document.getElementById(`participant-${currentUser.userId}`);
-    if (!localTile) {
-      console.warn(`⚠️ No tile for ${currentUser.username} yet - will be created when user_joined_call fires`);
-      return; // Exit gracefully - will be called again when tile is created
-    }
-    
-    const localVid = await waitForElement(`video-${currentUser.userId}`);
-    const localPfp = await waitForElement(`pfp-${currentUser.userId}`);
-    
-    console.log(`✅ Found video elements for ${currentUser.username}`);
-    console.log(`   Video element: ${!!localVid}, PFP element: ${!!localPfp}`);
-    console.log(`   LocalStream: ${!!localStream}, Video tracks: ${localStream.getVideoTracks().length}`);
-    
-    if (!localStream) {
-      console.error(`❌ No localStream available`);
-      return;
-    }
-    
-    localVid.srcObject = localStream;
-    localVid.muted = true;
-    localVid.volume = 0;
-    localVid.style.transform = 'scaleX(1)';
-    console.log(`✅ Local stream attached to video element`);
-    
-    if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
-      console.log(`📹 Waiting for local video to be ready...`);
-      
-      await new Promise((resolve) => {
-        const checkReady = () => {
-          if (localVid.readyState >= 2) {
-            console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
-            resolve();
-          } else {
-            localVid.addEventListener('loadedmetadata', () => {
-              console.log(`📹 Metadata loaded: ${localVid.videoWidth}x${localVid.videoHeight}`);
-              resolve();
-            }, { once: true });
-          }
-        };
-        checkReady();
-      });
-      
-      try {
-        await localVid.play();
-        console.log(`▶️ Local video playback started`);
-        updateVideoVisibility(currentUser.userId, true, true);
-      } catch (e) {
-        console.error('❌ Local video play failed:', e);
-        updateVideoVisibility(currentUser.userId, false, false);
-      }
-    } else {
-      console.log(`📹 Video disabled or no video track for ${currentUser.username}`);
-      updateVideoVisibility(currentUser.userId, false, false);
-    }
-    
-    updateVideoButton();
-    updateMicButton();
-    
-    console.log(`✅ setupLocalVideo() complete for ${currentUser.username}`);
-    
-  } catch (error) {
-    console.error(`❌ setupLocalVideo() failed:`, error);
-    console.log(`⚠️ Will retry when tile becomes available`);
-  }
-}
-
-
-
-function updateVideoButton() {
-  const btn = document.getElementById('videoBtn');
-  const icon = btn?.querySelector('.material-symbols-outlined');
+  // ============================================
+  // STORAGE KEYS
+  // ============================================
+  const CHAT_STATE_KEY = 'chat_state';
+  const CHAT_MESSAGES_KEY = 'chat_messages';
+  const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
+  const ACTIVE_CALL_KEY = 'activeCall';
   
-  if (!btn || !icon) return;
+  // ============================================
+  // STATE MANAGEMENT
+  // ============================================
+  let replyingTo = null;
+  let isInitiatingCall = false;
+  let pendingCallData = null;
+  let navigatingToCall = false;
+  let messagesCache = [];
+  let activeCallInRoom = null;
+  let backButtonHandled = false;
+  let timerInterval = null;
+  let socketInstance = null;
+  let currentUser = null;
+  let roomData = null;
   
-  if (isVideoEnabled) {
-    btn.classList.add('bg-primary', 'text-white');
-    btn.classList.remove('bg-slate-200', 'dark:bg-background-dark');
-    icon.textContent = 'videocam';
-  } else {
-    btn.classList.remove('bg-primary', 'text-white');
-    btn.classList.add('bg-slate-200', 'dark:bg-background-dark');
-    icon.textContent = 'videocam_off';
-  }
-  console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-}
-
-
-
-
-function updateMicButton() {
-  const micBtn = document.getElementById('micBtn');
-  const micIcon = micBtn?.querySelector('.material-symbols-outlined');
+  // ============================================
+  // DOM ELEMENTS (Initialized early)
+  // ============================================
+  const sidebar = document.getElementById('sidebar');
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const sidebarClose = document.getElementById('sidebarClose');
+  const sidebarOverlay = document.getElementById('sidebarOverlay');
+  const messagesList = document.getElementById('messagesList');
+  const messageForm = document.getElementById('messageForm');
+  const messageInput = document.getElementById('messageInput');
+  const usersList = document.getElementById('usersList');
+  const onlineCount = document.getElementById('onlineCount');
+  const timeRemaining = document.getElementById('timeRemaining');
+  const leaveBtn = document.getElementById('leaveBtn');
+  const cancelReplyBtn = document.getElementById('cancelReply');
+  const audioCallBtn = document.getElementById('audioCallBtn');
+  const videoCallBtn = document.getElementById('videoCallBtn');
+  const joinCallBtn = document.getElementById('joinCallBtn');
+  const incomingCallModal = document.getElementById('incomingCallModal');
+  const acceptCallBtn = document.getElementById('acceptCallBtn');
+  const declineCallBtn = document.getElementById('declineCallBtn');
   
-  if (!micBtn || !micIcon) return;
+  // ============================================
+  // UTILITY FUNCTIONS
+  // ============================================
   
-  if (isAudioEnabled) {
-    micBtn.classList.add('bg-primary', 'text-white');
-    micBtn.classList.remove('bg-accent-red');
-    micIcon.textContent = 'mic';
-  } else {
-    micBtn.classList.remove('bg-primary');
-    micBtn.classList.add('bg-accent-red', 'text-white');
-    micIcon.textContent = 'mic_off';
-  }
-  console.log(`✅ Mic button updated: ${isAudioEnabled ? 'ON' : 'OFF'}`);
-}
-
-
-
-function createPC(userId) {
-  console.log(`🔗 Creating PC for ${userId}`);
-  
-  // CRITICAL FIX: Check for existing PC and close it
-  const existingPC = peerConnections.get(userId);
-  if (existingPC) {
-    console.warn(`⚠️ PC already exists for ${userId}, closing old one`);
-    existingPC.close();
-    peerConnections.delete(userId);
-  }
-  
-  if (!localStream) {
-    console.error(`❌ CRITICAL: localStream is null when creating PC for ${userId}!`);
-    throw new Error('Cannot create PeerConnection without localStream');
-  }
-  
-  console.log(`✅ localStream validated: ${localStream.getTracks().length} tracks`);
-  
-  const pc = new RTCPeerConnection({ 
-    ...PEER_CONNECTION_CONFIG, 
-    iceServers: ICE_SERVERS 
-  });
-  
-  connectionStats.set(userId, { 
-    startTime: Date.now(), 
-    iceState: 'new', 
-    connectionState: 'new', 
-    candidatesReceived: 0, 
-    candidatesSent: 0,
-    iceRestartCount: 0,
-    lastIceCandidateTime: 0
-  });
-  
-  const tracks = localStream.getTracks();
-  console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
-  
-  tracks.forEach(track => {
-    pc.addTrack(track, localStream);
-    console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
-  });
-  
-  // CRITICAL: Add ontrack handler to receive remote media
-  pc.ontrack = (event) => {
-    console.log(`🎵 [TRACK] Received ${event.track.kind} track from ${userId}`);
-    console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
-    console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
-    console.log(`   Streams: ${event.streams.length}`);
-    
-    if (event.streams && event.streams.length > 0) {
-      const remoteStream = event.streams[0];
-      console.log(`   Remote stream: ${remoteStream.id.substring(0, 8)}... with ${remoteStream.getTracks().length} tracks`);
-      
-      const remoteVideo = document.getElementById(`video-${userId}`);
-      
-      if (remoteVideo) {
-        // CRITICAL: Set srcObject if not already set or different
-        if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
-          console.log(`📺 Setting srcObject for ${userId}`);
-          remoteVideo.srcObject = remoteStream;
-          remoteVideo.muted = false; // Ensure NOT muted for remote
-          remoteVideo.volume = 1.0;
-          
-          // Wait for metadata and play
-          remoteVideo.onloadedmetadata = async () => {
-            console.log(`📺 Metadata loaded for ${userId}: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
-            try {
-              await remoteVideo.play();
-              console.log(`▶️ Remote video playing for ${userId}`);
-              
-              // Update visibility based on track type
-              if (event.track.kind === 'video' && event.track.enabled) {
-                console.log(`📹 Remote video track enabled for ${userId}`);
-                updateVideoVisibility(userId, true, true);
-              }
-            } catch (playError) {
-              console.error(`❌ Failed to play remote video for ${userId}:`, playError);
-            }
-          };
-          
-          // If metadata already loaded, play immediately
-          if (remoteVideo.readyState >= 2) {
-            console.log(`📺 Metadata already loaded for ${userId}, playing now`);
-            remoteVideo.play().catch(e => {
-              console.error(`❌ Play failed for ${userId}:`, e);
-            });
-          }
-        } else {
-          console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
-        }
-        
-        // Setup audio detection for remote streams
-        if (event.track.kind === 'audio') {
-          console.log(`🎤 Setting up audio detection for remote user ${userId}`);
-          setupAudioDetection(userId, remoteStream);
-        }
-        
-      } else {
-        console.error(`❌ Video element not found for ${userId}`);
-      }
-    } else {
-      console.warn(`⚠️ No streams in track event for ${userId}`);
-    }
-    
-    // Track ended handler
-    event.track.onended = () => {
-      console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
-    };
-    
-    // Track mute/unmute handlers
-    event.track.onmute = () => {
-      console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
-    };
-    
-    event.track.onunmute = () => {
-      console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
-    };
-  };
-  
-  // CRITICAL: ICE candidate handler with rate limiting
-  let lastCandidateEmit = 0;
-  const CANDIDATE_EMIT_THROTTLE = 50; // 50ms between emits
-  
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      const stats = connectionStats.get(userId);
-      if (stats) {
-        stats.candidatesSent++;
-        stats.lastIceCandidateTime = Date.now();
-      }
-      
-      const candidateType = e.candidate.type || 'unknown';
-      const candidateProtocol = e.candidate.protocol || 'unknown';
-      
-      console.log(`🧊 [ICE] Generated ${candidateType} candidate for ${userId} (protocol: ${candidateProtocol})`);
-      
-      // Throttle candidate emissions
-      const now = Date.now();
-      if (now - lastCandidateEmit < CANDIDATE_EMIT_THROTTLE) {
-        setTimeout(() => {
-          socketInstance.emit('ice_candidate', { 
-            callId: callData.callId, 
-            targetUserId: userId, 
-            candidate: e.candidate 
-          });
-          console.log(`📤 [ICE] Sent throttled candidate #${stats.candidatesSent} to ${userId}`);
-        }, CANDIDATE_EMIT_THROTTLE);
-      } else {
-        socketInstance.emit('ice_candidate', { 
-          callId: callData.callId, 
-          targetUserId: userId, 
-          candidate: e.candidate 
-        });
-        console.log(`📤 [ICE] Sent candidate #${stats.candidatesSent} to ${userId}`);
-      }
-      lastCandidateEmit = now;
-      
-    } else {
-      console.log(`🧊 [ICE] End of candidates for ${userId}`);
-      socketInstance.emit('ice_candidate', { 
-        callId: callData.callId, 
-        targetUserId: userId, 
-        candidate: null 
-      });
-    }
-  };
-  
-  // ICE connection state monitoring
-  pc.oniceconnectionstatechange = () => {
-    const state = pc.iceConnectionState;
-    const stats = connectionStats.get(userId);
-    if (stats) stats.iceState = state;
-    
-    console.log(`🧊 [ICE] Connection state for ${userId}: ${state}`);
-    
-    if (state === 'connected' || state === 'completed') {
-      console.log(`✅ [ICE] Connected to ${userId}`);
-      
-      // Get selected candidate pair for debugging
-      pc.getStats().then(stats => {
-        stats.forEach(report => {
-          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-            console.log(`   Selected pair: ${report.id}`);
-            const local = stats.get(report.localCandidateId);
-            const remote = stats.get(report.remoteCandidateId);
-            if (local && remote) {
-              console.log(`   Local: ${local.candidateType} ${local.protocol} ${local.address}:${local.port}`);
-              console.log(`   Remote: ${remote.candidateType} ${remote.protocol} ${remote.address}:${remote.port}`);
-            }
-          }
-        });
-      });
-      
-    } else if (state === 'failed') {
-      console.error(`❌ [ICE] Connection failed for ${userId}`);
-      
-      // Attempt ICE restart
-      if (stats && stats.iceRestartCount < 2) {
-        stats.iceRestartCount++;
-        console.log(`🔄 Attempting ICE restart for ${userId} (attempt ${stats.iceRestartCount})`);
-        
-        setTimeout(() => {
-          if (pc.connectionState !== 'closed') {
-            createOffer(userId);
-          }
-        }, 1000);
-      }
-    } else if (state === 'disconnected') {
-      console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
-    } else if (state === 'closed') {
-      console.log(`🔒 [ICE] Connection closed for ${userId}`);
-    }
-  };
-  
-  // Connection state monitoring
-  pc.onconnectionstatechange = () => {
-    const state = pc.connectionState;
-    const stats = connectionStats.get(userId);
-    if (stats) stats.connectionState = state;
-    
-    console.log(`🔌 [PC] Connection state for ${userId}: ${state}`);
-    
-    if (state === 'connected') {
-      console.log(`✅ [PC] Peer connection established with ${userId}`);
-      
-      // Emit connection state update
-      socketInstance.emit('connection_state_update', {
-        callId: callData.callId,
-        state: 'connected'
-      });
-      
-    } else if (state === 'failed') {
-      console.error(`❌ [PC] Connection failed with ${userId}`);
-      
-      socketInstance.emit('connection_state_update', {
-        callId: callData.callId,
-        state: 'failed'
-      });
-      
-    } else if (state === 'disconnected') {
-      console.warn(`⚠️ [PC] Disconnected from ${userId}`);
-    }
-  };
-  
-  monitorConnectionQuality(userId, pc);
-  
-  peerConnections.set(userId, pc);
-  console.log(`✅ PeerConnection created for ${userId} with all handlers`);
-  return pc;
-}
-
-
-async function createOffer(userId) {
-  // CRITICAL: Check if already making offer
-  if (makingOffer.get(userId)) {
-    console.warn(`⚠️ Already making offer to ${userId}, skipping`);
-    return;
-  }
-  
-  try {
-    makingOffer.set(userId, true);
-    
-    console.log(`📤 Creating offer for ${userId}`);
-    
-    // Small delay to ensure remote peer has fully joined
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const pc = createPC(userId);
-    
-    // Validate local stream
-    if (!localStream || localStream.getTracks().length === 0) {
-      console.error(`❌ No local stream available when creating offer for ${userId}`);
-      return;
-    }
-    
-    console.log(`📊 Local stream for offer: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
-    
-    const offer = await pc.createOffer({ 
-      offerToReceiveAudio: true, 
-      offerToReceiveVideo: true 
-    });
-    
-    await pc.setLocalDescription(offer);
-    
-    console.log(`✅ Offer created and set as local description for ${userId}`);
-    console.log(`   Offer type: ${offer.type}`);
-    console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
-    console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    socketInstance.emit('webrtc_offer', { 
-      callId: callData.callId, 
-      targetUserId: userId, 
-      offer 
-    });
-    
-    console.log(`📤 Offer sent to ${userId} via socket`);
-    
-  } catch (e) { 
-    console.error(`❌ Offer creation error for ${userId}:`, e);
-    console.error(`   Error name: ${e.name}`);
-    console.error(`   Error message: ${e.message}`);
-  } finally {
-    makingOffer.set(userId, false);
-  }
-}
-
-async function handleOffer(fromUserId, offer) {
-  // CRITICAL: Prevent duplicate offer processing with mutex
-  if (negotiationMutex.has(fromUserId)) {
-    console.warn(`⚠️ Already processing offer from ${fromUserId}, ignoring duplicate`);
-    return;
-  }
-  
-  // Create mutex promise
-  const mutexPromise = (async () => {
+  function saveChatState(roomId, messages) {
     try {
-      console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
-      console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
-      
-      // Validate localStream
-      if (!localStream) {
-        console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
-        return;
-      }
-      
-      console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
-      
-      let pc = peerConnections.get(fromUserId);
-      
-      // CRITICAL: Check for signaling state collision
-      const offerCollision = pc && 
-        (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer');
-      
-      // Determine polite/impolite based on user ID comparison
-      const polite = currentUser.userId < fromUserId;
-      
-      console.log(`   Polite: ${polite}, Offer collision: ${offerCollision}`);
-      
-      // Impolite peer ignores colliding offers
-      if (offerCollision && !polite) {
-        console.log(`   🚫 Impolite peer ignoring colliding offer from ${fromUserId}`);
-        return;
-      }
-      
-      // If PC exists and we have a collision, polite peer uses rollback
-      if (offerCollision && polite) {
-        console.log(`   🔄 Polite peer performing rollback for ${fromUserId}`);
-        await pc.setLocalDescription({ type: 'rollback' });
-        console.log(`   ✅ Rollback complete`);
-      }
-      
-      // Create new PC if needed or if closed
-      if (!pc || pc.connectionState === 'closed') {
-        console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
-        pc = createPC(fromUserId);
-      }
-      
-      console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
-      console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-      
-      // CRITICAL: Use Promise.all to queue operations properly
-      await Promise.all([
-        pc.setRemoteDescription(new RTCSessionDescription(offer)),
-        // Queue ICE candidate processing after setRemoteDescription
-        new Promise(resolve => setTimeout(resolve, 0))
-      ]);
-      
-      console.log(`✅ Remote description set successfully`);
-      console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-      
-      // Inside handleOffer function, replace the pending candidates section:
-
-// Process pending ICE candidates AFTER remote description is set
-if (pendingIceCandidates.has(fromUserId)) {
-  const cands = pendingIceCandidates.get(fromUserId);
-  console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
-  
-  for (const item of cands) {
-    try {
-      const c = item.candidate;
-      
-      // Validate before adding
-      if (!c.candidate || typeof c.candidate !== 'string') {
-        console.warn(`⚠️ Skipping invalid queued candidate`);
-        continue;
-      }
-      
-      if (c.sdpMid === null && c.sdpMLineIndex === null) {
-        console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
-        continue;
-      }
-      
-      await pc.addIceCandidate(new RTCIceCandidate(c));
-      console.log(`✅ Added pending ICE candidate`);
-    } catch (e) {
-      console.warn(`⚠️ Failed to add queued candidate:`, e.message);
-      // Continue with next candidate
-    }
-  }
-  pendingIceCandidates.delete(fromUserId);
-}
-      
-      console.log(`📤 Creating answer for ${fromUserId}...`);
-      
-      // Create answer
-      const answer = await pc.createAnswer();
-      console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
-      
-      await pc.setLocalDescription(answer);
-      console.log(`✅ Answer set as local description`);
-      console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-      
-      console.log(`📤 Sending answer to ${fromUserId} via socket`);
-      socketInstance.emit('webrtc_answer', { 
-        callId: callData.callId, 
-        targetUserId: fromUserId, 
-        answer 
-      });
-      console.log(`✅ Answer emitted successfully`);
-      
-    } catch (e) { 
-      console.error(`❌ Handle offer error for ${fromUserId}:`, e);
-      console.error(`   Error name: ${e.name}`);
-      console.error(`   Error message: ${e.message}`);
-    } finally {
-      // Remove mutex after 100ms to allow for any in-flight duplicates to be caught
-      setTimeout(() => {
-        negotiationMutex.delete(fromUserId);
-      }, 100);
-    }
-  })();
-  
-  negotiationMutex.set(fromUserId, mutexPromise);
-  await mutexPromise;
-}
-
-async function handleAnswer(fromUserId, answer) {
-  try {
-    console.log(`📥 [ANSWER] Received answer from ${fromUserId}`);
-    console.log(`   Answer type: ${answer.type}, SDP length: ${answer.sdp?.length || 0}`);
-    
-    const pc = peerConnections.get(fromUserId);
-    
-    if (!pc) {
-      console.error(`❌ No PC found for ${fromUserId} when handling answer`);
-      return;
-    }
-    
-    console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    // CRITICAL: Only accept answer if we're in the right state
-    if (pc.signalingState !== 'have-local-offer') {
-      console.warn(`⚠️ Ignoring answer from ${fromUserId} - wrong state: ${pc.signalingState}`);
-      return;
-    }
-    
-    console.log(`🔧 Setting remote description (answer) for ${fromUserId}`);
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    console.log(`✅ Answer set as remote description`);
-    console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-   // Inside handleAnswer function, replace the pending candidates section:
-
-// Process pending ICE candidates
-if (pendingIceCandidates.has(fromUserId)) {
-  const cands = pendingIceCandidates.get(fromUserId);
-  console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
-  
-  for (const item of cands) {
-    try {
-      const c = item.candidate;
-      
-      // Validate before adding
-      if (!c.candidate || typeof c.candidate !== 'string') {
-        console.warn(`⚠️ Skipping invalid queued candidate`);
-        continue;
-      }
-      
-      if (c.sdpMid === null && c.sdpMLineIndex === null) {
-        console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
-        continue;
-      }
-      
-      await pc.addIceCandidate(new RTCIceCandidate(c));
-      console.log(`✅ Added pending ICE candidate`);
-    } catch (e) {
-      console.warn(`⚠️ Failed to add queued candidate:`, e.message);
-      // Continue with next candidate
-    }
-  }
-  pendingIceCandidates.delete(fromUserId);
-}
-    
-    console.log(`✅ Answer handling complete for ${fromUserId}`);
-    
-  } catch (e) { 
-    console.error(`❌ Handle answer error for ${fromUserId}:`, e);
-    console.error(`   Error name: ${e.name}`);
-    console.error(`   Error message: ${e.message}`);
-  }
-}
-
-// Replace handleIceCandidate function
-async function handleIceCandidate(fromUserId, candidate) {
-  try {
-    if (!candidate) {
-      console.log(`🧊 [ICE] Received end-of-candidates from ${fromUserId}`);
-      return;
-    }
-    
-    // CRITICAL FIX: Validate candidate structure before queuing/adding
-    if (!candidate.candidate || typeof candidate.candidate !== 'string') {
-      console.warn(`⚠️ [ICE] Invalid candidate structure from ${fromUserId}:`, candidate);
-      return;
-    }
-    
-    // Additional validation for required fields
-    if (candidate.sdpMid === null && candidate.sdpMLineIndex === null) {
-      console.warn(`⚠️ [ICE] Candidate missing both sdpMid and sdpMLineIndex from ${fromUserId}, skipping`);
-      return;
-    }
-    
-    const pc = peerConnections.get(fromUserId);
-    
-    // Queue candidates if no PC yet OR if remote description not set
-    if (!pc || !pc.remoteDescription) {
-      if (!pendingIceCandidates.has(fromUserId)) {
-        pendingIceCandidates.set(fromUserId, []);
-      }
-      
-      const queue = pendingIceCandidates.get(fromUserId);
-      queue.push({
-        candidate: candidate,
+      const state = {
+        roomId,
+        messages: messages || [],
         timestamp: Date.now()
-      });
-      
-      console.log(`🧊 [ICE] Queued candidate from ${fromUserId} (pending: ${queue.length})`);
-      
-      // Auto-cleanup old candidates after 30 seconds
-      setTimeout(() => {
-        const currentQueue = pendingIceCandidates.get(fromUserId);
-        if (currentQueue) {
-          const filtered = currentQueue.filter(item => Date.now() - item.timestamp < 30000);
-          if (filtered.length !== currentQueue.length) {
-            console.log(`🧹 [ICE] Cleaned ${currentQueue.length - filtered.length} old candidates for ${fromUserId}`);
-            pendingIceCandidates.set(fromUserId, filtered);
-          }
-        }
-      }, 30000);
-      
-      return;
+      };
+      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+      console.log('✅ Chat state saved:', messages.length, 'messages');
+    } catch (e) {
+      console.warn('⚠️ Failed to save chat state:', e);
     }
-    
-    // Add candidate if PC is ready
+  }
+  
+  function loadChatState() {
     try {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      const stats = connectionStats.get(fromUserId);
-      if (stats) stats.candidatesReceived++;
+      const stateStr = localStorage.getItem(CHAT_STATE_KEY);
+      if (!stateStr) return null;
       
-      const candidateType = candidate.type || candidate.candidate?.split(' ')[7] || 'unknown';
-      console.log(`🧊 [ICE] Added ${candidateType} candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
-    } catch (addError) {
-      console.warn(`⚠️ [ICE] Failed to add candidate from ${fromUserId}:`, addError.message);
-      // Don't throw - continue processing other candidates
-    }
-    
-  } catch (e) { 
-    console.warn(`⚠️ [ICE] Candidate processing error for ${fromUserId}:`, e.message);
-  }
-}
-
-function toggleMic() {
-  if (localStream) {
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      isAudioEnabled = track.enabled;
-      const btn = document.getElementById('micBtn');
-      const icon = btn.querySelector('.material-symbols-outlined');
-      const mic = document.getElementById(`mic-${currentUser.userId}`);
-      
-      console.log(`🎤 Mic toggled: ${isAudioEnabled ? 'ON' : 'OFF'}`);
-      
-      if (isAudioEnabled) {
-        btn.classList.add('bg-primary', 'text-white');
-        btn.classList.remove('bg-accent-red');
-        icon.textContent = 'mic';
-        if (mic) mic.classList.add('hidden');
-      } else {
-        btn.classList.remove('bg-primary');
-        btn.classList.add('bg-accent-red', 'text-white');
-        icon.textContent = 'mic_off';
-        if (mic) mic.classList.remove('hidden');
-      }
-      
-      socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+      const state = JSON.parse(stateStr);
+      console.log('✅ Chat state loaded:', state.messages?.length || 0, 'messages');
+      return state;
+    } catch (e) {
+      console.warn('⚠️ Failed to load chat state:', e);
+      return null;
     }
   }
-}
+  
+  function clearChatState() {
+    localStorage.removeItem(CHAT_STATE_KEY);
+    localStorage.removeItem(CHAT_MESSAGES_KEY);
+    localStorage.removeItem(CHAT_TIMESTAMP_KEY);
+    console.log('🗑️ Chat state cleared');
+  }
+  
+  function escapeHtml(text) {
+    if (_Utils && typeof _Utils.escapeHtml === 'function') {
+      return _Utils.escapeHtml(text);
+    }
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-async function toggleVideo() {
-  if (callData.callType === 'audio') { 
-    toast('Video not available in audio call', 'warning'); 
-    return; 
+  function formatTimestamp(timestamp) {
+    if (_Utils && typeof _Utils.formatDate === 'function') {
+      return _Utils.formatDate(timestamp);
+    }
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
   
-  if (isTogglingVideo) {
-    console.log('⚠️ Video toggle already in progress, ignoring');
-    return;
-  }
-  
-  isTogglingVideo = true;
-  
-  if (!localStream) {
-    console.error('❌ No localStream available');
-    isTogglingVideo = false;
-    return;
-  }
-  
-  const track = localStream.getVideoTracks()[0];
-  if (!track) {
-    console.error('❌ No video track available');
-    isTogglingVideo = false;
-    return;
-  }
-  
-  // Toggle the track enabled state
-  const newState = !track.enabled;
-  track.enabled = newState;
-  isVideoEnabled = newState;
-  
-  console.log(`📹 Video toggled locally: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-  console.log(`📹 Track state after toggle: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
-  
-  // CRITICAL FIX: Update local video visibility immediately
-  const localVid = document.getElementById(`video-${currentUser.userId}`);
-  if (localVid && localVid.srcObject) {
-    console.log(`📹 Updating local video element visibility`);
-    updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
-  }
-  
-  // Update button state
-  updateVideoButton();
-  
-  // Emit to server (server will broadcast to ALL including us for confirmation)
-  socketInstance.emit('video_state_changed', { 
-    callId: callData.callId, 
-    enabled: isVideoEnabled 
-  });
-  console.log(`📤 Emitted video_state_changed to server: ${isVideoEnabled}`);
-  
-  // Clear toggle lock after a delay
-  setTimeout(() => {
-    isTogglingVideo = false;
-    console.log(`🔓 Video toggle unlocked`);
-  }, 200);
-}
-
-      function updateDuration() {
-        if (!callStartTime) return;
-        const e = Math.floor((Date.now() - callStartTime) / 1000);
-        const h = Math.floor(e / 3600), m = Math.floor((e % 3600) / 60), s = e % 60;
-        const el = document.getElementById('callDuration');
-        if (el) el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-      }
-
-      function leaveCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-        audioContexts.forEach(c => c.close());
-        audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
-        peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-        if (durationInterval) clearInterval(durationInterval);
-        localStorage.removeItem('activeCall');
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
-      }
-      
-      
-      
-      // Add this helper function before initCall()
-let joinCallRetryCount = 0;
-const MAX_JOIN_RETRIES = 3;
-
-async function attemptJoinCall(callId, retryDelay = 1000) {
-  return new Promise((resolve, reject) => {
-    console.log(`🔄 Attempting to join call (attempt ${joinCallRetryCount + 1}/${MAX_JOIN_RETRIES})`);
-    
-    socketInstance.emit('join_call', { callId });
-    
-    // Set timeout for response
-    const timeout = setTimeout(() => {
-      joinCallRetryCount++;
-      
-      if (joinCallRetryCount < MAX_JOIN_RETRIES) {
-        console.warn(`⚠️ Join call timeout, retrying in ${retryDelay}ms...`);
-        setTimeout(() => {
-          attemptJoinCall(callId, retryDelay * 1.5).then(resolve).catch(reject);
-        }, retryDelay);
-      } else {
-        reject(new Error('Failed to join call after maximum retries'));
-      }
-    }, 5000); // 5 second timeout per attempt
-    
-    // Listen for successful join (one-time)
-    const handleJoined = (data) => {
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
       clearTimeout(timeout);
-      joinCallRetryCount = 0; // Reset on success
-      console.log(`✅ Join call succeeded on attempt ${joinCallRetryCount + 1}`);
-      socketInstance.off('call_joined', handleJoined);
-      socketInstance.off('error', handleError);
-      resolve(data);
+      timeout = setTimeout(later, wait);
     };
-    
-    const handleError = (errorData) => {
-      clearTimeout(timeout);
-      socketInstance.off('call_joined', handleJoined);
-      socketInstance.off('error', handleError);
-      reject(new Error(errorData.message || 'Join call failed'));
-    };
-    
-    socketInstance.once('call_joined', handleJoined);
-    socketInstance.once('error', handleError);
-  });
-}
-      
+  }
 
-      async function initCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-        console.log('=== INIT CALL ===');
-        
+  // ============================================
+  // CALL STATE MANAGEMENT
+  // ============================================
+  
+ function setInitialCallButtonState() {
+    console.log('🔍 Checking for active call in localStorage...');
+    
+    // Show loading state initially
+    if (joinCallBtn) {
+        joinCallBtn.classList.add('join-btn-loading');
+        joinCallBtn.classList.add('flex');
+        joinCallBtn.classList.remove('hidden');
+    }
+    if (audioCallBtn) {
+        audioCallBtn.classList.add('call-btn-loading');
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.add('call-btn-loading');
+    }
+    
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    
+    if (activeCallStr) {
         try {
-          await _Auth.requireAuth();
-          await fetchIceServers();
-          
-          const callStr = localStorage.getItem('activeCall');
-          if (!callStr) { toast('No active call', 'error'); setTimeout(() => window.location.href = '/chat.html', 1500); return; }
-          
-          callData = JSON.parse(callStr);
-          console.log(`📞 Call: ${callData.callId} (${callData.callType})`);
-          
-          const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) { window.location.href = '/login.html'; return; }
-          
-          const userData = await _API.get('/api/users/me');
-          currentUser = { userId: userData._id, username: userData.username, pfpUrl: userData.pfpUrl };
-          console.log(`👤 Current user: ${currentUser.username} (${currentUser.userId})`);
-          
-          const title = document.getElementById('callTitle');
-          if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
-          
-          const token = await firebaseUser.getIdToken();
-          socketInstance = io(window.location.origin, {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            auth: { token }
-          });
-          
-          socketInstance.on('connect', () => {
-            console.log(`🔌 Connected: ${socketInstance.id}`);
-            socketInstance.emit('authenticate', { token, userId: currentUser.userId });
-          });
-          
-          // Inside initCall() function, replace the 'authenticated' handler:
-
-socketInstance.on('authenticated', async () => {
-  console.log('✅ Authenticated');
-  
-  // CRITICAL FIX: Prevent duplicate join attempts
-  if (isJoiningCall) {
-    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
-    return;
-  }
-  
-  if (!hasJoinedCall) {
-    isJoiningCall = true;
-    hasJoinedCall = true;
-    
-    try {
-      console.log(`📞 Attempting to join call ${callData.callId}...`);
-      await attemptJoinCall(callData.callId);
-      console.log(`✅ Successfully joined call ${callData.callId}`);
-    } catch (error) {
-      console.error('❌ Failed to join call:', error);
-      toast('Failed to join call. Returning to chat...', 'error');
-      setTimeout(() => {
-        window.location.href = '/chat.html';
-      }, 2000);
-    } finally {
-      isJoiningCall = false;
-    }
-  }
-});
-          
-          
-socketInstance.on('webrtc_offer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
-  handleOffer(d.fromUserId, d.offer);
-});
-
-socketInstance.on('webrtc_answer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
-  handleAnswer(d.fromUserId, d.answer);
-});
-
-socketInstance.on('ice_candidate', (d) => {
-  console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
-  handleIceCandidate(d.fromUserId, d.candidate);
-});
-          
-          
-// Replace call_joined handler
-socketInstance.on('call_joined', async (data) => {
-  console.log(`✅ Call joined event received`);
-  console.log(`📊 Participants: ${data.participants.length}`);
-  console.log('🔍 Full participant data:', JSON.stringify(data.participants.map(p => ({
-    userId: p.userId,
-    username: p.username,
-    videoEnabled: p.videoEnabled,
-    audioEnabled: p.audioEnabled
-  })), null, 2));
-  
-  // CRITICAL FIX: Validate we have participants
-  if (!data.participants || data.participants.length === 0) {
-    console.error('❌ Received call_joined with 0 participants!');
-    console.error('❌ This indicates a server-side state issue');
-    toast('Call state error. Please try again.', 'error');
-    setTimeout(() => {
-      window.location.href = '/chat.html';
-    }, 2000);
-    return;
-  }
-  
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
-  
-  console.log(`🎬 Initializing local media...`);
-  try {
-    await initLocalMedia();
-    console.log(`✅ Local media initialized successfully`);
-  } catch (mediaError) {
-    console.error(`❌ Media initialization failed:`, mediaError);
-    toast('Failed to initialize media.', 'error');
-  }
-  
-  if (!localStream) {
-    console.error(`❌ CRITICAL: localStream is still null!`);
-    localStream = new MediaStream();
-  }
-  
-  console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
-  localStream.getTracks().forEach(t => {
-    console.log(`   - ${t.kind}: id=${t.id.substring(0, 8)}..., enabled=${t.enabled}, readyState=${t.readyState}`);
-  });
-  
-  const grid = document.getElementById('participantGrid');
-  if (!grid) {
-    console.error('❌ Grid element not found!');
-    return;
-  }
-  
-  const fragment = document.createDocumentFragment();
-  
-  console.log(`🧹 Clearing grid and tracking`);
-  grid.innerHTML = '';
-  renderedParticipants.clear();
-  
-  console.log(`📋 Rendering ${data.participants.length} tiles`);
-  
-  const sortedParticipants = [...data.participants].sort((a, b) => 
-    a.userId.localeCompare(b.userId)
-  );
-  
-  let selfTileRendered = false;
-  
-  sortedParticipants.forEach((p, index) => {
-    const isSelf = p.userId === currentUser.userId;
-    const videoState = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
-    const audioState = p.audioEnabled !== undefined ? p.audioEnabled : true;
-    
-    console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${videoState} audio=${audioState}`);
-    
-    const tile = createParticipantTile(p, isSelf);
-    if (tile) {
-      fragment.appendChild(tile);
-      console.log(`✅ [${index}] Tile created for ${p.username}`);
-      
-      if (isSelf) selfTileRendered = true;
-      
-      if (audioState === false) {
-        const micIndicator = tile.querySelector(`#mic-${p.userId}`);
-        if (micIndicator) micIndicator.classList.remove('hidden');
-      }
-      
-      if (!isSelf && videoState === false) {
-        const vid = tile.querySelector(`#video-${p.userId}`);
-        const pfp = tile.querySelector(`#pfp-${p.userId}`);
-        if (vid && pfp) {
-          vid.classList.add('hidden');
-          pfp.classList.remove('hidden');
-        }
-      }
-    }
-  });
-  
-  grid.appendChild(fragment);
-  
-  console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
-  console.log(`📊 Self rendered: ${selfTileRendered}`);
-  
-  if (selfTileRendered) {
-    console.log(`🎬 Setting up local video...`);
-    await setupLocalVideo();
-  } else {
-    console.warn(`⚠️ Self NOT in participants - will setup on user_joined_call`);
-  }
-  
-  // Setup WebRTC offers
-  const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
-  
-  for (let i = 0; i < remoteParticipants.length; i++) {
-    const p = remoteParticipants[i];
-    const shouldInitiateOffer = currentUser.userId < p.userId;
-    
-    console.log(`🔗 [${i}] ${p.username}: shouldInitiate=${shouldInitiateOffer}`);
-    
-    if (shouldInitiateOffer) {
-      const delay = 1000 + (i * 500);
-      setTimeout(() => {
-        console.log(`📤 [${i}] Creating offer to ${p.username}`);
-        createOffer(p.userId);
-      }, delay);
-    }
-  }
-  
-  callStartTime = Date.now();
-  durationInterval = setInterval(updateDuration, 1000);
-  isInitializing = false;
-  console.log('=== INIT COMPLETE ===');
-});
-          
-// Replace the entire user_joined_call handler
-socketInstance.on('user_joined_call', (data) => {
-  const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
-  const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
-  
-  console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
-  
-  // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
-  if (renderedParticipants.has(data.user.userId)) {
-    console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
-    return;
-  }
-  
-  const grid = document.getElementById('participantGrid');
-  const existingTile = document.getElementById(`participant-${data.user.userId}`);
-  
-  if (existingTile) {
-    console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
-    existingTile.remove();
-    renderedParticipants.delete(data.user.userId);
-  }
-  
-  console.log(`➕ Adding NEW participant ${data.user.username}`);
-  
-  if (grid) {
-    const isSelf = data.user.userId === currentUser.userId;
-    const tile = createParticipantTile(data.user, isSelf);
-    
-    if (tile) {
-      grid.appendChild(tile);
-      
-      const micIndicator = document.getElementById(`mic-${data.user.userId}`);
-      if (micIndicator && audioState === false) {
-        micIndicator.classList.remove('hidden');
-      }
-      
-      // CRITICAL FIX: If this is our own tile, setup local video NOW
-      if (isSelf) {
-        console.log(`✅ Self tile created via user_joined_call - setting up local video...`);
-        setupLocalVideo().catch(err => {
-          console.error('❌ Failed to setup local video for self:', err);
-        });
-      } else {
-        // For remote users, initiate connection with delay to avoid race
-        const shouldInitiateOffer = currentUser.userId < data.user.userId;
-        if (shouldInitiateOffer) {
-          setTimeout(() => {
-            console.log(`📤 Creating offer to late joiner ${data.user.username}`);
-            createOffer(data.user.userId);
-          }, 2000); // Increased delay to 2s
-        }
-      }
-      
-      console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
-    }
-  }
-});
-          
-         // Replace user_left_call handler
-socketInstance.on('user_left_call', (data) => {
-  console.log(`👋 User left: ${data.userId}`);
-  
-  // Remove tile
-  const tile = document.getElementById(`participant-${data.userId}`);
-  if (tile) tile.remove();
-  renderedParticipants.delete(data.userId);
-  
-  // Clean up peer connection
-  const pc = peerConnections.get(data.userId);
-  if (pc) { 
-    pc.close(); 
-    peerConnections.delete(data.userId); 
-  }
-  
-  // Clean up audio context
-  const ac = audioContexts.get(data.userId);
-  if (ac) { 
-    ac.close(); 
-    audioContexts.delete(data.userId); 
-  }
-  
-  // Clean up connection stats and monitoring
-  const stats = connectionStats.get(data.userId);
-  if (stats && stats.monitorInterval) {
-    clearInterval(stats.monitorInterval);
-  }
-  connectionStats.delete(data.userId);
-  
-  // Clean up pending candidates
-  pendingIceCandidates.delete(data.userId);
-  
-  // Clean up negotiation mutex
-  negotiationMutex.delete(data.userId);
-  makingOffer.delete(data.userId);
-  
-  console.log(`✅ Fully cleaned up resources for ${data.userId}`);
-});
-          
-          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
-          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
-          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
-          
-          socketInstance.on('speaking_state', (d) => {
-            const s = document.getElementById(`speaking-${d.userId}`);
-            const t = document.getElementById(`participant-${d.userId}`);
-            if (s && t) {
-              if (d.speaking) { s.classList.remove('hidden'); t.classList.add('active-speaker'); }
-              else { s.classList.add('hidden'); t.classList.remove('active-speaker'); }
+            const activeCallData = JSON.parse(activeCallStr);
+            
+            if (activeCallData.roomId === roomData?.roomId) {
+                console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
+                
+                activeCallInRoom = {
+                    callId: activeCallData.callId,
+                    participantCount: 1,
+                    callType: activeCallData.callType
+                };
+                
+                // Keep loading state - will be removed when socket confirms
+                console.log('✅ Initial call state set (waiting for socket confirmation)');
+                return true;
+            } else {
+                console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
             }
-          });
-          
-          socketInstance.on('audio_state_changed', (data) => {
-  console.log(`🎤 Received audio_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
-  
-  const micIndicator = document.getElementById(`mic-${data.userId}`);
-  if (micIndicator) {
-    if (data.enabled) {
-      micIndicator.classList.add('hidden');
-    } else {
-      micIndicator.classList.remove('hidden');
-    }
-  }
-});
-
-socketInstance.on('video_state_changed', (data) => {
-  console.log(`📹 [SOCKET] Received video_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
-  
-  // CRITICAL FIX: Update visibility for BOTH self and remote users
-  if (data.userId === currentUser.userId) {
-    console.log(`📹 Confirming our own video state from server: ${data.enabled}`);
-    // Server confirms our state - update UI if out of sync
-    if (isVideoEnabled !== data.enabled) {
-      console.warn(`⚠️ Local state (${isVideoEnabled}) out of sync with server (${data.enabled}), correcting...`);
-      isVideoEnabled = data.enabled;
-      updateVideoButton();
-    }
-    updateVideoVisibility(currentUser.userId, data.enabled, true);
-  } else {
-    // For remote users, update visibility
-    console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
-    updateVideoVisibility(data.userId, data.enabled, true);
-  }
-});
-          
-          socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
-          
-          const mic = document.getElementById('micBtn');
-          const vid = document.getElementById('videoBtn');
-          const leave = document.getElementById('leaveCallBtn');
-          if (mic) mic.addEventListener('click', toggleMic);
-          if (vid) vid.addEventListener('click', toggleVideo);
-          if (leave) leave.addEventListener('click', leaveCall);
-          window.addEventListener('beforeunload', () => leaveCall());
-          
         } catch (e) {
-          console.error('❌ Init error:', e);
-          toast('Failed to initialize call', 'error');
-          isInitializing = false;
-          setTimeout(() => window.location.href = '/chat.html', 2000);
+            console.error('❌ Failed to parse activeCall:', e);
+            localStorage.removeItem(ACTIVE_CALL_KEY);
         }
+    }
+    
+    // Keep loading state - will be removed when socket confirms no active call
+    return false;
+}
+  
+  function updateCallButtonState(isActive, callData = null) {
+    // Remove loading states
+    if (audioCallBtn) audioCallBtn.classList.remove('call-btn-loading');
+    if (videoCallBtn) videoCallBtn.classList.remove('call-btn-loading');
+    if (joinCallBtn) joinCallBtn.classList.remove('join-btn-loading');
+    
+    if (isActive && callData) {
+        activeCallInRoom = {
+            callId: callData.callId,
+            participantCount: callData.participantCount || 1,
+            callType: callData.callType || 'video'
+        };
+        
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('hidden');
+            joinCallBtn.classList.add('flex');
+        }
+        if (audioCallBtn) audioCallBtn.classList.add('hidden');
+        if (videoCallBtn) videoCallBtn.classList.add('hidden');
+        
+        console.log(`✅ Call buttons updated: JOIN visible`);
+    } else {
+        activeCallInRoom = null;
+        
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('flex');
+            joinCallBtn.classList.add('hidden');
+        }
+        if (audioCallBtn) audioCallBtn.classList.remove('hidden');
+        if (videoCallBtn) videoCallBtn.classList.remove('hidden');
+        
+        console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
+    }
+}
+
+  // ============================================
+  // UI FUNCTIONS
+  // ============================================
+  
+  function openSidebar() {
+    if (!sidebar || !sidebarOverlay) return;
+    sidebar.classList.add('show');
+    sidebarOverlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebar() {
+    if (!sidebar || !sidebarOverlay) return;
+    sidebar.classList.remove('show');
+    sidebarOverlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function toggleSidebar() {
+    if (!sidebar) return;
+    sidebar.classList.contains('show') ? closeSidebar() : openSidebar();
+  }
+
+  function setupUserCardClick() {
+    if (window.innerWidth <= 768) {
+      document.querySelectorAll('.user-card').forEach(card => {
+        card.addEventListener('click', closeSidebar, { passive: true });
+      });
+    }
+  }
+
+  function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
+    const initial = username ? username.charAt(0).toUpperCase() : 'U';
+    const container = document.createElement('div');
+    container.className = `${size} rounded-full overflow-hidden bg-slate-100 border-2 border-white shadow-sm flex-shrink-0`;
+    
+    if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
+      const img = document.createElement('img');
+      img.src = pfpUrl;
+      img.alt = username;
+      img.className = 'h-full w-full object-cover';
+      img.loading = 'lazy';
+      img.onerror = function() {
+        this.onerror = null;
+        container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+      };
+      container.appendChild(img);
+    } else {
+      container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+    }
+    
+    return container;
+  }
+
+  function showReplyPreview(messageData) {
+    replyingTo = messageData;
+    const replyPreview = document.getElementById('replyPreview');
+    const replyToUsername = document.getElementById('replyToUsername');
+    const replyToMessage = document.getElementById('replyToMessage');
+    
+    if (replyPreview && replyToUsername && replyToMessage) {
+      replyToUsername.textContent = `Replying to ${messageData.username}`;
+      replyToMessage.textContent = messageData.message;
+      replyPreview.classList.remove('hidden');
+      
+      if (messageInput) messageInput.focus();
+    }
+  }
+
+  function hideReplyPreview() {
+    replyingTo = null;
+    const replyPreview = document.getElementById('replyPreview');
+    if (replyPreview) replyPreview.classList.add('hidden');
+  }
+
+ function createMessageElement(data, isCurrentUser) {
+    const messageItem = document.createElement('div');
+    messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
+    messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
+    
+    const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
+    const messageContent = document.createElement('div');
+    messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1 min-w-0`;
+
+    const headerDiv = document.createElement('div');
+    headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
+    
+    const usernameSpan = document.createElement('span');
+    usernameSpan.className = 'text-xs sm:text-sm font-semibold text-gray-900 truncate';
+    usernameSpan.textContent = data.username || 'User';
+    
+    const timestampSpan = document.createElement('span');
+    timestampSpan.className = 'text-[10px] sm:text-xs text-gray-400 whitespace-nowrap';
+    timestampSpan.textContent = data.timestamp ? formatTimestamp(data.timestamp) : 'Just now';
+    
+    headerDiv.appendChild(usernameSpan);
+    headerDiv.appendChild(timestampSpan);
+    messageContent.appendChild(headerDiv);
+
+    const bubbleWrapper = document.createElement('div');
+    // For current user: full width with justify-end, for others: keep default
+    bubbleWrapper.className = `flex items-center gap-1 ${isCurrentUser ? 'w-full justify-end' : ''}`;
+
+    const messageBubble = document.createElement('div');
+    messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
+
+    if (data.replyTo) {
+      const quotedDiv = document.createElement('div');
+      quotedDiv.className = `quoted-message ${isCurrentUser ? '' : 'quoted-message-light'}`;
+      
+      const quotedUsername = document.createElement('div');
+      quotedUsername.className = `text-xs font-semibold mb-1 ${isCurrentUser ? 'text-blue-200' : 'text-primary'}`;
+      quotedUsername.textContent = data.replyTo.username;
+      
+      const quotedText = document.createElement('div');
+      quotedText.className = `text-xs ${isCurrentUser ? 'text-white/80' : 'text-gray-600'} break-words`;
+      quotedText.textContent = data.replyTo.message;
+      
+      quotedDiv.appendChild(quotedUsername);
+      quotedDiv.appendChild(quotedText);
+      messageBubble.appendChild(quotedDiv);
+    }
+
+    const messageText = document.createElement('div');
+    messageText.className = 'text-sm sm:text-base break-words';
+    messageText.innerHTML = escapeHtml(data.message || '');
+    messageBubble.appendChild(messageText);
+
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-100 rounded-full transition-colors flex-shrink-0';
+    replyBtn.title = 'Reply';
+    replyBtn.innerHTML = '<span class="material-symbols-outlined text-gray-400 text-base sm:text-lg">reply</span>';
+    replyBtn.addEventListener('click', () => {
+      showReplyPreview({
+        messageId: messageItem.dataset.messageId,
+        username: data.username,
+        message: data.message,
+        userId: data.userId
+      });
+    }, { passive: true });
+
+    // Current user: reply button left, bubble right
+    // Other users: bubble left, reply button right (original behavior)
+    if (isCurrentUser) {
+      bubbleWrapper.appendChild(replyBtn);
+      bubbleWrapper.appendChild(messageBubble);
+    } else {
+      bubbleWrapper.appendChild(messageBubble);
+      bubbleWrapper.appendChild(replyBtn);
+    }
+
+    messageContent.appendChild(bubbleWrapper);
+    messageItem.appendChild(pfpContainer);
+    messageItem.appendChild(messageContent);
+    
+    return messageItem;
+  }
+
+  // ============================================
+  // CONFIRMATION DIALOG
+  // ============================================
+  
+  function showConfirmationDialog() {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('confirmationOverlay');
+      if (!overlay) return resolve(false);
+      
+      const dialogHTML = `
+        <div class="confirmation-overlay">
+          <div class="confirmation-dialog">
+            <div style="text-align: center; margin-bottom: 1rem;">
+              <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                <span class="material-symbols-outlined" style="font-size: 32px; color: #dc2626;">warning</span>
+              </div>
+              <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Leave Chat Room?</h3>
+              <p style="color: #6b7280; font-size: 0.95rem; line-height: 1.5;">
+                You're currently in an active chat room. If you leave, you'll be disconnected from the conversation.
+              </p>
+            </div>
+            <div class="confirmation-buttons">
+              <button class="btn-stay" id="btnStay">Stay Here</button>
+              <button class="btn-leave" id="btnLeave">Leave</button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      overlay.innerHTML = dialogHTML;
+      overlay.style.display = 'flex';
+      
+      const btnStay = document.getElementById('btnStay');
+      const btnLeave = document.getElementById('btnLeave');
+      
+      if (btnStay) {
+        btnStay.addEventListener('click', () => {
+          overlay.style.display = 'none';
+          resolve(false);
+        }, { once: true });
+      }
+      
+      if (btnLeave) {
+        btnLeave.addEventListener('click', () => {
+          overlay.style.display = 'none';
+          resolve(true);
+        }, { once: true });
+      }
+    });
+  }
+
+  // ============================================
+  // BACK BUTTON HANDLER
+  // ============================================
+  
+  function setupBackButtonHandler() {
+    history.pushState({ page: 'chat' }, '', window.location.href);
+    
+    window.addEventListener('popstate', async (event) => {
+      if (backButtonHandled) return;
+      
+      console.log('⬅️ Back button pressed');
+      history.pushState({ page: 'chat' }, '', window.location.href);
+      
+      const shouldLeave = await showConfirmationDialog();
+      
+      if (shouldLeave) {
+        console.log('✅ User confirmed leaving');
+        backButtonHandled = true;
+        
+        if (socketInstance?.connected) {
+          socketInstance.emit('leave_room');
+        }
+        
+        clearChatState();
+        window.location.href = '/mood.html';
+      } else {
+        console.log('❌ User staying in chat');
+      }
+    });
+  }
+
+  // ============================================
+  // TIMER UPDATE
+  // ============================================
+  
+  const updateTimer = () => {
+    if (!roomData) return;
+    
+    const now = Date.now();
+    const remaining = Math.max(0, roomData.expiresAt - now);
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    
+    if (timeRemaining) {
+      timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+    }
+
+    if (remaining === 0) {
+      if (timerInterval) clearInterval(timerInterval);
+      toast('Room has expired', 'warning');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    }
+  };
+
+  // ============================================
+  // SOCKET EVENT HANDLERS
+  // ============================================
+  
+  function setupSocketHandlers() {
+    if (!socketInstance) return;
+    
+    socketInstance.on('connect', () => {
+      console.log('🔌 Socket connected:', socketInstance.id);
+      
+      firebase.auth().currentUser?.getIdToken().then(idToken => {
+        socketInstance.emit('authenticate', {
+          token: idToken,
+          userId: currentUser.userId
+        });
+      }).catch(err => {
+        console.error('❌ Failed to get token:', err);
+      });
+    });
+
+    socketInstance.on('authenticated', (data) => {
+      console.log('✅ Authenticated:', data);
+      socketInstance.emit('join_room', { roomId: roomData.roomId });
+    });
+
+    socketInstance.on('room_joined', (data) => {
+      console.log('✅ Room joined:', data);
+      
+      // Handle chat history
+      if (data.chatHistory?.length > 0) {
+        console.log(`📜 Loading ${data.chatHistory.length} messages`);
+        
+        const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+        
+        data.chatHistory.forEach(msg => {
+          const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+          if (existingIds.has(msgId)) return;
+          
+          const isCurrentUser = msg.userId === currentUser.userId;
+          const msgEl = createMessageElement(msg, isCurrentUser);
+          messagesList?.appendChild(msgEl);
+          messagesCache.push(msg);
+        });
+        
+        if (messagesList) {
+          messagesList.scrollTop = messagesList.scrollHeight;
+        }
+        
+        saveChatState(roomData.roomId, messagesCache);
+      }
+      
+      // Handle active call state
+      if (data.activeCall) {
+        console.log('📞 Active call confirmed:', data.activeCall);
+        updateCallButtonState(true, data.activeCall);
+      } else {
+        console.log('📞 No active call');
+        updateCallButtonState(false);
+      }
+    });
+
+    socketInstance.on('error', (data) => {
+      console.error('❌ Socket error:', data);
+      if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
+        toast('Room no longer available', 'error');
+        clearChatState();
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      } else {
+        toast(data.message || 'An error occurred', 'error');
+      }
+    });
+
+    socketInstance.on('chat_message', (data) => {
+      if (!data.messageId) {
+        data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+      }
+      
+      const isCurrentUser = data.userId === currentUser.userId;
+      const msgEl = createMessageElement(data, isCurrentUser);
+      
+      if (messagesList) {
+        messagesList.appendChild(msgEl);
+        messagesList.scrollTop = messagesList.scrollHeight;
+      }
+      
+      messagesCache.push(data);
+      saveChatState(roomData.roomId, messagesCache);
+    });
+
+    socketInstance.on('user_left', (data) => {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+      msgEl.textContent = `${data.username || 'A user'} left the room`;
+      messagesList?.appendChild(msgEl);
+
+      if (onlineCount && data.remainingUsers !== undefined) {
+        onlineCount.textContent = `${data.remainingUsers} Online`;
       }
 
-      console.log('✅ Page loaded - starting initialization');
-      initCall();
-    })();
-    </script>
+      if (data.remainingUsers <= 1) {
+        toast('Room closing...', 'warning');
+        clearChatState();
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      }
+    });
+
+    socketInstance.on('left_room', (data) => {
+      toast('Left room', 'success');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 1000);
+    });
+
+    socketInstance.on('incoming_call', (data) => {
+      pendingCallData = data;
+      const callerName = document.getElementById('callerName');
+      const callType = document.getElementById('callType');
+      const callerAvatar = document.getElementById('callerAvatar');
+      
+      if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+      if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+      if (callerAvatar) {
+        callerAvatar.innerHTML = '';
+        const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+        callerAvatar.appendChild(pfp);
+      }
+      
+      incomingCallModal?.classList.remove('hidden');
+    });
+
+    socketInstance.on('call_accepted', (data) => {
+      console.log('✅ Call accepted:', data);
+      isInitiatingCall = false;
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: roomData.roomId,
+        callType: data.callType,
+        users: data.users
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
+
+    socketInstance.on('call_declined', (data) => {
+      toast('Call was declined', 'warning');
+      isInitiatingCall = false;
+      audioCallBtn?.classList.remove('calling');
+      videoCallBtn?.classList.remove('calling');
+    });
+    
+    socketInstance.on('call_state_update', (data) => {
+      console.log('📞 Call state update:', data);
+      
+      if (data.isActive && data.participantCount > 0) {
+        updateCallButtonState(true, data);
+      } else {
+        updateCallButtonState(false);
+      }
+    });
+
+    socketInstance.on('call_ended_notification', (data) => {
+      console.log('📞 Call ended:', data.callId);
+      updateCallButtonState(false);
+    });
+
+    socketInstance.on('join_existing_call_success', (data) => {
+      console.log('✅ Joining existing call:', data);
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: data.roomId,
+        callType: data.callType,
+        users: []
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
+  }
+
+  // ============================================
+  // EVENT LISTENERS
+  // ============================================
+  
+  function setupEventListeners() {
+    // Sidebar
+    sidebarToggle?.addEventListener('click', toggleSidebar, { passive: true });
+    sidebarClose?.addEventListener('click', closeSidebar, { passive: true });
+    sidebarOverlay?.addEventListener('click', closeSidebar, { passive: true });
+    
+    // Reply
+    cancelReplyBtn?.addEventListener('click', hideReplyPreview, { passive: true });
+    
+    // Call buttons
+    if (audioCallBtn) {
+      audioCallBtn.addEventListener('click', () => {
+        if (isInitiatingCall) return;
+        isInitiatingCall = true;
+        audioCallBtn.classList.add('calling');
+        videoCallBtn?.classList.add('calling');
+        
+        socketInstance?.emit('initiate_call', {
+          roomId: roomData.roomId,
+          callType: 'audio'
+        });
+        toast('Calling...', 'success');
+        
+        setTimeout(() => {
+          if (isInitiatingCall) {
+            isInitiatingCall = false;
+            audioCallBtn.classList.remove('calling');
+            videoCallBtn?.classList.remove('calling');
+          }
+        }, 30000);
+      }, { passive: true });
+    }
+
+    if (videoCallBtn) {
+      videoCallBtn.addEventListener('click', () => {
+        if (isInitiatingCall) return;
+        isInitiatingCall = true;
+        audioCallBtn?.classList.add('calling');
+        videoCallBtn.classList.add('calling');
+        
+        socketInstance?.emit('initiate_call', {
+          roomId: roomData.roomId,
+          callType: 'video'
+        });
+        toast('Calling...', 'success');
+        
+        setTimeout(() => {
+          if (isInitiatingCall) {
+            isInitiatingCall = false;
+            audioCallBtn?.classList.remove('calling');
+            videoCallBtn.classList.remove('calling');
+          }
+        }, 30000);
+      }, { passive: true });
+    }
+
+    if (joinCallBtn) {
+    joinCallBtn.addEventListener('click', () => {
+        if (!activeCallInRoom) {
+            toast('No active call to join', 'warning');
+            return;
+        }
+        
+        // Add loading state
+        joinCallBtn.classList.add('join-btn-loading');
+        
+        console.log(`📞 Joining call ${activeCallInRoom.callId}`);
+        
+        socketInstance?.emit('join_existing_call', {
+            callId: activeCallInRoom.callId,
+            roomId: roomData.roomId
+        });
+        
+        toast('Joining call...', 'success');
+    }, { passive: true });
+}
+
+    if (acceptCallBtn) {
+      acceptCallBtn.addEventListener('click', () => {
+        if (pendingCallData) {
+          socketInstance?.emit('accept_call', {
+            callId: pendingCallData.callId,
+            roomId: roomData.roomId
+          });
+          incomingCallModal?.classList.add('hidden');
+          pendingCallData = null;
+        }
+      }, { passive: true });
+    }
+
+    if (declineCallBtn) {
+      declineCallBtn.addEventListener('click', () => {
+        if (pendingCallData) {
+          socketInstance?.emit('decline_call', {
+            callId: pendingCallData.callId,
+            roomId: roomData.roomId
+          });
+          incomingCallModal?.classList.add('hidden');
+          pendingCallData = null;
+        }
+      }, { passive: true });
+    }
+
+    // Message form
+    if (messageForm) {
+      messageForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const message = messageInput?.value.trim();
+        if (!message) return;
+
+        const messageData = {
+          roomId: roomData.roomId,
+          message: message
+        };
+
+        if (replyingTo) {
+          messageData.replyTo = {
+            messageId: replyingTo.messageId,
+            username: replyingTo.username,
+            message: replyingTo.message,
+            userId: replyingTo.userId
+          };
+          hideReplyPreview();
+        }
+
+        socketInstance?.emit('chat_message', messageData);
+        if (messageInput) messageInput.value = '';
+      });
+    }
+
+    // Leave button
+    leaveBtn?.addEventListener('click', () => {
+      socketInstance?.emit('leave_room');
+    }, { passive: true });
+
+    // Visibility change
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        console.log('📱 Page hidden');
+        saveChatState(roomData.roomId, messagesCache);
+      } else {
+        console.log('📱 Page visible');
+      }
+    });
+
+    // Before unload
+    window.addEventListener('beforeunload', (e) => {
+      if (navigatingToCall) {
+        console.log('🔒 Navigating to call - keeping socket');
+        saveChatState(roomData.roomId, messagesCache);
+        return;
+      }
+      
+      console.log('🚪 Closing - cleanup');
+      if (socketInstance) {
+        socketInstance.emit('leave_room');
+        socketInstance.disconnect();
+      }
+      if (timerInterval) clearInterval(timerInterval);
+    });
+  }
+
+  // ============================================
+  // INITIALIZATION
+  // ============================================
+  
+  try {
+    // Auth check
+    await _Auth.requireAuth();
+  } catch (err) {
+    console.error('❌ Auth failed:', err);
+    window.location.href = '/login.html';
+    return;
+  }
+
+  // Check if returning from call
+  const returningFromCall = sessionStorage.getItem('returningFromCall');
+  if (returningFromCall === 'true') {
+    console.log('🔄 Returning from call');
+    sessionStorage.removeItem('returningFromCall');
+  }
+
+  // Get room data
+  const roomDataStr = localStorage.getItem('currentRoom');
+  if (!roomDataStr) {
+    toast('No active room found', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 1500);
+    return;
+  }
+
+  try {
+    roomData = JSON.parse(roomDataStr);
+    if (!roomData.roomId) throw new Error('Invalid room data');
+  } catch (err) {
+    console.error('❌ Invalid room data:', err);
+    toast('Invalid room data', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 1500);
+    return;
+  }
+
+  // Get Firebase user
+  const firebaseUser = firebase.auth().currentUser;
+  if (!firebaseUser) {
+    window.location.href = '/login.html';
+    return;
+  }
+
+  // Get current user data
+  try {
+    const userData = await _API.get('/api/users/me');
+    currentUser = {
+      userId: userData._id,
+      username: userData.username,
+      pfpUrl: userData.pfpUrl
+    };
+  } catch (err) {
+    console.error('❌ Failed to get user data:', err);
+    toast('Failed to load user data', 'error');
+    setTimeout(() => window.location.href = '/login.html', 1500);
+    return;
+  }
+
+  // Set initial call button state AFTER roomData is loaded
+  setInitialCallButtonState();
+
+  // Load previous chat state
+  const previousState = loadChatState();
+  if (previousState?.roomId === roomData.roomId && previousState.messages) {
+    console.log('🔄 Restoring', previousState.messages.length, 'messages');
+    previousState.messages.forEach(msg => {
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      messagesList?.appendChild(msgEl);
+    });
+    messagesCache = previousState.messages;
+    if (messagesList) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+  }
+
+  // Render initial users
+  if (usersList && Array.isArray(roomData.users)) {
+    roomData.users.forEach(user => {
+      const userCard = document.createElement('div');
+      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+      
+      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
+      
+      const userInfo = document.createElement('div');
+      userInfo.className = 'flex-1 min-w-0';
+      
+      const nameSpan = document.createElement('div');
+      nameSpan.className = 'text-sm font-semibold truncate';
+      nameSpan.textContent = user.username || 'User';
+      
+      const statusSpan = document.createElement('div');
+      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
+      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
+      
+      userInfo.appendChild(nameSpan);
+      userInfo.appendChild(statusSpan);
+      
+      userCard.appendChild(pfpElement);
+      userCard.appendChild(userInfo);
+      usersList.appendChild(userCard);
+    });
+
+    setupUserCardClick();
+
+    if (onlineCount) {
+      onlineCount.textContent = `${roomData.users.length} Online`;
+    }
+  }
+
+  // Start timer
+  timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+
+  // Initialize socket
+  try {
+    const idToken = await firebaseUser.getIdToken();
+    const socketUrl = window.location.origin;
+    
+    socketInstance = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionAttempts: 10,
+      auth: { token: idToken },
+      timeout: 10000
+    });
+
+    setupSocketHandlers();
+  } catch (err) {
+    console.error('❌ Socket initialization failed:', err);
+    toast('Connection failed', 'error');
+  }
+
+  // Setup all event listeners
+  setupEventListeners();
+
+  // Setup back button handler
+  setupBackButtonHandler();
+
+  console.log('✅ Chat initialization complete');
+
+})();
+</script>
 </body>
 </html>
