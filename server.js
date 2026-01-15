@@ -29,34 +29,41 @@ const callMutexes = new Map();
 
 
 
-// Add this helper function at the top of server.js, after imports
 function getUserDataForParticipant(participantId, socketUsers, room) {
   console.log(`🔍 Resolving user data for ${participantId}`);
   
-  // Try active socket connections first
-  for (const [socketId, socketUser] of socketUsers.entries()) {
-    if (socketUser.userId === participantId) {
-      console.log(`✅ Found in active sockets: ${socketUser.username}`);
-      return socketUser;
-    }
-  }
-  
-  // Try room data
+  // CRITICAL FIX: Prioritize room data (most reliable source)
   if (room) {
     const roomUser = room.users.find(u => u.userId === participantId);
     if (roomUser) {
-      console.log(`✅ Found in room data: ${roomUser.username}`);
-      return roomUser;
+      console.log(`✅ Found in room data: ${roomUser.username} (${roomUser.userId})`);
+      return {
+        userId: roomUser.userId,
+        username: roomUser.username,
+        pfpUrl: roomUser.pfpUrl
+      };
+    } else {
+      console.warn(`⚠️ User ${participantId} NOT found in room users!`);
+    }
+  } else {
+    console.warn(`⚠️ No room provided for user lookup`);
+  }
+  
+  // Fallback to active socket connections
+  for (const [socketId, socketUser] of socketUsers.entries()) {
+    if (socketUser.userId === participantId) {
+      console.log(`✅ Found in active sockets: ${socketUser.username}`);
+      return {
+        userId: socketUser.userId,
+        username: socketUser.username,
+        pfpUrl: socketUser.pfpUrl
+      };
     }
   }
   
-  // Fallback
-  console.warn(`⚠️ No user data found for ${participantId}, using fallback`);
-  return {
-    userId: participantId,
-    username: 'User',
-    pfpUrl: 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200'
-  };
+  // CRITICAL: Do NOT use fallback - return null to signal error
+  console.error(`❌ CRITICAL: No user data found for ${participantId} anywhere!`);
+  return null;
 }
 
 
@@ -1071,13 +1078,33 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
   }
 });
 
-// Replace accept_call handler with better logging
 socket.on('accept_call', async ({ callId, roomId }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) {
       socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    // CRITICAL FIX: Validate room exists BEFORE proceeding
+    const room = matchmaking.getRoom(roomId);
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found when ${user.username} tried to accept call ${callId}`);
+      socket.emit('error', { 
+        message: 'Room not found or has expired',
+        code: 'ROOM_NOT_FOUND' 
+      });
+      return;
+    }
+
+    // CRITICAL FIX: Validate user is in the room
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} not in room ${roomId} when accepting call ${callId}`);
+      socket.emit('error', { 
+        message: 'You are not in this room',
+        code: 'NOT_IN_ROOM' 
+      });
       return;
     }
 
@@ -1097,13 +1124,37 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       if (call.participants.includes(user.userId)) {
         console.log(`⚠️ User ${user.username} already in call ${callId} - re-sending state`);
         
-        // Send current state to this user
-        const room = matchmaking.getRoom(roomId);
-        if (!room) {
-          socket.emit('error', { message: 'Room not found' });
+        // CRITICAL FIX: Build participant data with VALIDATED room data
+        const callUsers = call.participants.map(participantId => {
+          const roomUser = room.users.find(u => u.userId === participantId);
+          
+          if (!roomUser) {
+            console.error(`❌ CRITICAL: Participant ${participantId} not found in room ${roomId}!`);
+            return null;
+          }
+          
+          const mediaState = call.userMediaStates.get(participantId) || {
+            videoEnabled: call.callType === 'video',
+            audioEnabled: true
+          };
+          
+          return {
+            userId: participantId,
+            username: roomUser.username,
+            pfpUrl: roomUser.pfpUrl,
+            videoEnabled: mediaState.videoEnabled,
+            audioEnabled: mediaState.audioEnabled
+          };
+        }).filter(u => u !== null); // Remove any null entries
+
+        if (callUsers.length !== call.participants.length) {
+          console.error(`❌ CRITICAL: Participant count mismatch! Expected ${call.participants.length}, got ${callUsers.length}`);
+          socket.emit('error', { 
+            message: 'Call state inconsistent. Please try again.',
+            code: 'STATE_MISMATCH'
+          });
           return;
         }
-
 
         socket.emit('call_accepted', {
           callId,
@@ -1138,27 +1189,43 @@ socket.on('accept_call', async ({ callId, roomId }) => {
 
       console.log(`✅ User ${user.username} accepted call ${callId} - now ${call.status.toUpperCase()}`);
 
-      const room = matchmaking.getRoom(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
+      // CRITICAL FIX: Build validated participant list from ROOM data
+      const callUsers = call.participants.map(participantId => {
+        const roomUser = room.users.find(u => u.userId === participantId);
+        
+        if (!roomUser) {
+          console.error(`❌ CRITICAL: Participant ${participantId} not found in room ${roomId}!`);
+          return null;
+        }
+        
+        const mediaState = call.userMediaStates.get(participantId) || {
+          videoEnabled: call.callType === 'video',
+          audioEnabled: true
+        };
+        
+        return {
+          userId: participantId,
+          username: roomUser.username,
+          pfpUrl: roomUser.pfpUrl,
+          videoEnabled: mediaState.videoEnabled,
+          audioEnabled: mediaState.audioEnabled
+        };
+      }).filter(u => u !== null);
+
+      if (callUsers.length !== call.participants.length) {
+        console.error(`❌ CRITICAL: Participant validation failed! Expected ${call.participants.length}, got ${callUsers.length}`);
+        console.error(`   Room users: ${room.users.map(u => u.userId).join(', ')}`);
+        console.error(`   Call participants: ${call.participants.join(', ')}`);
+        socket.emit('error', { 
+          message: 'Unable to resolve all participants. Please try again.',
+          code: 'PARTICIPANT_RESOLUTION_FAILED'
+        });
+        // Rollback the participant addition
+        call.participants = call.participants.filter(p => p !== user.userId);
+        userCalls.delete(user.userId);
+        call.userMediaStates.delete(user.userId);
         return;
       }
-const callUsers = call.participants.map(participantId => {
-  const userData = getUserDataForParticipant(participantId, socketUsers, room);
-  
-  const mediaState = call.userMediaStates.get(participantId) || {
-    videoEnabled: call.callType === 'video',
-    audioEnabled: true
-  };
-  
-  return {
-    userId: participantId,
-    username: userData.username,
-    pfpUrl: userData.pfpUrl,
-    videoEnabled: mediaState.videoEnabled,
-    audioEnabled: mediaState.audioEnabled
-  };
-});
 
       console.log(`📊 Broadcasting to ${callUsers.length} participants:`);
       callUsers.forEach((u, idx) => {
@@ -1267,7 +1334,29 @@ socket.on('join_call', async ({ callId }) => {
       const validation = validateCallState(call, 'join_call');
       if (!validation.valid) {
         socket.emit('error', { message: validation.error });
-        joinCallDebounce.delete(user.userId); // Clear on error
+        joinCallDebounce.delete(user.userId);
+        return;
+      }
+
+      // CRITICAL FIX: Validate room exists and user is in it
+      const room = matchmaking.getRoom(call.roomId);
+      if (!room) {
+        console.error(`❌ Room ${call.roomId} not found when ${user.username} tried to join call ${callId}`);
+        socket.emit('error', { 
+          message: 'Room not found or has expired',
+          code: 'ROOM_NOT_FOUND'
+        });
+        joinCallDebounce.delete(user.userId);
+        return;
+      }
+
+      if (!room.hasUser(user.userId)) {
+        console.error(`❌ User ${user.username} not in room ${call.roomId}`);
+        socket.emit('error', { 
+          message: 'You are not in this room',
+          code: 'NOT_IN_ROOM'
+        });
+        joinCallDebounce.delete(user.userId);
         return;
       }
 
@@ -1275,7 +1364,10 @@ socket.on('join_call', async ({ callId }) => {
       if (!call.participants.includes(user.userId)) {
         console.error(`❌ User ${user.username} not authorized for call ${callId}`);
         console.error(`   Participants: [${call.participants.join(', ')}]`);
-        socket.emit('error', { message: 'You are not in this call' });
+        socket.emit('error', { 
+          message: 'You are not in this call',
+          code: 'NOT_IN_CALL'
+        });
         joinCallDebounce.delete(user.userId);
         return;
       }
@@ -1301,8 +1393,14 @@ socket.on('join_call', async ({ callId }) => {
       socket.join(`call-${callId}`);
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
+      // CRITICAL FIX: Build participant data from ROOM (not socketUsers)
       const participantsWithMediaStates = call.participants.map(participantId => {
-        const userData = getUserDataForParticipant(participantId, socketUsers, matchmaking.getRoom(call.roomId));
+        const roomUser = room.users.find(u => u.userId === participantId);
+        
+        if (!roomUser) {
+          console.error(`❌ CRITICAL: Participant ${participantId} not in room ${call.roomId}!`);
+          return null;
+        }
         
         const mediaState = call.userMediaStates.get(participantId) || {
           videoEnabled: call.callType === 'video',
@@ -1310,15 +1408,29 @@ socket.on('join_call', async ({ callId }) => {
         };
         
         return {
-          userId: userData.userId,
-          username: userData.username,
-          pfpUrl: userData.pfpUrl,
+          userId: roomUser.userId,
+          username: roomUser.username,
+          pfpUrl: roomUser.pfpUrl,
           videoEnabled: mediaState.videoEnabled,
           audioEnabled: mediaState.audioEnabled
         };
-      });
+      }).filter(p => p !== null);
 
-      console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username}`);
+      // CRITICAL: Validate all participants were resolved
+      if (participantsWithMediaStates.length !== call.participants.length) {
+        console.error(`❌ CRITICAL: Failed to resolve all participants!`);
+        console.error(`   Expected: ${call.participants.length}, Got: ${participantsWithMediaStates.length}`);
+        console.error(`   Room users: ${room.users.map(u => `${u.username}(${u.userId})`).join(', ')}`);
+        console.error(`   Call participants: ${call.participants.join(', ')}`);
+        socket.emit('error', { 
+          message: 'Unable to load all participants. Please refresh and try again.',
+          code: 'PARTICIPANT_RESOLUTION_FAILED'
+        });
+        joinCallDebounce.delete(user.userId);
+        return;
+      }
+
+      console.log(`📊 Sending ${participantsWithMediaStates.length} VALIDATED participants to ${user.username}`);
       participantsWithMediaStates.forEach((p, idx) => {
         console.log(`   [${idx}] ${p.username} (${p.userId}): video=${p.videoEnabled}, audio=${p.audioEnabled}`);
       });
@@ -1372,21 +1484,25 @@ socket.on('leave_call', ({ callId }) => {
     
     if (!call) {
       console.warn(`⚠️ Call ${callId} not found when ${user.username} tried to leave`);
+      // Still let user leave the room socket
+      socket.leave(`call-${callId}`);
       return;
     }
 
     // CRITICAL FIX: Check if user is actually in the call before removing
     if (!call.participants.includes(user.userId)) {
       console.warn(`⚠️ User ${user.username} not in call ${callId} participants, ignoring leave`);
+      socket.leave(`call-${callId}`);
       return;
     }
 
+    // Remove user from call
     call.participants = call.participants.filter(p => p !== user.userId);
     userCalls.delete(user.userId);
     call.userMediaStates.delete(user.userId);
 
     console.log(`📵 User ${user.username} left call ${callId}`);
-    console.log(`📊 Remaining participants in call ${callId}:`, call.participants);
+    console.log(`📊 Remaining participants: [${call.participants.join(', ')}] (${call.participants.length} total)`);
 
     socket.leave(`call-${callId}`);
 
@@ -1395,8 +1511,9 @@ socket.on('leave_call', ({ callId }) => {
       userId: user.userId,
       username: user.username
     });
+    console.log(`📢 Notified others in call-${callId} that ${user.username} left`);
 
-    // Broadcast updated call state to the room (for join button visibility)
+    // CRITICAL FIX: Get room and broadcast call state
     const room = matchmaking.getRoom(call.roomId);
     if (room) {
       io.to(call.roomId).emit('call_state_update', {
@@ -1405,36 +1522,45 @@ socket.on('leave_call', ({ callId }) => {
         participantCount: call.participants.length
       });
       console.log(`📢 Broadcasted call_state_update to room ${call.roomId}: active=${call.participants.length > 0}, count=${call.participants.length}`);
+    } else {
+      console.warn(`⚠️ Room ${call.roomId} not found when broadcasting call state update`);
     }
 
-    // Only delete call if NO participants remain
+    // CRITICAL FIX: Only delete call after grace period if truly empty
     if (call.participants.length === 0) {
-      console.log(`🗑️ Call ${callId} ended (no participants) - scheduling cleanup`);
+      console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
       
-      // CRITICAL FIX: Delay cleanup to allow for rapid rejoin
       setTimeout(() => {
         const currentCall = activeCalls.get(callId);
-        if (currentCall && currentCall.participants.length === 0) {
+        
+        if (!currentCall) {
+          console.log(`ℹ️ Call ${callId} already cleaned up`);
+          return;
+        }
+        
+        if (currentCall.participants.length === 0) {
+          console.log(`🗑️ Call ${callId} still empty after grace period - cleaning up`);
           activeCalls.delete(callId);
-          console.log(`🗑️ Call ${callId} fully cleaned up after grace period`);
           
-          // Notify room that call has ended
+          // Notify room that call has fully ended
           if (room) {
-            io.to(call.roomId).emit('call_ended_notification', {
+            io.to(currentCall.roomId).emit('call_ended_notification', {
               callId: callId
             });
-            console.log(`📢 Call ${callId} completely ended, notified room`);
+            console.log(`📢 Call ${callId} fully ended, notified room ${currentCall.roomId}`);
           }
         } else {
-          console.log(`✅ Call ${callId} has participants again, cleanup cancelled`);
+          console.log(`✅ Call ${callId} has ${currentCall.participants.length} participant(s) again - cleanup cancelled`);
         }
-      }, 3000); // 3 second grace period
+      }, 5000); // 5 second grace period
+      
     } else {
       console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
     }
 
   } catch (error) {
     console.error('❌ Leave call error:', error);
+    socket.emit('error', { message: 'Failed to leave call properly' });
   }
 });
 
