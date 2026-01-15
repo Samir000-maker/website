@@ -45,6 +45,7 @@ class Room {
     this.warningTimer = null;
     this.isExpired = false;
     this.io = null; // Socket.IO instance (set externally)
+    this.hasActiveCall = false; // CRITICAL: Track if room has active call
     
     // Setup timers
     this.setupLifecycleTimers();
@@ -79,9 +80,45 @@ class Room {
   }
 
   /**
+   * CRITICAL: Mark room as having active call
+   */
+  setActiveCall(isActive) {
+    this.hasActiveCall = isActive;
+    console.log(`📞 Room ${this.id} active call status: ${isActive}`);
+  }
+
+  /**
+   * CRITICAL: Extend room expiry (for active calls)
+   */
+  extendExpiry(additionalMinutes) {
+    const extension = additionalMinutes * 60 * 1000;
+    this.expiresAt = Date.now() + extension;
+    
+    console.log(`⏰ Extended room ${this.id} expiry by ${additionalMinutes} minutes`);
+    console.log(`   New expiry: ${new Date(this.expiresAt).toLocaleTimeString()}`);
+    
+    // Clear existing timers
+    if (this.cleanupTimer) {
+      clearTimeout(this.cleanupTimer);
+    }
+    if (this.warningTimer) {
+      clearTimeout(this.warningTimer);
+    }
+    
+    // Setup new timers
+    this.setupLifecycleTimers();
+  }
+
+  /**
    * Emit warning to room users
    */
   emitWarning() {
+    // CRITICAL: Don't warn if call is active
+    if (this.hasActiveCall) {
+      console.log(`⏭️ Skipping warning for room ${this.id} - active call in progress`);
+      return;
+    }
+    
     if (this.io && !this.isExpired) {
       console.log(`⚠️ Room ${this.id} expiring in 1 minute`);
       
@@ -97,6 +134,14 @@ class Room {
    */
   expire() {
     if (this.isExpired) return;
+    
+    // CRITICAL: Don't expire if call is active
+    if (this.hasActiveCall) {
+      console.log(`⏭️ Postponing expiry for room ${this.id} - active call in progress`);
+      // Extend by 15 more minutes
+      this.extendExpiry(15);
+      return;
+    }
     
     this.isExpired = true;
     
@@ -296,8 +341,9 @@ export function getRoomIdByUser(userId) {
 
 /**
  * Remove user from room
+ * Note: Does NOT destroy room if there are active calls
  */
-export function leaveRoom(userId) {
+export function leaveRoom(userId, hasActiveCall = false) {
   const roomId = userRoomMap.get(userId);
   if (!roomId) {
     return { roomId: null, remainingUsers: 0, destroyed: false };
@@ -315,7 +361,13 @@ export function leaveRoom(userId) {
   
   console.log(`👋 User ${userId} left room ${roomId}. Remaining: ${remainingUsers}`);
 
-  // Destroy room if only 1 or 0 users remain
+  // CRITICAL FIX: Do NOT destroy room if there's an active call
+  if (hasActiveCall) {
+    console.log(`🛡️ Room ${roomId} has active call - PRESERVING room despite ${remainingUsers} users`);
+    return { roomId, remainingUsers, destroyed: false };
+  }
+
+  // Destroy room if only 1 or 0 users remain (and no active call)
   if (remainingUsers <= 1) {
     destroyRoom(roomId, 'Too few users');
     return { roomId, remainingUsers, destroyed: true };
