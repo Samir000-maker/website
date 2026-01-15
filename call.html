@@ -189,7 +189,7 @@
 
 let videoStateChangeTimeout = null;
 let isTogglingVideo = false;
-
+let isJoiningCall = false;
 
 let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
 let makingOffer = new Map();
@@ -1321,7 +1321,15 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
 
 socketInstance.on('authenticated', async () => {
   console.log('✅ Authenticated');
+  
+  // CRITICAL FIX: Prevent duplicate join attempts
+  if (isJoiningCall) {
+    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
+    return;
+  }
+  
   if (!hasJoinedCall) {
+    isJoiningCall = true;
     hasJoinedCall = true;
     
     try {
@@ -1334,6 +1342,8 @@ socketInstance.on('authenticated', async () => {
       setTimeout(() => {
         window.location.href = '/chat.html';
       }, 2000);
+    } finally {
+      isJoiningCall = false;
     }
   }
 });
@@ -1485,19 +1495,26 @@ socketInstance.on('call_joined', async (data) => {
   console.log('=== INIT COMPLETE ===');
 });
           
-// Replace user_joined_call handler
+// Replace the entire user_joined_call handler
 socketInstance.on('user_joined_call', (data) => {
   const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
   const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
   
-  console.log(`👋 User joined: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
+  console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
+  
+  // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
+  if (renderedParticipants.has(data.user.userId)) {
+    console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
+    return;
+  }
   
   const grid = document.getElementById('participantGrid');
   const existingTile = document.getElementById(`participant-${data.user.userId}`);
   
   if (existingTile) {
-    console.warn(`⚠️ Tile already exists for ${data.user.username}!`);
-    return;
+    console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
+    existingTile.remove();
+    renderedParticipants.delete(data.user.userId);
   }
   
   console.log(`➕ Adding NEW participant ${data.user.username}`);
@@ -1521,15 +1538,17 @@ socketInstance.on('user_joined_call', (data) => {
           console.error('❌ Failed to setup local video for self:', err);
         });
       } else {
-        // For remote users, initiate connection
+        // For remote users, initiate connection with delay to avoid race
         const shouldInitiateOffer = currentUser.userId < data.user.userId;
         if (shouldInitiateOffer) {
           setTimeout(() => {
             console.log(`📤 Creating offer to late joiner ${data.user.username}`);
             createOffer(data.user.userId);
-          }, 1500);
+          }, 2000); // Increased delay to 2s
         }
       }
+      
+      console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
     }
   }
 });
