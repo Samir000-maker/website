@@ -1897,64 +1897,110 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
     }
   });
 
-  socket.on('disconnect', () => {
-    const user = socketUsers.get(socket.id);
-    
-    if (user) {
-      console.log(`🔌 User ${user.username} disconnected`);
+socket.on('disconnect', () => {
+  const user = socketUsers.get(socket.id);
+  
+  if (user) {
+    console.log(`🔌 User ${user.username} disconnected`);
 
-      // Handle call disconnection with grace period
-      const callId = userCalls.get(user.userId);
-      if (callId) {
-        const call = activeCalls.get(callId);
-        if (call && call.status === 'active') {
-          console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
+    // Handle call disconnection with grace period
+    const callId = userCalls.get(user.userId);
+    if (callId) {
+      const call = activeCalls.get(callId);
+      if (call && call.status === 'active') {
+        console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
+        
+        const graceTimeout = setTimeout(() => {
+          console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
           
-          const graceTimeout = setTimeout(() => {
-            console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
+          const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+          
+          if (!reconnected) {
+            console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
             
-            const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
-            
-            if (!reconnected) {
-              console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
+            call.participants = call.participants.filter(p => p !== user.userId);
+            userCalls.delete(user.userId);
+            call.userMediaStates.delete(user.userId);
+
+            io.to(`call-${callId}`).emit('user_left_call', {
+              userId: user.userId,
+              username: user.username
+            });
+
+            // Only clean up call if empty
+            if (call.participants.length === 0) {
+              console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
               
-              call.participants = call.participants.filter(p => p !== user.userId);
-              userCalls.delete(user.userId);
-
-              io.to(`call-${callId}`).emit('user_left_call', {
-                userId: user.userId,
-                username: user.username
-              });
-
-              if (call.participants.length === 0) {
-                activeCalls.delete(callId);
-                callGracePeriod.delete(callId);
-                console.log(`🗑️ Call ${callId} ended (all participants left)`);
+              // Mark room as no longer having active call
+              const room = matchmaking.getRoom(call.roomId);
+              if (room) {
+                room.setActiveCall(false);
               }
-            } else {
-              console.log(`✅ User ${user.username} rejoined call`);
+              
+              setTimeout(() => {
+                const currentCall = activeCalls.get(callId);
+                if (currentCall && currentCall.participants.length === 0) {
+                  activeCalls.delete(callId);
+                  console.log(`🗑️ Call ${callId} fully cleaned up`);
+                  
+                  if (room) {
+                    io.to(call.roomId).emit('call_ended_notification', {
+                      callId: callId
+                    });
+                    console.log(`📢 Call ${callId} ended, room ${call.roomId} still active`);
+                  }
+                }
+              }, 5000);
             }
-          }, 10000);
-          
-          callGracePeriod.set(callId, graceTimeout);
-        }
+          } else {
+            console.log(`✅ User ${user.username} rejoined call`);
+          }
+        }, 10000); // 10 second grace period
+        
+        callGracePeriod.set(callId, graceTimeout);
       }
+    }
+    
+    // Matchmaking cleanup
+    matchmaking.cancelMatchmaking(user.userId);
+    
+    // CRITICAL FIX: Room cleanup - check for active calls
+    const roomId = matchmaking.getRoomIdByUser(user.userId);
+    
+    if (roomId) {
+      const room = matchmaking.getRoom(roomId);
       
-      // Matchmaking cleanup
-      matchmaking.cancelMatchmaking(user.userId);
+      // Check if there's an active call in this room
+      let hasActiveCall = false;
+      activeCalls.forEach((call) => {
+        if (call.roomId === roomId && call.participants.length > 0) {
+          hasActiveCall = true;
+          console.log(`🛡️ Room ${roomId} has active call ${call.callId}`);
+        }
+      });
       
-      // Room cleanup with grace period
-      const roomId = matchmaking.getRoomIdByUser(user.userId);
-      
-      if (roomId) {
-        console.log(`⏳ User ${user.username} disconnected but still in room ${roomId} (grace period)`);
+      if (hasActiveCall) {
+        console.log(`🛡️ User ${user.username} disconnected - room ${roomId} PRESERVED (active call)`);
+        // Do NOT remove user or start destruction
+      } else {
+        console.log(`⏳ User ${user.username} disconnected - grace period for room ${roomId}`);
         
         setTimeout(() => {
           const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
           
           if (stillDisconnected) {
             console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
-            const result = matchmaking.leaveRoom(user.userId);
+            
+            // Check AGAIN for active calls before destroying
+            let stillHasActiveCall = false;
+            activeCalls.forEach((call) => {
+              if (call.roomId === roomId && call.participants.length > 0) {
+                stillHasActiveCall = true;
+              }
+            });
+            
+            // Pass the hasActiveCall flag to leaveRoom
+            const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
             
             if (result.roomId && !result.destroyed) {
               io.to(result.roomId).emit('user_left', {
@@ -1972,14 +2018,15 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
           } else {
             console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
           }
-        }, 5000);
+        }, 5000); // 5 second grace
       }
-
-      socketUsers.delete(socket.id);
-    } else {
-      console.log('🔌 Unauthenticated client disconnected:', socket.id);
     }
-  });
+
+    socketUsers.delete(socket.id);
+  } else {
+    console.log('🔌 Unauthenticated client disconnected:', socket.id);
+  }
+});
 });
 
 // ============================================
