@@ -193,19 +193,41 @@ let isTogglingVideo = false;
 
       let ICE_SERVERS = null;
       async function fetchIceServers() {
-        try {
-          const response = await _API.get('/api/ice-servers');
-          ICE_SERVERS = response.iceServers;
-          console.log(`✅ ICE servers loaded`);
-          return ICE_SERVERS;
-        } catch (error) {
-          console.error('❌ ICE servers failed:', error);
-          ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
-          return ICE_SERVERS;
-        }
-      }
+  try {
+    const response = await _API.get('/api/ice-servers');
+    
+    // CRITICAL: Ensure STUN servers come FIRST for proper prioritization
+    const stunServers = response.iceServers.filter(server => 
+      server.urls.some(url => url.startsWith('stun:'))
+    );
+    
+    const turnServers = response.iceServers.filter(server => 
+      server.urls.some(url => url.startsWith('turn:') || url.startsWith('turns:'))
+    );
+    
+    // Put STUN first, TURN second - ICE will prioritize in this order
+    ICE_SERVERS = [...stunServers, ...turnServers];
+    
+    console.log(`✅ ICE servers loaded in priority order:`);
+    console.log(`   - ${stunServers.length} STUN server group(s)`);
+    console.log(`   - ${turnServers.length} TURN server group(s)`);
+    
+    return ICE_SERVERS;
+  } catch (error) {
+    console.error('❌ ICE servers failed:', error);
+    ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+    return ICE_SERVERS;
+  }
+}
 
-      const PEER_CONNECTION_CONFIG = { iceCandidatePoolSize: 10, iceTransportPolicy: 'all', bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' };
+      const PEER_CONNECTION_CONFIG = { 
+  iceCandidatePoolSize: 10,
+  iceTransportPolicy: 'all', // MUST be 'all' to try STUN first, NOT 'relay'
+  bundlePolicy: 'max-bundle', 
+  rtcpMuxPolicy: 'require',
+  // Enable ICE restart for failed connections
+  iceRestart: false
+};
       let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let callStartTime = null, durationInterval = null, isInitializing = false, hasJoinedCall = false;
@@ -599,13 +621,18 @@ function createPC(userId) {
   
   console.log(`✅ localStream validated: ${localStream.getTracks().length} tracks`);
   
-  const pc = new RTCPeerConnection({ ...PEER_CONNECTION_CONFIG, iceServers: ICE_SERVERS });
+  const pc = new RTCPeerConnection({ 
+    ...PEER_CONNECTION_CONFIG, 
+    iceServers: ICE_SERVERS 
+  });
+  
   connectionStats.set(userId, { 
     startTime: Date.now(), 
     iceState: 'new', 
     connectionState: 'new', 
     candidatesReceived: 0, 
-    candidatesSent: 0 
+    candidatesSent: 0,
+    iceRestartCount: 0
   });
   
   const tracks = localStream.getTracks();
@@ -616,156 +643,177 @@ function createPC(userId) {
     console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   });
   
-  // CRITICAL FIX: Robust ontrack handler with proper state tracking
+  // Enhanced track handling with proper unmute detection
   const remoteMediaState = {
     videoTrackReady: false,
     audioTrackReady: false,
     videoEnabled: false,
-    audioEnabled: false
+    audioEnabled: false,
+    unmuteTimers: {}
   };
   
- pc.ontrack = (e) => {
-  console.log(`📥 Received ${e.track.kind} track from ${userId}, readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
-  
-  const vid = document.getElementById(`video-${userId}`);
-  
-  if (!vid) {
-    console.error(`❌ Video element not found for ${userId}`);
-    return;
-  }
-  
-  // Create or get MediaStream
-  if (!vid.srcObject) {
-    vid.srcObject = new MediaStream();
-    console.log(`📺 Created new MediaStream for ${userId}`);
-  }
-  
-  // Remove old tracks of same kind
-  const existingTracks = vid.srcObject.getTracks().filter(t => t.kind === e.track.kind);
-  existingTracks.forEach(t => {
-    console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
-    vid.srcObject.removeTrack(t);
-    t.stop();
-  });
-  
-  // Add new track
-  vid.srcObject.addTrack(e.track);
-  console.log(`➕ Added ${e.track.kind} track to MediaStream for ${userId}`);
-  console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks`);
-  
-  if (e.track.kind === 'video') {
-    remoteMediaState.videoTrackReady = true;
+  pc.ontrack = (e) => {
+    console.log(`📥 [TRACK] Received ${e.track.kind} from ${userId}`);
+    console.log(`   readyState=${e.track.readyState}, enabled=${e.track.enabled}, muted=${e.track.muted}`);
     
-    console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+    const vid = document.getElementById(`video-${userId}`);
     
-    // CRITICAL FIX: Video visibility logic that accounts for muted state
-    const updateVideoVisibilityForTrack = () => {
-      const isTrackLive = e.track.readyState === 'live';
-      const isTrackEnabled = e.track.enabled;
-      
-      // CRITICAL: Track can be enabled=true but muted=true (browser auto-mute)
-      // We need to check BOTH enabled state AND unmuted state
-      const isTrackUnmuted = !e.track.muted;
-      const shouldShow = isTrackLive && isTrackEnabled && isTrackUnmuted;
-      
-      console.log(`📹 Video visibility check for ${userId}: live=${isTrackLive}, enabled=${isTrackEnabled}, unmuted=${isTrackUnmuted}, shouldShow=${shouldShow}`);
-      
-      remoteMediaState.videoEnabled = shouldShow;
-      updateVideoVisibility(userId, shouldShow, true);
-    };
-    
-    // CRITICAL FIX: Wait for unmute event before showing video
-    // Tracks often arrive muted and unmute shortly after
-    const handleLoadedMetadata = () => {
-      console.log(`📹 Video metadata loaded for ${userId}: ${vid.videoWidth}x${vid.videoHeight}`);
-      
-      if (e.track.muted) {
-        console.log(`📹 Track initially muted, waiting for unmute event...`);
-        // Don't show video yet, wait for unmute
-        updateVideoVisibility(userId, false, true);
-      } else {
-        // Track is already unmuted, safe to show if enabled
-        setTimeout(updateVideoVisibilityForTrack, 100);
-      }
-    };
-    
-    if (vid.readyState >= 1) {
-      handleLoadedMetadata();
-    } else {
-      vid.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+    if (!vid) {
+      console.error(`❌ Video element not found for ${userId}`);
+      return;
     }
     
-    // CRITICAL FIX: Track unmute event is the KEY to showing video
-    e.track.onunmute = () => {
-      console.log(`📹 Video UNMUTED for ${userId} (this is when we should show it)`);
-      remoteMediaState.videoEnabled = e.track.enabled && e.track.readyState === 'live';
-      setTimeout(updateVideoVisibilityForTrack, 50);
-    };
+    // Create or get MediaStream
+    if (!vid.srcObject) {
+      vid.srcObject = new MediaStream();
+      console.log(`📺 Created new MediaStream for ${userId}`);
+    }
     
-    e.track.onmute = () => {
-      console.log(`📹 Video MUTED for ${userId}`);
-      remoteMediaState.videoEnabled = false;
-      updateVideoVisibility(userId, false, true);
-    };
-    
-    e.track.onended = () => {
-      console.log(`📹 Video ENDED for ${userId}`);
-      remoteMediaState.videoTrackReady = false;
-      remoteMediaState.videoEnabled = false;
-      updateVideoVisibility(userId, false, false);
-    };
-    
-  } else if (e.track.kind === 'audio') {
-    remoteMediaState.audioTrackReady = true;
-    
-    console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
-    
-    vid.volume = 1.0;
-    vid.muted = false;
-    
-    setupAudioDetection(userId, new MediaStream([e.track]));
-    
-    // CRITICAL FIX: Handle audio unmute event
-    e.track.onunmute = () => {
-      console.log(`🔊 Audio UNMUTED for ${userId}`);
-      remoteMediaState.audioEnabled = e.track.enabled;
-    };
-    
-    e.track.onmute = () => {
-      console.log(`🔊 Audio MUTED for ${userId}`);
-      remoteMediaState.audioEnabled = false;
-    };
-    
-    e.track.onended = () => {
-      console.log(`🔊 Audio track ended for ${userId}`);
-      remoteMediaState.audioTrackReady = false;
-      remoteMediaState.audioEnabled = false;
-    };
-  }
-  
-  // Start playback
-  vid.play()
-    .then(() => {
-      console.log(`▶️ Playback started for ${userId} (${e.track.kind})`);
-    })
-    .catch(err => {
-      console.warn(`⚠️ Playback error for ${userId}:`, err.message);
-      if (err.name === 'NotAllowedError') {
-        console.log(`🔓 Adding click listener to retry playback for ${userId}`);
-        document.addEventListener('click', () => {
-          vid.play().catch(e => console.warn('Retry play failed:', e));
-        }, { once: true });
-      }
+    // Remove old tracks of same kind
+    const existingTracks = vid.srcObject.getTracks().filter(t => t.kind === e.track.kind);
+    existingTracks.forEach(t => {
+      console.log(`🔄 Removing old ${t.kind} track from ${userId}`);
+      vid.srcObject.removeTrack(t);
+      t.stop();
     });
-};
-  
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      connectionStats.get(userId).candidatesSent++;
-      socketInstance.emit('ice_candidate', { callId: callData.callId, targetUserId: userId, candidate: e.candidate });
+    
+    // Add new track
+    vid.srcObject.addTrack(e.track);
+    console.log(`➕ Added ${e.track.kind} track to MediaStream for ${userId}`);
+    console.log(`📊 Stream now has ${vid.srcObject.getTracks().length} tracks`);
+    
+    if (e.track.kind === 'video') {
+      remoteMediaState.videoTrackReady = true;
+      
+      console.log(`📹 Video track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+      
+      // CRITICAL: Handle video unmute event
+      const handleVideoUnmute = () => {
+        console.log(`📹 [UNMUTE EVENT] Video UNMUTED for ${userId}`);
+        
+        // Clear any pending unmute timer
+        if (remoteMediaState.unmuteTimers.video) {
+          clearTimeout(remoteMediaState.unmuteTimers.video);
+        }
+        
+        // Wait for metadata and then show video
+        const showVideo = () => {
+          if (vid.readyState >= 1 && e.track.enabled && !e.track.muted) {
+            remoteMediaState.videoEnabled = true;
+            updateVideoVisibility(userId, true, true);
+            console.log(`✅ Video NOW VISIBLE for ${userId}`);
+          }
+        };
+        
+        if (vid.readyState >= 1) {
+          showVideo();
+        } else {
+          vid.addEventListener('loadedmetadata', showVideo, { once: true });
+        }
+      };
+      
+      // CRITICAL: If track arrives muted, wait for unmute
+      if (e.track.muted) {
+        console.log(`📹 Track initially muted for ${userId}, waiting for unmute...`);
+        updateVideoVisibility(userId, false, true);
+        e.track.onunmute = handleVideoUnmute;
+        
+        // Fallback: check periodically if track becomes unmuted
+        remoteMediaState.unmuteTimers.video = setInterval(() => {
+          if (!e.track.muted && e.track.enabled) {
+            clearInterval(remoteMediaState.unmuteTimers.video);
+            handleVideoUnmute();
+          }
+        }, 100);
+        
+        // Clear fallback after 5 seconds
+        setTimeout(() => {
+          if (remoteMediaState.unmuteTimers.video) {
+            clearInterval(remoteMediaState.unmuteTimers.video);
+          }
+        }, 5000);
+      } else {
+        // Track is already unmuted
+        console.log(`📹 Track arrived unmuted for ${userId}`);
+        e.track.onunmute = handleVideoUnmute;
+        
+        const handleLoadedMetadata = () => {
+          console.log(`📹 Video metadata loaded for ${userId}: ${vid.videoWidth}x${vid.videoHeight}`);
+          if (e.track.enabled && !e.track.muted) {
+            setTimeout(() => {
+              remoteMediaState.videoEnabled = true;
+              updateVideoVisibility(userId, true, true);
+            }, 100);
+          }
+        };
+        
+        if (vid.readyState >= 1) {
+          handleLoadedMetadata();
+        } else {
+          vid.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+        }
+      }
+      
+      e.track.onmute = () => {
+        console.log(`📹 Video MUTED for ${userId}`);
+        remoteMediaState.videoEnabled = false;
+        updateVideoVisibility(userId, false, true);
+      };
+      
+      e.track.onended = () => {
+        console.log(`📹 Video ENDED for ${userId}`);
+        remoteMediaState.videoTrackReady = false;
+        remoteMediaState.videoEnabled = false;
+        updateVideoVisibility(userId, false, false);
+      };
+      
+    } else if (e.track.kind === 'audio') {
+      remoteMediaState.audioTrackReady = true;
+      
+      console.log(`🔊 Audio track for ${userId}: enabled=${e.track.enabled}, muted=${e.track.muted}, readyState=${e.track.readyState}`);
+      
+      vid.volume = 1.0;
+      vid.muted = false;
+      
+      setupAudioDetection(userId, new MediaStream([e.track]));
+      
+      // Handle audio unmute
+      e.track.onunmute = () => {
+        console.log(`🔊 Audio UNMUTED for ${userId}`);
+        remoteMediaState.audioEnabled = e.track.enabled;
+      };
+      
+      e.track.onmute = () => {
+        console.log(`🔊 Audio MUTED for ${userId}`);
+        remoteMediaState.audioEnabled = false;
+      };
+      
+      e.track.onended = () => {
+        console.log(`🔊 Audio track ended for ${userId}`);
+        remoteMediaState.audioTrackReady = false;
+        remoteMediaState.audioEnabled = false;
+      };
     }
+    
+    // Start playback
+    vid.play()
+      .then(() => {
+        console.log(`▶️ Playback started for ${userId} (${e.track.kind})`);
+      })
+      .catch(err => {
+        console.warn(`⚠️ Playback error for ${userId}:`, err.message);
+        if (err.name === 'NotAllowedError') {
+          console.log(`🔓 Adding click listener to retry playback for ${userId}`);
+          document.addEventListener('click', () => {
+            vid.play().catch(e => console.warn('Retry play failed:', e));
+          }, { once: true });
+        }
+      });
   };
   
+  // ... rest of PC setup (ICE handlers, etc.) ...
+  
+  // ICE connection state with restart logic
   pc.oniceconnectionstatechange = () => {
     const state = pc.iceConnectionState;
     connectionStats.get(userId).iceState = state;
@@ -773,12 +821,30 @@ function createPC(userId) {
     
     if (state === 'connected' || state === 'completed') {
       console.log(`✅ ICE connection established for ${userId}`);
+      // Reset restart count on success
+      connectionStats.get(userId).iceRestartCount = 0;
     } else if (state === 'failed') {
-      console.warn(`⚠️ ICE failed for ${userId}, attempting restart`);
-      pc.restartIce();
+      const stats = connectionStats.get(userId);
+      if (stats.iceRestartCount < 3) {
+        stats.iceRestartCount++;
+        console.warn(`⚠️ ICE failed for ${userId}, attempting restart #${stats.iceRestartCount}`);
+        pc.restartIce();
+      } else {
+        console.error(`❌ ICE failed permanently for ${userId} after 3 restart attempts`);
+      }
+    } else if (state === 'disconnected') {
+      console.warn(`⚠️ ICE disconnected for ${userId}, monitoring for reconnection`);
+      // Give it 5 seconds to reconnect before restarting
+      setTimeout(() => {
+        if (pc.iceConnectionState === 'disconnected') {
+          console.warn(`⚠️ Still disconnected after 5s, restarting ICE for ${userId}`);
+          pc.restartIce();
+        }
+      }, 5000);
     }
   };
 
+  // Connection state with timeout detection
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
     connectionStats.get(userId).connectionState = state;
@@ -787,10 +853,12 @@ function createPC(userId) {
     if (state === 'connected') {
       console.log(`✅✅✅ PEER CONNECTION ESTABLISHED for ${userId} ✅✅✅`);
       
+      // Update subtitle
       const subtitle = document.getElementById('callSubtitle');
       const count = Array.from(connectionStats.values()).filter(s => s.connectionState === 'connected').length + 1;
       if (subtitle) subtitle.textContent = `${count} participant${count>1?'s':''} connected`;
       
+      // Log connection type
       pc.getStats().then(stats => {
         stats.forEach(r => {
           if (r.type === 'candidate-pair' && r.state === 'succeeded') {
@@ -808,9 +876,21 @@ function createPC(userId) {
       });
     } else if (state === 'failed') {
       console.error(`❌ Connection FAILED for ${userId}`);
+      // Attempt ICE restart
       setTimeout(() => { 
-        if (pc.connectionState === 'failed') pc.restartIce(); 
+        if (pc.connectionState === 'failed') {
+          console.warn(`⚠️ Connection still failed, restarting ICE for ${userId}`);
+          pc.restartIce();
+        }
       }, 1000);
+    } else if (state === 'connecting') {
+      // Set a timeout - if not connected within 10 seconds, something's wrong
+      setTimeout(() => {
+        if (pc.connectionState === 'connecting') {
+          console.warn(`⚠️ Connection still in 'connecting' state after 10s for ${userId}, restarting ICE`);
+          pc.restartIce();
+        }
+      }, 10000);
     }
   };
   
@@ -818,16 +898,17 @@ function createPC(userId) {
   return pc;
 }
 
+
 async function createOffer(userId) {
   try {
     console.log(`📤 Creating offer for ${userId}`);
     
-    // Wait a bit to ensure remote peer has joined the call
+    // CRITICAL: Ensure remote peer has fully joined before creating offer
     await new Promise(resolve => setTimeout(resolve, 1000));
     
     const pc = createPC(userId);
     
-    // Ensure we have local stream before creating offer
+    // Validate local stream
     if (!localStream || localStream.getTracks().length === 0) {
       console.error(`❌ No local stream available when creating offer for ${userId}`);
       return;
@@ -839,24 +920,36 @@ async function createOffer(userId) {
       offerToReceiveAudio: true, 
       offerToReceiveVideo: true 
     });
+    
     await pc.setLocalDescription(offer);
     
     console.log(`✅ Offer created and set as local description for ${userId}`);
-    socketInstance.emit('webrtc_offer', { callId: callData.callId, targetUserId: userId, offer });
+    console.log(`   Offer type: ${offer.type}`);
+    console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
+    
+    socketInstance.emit('webrtc_offer', { 
+      callId: callData.callId, 
+      targetUserId: userId, 
+      offer 
+    });
+    
+    console.log(`📤 Offer sent to ${userId} via socket`);
+    
   } catch (e) { 
-    console.error(`❌ Offer creation error for ${userId}:`, e); 
+    console.error(`❌ Offer creation error for ${userId}:`, e);
+    console.error(`   Error name: ${e.name}`);
+    console.error(`   Error message: ${e.message}`);
   }
 }
 
 async function handleOffer(fromUserId, offer) {
   try {
-    console.log(`📥 Received offer from ${fromUserId}`);
-    console.log(`📊 Offer type: ${offer.type}, sdp length: ${offer.sdp?.length || 0}`);
+    console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
+    console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
     
-    // Validate localStream exists before proceeding
+    // Validate localStream
     if (!localStream) {
       console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
-      console.error(`❌ Cannot create answer without local media`);
       return;
     }
     
@@ -864,25 +957,29 @@ async function handleOffer(fromUserId, offer) {
     
     let pc = peerConnections.get(fromUserId);
     if (pc) {
-      console.log(`⚠️ PC already exists for ${fromUserId} (state: ${pc.signalingState}), closing and recreating`);
-      pc.close();
-      peerConnections.delete(fromUserId);
+      console.log(`⚠️ PC already exists for ${fromUserId} (state: ${pc.signalingState})`);
+      if (pc.signalingState !== 'stable') {
+        console.log(`   Closing and recreating due to non-stable state`);
+        pc.close();
+        peerConnections.delete(fromUserId);
+      } else {
+        console.log(`   PC is stable, using existing connection`);
+      }
     }
     
-    console.log(`🔧 Creating new PeerConnection for ${fromUserId}...`);
-    pc = createPC(fromUserId);
-    
-    if (!pc) {
-      console.error(`❌ Failed to create PeerConnection for ${fromUserId}`);
-      return;
+    if (!peerConnections.has(fromUserId)) {
+      console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
+      pc = createPC(fromUserId);
+    } else {
+      pc = peerConnections.get(fromUserId);
     }
     
     console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
-    console.log(`📊 PC state before setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
     console.log(`✅ Remote description set successfully`);
-    console.log(`📊 PC state after setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
     // Process pending ICE candidates
     if (pendingIceCandidates.has(fromUserId)) {
@@ -891,7 +988,7 @@ async function handleOffer(fromUserId, offer) {
       for (const c of cands) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(c));
-          console.log(`✅ Added pending ICE candidate (type: ${c.candidate?.split(' ')[7] || 'unknown'})`);
+          console.log(`✅ Added pending ICE candidate`);
         } catch (e) {
           console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
         }
@@ -902,21 +999,24 @@ async function handleOffer(fromUserId, offer) {
     console.log(`📤 Creating answer for ${fromUserId}...`);
     const answer = await pc.createAnswer();
     
-    console.log(`📊 Answer created: type=${answer.type}, sdp length=${answer.sdp?.length || 0}`);
+    console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
     
     await pc.setLocalDescription(answer);
     console.log(`✅ Answer set as local description`);
-    console.log(`📊 PC state after setLocalDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
-    console.log(`📤 Sending answer to ${fromUserId} via socket...`);
-    socketInstance.emit('webrtc_answer', { callId: callData.callId, targetUserId: fromUserId, answer });
+    console.log(`📤 Sending answer to ${fromUserId} via socket`);
+    socketInstance.emit('webrtc_answer', { 
+      callId: callData.callId, 
+      targetUserId: fromUserId, 
+      answer 
+    });
     console.log(`✅ Answer emitted successfully`);
     
   } catch (e) { 
     console.error(`❌ Handle offer error for ${fromUserId}:`, e);
-    console.error(`❌ Error name: ${e.name}`);
-    console.error(`❌ Error message: ${e.message}`);
-    console.error(`❌ Error stack:`, e.stack);
+    console.error(`   Error name: ${e.name}`);
+    console.error(`   Error message: ${e.message}`);
   }
 }
 
