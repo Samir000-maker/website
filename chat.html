@@ -1019,10 +1019,11 @@
       });
     });
 
-    socketInstance.on('authenticated', (data) => {
-      console.log('✅ Authenticated:', data);
-      socketInstance.emit('join_room', { roomId: roomData.roomId });
-    });
+socketInstance.on('authenticated', (data) => {
+  console.log('✅ Authenticated:', data);
+  console.log('🔍 Checking all registered socket handlers:', Object.keys(socketInstance._callbacks || {}));
+  socketInstance.emit('join_room', { roomId: roomData.roomId });
+});
 
     socketInstance.on('room_joined', (data) => {
       console.log('✅ Room joined:', data);
@@ -1138,23 +1139,23 @@
 });
 
     socketInstance.on('call_accepted', (data) => {
-      console.log('✅ Call accepted:', data);
-      isInitiatingCall = false;
-      navigatingToCall = true;
-      
-      saveChatState(roomData.roomId, messagesCache);
-      sessionStorage.setItem('returningFromCall', 'true');
-      
-      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-        callId: data.callId,
-        roomId: roomData.roomId,
-        callType: data.callType,
-        users: data.users
-      }));
-      
-      console.log('🚀 Navigating to call');
-      window.location.href = '/call.html';
-    });
+  console.log('✅ Call accepted:', data);
+  isInitiatingCall = false;
+  navigatingToCall = true;
+  
+  saveChatState(roomData.roomId, messagesCache);
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+    callId: data.callId,
+    roomId: roomData.roomId,
+    callType: data.callType,
+    users: data.users
+  }));
+  
+  console.log('🚀 Navigating to call.html from call_accepted handler');
+  window.location.href = '/call.html';
+});
 
     socketInstance.on('call_declined', (data) => {
       toast('Call was declined', 'warning');
