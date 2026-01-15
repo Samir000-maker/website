@@ -818,7 +818,7 @@
     
     const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
     const messageContent = document.createElement('div');
-    messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[75%] sm:max-w-[70%] flex-1 min-w-0`;
+    messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} flex-1 min-w-0`;
 
     const headerDiv = document.createElement('div');
     headerDiv.className = `flex items-center gap-1.5 sm:gap-2 mb-1 px-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`;
@@ -836,7 +836,7 @@
     messageContent.appendChild(headerDiv);
 
     const bubbleWrapper = document.createElement('div');
-    bubbleWrapper.className = `flex items-center gap-1 w-full ${isCurrentUser ? 'justify-end' : 'justify-start'}`;
+    bubbleWrapper.className = `flex items-center gap-1`;
 
     const messageBubble = document.createElement('div');
     messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
@@ -876,9 +876,15 @@
       });
     }, { passive: true });
 
-    // Always put reply button on the left, message bubble on the right for current user's messages
-    bubbleWrapper.appendChild(replyBtn);
-    bubbleWrapper.appendChild(messageBubble);
+    // Current user: reply button left, bubble right
+    // Other users: bubble left, reply button right
+    if (isCurrentUser) {
+      bubbleWrapper.appendChild(replyBtn);
+      bubbleWrapper.appendChild(messageBubble);
+    } else {
+      bubbleWrapper.appendChild(messageBubble);
+      bubbleWrapper.appendChild(replyBtn);
+    }
 
     messageContent.appendChild(bubbleWrapper);
     messageItem.appendChild(pfpContainer);
@@ -1106,21 +1112,32 @@
     });
 
     socketInstance.on('incoming_call', (data) => {
-      pendingCallData = data;
-      const callerName = document.getElementById('callerName');
-      const callType = document.getElementById('callType');
-      const callerAvatar = document.getElementById('callerAvatar');
-      
-      if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-      if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
-      if (callerAvatar) {
-        callerAvatar.innerHTML = '';
-        const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
-        callerAvatar.appendChild(pfp);
-      }
-      
+  pendingCallData = data;
+  const callerName = document.getElementById('callerName');
+  const callType = document.getElementById('callType');
+  const callerAvatar = document.getElementById('callerAvatar');
+  
+  if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+  if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+  if (callerAvatar) {
+    callerAvatar.innerHTML = '';
+    const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+    callerAvatar.appendChild(pfp);
+  }
+  
+  // CRITICAL: Show modal after 2 second delay
+  setTimeout(() => {
+    // Only show if call is still pending (user hasn't left, call hasn't ended)
+    if (pendingCallData && pendingCallData.callId === data.callId) {
       incomingCallModal?.classList.remove('hidden');
-    });
+      console.log(`📞 Showing incoming call modal after 2s delay`);
+    } else {
+      console.log(`📞 Call already handled, skipping modal display`);
+    }
+  }, 2000);
+  
+  console.log(`📞 Incoming call from ${data.callerUsername} - modal will appear in 2s`);
+});
 
     socketInstance.on('call_accepted', (data) => {
       console.log('✅ Call accepted:', data);
@@ -1264,30 +1281,34 @@
 }
 
     if (acceptCallBtn) {
-      acceptCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-          socketInstance?.emit('accept_call', {
-            callId: pendingCallData.callId,
-            roomId: roomData.roomId
-          });
-          incomingCallModal?.classList.add('hidden');
-          pendingCallData = null;
-        }
-      }, { passive: true });
+  acceptCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToAccept = pendingCallData;
+      pendingCallData = null; // Clear immediately to prevent modal re-show
+      
+      socketInstance?.emit('accept_call', {
+        callId: callToAccept.callId,
+        roomId: roomData.roomId
+      });
+      incomingCallModal?.classList.add('hidden');
     }
+  }, { passive: true });
+}
 
     if (declineCallBtn) {
-      declineCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-          socketInstance?.emit('decline_call', {
-            callId: pendingCallData.callId,
-            roomId: roomData.roomId
-          });
-          incomingCallModal?.classList.add('hidden');
-          pendingCallData = null;
-        }
-      }, { passive: true });
+  declineCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToDecline = pendingCallData;
+      pendingCallData = null; // Clear immediately to prevent modal re-show
+      
+      socketInstance?.emit('decline_call', {
+        callId: callToDecline.callId,
+        roomId: roomData.roomId
+      });
+      incomingCallModal?.classList.add('hidden');
     }
+  }, { passive: true });
+}
 
     // Message form
     if (messageForm) {
