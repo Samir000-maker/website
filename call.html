@@ -900,11 +900,19 @@ function createPC(userId) {
 
 
 async function createOffer(userId) {
+  // CRITICAL: Check if already making offer
+  if (makingOffer.get(userId)) {
+    console.warn(`⚠️ Already making offer to ${userId}, skipping`);
+    return;
+  }
+  
   try {
+    makingOffer.set(userId, true);
+    
     console.log(`📤 Creating offer for ${userId}`);
     
-    // CRITICAL: Ensure remote peer has fully joined before creating offer
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Small delay to ensure remote peer has fully joined
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     const pc = createPC(userId);
     
@@ -926,6 +934,7 @@ async function createOffer(userId) {
     console.log(`✅ Offer created and set as local description for ${userId}`);
     console.log(`   Offer type: ${offer.type}`);
     console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
+    console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
     socketInstance.emit('webrtc_offer', { 
       callId: callData.callId, 
@@ -939,52 +948,155 @@ async function createOffer(userId) {
     console.error(`❌ Offer creation error for ${userId}:`, e);
     console.error(`   Error name: ${e.name}`);
     console.error(`   Error message: ${e.message}`);
+  } finally {
+    makingOffer.set(userId, false);
   }
 }
 
 async function handleOffer(fromUserId, offer) {
+  // CRITICAL: Prevent duplicate offer processing with mutex
+  if (negotiationMutex.has(fromUserId)) {
+    console.warn(`⚠️ Already processing offer from ${fromUserId}, ignoring duplicate`);
+    return;
+  }
+  
+  // Create mutex promise
+  const mutexPromise = (async () => {
+    try {
+      console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
+      console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
+      
+      // Validate localStream
+      if (!localStream) {
+        console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
+        return;
+      }
+      
+      console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
+      
+      let pc = peerConnections.get(fromUserId);
+      
+      // CRITICAL: Check for signaling state collision
+      const offerCollision = pc && 
+        (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer');
+      
+      // Determine polite/impolite based on user ID comparison
+      const polite = currentUser.userId < fromUserId;
+      
+      console.log(`   Polite: ${polite}, Offer collision: ${offerCollision}`);
+      
+      // Impolite peer ignores colliding offers
+      if (offerCollision && !polite) {
+        console.log(`   🚫 Impolite peer ignoring colliding offer from ${fromUserId}`);
+        return;
+      }
+      
+      // If PC exists and we have a collision, polite peer uses rollback
+      if (offerCollision && polite) {
+        console.log(`   🔄 Polite peer performing rollback for ${fromUserId}`);
+        await pc.setLocalDescription({ type: 'rollback' });
+        console.log(`   ✅ Rollback complete`);
+      }
+      
+      // Create new PC if needed or if closed
+      if (!pc || pc.connectionState === 'closed') {
+        console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
+        pc = createPC(fromUserId);
+      }
+      
+      console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
+      console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+      
+      // CRITICAL: Use Promise.all to queue operations properly
+      await Promise.all([
+        pc.setRemoteDescription(new RTCSessionDescription(offer)),
+        // Queue ICE candidate processing after setRemoteDescription
+        new Promise(resolve => setTimeout(resolve, 0))
+      ]);
+      
+      console.log(`✅ Remote description set successfully`);
+      console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+      
+      // Process pending ICE candidates AFTER remote description is set
+      if (pendingIceCandidates.has(fromUserId)) {
+        const cands = pendingIceCandidates.get(fromUserId);
+        console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+        
+        for (const c of cands) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+            console.log(`✅ Added pending ICE candidate`);
+          } catch (e) {
+            console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
+          }
+        }
+        pendingIceCandidates.delete(fromUserId);
+      }
+      
+      console.log(`📤 Creating answer for ${fromUserId}...`);
+      
+      // Create answer
+      const answer = await pc.createAnswer();
+      console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
+      
+      await pc.setLocalDescription(answer);
+      console.log(`✅ Answer set as local description`);
+      console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+      
+      console.log(`📤 Sending answer to ${fromUserId} via socket`);
+      socketInstance.emit('webrtc_answer', { 
+        callId: callData.callId, 
+        targetUserId: fromUserId, 
+        answer 
+      });
+      console.log(`✅ Answer emitted successfully`);
+      
+    } catch (e) { 
+      console.error(`❌ Handle offer error for ${fromUserId}:`, e);
+      console.error(`   Error name: ${e.name}`);
+      console.error(`   Error message: ${e.message}`);
+    } finally {
+      // Remove mutex after 100ms to allow for any in-flight duplicates to be caught
+      setTimeout(() => {
+        negotiationMutex.delete(fromUserId);
+      }, 100);
+    }
+  })();
+  
+  negotiationMutex.set(fromUserId, mutexPromise);
+  await mutexPromise;
+}
+
+async function handleAnswer(fromUserId, answer) {
   try {
-    console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
-    console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
+    console.log(`📥 [ANSWER] Received answer from ${fromUserId}`);
+    console.log(`   Answer type: ${answer.type}, SDP length: ${answer.sdp?.length || 0}`);
     
-    // Validate localStream
-    if (!localStream) {
-      console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
+    const pc = peerConnections.get(fromUserId);
+    
+    if (!pc) {
+      console.error(`❌ No PC found for ${fromUserId} when handling answer`);
       return;
     }
     
-    console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
+    console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
-    let pc = peerConnections.get(fromUserId);
-    if (pc) {
-      console.log(`⚠️ PC already exists for ${fromUserId} (state: ${pc.signalingState})`);
-      if (pc.signalingState !== 'stable') {
-        console.log(`   Closing and recreating due to non-stable state`);
-        pc.close();
-        peerConnections.delete(fromUserId);
-      } else {
-        console.log(`   PC is stable, using existing connection`);
-      }
+    // CRITICAL: Only accept answer if we're in the right state
+    if (pc.signalingState !== 'have-local-offer') {
+      console.warn(`⚠️ Ignoring answer from ${fromUserId} - wrong state: ${pc.signalingState}`);
+      return;
     }
     
-    if (!peerConnections.has(fromUserId)) {
-      console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
-      pc = createPC(fromUserId);
-    } else {
-      pc = peerConnections.get(fromUserId);
-    }
-    
-    console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
-    console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    console.log(`✅ Remote description set successfully`);
+    console.log(`🔧 Setting remote description (answer) for ${fromUserId}`);
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log(`✅ Answer set as remote description`);
     console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
     
     // Process pending ICE candidates
     if (pendingIceCandidates.has(fromUserId)) {
       const cands = pendingIceCandidates.get(fromUserId);
       console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+      
       for (const c of cands) {
         try {
           await pc.addIceCandidate(new RTCIceCandidate(c));
@@ -996,99 +1108,37 @@ async function handleOffer(fromUserId, offer) {
       pendingIceCandidates.delete(fromUserId);
     }
     
-    console.log(`📤 Creating answer for ${fromUserId}...`);
-    const answer = await pc.createAnswer();
-    
-    console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
-    
-    await pc.setLocalDescription(answer);
-    console.log(`✅ Answer set as local description`);
-    console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    console.log(`📤 Sending answer to ${fromUserId} via socket`);
-    socketInstance.emit('webrtc_answer', { 
-      callId: callData.callId, 
-      targetUserId: fromUserId, 
-      answer 
-    });
-    console.log(`✅ Answer emitted successfully`);
-    
-  } catch (e) { 
-    console.error(`❌ Handle offer error for ${fromUserId}:`, e);
-    console.error(`   Error name: ${e.name}`);
-    console.error(`   Error message: ${e.message}`);
-  }
-}
-
-async function handleAnswer(fromUserId, answer) {
-  try {
-    console.log(`📥 Received answer from ${fromUserId}`);
-    console.log(`📊 Answer type: ${answer.type}, sdp length: ${answer.sdp?.length || 0}`);
-    
-    const pc = peerConnections.get(fromUserId);
-    
-    if (!pc) {
-      console.error(`❌ No PC found for ${fromUserId} when handling answer`);
-      console.error(`❌ Available PCs:`, Array.from(peerConnections.keys()));
-      return;
-    }
-    
-    console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    if (pc.signalingState === 'stable') {
-      console.warn(`⚠️ PC already stable for ${fromUserId}, ignoring answer`);
-      return;
-    }
-    
-    if (pc.signalingState !== 'have-local-offer') {
-      console.warn(`⚠️ Unexpected signaling state '${pc.signalingState}' for ${fromUserId}, expected 'have-local-offer'`);
-    }
-    
-    console.log(`🔧 Setting remote description (answer) for ${fromUserId}`);
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    console.log(`✅ Answer set as remote description`);
-    console.log(`📊 PC state after setRemoteDescription: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
-    
-    // Process pending ICE candidates
-    if (pendingIceCandidates.has(fromUserId)) {
-      const cands = pendingIceCandidates.get(fromUserId);
-      console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
-      for (const c of cands) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(c));
-          console.log(`✅ Added pending ICE candidate (type: ${c.candidate?.split(' ')[7] || 'unknown'})`);
-        } catch (e) {
-          console.warn(`⚠️ Failed to add ICE candidate:`, e.message);
-        }
-      }
-      pendingIceCandidates.delete(fromUserId);
-    }
-    
     console.log(`✅ Answer handling complete for ${fromUserId}`);
     
   } catch (e) { 
     console.error(`❌ Handle answer error for ${fromUserId}:`, e);
-    console.error(`❌ Error name: ${e.name}`);
-    console.error(`❌ Error message: ${e.message}`);
-    console.error(`❌ Error stack:`, e.stack);
+    console.error(`   Error name: ${e.name}`);
+    console.error(`   Error message: ${e.message}`);
   }
 }
 
 async function handleIceCandidate(fromUserId, candidate) {
   try {
     const pc = peerConnections.get(fromUserId);
-    if (pc && pc.remoteDescription) {
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      const stats = connectionStats.get(fromUserId);
-      if (stats) stats.candidatesReceived++;
-      console.log(`🧊 Added ICE candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
-    } else {
-      if (!pendingIceCandidates.has(fromUserId)) pendingIceCandidates.set(fromUserId, []);
+    
+    // Queue candidates if no PC yet OR if remote description not set
+    if (!pc || !pc.remoteDescription) {
+      if (!pendingIceCandidates.has(fromUserId)) {
+        pendingIceCandidates.set(fromUserId, []);
+      }
       pendingIceCandidates.get(fromUserId).push(candidate);
       console.log(`🧊 Queued ICE candidate from ${fromUserId} (pending: ${pendingIceCandidates.get(fromUserId).length})`);
+      return;
     }
+    
+    // Add candidate if PC is ready
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    const stats = connectionStats.get(fromUserId);
+    if (stats) stats.candidatesReceived++;
+    console.log(`🧊 Added ICE candidate from ${fromUserId} (total: ${stats?.candidatesReceived || 0})`);
+    
   } catch (e) { 
-    console.warn(`⚠️ ICE candidate error for ${fromUserId}:`, e.message); 
+    console.warn(`⚠️ ICE candidate error for ${fromUserId}:`, e.message);
   }
 }
 
@@ -1249,7 +1299,7 @@ async function toggleVideo() {
           });
           
           
-          socketInstance.on('webrtc_offer', (d) => {
+socketInstance.on('webrtc_offer', (d) => {
   console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
   handleOffer(d.fromUserId, d.offer);
 });
