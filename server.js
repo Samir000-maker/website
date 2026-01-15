@@ -1359,21 +1359,34 @@ socket.on('join_call', async ({ callId }) => {
   }
 });
 
-  socket.on('leave_call', ({ callId }) => {
+socket.on('leave_call', ({ callId }) => {
   try {
     const user = socketUsers.get(socket.id);
     
-    if (!user) return;
+    if (!user) {
+      console.warn(`⚠️ Unauthenticated socket tried to leave call`);
+      return;
+    }
 
     const call = activeCalls.get(callId);
     
-    if (!call) return;
+    if (!call) {
+      console.warn(`⚠️ Call ${callId} not found when ${user.username} tried to leave`);
+      return;
+    }
+
+    // CRITICAL FIX: Check if user is actually in the call before removing
+    if (!call.participants.includes(user.userId)) {
+      console.warn(`⚠️ User ${user.username} not in call ${callId} participants, ignoring leave`);
+      return;
+    }
 
     call.participants = call.participants.filter(p => p !== user.userId);
     userCalls.delete(user.userId);
+    call.userMediaStates.delete(user.userId);
 
     console.log(`📵 User ${user.username} left call ${callId}`);
-    console.log(`📊 Remaining participants in call ${callId}:`, call.participants.length);
+    console.log(`📊 Remaining participants in call ${callId}:`, call.participants);
 
     socket.leave(`call-${callId}`);
 
@@ -1396,22 +1409,32 @@ socket.on('join_call', async ({ callId }) => {
 
     // Only delete call if NO participants remain
     if (call.participants.length === 0) {
-      activeCalls.delete(callId);
-      console.log(`🗑️ Call ${callId} ended (no participants)`);
+      console.log(`🗑️ Call ${callId} ended (no participants) - scheduling cleanup`);
       
-      // Notify room that call has ended
-      if (room) {
-        io.to(call.roomId).emit('call_ended_notification', {
-          callId: callId
-        });
-        console.log(`📢 Call ${callId} completely ended, notified room`);
-      }
+      // CRITICAL FIX: Delay cleanup to allow for rapid rejoin
+      setTimeout(() => {
+        const currentCall = activeCalls.get(callId);
+        if (currentCall && currentCall.participants.length === 0) {
+          activeCalls.delete(callId);
+          console.log(`🗑️ Call ${callId} fully cleaned up after grace period`);
+          
+          // Notify room that call has ended
+          if (room) {
+            io.to(call.roomId).emit('call_ended_notification', {
+              callId: callId
+            });
+            console.log(`📢 Call ${callId} completely ended, notified room`);
+          }
+        } else {
+          console.log(`✅ Call ${callId} has participants again, cleanup cancelled`);
+        }
+      }, 3000); // 3 second grace period
     } else {
       console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
     }
 
   } catch (error) {
-    console.error('Leave call error:', error);
+    console.error('❌ Leave call error:', error);
   }
 });
 
