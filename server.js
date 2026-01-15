@@ -1040,6 +1040,7 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
   }
 });
 
+// Replace accept_call handler with better logging
 socket.on('accept_call', async ({ callId, roomId }) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -1058,48 +1059,53 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         return;
       }
 
+      console.log(`🔍 [accept_call] Before: participants=[${call.participants.join(', ')}]`);
+      console.log(`🔍 [accept_call] User ${user.username} (${user.userId}) accepting`);
+
       // Check if already in call
       if (call.participants.includes(user.userId)) {
-        console.log(`⚠️ User ${user.username} already in call ${callId}`);
+        console.log(`⚠️ User ${user.username} already in call ${callId} - re-sending state`);
         
-        // CRITICAL FIX: Even if already in call, send them the full state
+        // Send current state to this user
         const room = matchmaking.getRoom(roomId);
         if (!room) {
           socket.emit('error', { message: 'Room not found' });
           return;
         }
 
-        // Get all participants with media states
-        const callUsers = room.users
-          .filter(u => call.participants.includes(u.userId))
-          .map(u => {
-            const mediaState = call.userMediaStates.get(u.userId) || {
-              videoEnabled: call.callType === 'video',
-              audioEnabled: true
-            };
-            return {
-              userId: u.userId,
-              username: u.username,
-              pfpUrl: u.pfpUrl,
-              videoEnabled: mediaState.videoEnabled,
-              audioEnabled: mediaState.audioEnabled
-            };
-          });
+        // Build participant list from call.participants (authoritative)
+        const callUsers = call.participants.map(participantId => {
+          const roomUser = room.users.find(u => u.userId === participantId);
+          const mediaState = call.userMediaStates.get(participantId) || {
+            videoEnabled: call.callType === 'video',
+            audioEnabled: true
+          };
+          
+          return {
+            userId: participantId,
+            username: roomUser?.username || 'Unknown',
+            pfpUrl: roomUser?.pfpUrl || 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200',
+            videoEnabled: mediaState.videoEnabled,
+            audioEnabled: mediaState.audioEnabled
+          };
+        });
 
-        // Send state to THIS user
         socket.emit('call_accepted', {
           callId,
           callType: call.callType,
           users: callUsers
         });
         
-        console.log(`✅ Re-sent call state to ${user.username} (already in participants)`);
+        console.log(`✅ Re-sent call state to ${user.username}`);
         return;
       }
 
       // Add participant atomically
       call.participants.push(user.userId);
       userCalls.set(user.userId, callId);
+      
+      console.log(`➕ Added ${user.username} to participants`);
+      console.log(`🔍 [accept_call] After: participants=[${call.participants.join(', ')}]`);
       
       // Initialize media state
       call.userMediaStates.set(user.userId, {
@@ -1110,12 +1116,12 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       // Mark as active when first user accepts
       if (call.status === 'pending') {
         call.status = 'active';
+        console.log(`📊 Call status changed: pending → active`);
       }
       
       call.lastActivity = Date.now();
 
       console.log(`✅ User ${user.username} accepted call ${callId} - now ${call.status.toUpperCase()}`);
-      console.log(`📊 Participants: [${call.participants.join(', ')}]`);
 
       const room = matchmaking.getRoom(roomId);
       if (!room) {
@@ -1123,26 +1129,29 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         return;
       }
 
-      // Get all participants with media states
-      const callUsers = room.users
-        .filter(u => call.participants.includes(u.userId))
-        .map(u => {
-          const mediaState = call.userMediaStates.get(u.userId) || {
-            videoEnabled: call.callType === 'video',
-            audioEnabled: true
-          };
-          return {
-            userId: u.userId,
-            username: u.username,
-            pfpUrl: u.pfpUrl,
-            videoEnabled: mediaState.videoEnabled,
-            audioEnabled: mediaState.audioEnabled
-          };
-        });
+      // Build participant list from call.participants (authoritative)
+      const callUsers = call.participants.map(participantId => {
+        const roomUser = room.users.find(u => u.userId === participantId);
+        const mediaState = call.userMediaStates.get(participantId) || {
+          videoEnabled: call.callType === 'video',
+          audioEnabled: true
+        };
+        
+        return {
+          userId: participantId,
+          username: roomUser?.username || 'Unknown',
+          pfpUrl: roomUser?.pfpUrl || 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200',
+          videoEnabled: mediaState.videoEnabled,
+          audioEnabled: mediaState.audioEnabled
+        };
+      });
 
-      console.log(`📊 Broadcasting to ${callUsers.length} participants`);
+      console.log(`📊 Broadcasting to ${callUsers.length} participants:`);
+      callUsers.forEach((u, idx) => {
+        console.log(`   [${idx}] ${u.username} (${u.userId})`);
+      });
 
-      // CRITICAL FIX: Use Promise.all to emit to all participants simultaneously
+      // Emit to ALL participants simultaneously
       const emitPromises = callUsers.map(roomUser => {
         return new Promise((resolve) => {
           const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -1155,7 +1164,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
             console.log(`📤 Sent call_accepted to ${roomUser.username}`);
             resolve();
           } else {
-            console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
+            console.error(`❌ No active socket for ${roomUser.username} (${roomUser.userId})`);
             resolve();
           }
         });
@@ -1170,7 +1179,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         participantCount: call.participants.length,
         callType: call.callType
       });
-      console.log(`📢 Broadcasted call_state_update to room ${roomId}: active=true, count=${call.participants.length}`);
+      console.log(`📢 Broadcasted call_state_update: active=true, count=${call.participants.length}`);
     });
 
   } catch (error) {
@@ -1217,7 +1226,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
     }
   });
 
-// Replace join_call handler
+// Replace the join_call handler completely
 socket.on('join_call', async ({ callId }) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -1236,6 +1245,7 @@ socket.on('join_call', async ({ callId }) => {
         return;
       }
 
+      // CRITICAL FIX: Check if user is in participants list
       if (!call.participants.includes(user.userId)) {
         console.error(`❌ User ${user.username} not authorized for call ${callId}`);
         console.error(`   Participants: [${call.participants.join(', ')}]`);
@@ -1264,49 +1274,71 @@ socket.on('join_call', async ({ callId }) => {
       socket.join(`call-${callId}`);
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
-      const room = matchmaking.getRoom(call.roomId);
-      
-      // CRITICAL FIX: Include ALL participants (including self)
-      const participants = room ? room.users.filter(u => call.participants.includes(u.userId)) : [];
-
-      // Ensure ALL participants have media states
-      participants.forEach(p => {
-        if (!call.userMediaStates.has(p.userId)) {
-          call.userMediaStates.set(p.userId, {
-            videoEnabled: call.callType === 'video',
-            audioEnabled: true
-          });
+      // CRITICAL FIX: Get ALL participants from call.participants (authoritative source)
+      // Build participant data from call state, not room state
+      const participantsWithMediaStates = call.participants.map(participantId => {
+        // Find user data from socketUsers or room
+        let userData = null;
+        
+        // First try to find from active socket connections
+        for (const [socketId, socketUser] of socketUsers.entries()) {
+          if (socketUser.userId === participantId) {
+            userData = socketUser;
+            break;
+          }
         }
-      });
-
-      // Include media states in participant data
-      const participantsWithMediaStates = participants.map(p => {
-        const mediaState = call.userMediaStates.get(p.userId);
+        
+        // If not found in active sockets, try to get from room
+        if (!userData) {
+          const room = matchmaking.getRoom(call.roomId);
+          if (room) {
+            const roomUser = room.users.find(u => u.userId === participantId);
+            if (roomUser) {
+              userData = roomUser;
+            }
+          }
+        }
+        
+        // If still not found, create minimal data
+        if (!userData) {
+          console.warn(`⚠️ No user data found for participant ${participantId}, using minimal data`);
+          userData = {
+            userId: participantId,
+            username: 'Unknown',
+            pfpUrl: 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200'
+          };
+        }
+        
+        const mediaState = call.userMediaStates.get(participantId) || {
+          videoEnabled: call.callType === 'video',
+          audioEnabled: true
+        };
+        
         return {
-          userId: p.userId,
-          username: p.username,
-          pfpUrl: p.pfpUrl,
+          userId: userData.userId,
+          username: userData.username,
+          pfpUrl: userData.pfpUrl,
           videoEnabled: mediaState.videoEnabled,
           audioEnabled: mediaState.audioEnabled
         };
       });
 
-      console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username} (including self)`);
-      participantsWithMediaStates.forEach(p => {
-        console.log(`   - ${p.username}: video=${p.videoEnabled}, audio=${p.audioEnabled}`);
+      console.log(`📊 Sending ${participantsWithMediaStates.length} participants to ${user.username}`);
+      participantsWithMediaStates.forEach((p, idx) => {
+        console.log(`   [${idx}] ${p.username} (${p.userId}): video=${p.videoEnabled}, audio=${p.audioEnabled}`);
       });
 
       // Send complete state to joining user
       socket.emit('call_joined', {
         callId,
         callType: call.callType,
-        participants: participantsWithMediaStates // Now includes self!
+        participants: participantsWithMediaStates
       });
 
       // Get current user's media state
       const userMediaState = call.userMediaStates.get(user.userId);
 
-      // Broadcast to OTHER users
+      // Broadcast to OTHER users that this user joined
       socket.to(`call-${callId}`).emit('user_joined_call', {
         user: {
           userId: user.userId,
@@ -1317,7 +1349,7 @@ socket.on('join_call', async ({ callId }) => {
         }
       });
 
-      console.log(`✅ ${user.username} successfully joined call ${callId} with ${participants.length} total participants`);
+      console.log(`✅ ${user.username} successfully joined call ${callId} with ${call.participants.length} total participants`);
     });
 
   } catch (error) {
