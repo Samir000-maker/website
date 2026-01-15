@@ -1106,21 +1106,32 @@
     });
 
     socketInstance.on('incoming_call', (data) => {
-      pendingCallData = data;
-      const callerName = document.getElementById('callerName');
-      const callType = document.getElementById('callType');
-      const callerAvatar = document.getElementById('callerAvatar');
-      
-      if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-      if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
-      if (callerAvatar) {
-        callerAvatar.innerHTML = '';
-        const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
-        callerAvatar.appendChild(pfp);
-      }
-      
+  pendingCallData = data;
+  const callerName = document.getElementById('callerName');
+  const callType = document.getElementById('callType');
+  const callerAvatar = document.getElementById('callerAvatar');
+  
+  if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+  if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+  if (callerAvatar) {
+    callerAvatar.innerHTML = '';
+    const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+    callerAvatar.appendChild(pfp);
+  }
+  
+  // CRITICAL: Show modal after 2 second delay
+  setTimeout(() => {
+    // Only show if call is still pending (user hasn't left, call hasn't ended)
+    if (pendingCallData && pendingCallData.callId === data.callId) {
       incomingCallModal?.classList.remove('hidden');
-    });
+      console.log(`📞 Showing incoming call modal after 2s delay`);
+    } else {
+      console.log(`📞 Call already handled, skipping modal display`);
+    }
+  }, 2000);
+  
+  console.log(`📞 Incoming call from ${data.callerUsername} - modal will appear in 2s`);
+});
 
     socketInstance.on('call_accepted', (data) => {
       console.log('✅ Call accepted:', data);
@@ -1263,31 +1274,35 @@
     }, { passive: true });
 }
 
-    if (acceptCallBtn) {
-      acceptCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-          socketInstance?.emit('accept_call', {
-            callId: pendingCallData.callId,
-            roomId: roomData.roomId
-          });
-          incomingCallModal?.classList.add('hidden');
-          pendingCallData = null;
-        }
-      }, { passive: true });
+if (acceptCallBtn) {
+  acceptCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToAccept = pendingCallData;
+      pendingCallData = null; // Clear immediately to prevent modal re-show
+      
+      socketInstance?.emit('accept_call', {
+        callId: callToAccept.callId,
+        roomId: roomData.roomId
+      });
+      incomingCallModal?.classList.add('hidden');
     }
+  }, { passive: true });
+}
 
     if (declineCallBtn) {
-      declineCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-          socketInstance?.emit('decline_call', {
-            callId: pendingCallData.callId,
-            roomId: roomData.roomId
-          });
-          incomingCallModal?.classList.add('hidden');
-          pendingCallData = null;
-        }
-      }, { passive: true });
+  declineCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToDecline = pendingCallData;
+      pendingCallData = null; // Clear immediately to prevent modal re-show
+      
+      socketInstance?.emit('decline_call', {
+        callId: callToDecline.callId,
+        roomId: roomData.roomId
+      });
+      incomingCallModal?.classList.add('hidden');
     }
+  }, { passive: true });
+}
 
     // Message form
     if (messageForm) {
