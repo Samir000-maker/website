@@ -1006,6 +1006,59 @@
   function setupSocketHandlers() {
     if (!socketInstance) return;
     
+    // Add to setupSocketHandlers() function
+
+socketInstance.on('timer_update', (data) => {
+  if (!roomData || data.expiresAt !== roomData.expiresAt) {
+    // Update stored expiry time if changed
+    if (roomData) {
+      roomData.expiresAt = data.expiresAt;
+      localStorage.setItem('currentRoom', JSON.stringify(roomData));
+    }
+  }
+  
+  // Update UI
+  const remaining = data.remaining;
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  
+  if (timeRemaining) {
+    timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+  }
+  
+  // Warning at 1 minute
+  if (remaining <= 60000 && remaining > 59000) {
+    toast('Room expires in 1 minute', 'warning');
+    console.log('⚠️ 1 minute warning shown');
+  }
+});
+
+socketInstance.on('room_expired', (data) => {
+  console.log('⏰ Room expired event received:', data);
+  toast('Room has expired', 'error');
+  clearChatState();
+  
+  if (timerInterval) clearInterval(timerInterval);
+  
+  // Immediate redirect
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 500);
+});
+
+socketInstance.on('room_closed_solo', (data) => {
+  console.log('👤 Room closed - solo user:', data);
+  toast('Room closed - no other participants', 'warning');
+  clearChatState();
+  
+  if (timerInterval) clearInterval(timerInterval);
+  
+  // Immediate redirect
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 500);
+});
+    
     socketInstance.on('connect', () => {
       console.log('🔌 Socket connected:', socketInstance.id);
       
