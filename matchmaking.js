@@ -198,8 +198,6 @@ expire() {
 
     // Remove from activity tracking
     roomActivity.delete(this.id);
-
-    console.log(🗑️ Room ${this.id} destroyed and cleaned up);
   }
 }
 
