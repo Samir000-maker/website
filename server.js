@@ -311,23 +311,26 @@ function performRoomCleanup(roomId) {
 
   console.log(`🗑️ Cleaning up room ${roomId} (${room.users.length} users)`);
 
-  // Notify all users in the room
-  room.users.forEach(user => {
-    const userSocket = findActiveSocketForUser(user.userId);
-    if (userSocket) {
-      userSocket.emit('room_expired', {
-        roomId,
-        message: 'Chat room has expired'
-      });
-      userSocket.leave(roomId);
-    }
+  // Notify all users in the chat room
+  io.to(roomId).emit('room_expired', {
+    roomId,
+    message: 'Chat room has expired',
+    redirect: true
   });
+  console.log(`📢 Sent room_expired to chat room ${roomId}`);
 
-  // Clean up any active calls in this room
+  // Notify all users in active calls
   activeCalls.forEach((call, callId) => {
-    if (call.roomId === roomId) {
-      console.log(`🗑️ Cleaning up call ${callId} in expired room`);
+    if (call.roomId === roomId && call.participants.length > 0) {
+      io.to(`call-${callId}`).emit('call_room_expired', {
+        callId,
+        roomId,
+        message: 'Room has expired',
+        redirect: true
+      });
+      console.log(`📢 Sent call_room_expired to call-${callId}`);
       
+      // Clean up call state
       call.participants.forEach(userId => {
         userCalls.delete(userId);
       });
@@ -338,6 +341,17 @@ function performRoomCleanup(roomId) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
       }
+      
+      console.log(`🗑️ Call ${callId} cleaned up due to room expiry`);
+    }
+  });
+
+  // Disconnect all sockets from the room
+  room.users.forEach(user => {
+    const userSocket = findActiveSocketForUser(user.userId);
+    if (userSocket) {
+      userSocket.leave(roomId);
+      console.log(`🚪 Disconnected ${user.username} from room ${roomId}`);
     }
   });
 
@@ -2070,6 +2084,79 @@ setInterval(() => {
     }
   });
 }, 60000);
+
+
+setInterval(() => {
+  const now = Date.now();
+  const rooms = matchmaking.getActiveRooms();
+  
+  rooms.forEach(room => {
+    const remaining = Math.max(0, room.expiresAt - now);
+    
+    // Broadcast to chat room
+    io.to(room.id).emit('timer_update', {
+      remaining,
+      expiresAt: room.expiresAt
+    });
+    
+    // Broadcast to active calls in this room
+    activeCalls.forEach((call, callId) => {
+      if (call.roomId === room.id && call.participants.length > 0) {
+        io.to(`call-${callId}`).emit('timer_update', {
+          remaining,
+          expiresAt: room.expiresAt
+        });
+        console.log(`⏱️ Timer broadcast to call-${callId}: ${Math.floor(remaining / 1000)}s remaining`);
+      }
+    });
+    
+    // If expired, trigger cleanup
+    if (remaining === 0) {
+      console.log(`⏰ Room ${room.id} timer expired - triggering cleanup`);
+      performRoomCleanup(room.id);
+    }
+  });
+}, 1000); // Every second
+
+
+setInterval(() => {
+  const rooms = matchmaking.getActiveRooms();
+  
+  rooms.forEach(room => {
+    if (room.users.length === 1) {
+      const soloUser = room.users[0];
+      console.log(`👤 Room ${room.id} has only 1 user: ${soloUser.username}`);
+      
+      // Check if there's an active call (if so, don't destroy yet)
+      let hasActiveCall = false;
+      activeCalls.forEach((call) => {
+        if (call.roomId === room.id && call.participants.length > 0) {
+          hasActiveCall = true;
+        }
+      });
+      
+      if (!hasActiveCall) {
+        console.log(`🗑️ Room ${room.id} being destroyed - only 1 user left and no active call`);
+        
+        // Notify the solo user
+        const userSocket = findActiveSocketForUser(soloUser.userId);
+        if (userSocket) {
+          userSocket.emit('room_closed_solo', {
+            roomId: room.id,
+            message: 'Room closed - you are the only user remaining',
+            redirect: true
+          });
+          console.log(`📢 Notified ${soloUser.username} of room closure`);
+        }
+        
+        // Clean up the room
+        performRoomCleanup(room.id);
+      } else {
+        console.log(`🛡️ Room ${room.id} preserved - active call in progress`);
+      }
+    }
+  });
+}, 2000); // Check every 2 seconds
 
 // ============================================
 // START SERVER
