@@ -1359,12 +1359,40 @@ async function toggleVideo() {
 }
 
       function updateDuration() {
-        if (!callStartTime) return;
-        const e = Math.floor((Date.now() - callStartTime) / 1000);
-        const h = Math.floor(e / 3600), m = Math.floor((e % 3600) / 60), s = e % 60;
-        const el = document.getElementById('callDuration');
-        if (el) el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-      }
+  if (!callData || !callData.roomId) return;
+  
+  const room = sessionStorage.getItem('currentRoom');
+  if (!room) {
+    console.warn('⚠️ No room data in session - cannot sync timer');
+    return;
+  }
+  
+  try {
+    const roomData = JSON.parse(room);
+    const now = Date.now();
+    const remaining = Math.max(0, roomData.expiresAt - now);
+    
+    const totalSeconds = Math.floor(remaining / 1000);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    
+    const el = document.getElementById('callDuration');
+    if (el) {
+      el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+    }
+    
+    // Check if expired
+    if (remaining === 0) {
+      console.log('⏰ Room expired during call - redirecting');
+      if (durationInterval) clearInterval(durationInterval);
+      toast('Room has expired', 'warning');
+      leaveCall();
+    }
+  } catch (e) {
+    console.error('❌ Timer sync error:', e);
+  }
+}
 
       function leaveCall() {
         if (isInitializing) return;
@@ -1470,6 +1498,24 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
           
           // Inside initCall() function, replace the 'authenticated' handler:
 
+
+
+// Add room_expired handler in initCall() after socketInstance setup
+socketInstance.on('room_expired', (data) => {
+  console.log('⏰ Room expired notification received:', data);
+  toast(data.message || 'Room has expired', 'warning');
+  
+  if (durationInterval) clearInterval(durationInterval);
+  
+  // Clean up and redirect
+  leaveCall();
+});
+
+socketInstance.on('room_expiring_soon', (data) => {
+  console.log(`⚠️ Room expiring in ${data.expiresIn / 1000} seconds`);
+  toast(`Room expiring soon!`, 'warning');
+});
+
 socketInstance.on('authenticated', async () => {
   console.log('✅ Authenticated');
   
@@ -1516,21 +1562,13 @@ socketInstance.on('ice_candidate', (d) => {
 });
           
           
-// Replace call_joined handler
+// Update call_joined handler to start synced timer
 socketInstance.on('call_joined', async (data) => {
   console.log(`✅ Call joined event received`);
   console.log(`📊 Participants: ${data.participants.length}`);
-  console.log('🔍 Full participant data:', JSON.stringify(data.participants.map(p => ({
-    userId: p.userId,
-    username: p.username,
-    videoEnabled: p.videoEnabled,
-    audioEnabled: p.audioEnabled
-  })), null, 2));
   
-  // CRITICAL FIX: Validate we have participants
   if (!data.participants || data.participants.length === 0) {
     console.error('❌ Received call_joined with 0 participants!');
-    console.error('❌ This indicates a server-side state issue');
     toast('Call state error. Please try again.', 'error');
     setTimeout(() => {
       window.location.href = '/chat.html';
@@ -1556,9 +1594,6 @@ socketInstance.on('call_joined', async (data) => {
   }
   
   console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
-  localStream.getTracks().forEach(t => {
-    console.log(`   - ${t.kind}: id=${t.id.substring(0, 8)}..., enabled=${t.enabled}, readyState=${t.readyState}`);
-  });
   
   const grid = document.getElementById('participantGrid');
   if (!grid) {
@@ -1613,16 +1648,12 @@ socketInstance.on('call_joined', async (data) => {
   grid.appendChild(fragment);
   
   console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
-  console.log(`📊 Self rendered: ${selfTileRendered}`);
   
   if (selfTileRendered) {
     console.log(`🎬 Setting up local video...`);
     await setupLocalVideo();
-  } else {
-    console.warn(`⚠️ Self NOT in participants - will setup on user_joined_call`);
   }
   
-  // Setup WebRTC offers
   const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
   
   for (let i = 0; i < remoteParticipants.length; i++) {
@@ -1640,8 +1671,11 @@ socketInstance.on('call_joined', async (data) => {
     }
   }
   
-  callStartTime = Date.now();
+  // CRITICAL: Start synced timer with room expiry
+  console.log('⏰ Starting synced timer with room expiry');
   durationInterval = setInterval(updateDuration, 1000);
+  updateDuration(); // Update immediately
+  
   isInitializing = false;
   console.log('=== INIT COMPLETE ===');
 });
