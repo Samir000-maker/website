@@ -84,7 +84,6 @@ setupLifecycleTimers() {
    */
   setActiveCall(isActive) {
     this.hasActiveCall = isActive;
-    console.log(📞 Room ${this.id} active call status: ${isActive});
   }
 
  extendExpiry(additionalMinutes) {
