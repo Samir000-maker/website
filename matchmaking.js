@@ -26,8 +26,8 @@ const roomActivity = new Map(); // roomId -> lastActivityTimestamp
 
 // Cleanup interval
 const CLEANUP_INTERVAL = 60 * 1000; // 1 minute
-const ROOM_LIFETIME = 10 * 60 * 1000; // 10 minutes
-const ROOM_WARNING_TIME = 9 * 60 * 1000; // 9 minutes (1 minute warning)
+const ROOM_LIFETIME = 7 * 1000; // 7 SECONDS FOR TESTING
+const ROOM_WARNING_TIME = 5 * 1000; // 5 seconds (2 second warning)g)
 
 /**
  * Enhanced Room class with lifecycle management
@@ -51,22 +51,22 @@ class Room {
     this.setupLifecycleTimers();
   }
 
-  /**
-   * Setup lifecycle timers
-   */
-  setupLifecycleTimers() {
-    // Warning timer (1 minute before expiration)
-    this.warningTimer = setTimeout(() => {
-      this.emitWarning();
-    }, ROOM_WARNING_TIME);
+/**
+ * Setup lifecycle timers
+ */
+setupLifecycleTimers() {
+  // Warning timer (2 seconds before expiration)
+  this.warningTimer = setTimeout(() => {
+    this.emitWarning();
+  }, ROOM_WARNING_TIME);
 
-    // Cleanup timer (expiration)
-    this.cleanupTimer = setTimeout(() => {
-      this.expire();
-    }, ROOM_LIFETIME);
+  // Cleanup timer (expiration)
+  this.cleanupTimer = setTimeout(() => {
+    this.expire();
+  }, ROOM_LIFETIME);
 
-    console.log(⏱️ Room ${this.id} lifecycle timers set (expires in 10 min));
-  }
+  console.log(`⏱️ Room ${this.id} lifecycle timers set (expires in ${ROOM_LIFETIME / 1000}s)`);
+}
 
   /**
    * Update activity timestamp (extends room life)
@@ -87,77 +87,49 @@ class Room {
     console.log(📞 Room ${this.id} active call status: ${isActive});
   }
 
-  /**
-   * CRITICAL: Extend room expiry (for active calls)
-   */
-  extendExpiry(additionalMinutes) {
-    const extension = additionalMinutes * 60 * 1000;
-    this.expiresAt = Date.now() + extension;
+ extendExpiry(additionalMinutes) {
+  // DISABLED: Calls now use same timer as chat
+  console.log(`⏭️ Room ${this.id} expiry extension disabled - using unified timer`);
+}
 
-    console.log(⏰ Extended room ${this.id} expiry by ${additionalMinutes} minutes);
-    console.log(   New expiry: ${new Date(this.expiresAt).toLocaleTimeString()});
+/**
+ * Emit warning to room users
+ */
+emitWarning() {
+  // REMOVED: hasActiveCall check - warning fires regardless
+  if (this.io && !this.isExpired) {
+    const warningTime = (ROOM_LIFETIME - ROOM_WARNING_TIME) / 1000;
+    console.log(`⚠️ Room ${this.id} expiring in ${warningTime} seconds`);
 
-    // Clear existing timers
-    if (this.cleanupTimer) {
-      clearTimeout(this.cleanupTimer);
-    }
-    if (this.warningTimer) {
-      clearTimeout(this.warningTimer);
-    }
+    this.io.to(this.id).emit('room_expiring_soon', {
+      roomId: this.id,
+      expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME
+    });
+  }
+}
 
-    // Setup new timers
-    this.setupLifecycleTimers();
+/**
+ * Expire and destroy room
+ */
+expire() {
+  if (this.isExpired) return;
+
+  // REMOVED: No longer checking hasActiveCall - unified expiry
+  this.isExpired = true;
+
+  console.log(`⏱️ Room ${this.id} expired after ${ROOM_LIFETIME / 1000} seconds`);
+
+  // Notify all users
+  if (this.io) {
+    this.io.to(this.id).emit('room_expired', {
+      roomId: this.id,
+      message: `This conversation has ended after ${ROOM_LIFETIME / 1000} seconds`
+    });
   }
 
-  /**
-   * Emit warning to room users
-   */
-  emitWarning() {
-    // CRITICAL: Don't warn if call is active
-    if (this.hasActiveCall) {
-      console.log(⏭️ Skipping warning for room ${this.id} - active call in progress);
-      return;
-    }
-
-    if (this.io && !this.isExpired) {
-      console.log(⚠️ Room ${this.id} expiring in 1 minute);
-
-      this.io.to(this.id).emit('room_expiring_soon', {
-        roomId: this.id,
-        expiresIn: 60000 // 1 minute
-      });
-    }
-  }
-
-  /**
-   * Expire and destroy room
-   */
-  expire() {
-    if (this.isExpired) return;
-
-    // CRITICAL: Don't expire if call is active
-    if (this.hasActiveCall) {
-      console.log(⏭️ Postponing expiry for room ${this.id} - active call in progress);
-      // Extend by 15 more minutes
-      this.extendExpiry(15);
-      return;
-    }
-
-    this.isExpired = true;
-
-    console.log(⏱️ Room ${this.id} expired after 10 minutes);
-
-    // Notify all users
-    if (this.io) {
-      this.io.to(this.id).emit('room_expired', {
-        roomId: this.id,
-        message: 'This conversation has ended after 10 minutes'
-      });
-    }
-
-    // Destroy room
-    this.destroy();
-  }
+  // Destroy room
+  this.destroy();
+}
 
   /**
    * Add message to room
