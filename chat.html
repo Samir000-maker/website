@@ -999,190 +999,210 @@
     }
   };
 
-async function setupSocketHandlers() {
+  // ============================================
+  // SOCKET EVENT HANDLERS
+  // ============================================
+  
+  function setupSocketHandlers() {
     if (!socketInstance) return;
     
-    // CRITICAL FIX: Add incoming call handler
-    socketInstance.on('incoming_call', (data) => {
-      console.log(`📞 Incoming ${data.callType} call from ${data.callerUsername}`);
+    socketInstance.on('connect', () => {
+      console.log('🔌 Socket connected:', socketInstance.id);
       
-      // Store pending call data
-      pendingCallData = {
-        callId: data.callId,
-        callType: data.callType,
-        callerUserId: data.callerUserId,
-        callerUsername: data.callerUsername,
-        callerPfp: data.callerPfp,
-        roomId: data.roomId
-      };
-      
-      // Update modal
-      const callerName = document.getElementById('callerName');
-      const callType = document.getElementById('callType');
-      const callerAvatar = document.getElementById('callerAvatar');
-      
-      if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-      if (callType) callType.textContent = `${data.callType === 'video' ? 'Video' : 'Audio'} Call`;
-      
-      if (callerAvatar) {
-        callerAvatar.innerHTML = '';
-        const pfpElement = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-20 h-20 sm:w-24 sm:h-24');
-        callerAvatar.appendChild(pfpElement);
-      }
-      
-      // Show modal
-      incomingCallModal?.classList.remove('hidden');
-      
-      // Auto-dismiss after 30 seconds
-      setTimeout(() => {
-        if (pendingCallData?.callId === data.callId) {
-          socketInstance.emit('decline_call', { callId: data.callId, roomId: data.roomId });
-          pendingCallData = null;
-          incomingCallModal?.classList.add('hidden');
-          toast('Missed call', 'warning');
-        }
-      }, 30000);
-    });
-    
-    // CRITICAL FIX: Add call accepted handler
-    socketInstance.on('call_accepted', (data) => {
-      console.log(`✅ Call accepted: ${data.callId} with ${data.users.length} users`);
-      
-      isInitiatingCall = false;
-      audioCallBtn?.classList.remove('calling');
-      videoCallBtn?.classList.remove('calling');
-      
-      // Store call data
-      const activeCallData = {
-        callId: data.callId,
-        callType: data.callType,
-        roomId: roomData.roomId,
-        participants: data.users
-      };
-      
-      localStorage.setItem('activeCall', JSON.stringify(activeCallData));
-      console.log('💾 Stored activeCall in localStorage');
-      
-      // Set navigation flag
-      navigatingToCall = true;
-      sessionStorage.setItem('navigatingToCall', 'true');
-      
-      // Navigate to call page
-      console.log('🔄 Navigating to call.html');
-      window.location.href = '/call.html';
-    });
-    
-    // CRITICAL FIX: Add call declined handler
-    socketInstance.on('call_declined', (data) => {
-      console.log(`❌ Call declined by ${data.username}`);
-      
-      isInitiatingCall = false;
-      audioCallBtn?.classList.remove('calling');
-      videoCallBtn?.classList.remove('calling');
-      
-      toast(`${data.username} declined the call`, 'warning');
-    });
-    
-    // CRITICAL FIX: Add join existing call handler
-    socketInstance.on('join_existing_call_success', (data) => {
-      console.log(`✅ Joining existing call: ${data.callId}`);
-      
-      // Remove loading state
-      joinCallBtn?.classList.remove('join-btn-loading');
-      
-      // Store call data
-      const activeCallData = {
-        callId: data.callId,
-        callType: data.callType,
-        roomId: data.roomId
-      };
-      
-      localStorage.setItem('activeCall', JSON.stringify(activeCallData));
-      
-      // Navigate to call
-      navigatingToCall = true;
-      sessionStorage.setItem('navigatingToCall', 'true');
-      window.location.href = '/call.html';
-    });
-    
-    // CRITICAL FIX: Add call state update handler
-    socketInstance.on('call_state_update', (data) => {
-      console.log(`📊 Call state update: active=${data.isActive}, count=${data.participantCount}`);
-      
-      updateCallButtonState(data.isActive, {
-        callId: data.callId,
-        participantCount: data.participantCount,
-        callType: data.callType
+      firebase.auth().currentUser?.getIdToken().then(idToken => {
+        socketInstance.emit('authenticate', {
+          token: idToken,
+          userId: currentUser.userId
+        });
+      }).catch(err => {
+        console.error('❌ Failed to get token:', err);
       });
     });
-    
-    // CRITICAL FIX: Add call ended notification
-    socketInstance.on('call_ended_notification', (data) => {
-      console.log(`📞 Call ${data.callId} ended`);
-      
-      updateCallButtonState(false, null);
-      toast('Call ended', 'info');
+
+    socketInstance.on('authenticated', (data) => {
+      console.log('✅ Authenticated:', data);
+      socketInstance.emit('join_room', { roomId: roomData.roomId });
     });
-    
-    // CRITICAL FIX: Add room expired handler
-    socketInstance.on('room_expired', (data) => {
-      console.log(`⏰ Room expired: ${data.roomId}`);
-      
-      if (timerInterval) clearInterval(timerInterval);
-      clearChatState();
-      
-      toast('Room has expired', 'warning');
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    });
-    
-    // CRITICAL FIX: Add call room expired handler
-    socketInstance.on('call_room_expired', (data) => {
-      console.log(`⏰ Call room expired: ${data.roomId}`);
-      toast('Room has expired', 'error');
-    });
-    
-    // CRITICAL FIX: Add room closed solo handler
-    socketInstance.on('room_closed_solo', (data) => {
-      console.log(`👤 Room closed - solo user: ${data.roomId}`);
-      
-      if (timerInterval) clearInterval(timerInterval);
-      clearChatState();
-      
-      toast('Room closed - other user left', 'info');
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    });
-    
-    // Existing timer handler
-    socketInstance.on('timer_update', (data) => {
-      // ... existing code ...
-    });
-    
-    // CRITICAL FIX: Add room_joined handler
+
     socketInstance.on('room_joined', (data) => {
-      console.log(`✅ Room joined confirmed: ${data.roomId}`);
+      console.log('✅ Room joined:', data);
       
-      // Check for active call
-      if (data.activeCall) {
-        console.log(`📞 Active call detected:`, data.activeCall);
-        updateCallButtonState(true, data.activeCall);
-      } else {
-        console.log(`📞 No active call in room`);
-        updateCallButtonState(false, null);
-      }
-      
-      // Render chat history
-      if (data.chatHistory && Array.isArray(data.chatHistory)) {
-        console.log(`💬 Rendering ${data.chatHistory.length} messages`);
+      // Handle chat history
+      if (data.chatHistory?.length > 0) {
+        console.log(`📜 Loading ${data.chatHistory.length} messages`);
+        
+        const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+        
         data.chatHistory.forEach(msg => {
+          const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+          if (existingIds.has(msgId)) return;
+          
           const isCurrentUser = msg.userId === currentUser.userId;
           const msgEl = createMessageElement(msg, isCurrentUser);
           messagesList?.appendChild(msgEl);
+          messagesCache.push(msg);
         });
-        messagesCache = data.chatHistory;
-        if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
+        
+        if (messagesList) {
+          messagesList.scrollTop = messagesList.scrollHeight;
+        }
+        
+        saveChatState(roomData.roomId, messagesCache);
+      }
+      
+      // Handle active call state
+      if (data.activeCall) {
+        console.log('📞 Active call confirmed:', data.activeCall);
+        updateCallButtonState(true, data.activeCall);
+      } else {
+        console.log('📞 No active call');
+        updateCallButtonState(false);
       }
     });
-}
+
+    socketInstance.on('error', (data) => {
+      console.error('❌ Socket error:', data);
+      if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
+        toast('Room no longer available', 'error');
+        clearChatState();
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      } else {
+        toast(data.message || 'An error occurred', 'error');
+      }
+    });
+
+    socketInstance.on('chat_message', (data) => {
+      if (!data.messageId) {
+        data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+      }
+      
+      const isCurrentUser = data.userId === currentUser.userId;
+      const msgEl = createMessageElement(data, isCurrentUser);
+      
+      if (messagesList) {
+        messagesList.appendChild(msgEl);
+        messagesList.scrollTop = messagesList.scrollHeight;
+      }
+      
+      messagesCache.push(data);
+      saveChatState(roomData.roomId, messagesCache);
+    });
+
+    socketInstance.on('user_left', (data) => {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+      msgEl.textContent = `${data.username || 'A user'} left the room`;
+      messagesList?.appendChild(msgEl);
+
+      if (onlineCount && data.remainingUsers !== undefined) {
+        onlineCount.textContent = `${data.remainingUsers} Online`;
+      }
+
+      if (data.remainingUsers <= 1) {
+        toast('Room closing...', 'warning');
+        clearChatState();
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      }
+    });
+
+    socketInstance.on('left_room', (data) => {
+      toast('Left room', 'success');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 1000);
+    });
+
+    socketInstance.on('incoming_call', (data) => {
+  pendingCallData = data;
+  const callerName = document.getElementById('callerName');
+  const callType = document.getElementById('callType');
+  const callerAvatar = document.getElementById('callerAvatar');
+  
+  if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+  if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+  if (callerAvatar) {
+    callerAvatar.innerHTML = '';
+    const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+    callerAvatar.appendChild(pfp);
+  }
+  
+  // CRITICAL: Show modal after 2 second delay
+  setTimeout(() => {
+    // Only show if call is still pending (user hasn't left, call hasn't ended)
+    if (pendingCallData && pendingCallData.callId === data.callId) {
+      incomingCallModal?.classList.remove('hidden');
+      console.log(`📞 Showing incoming call modal after 2s delay`);
+    } else {
+      console.log(`📞 Call already handled, skipping modal display`);
+    }
+  }, 2000);
+  
+  console.log(`📞 Incoming call from ${data.callerUsername} - modal will appear in 2s`);
+});
+
+    socketInstance.on('call_accepted', (data) => {
+      console.log('✅ Call accepted:', data);
+      isInitiatingCall = false;
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: roomData.roomId,
+        callType: data.callType,
+        users: data.users
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
+
+    socketInstance.on('call_declined', (data) => {
+      toast('Call was declined', 'warning');
+      isInitiatingCall = false;
+      audioCallBtn?.classList.remove('calling');
+      videoCallBtn?.classList.remove('calling');
+    });
+    
+    socketInstance.on('call_state_update', (data) => {
+      console.log('📞 Call state update:', data);
+      
+      if (data.isActive && data.participantCount > 0) {
+        updateCallButtonState(true, data);
+      } else {
+        updateCallButtonState(false);
+      }
+    });
+
+    socketInstance.on('call_ended_notification', (data) => {
+      console.log('📞 Call ended:', data.callId);
+      updateCallButtonState(false);
+    });
+
+    socketInstance.on('join_existing_call_success', (data) => {
+      console.log('✅ Joining existing call:', data);
+      navigatingToCall = true;
+      
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: data.callId,
+        roomId: data.roomId,
+        callType: data.callType,
+        users: []
+      }));
+      
+      console.log('🚀 Navigating to call');
+      window.location.href = '/call.html';
+    });
+  }
+
+  // ============================================
+  // EVENT LISTENERS
+  // ============================================
+  
   function setupEventListeners() {
     // Sidebar
     sidebarToggle?.addEventListener('click', toggleSidebar, { passive: true });
@@ -1470,213 +1490,16 @@ if (acceptCallBtn) {
     const idToken = await firebaseUser.getIdToken();
     const socketUrl = window.location.origin;
     
-socketInstance = io(socketUrl, {
-  transports: ['websocket', 'polling'],
-  reconnection: true,
-  reconnectionDelay: 500,
-  reconnectionAttempts: 10,
-  timeout: 10000
-});
+    socketInstance = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionAttempts: 10,
+      auth: { token: idToken },
+      timeout: 10000
+    });
 
-socketInstance.on('authenticated', async (data) => {
-  console.log('✅ Authenticated:', data.user.username);
-  hasJoinedCall = false;
-  
-  try {
-    // Initialize local media FIRST
-    console.log('🎥 Initializing local media...');
-    await initLocalMedia();
-    console.log('✅ Local media ready');
-    
-    // Join the call
-    const joinData = await attemptJoinCall(callData.callId);
-    console.log('✅ join_call emitted, waiting for response...');
-    
-  } catch (error) {
-    console.error('❌ Failed to join call:', error);
-    toast('Failed to join call', 'error');
-    setTimeout(() => window.location.href = '/chat.html', 2000);
-  }
-});
-
-// CRITICAL FIX: Add call_joined handler
-socketInstance.on('call_joined', async (data) => {
-  if (hasJoinedCall) {
-    console.warn('⚠️ Already joined call, ignoring duplicate');
-    return;
-  }
-  
-  hasJoinedCall = true;
-  console.log(`✅ call_joined received: ${data.participants.length} participants`);
-  
-  const grid = document.getElementById('participantGrid');
-  if (!grid) return;
-  
-  // CRITICAL: Clear grid completely
-  grid.innerHTML = '';
-  renderedParticipants.clear();
-  
-  // Render ALL participants (including self)
-  for (const participant of data.participants) {
-    const isSelf = participant.userId === currentUser.userId;
-    
-    console.log(`🎨 Rendering ${isSelf ? 'SELF' : 'REMOTE'}: ${participant.username} (${participant.userId})`);
-    
-    const tile = createParticipantTile(participant, isSelf);
-    grid.appendChild(tile);
-    
-    // Setup local video if self
-    if (isSelf) {
-      await setupLocalVideo();
-    }
-  }
-  
-  // Start call timer
-  if (!callStartTime) {
-    callStartTime = Date.now();
-    durationInterval = setInterval(updateDuration, 1000);
-  }
-  
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length !== 1 ? 's' : ''}`;
-  
-  // Create peer connections for OTHER users
-  for (const participant of data.participants) {
-    if (participant.userId !== currentUser.userId) {
-      console.log(`📞 Creating offer for ${participant.username}`);
-      await createOffer(participant.userId);
-    }
-  }
-  
-  console.log('✅ Call setup complete');
-});
-
-// Add user_joined_call handler
-socketInstance.on('user_joined_call', async (data) => {
-  console.log(`👋 User joined: ${data.user.username}`);
-  
-  const grid = document.getElementById('participantGrid');
-  if (!grid) return;
-  
-  // Check if already rendered
-  if (renderedParticipants.has(data.user.userId)) {
-    console.warn(`⚠️ ${data.user.username} already rendered, skipping`);
-    return;
-  }
-  
-  // Create tile for new user
-  const tile = createParticipantTile(data.user, false);
-  grid.appendChild(tile);
-  
-  // Update subtitle
-  const participantCount = grid.children.length;
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) subtitle.textContent = `${participantCount} participant${participantCount !== 1 ? 's' : ''}`;
-  
-  // Wait briefly for their offer
-  console.log(`⏳ Waiting for offer from ${data.user.username}...`);
-});
-
-// Add webrtc_offer handler
-socketInstance.on('webrtc_offer', async (data) => {
-  console.log(`📥 Received offer from ${data.fromUserId}`);
-  await handleOffer(data.fromUserId, data.offer);
-});
-
-// Add webrtc_answer handler
-socketInstance.on('webrtc_answer', async (data) => {
-  console.log(`📥 Received answer from ${data.fromUserId}`);
-  await handleAnswer(data.fromUserId, data.answer);
-});
-
-// Add ice_candidate handler
-socketInstance.on('ice_candidate', async (data) => {
-  await handleIceCandidate(data.fromUserId, data.candidate);
-});
-
-// Add video_state_changed handler
-socketInstance.on('video_state_changed', (data) => {
-  console.log(`📹 Video state changed: ${data.userId} → ${data.enabled}`);
-  updateVideoVisibility(data.userId, data.enabled, true);
-  
-  const micIndicator = document.getElementById(`mic-${data.userId}`);
-  // Video state doesn't affect mic indicator
-});
-
-// Add audio_state_changed handler
-socketInstance.on('audio_state_changed', (data) => {
-  console.log(`🎤 Audio state changed: ${data.userId} → ${data.enabled}`);
-  
-  const micIndicator = document.getElementById(`mic-${data.userId}`);
-  if (micIndicator) {
-    if (data.enabled) {
-      micIndicator.classList.add('hidden');
-    } else {
-      micIndicator.classList.remove('hidden');
-    }
-  }
-});
-
-// Add user_left_call handler
-socketInstance.on('user_left_call', (data) => {
-  console.log(`👋 User left: ${data.username} (${data.userId})`);
-  
-  // Close peer connection
-  const pc = peerConnections.get(data.userId);
-  if (pc) {
-    pc.close();
-    peerConnections.delete(data.userId);
-  }
-  
-  // Remove audio context
-  const audioCtx = audioContexts.get(data.userId);
-  if (audioCtx) {
-    audioCtx.close();
-    audioContexts.delete(data.userId);
-  }
-  
-  // Remove tile
-  const tile = document.getElementById(`participant-${data.userId}`);
-  if (tile) {
-    tile.remove();
-    renderedParticipants.delete(data.userId);
-  }
-  
-  // Update subtitle
-  const grid = document.getElementById('participantGrid');
-  const participantCount = grid?.children.length || 0;
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) subtitle.textContent = `${participantCount} participant${participantCount !== 1 ? 's' : ''}`;
-  
-  toast(`${data.username} left the call`, 'info');
-});
-
-// CRITICAL FIX: Wait for connection, then authenticate
-socketInstance.on('connect', () => {
-  console.log(`🔌 Socket connected: ${socketInstance.id}`);
-  socketInstance.emit('authenticate', { 
-    token: idToken, 
-    userId: currentUser.userId 
-  });
-});
-
-// CRITICAL FIX: Handle authentication response
-socketInstance.on('authenticated', (data) => {
-  console.log('✅ Socket authenticated:', data.user.username);
-  
-  // NOW join the room
-  socketInstance.emit('join_room', { roomId: roomData.roomId });
-  console.log(`📤 Emitted join_room for ${roomData.roomId}`);
-});
-
-// Handle auth errors
-socketInstance.on('auth_error', (data) => {
-  console.error('❌ Auth error:', data.message);
-  toast('Authentication failed', 'error');
-  setTimeout(() => window.location.href = '/login.html', 1500);
-});
-
-setupSocketHandlers();
+    setupSocketHandlers();
   } catch (err) {
     console.error('❌ Socket initialization failed:', err);
     toast('Connection failed', 'error');
