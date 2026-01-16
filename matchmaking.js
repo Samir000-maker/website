@@ -90,24 +90,48 @@ class Room {
   /**
    * CRITICAL: Extend room expiry (for active calls)
    */
-  extendExpiry(additionalMinutes) {
-    const extension = additionalMinutes * 60 * 1000;
-    this.expiresAt = Date.now() + extension;
-    
-    console.log(`⏰ Extended room ${this.id} expiry by ${additionalMinutes} minutes`);
-    console.log(`   New expiry: ${new Date(this.expiresAt).toLocaleTimeString()}`);
-    
-    // Clear existing timers
-    if (this.cleanupTimer) {
-      clearTimeout(this.cleanupTimer);
-    }
-    if (this.warningTimer) {
-      clearTimeout(this.warningTimer);
-    }
-    
-    // Setup new timers
-    this.setupLifecycleTimers();
+extendExpiry(additionalMinutes) {
+  // CRITICAL FIX: Don't extend if additionalMinutes is 0
+  if (additionalMinutes <= 0) {
+    console.warn(`⚠️ Attempted to extend room ${this.id} by ${additionalMinutes} minutes - ignoring`);
+    return;
   }
+  
+  const extension = additionalMinutes * 60 * 1000;
+  const oldExpiry = this.expiresAt;
+  this.expiresAt = Date.now() + extension;
+  
+  console.log(`⏰ Extended room ${this.id} expiry by ${additionalMinutes} minutes`);
+  console.log(`   Old expiry: ${new Date(oldExpiry).toLocaleTimeString()}`);
+  console.log(`   New expiry: ${new Date(this.expiresAt).toLocaleTimeString()}`);
+  
+  // Clear existing timers
+  if (this.cleanupTimer) {
+    clearTimeout(this.cleanupTimer);
+  }
+  if (this.warningTimer) {
+    clearTimeout(this.warningTimer);
+  }
+  
+  // Setup new timers based on NEW expiry time
+  const timeUntilExpiry = this.expiresAt - Date.now();
+  const timeUntilWarning = Math.max(0, timeUntilExpiry - 60000); // 1 min before expiry
+  
+  if (timeUntilWarning > 0) {
+    this.warningTimer = setTimeout(() => {
+      this.emitWarning();
+    }, timeUntilWarning);
+  }
+  
+  if (timeUntilExpiry > 0) {
+    this.cleanupTimer = setTimeout(() => {
+      this.expire();
+    }, timeUntilExpiry);
+  }
+  
+  console.log(`⏱️ Room ${this.id} lifecycle timers set (expires in ${Math.round(timeUntilExpiry / 1000)}s)`);
+}
+
 
   /**
    * Emit warning to room users
@@ -135,13 +159,21 @@ class Room {
   expire() {
     if (this.isExpired) return;
     
-    // CRITICAL: Don't expire if call is active
-    if (this.hasActiveCall) {
-      console.log(`⏭️ Postponing expiry for room ${this.id} - active call in progress`);
-      // Extend by 15 more minutes
-      this.extendExpiry(15);
-      return;
-    }
+// CRITICAL: Don't expire if call is active
+if (this.hasActiveCall) {
+  console.log(`⏭️ Postponing expiry for room ${this.id} - active call in progress`);
+  
+  // CRITICAL FIX: For testing with 7s timer, extend by smaller amount
+  const ROOM_LIFETIME_MINUTES = ROOM_LIFETIME / (60 * 1000);
+  const isTestMode = ROOM_LIFETIME_MINUTES < 1; // Less than 1 minute = test mode
+  const extensionMinutes = isTestMode ? 0.2 : 15; // 12 seconds for test, 15 min for prod
+  
+  if (extensionMinutes > 0) {
+    this.extendExpiry(extensionMinutes);
+    console.log(`⏭️ Extended room ${this.id} by ${extensionMinutes} minutes due to active call`);
+  }
+  return;
+}
     
     this.isExpired = true;
     
