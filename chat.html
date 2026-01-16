@@ -559,6 +559,7 @@
   let socketInstance = null;
   let currentUser = null;
   let roomData = null;
+  let serverClockOffset = 0;
   
   // ============================================
   // DOM ELEMENTS (Initialized early)
@@ -984,16 +985,21 @@ const updateTimer = () => {
     return;
   }
   
-  const now = Date.now();
-  const remaining = Math.max(0, roomData.expiresAt - now);
+  // CRITICAL FIX: Use server-adjusted time
+  const clientNow = Date.now();
+  const serverNow = clientNow + serverClockOffset; // Adjust for clock skew
+  const remaining = Math.max(0, roomData.expiresAt - serverNow);
+  
   const minutes = Math.floor(remaining / 60000);
   const seconds = Math.floor((remaining % 60000) / 1000);
   
   // DEBUGGING: Log every 5 seconds
-  if (Math.floor(now / 5000) !== Math.floor((now - 1000) / 5000)) {
+  if (Math.floor(clientNow / 5000) !== Math.floor((clientNow - 1000) / 5000)) {
     console.log(`⏰ Timer update:`);
     console.log(`   Server expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
-    console.log(`   Client now: ${new Date(now).toISOString()}`);
+    console.log(`   Client now: ${new Date(clientNow).toISOString()}`);
+    console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
+    console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
     console.log(`   Remaining: ${minutes}:${seconds.toString().padStart(2, '0')} (${(remaining / 1000).toFixed(1)}s)`);
   }
   
@@ -1053,41 +1059,54 @@ socketInstance.on('room_joined', (data) => {
     return;
   }
   
+  const clientNow = Date.now();
+  
   if (!data.serverTime) {
-    console.warn('⚠️ No serverTime in response, using client time');
-    data.serverTime = Date.now();
+    console.warn('⚠️ No serverTime in response, assuming no clock skew');
+    data.serverTime = clientNow;
   }
   
+  // CRITICAL FIX: Calculate clock offset
+  serverClockOffset = data.serverTime - clientNow;
+  
   console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
+  console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
+  console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
+  
+  if (Math.abs(serverClockOffset) > 5000) {
+    console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+    console.warn(`   Timer will be adjusted to compensate`);
+  }
+  
   console.log(`   Timer started: ${new Date(data.timerStartedAt).toISOString()}`);
   console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
   
-  const now = Date.now();
-  const timeRemaining = data.expiresAt - now;
-  const clockSkew = data.serverTime - now;
+  // Calculate time remaining using server-adjusted time
+  const serverNow = clientNow + serverClockOffset;
+  const timeRemaining = data.expiresAt - serverNow;
   
-  console.log(`   Client time: ${new Date(now).toISOString()}`);
-  console.log(`   Time remaining (raw): ${(timeRemaining / 1000).toFixed(1)}s`);
-  console.log(`   Clock skew: ${clockSkew}ms`);
+  console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
+  console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
   
-  // CRITICAL: Warn if clock skew is large
-  if (Math.abs(clockSkew) > 5000) {
-    console.warn(`⚠️ WARNING: Large clock skew detected (${clockSkew}ms)`);
-    console.warn('   This may cause timer issues');
-  }
-  
-  // CRITICAL: Validate expiresAt is in the future
-  if (data.expiresAt <= now) {
-    console.error('❌ CRITICAL: expiresAt is in the past!');
+  // CRITICAL: Validate expiresAt is in the future (server time)
+  if (data.expiresAt <= serverNow) {
+    console.error('❌ CRITICAL: expiresAt is in the past (server time)!');
     console.error(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
-    console.error(`   now: ${new Date(now).toISOString()}`);
-    console.error(`   Difference: ${((data.expiresAt - now) / 1000).toFixed(1)}s`);
+    console.error(`   server now: ${new Date(serverNow).toISOString()}`);
+    console.error(`   Difference: ${((data.expiresAt - serverNow) / 1000).toFixed(1)}s`);
     toast('Room has already expired', 'error');
     setTimeout(() => window.location.href = '/mood.html', 2000);
     return;
   }
   
-  // CRITICAL FIX: Update roomData.expiresAt from server (ABSOLUTE TIMESTAMP)
+  // Warn if time remaining seems incorrect
+  if (timeRemaining > 60000) {
+    console.warn(`⚠️ Unusually long time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+  } else if (timeRemaining < 10000) {
+    console.warn(`⚠️ Very little time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+  }
+  
+  // Update roomData.expiresAt from server
   const oldExpiresAt = roomData.expiresAt;
   roomData.expiresAt = data.expiresAt;
   
@@ -1107,7 +1126,8 @@ socketInstance.on('room_joined', (data) => {
   
   console.log(`✅ Room data updated with server expiry time`);
   console.log(`   Will expire at: ${new Date(roomData.expiresAt).toISOString()}`);
-  console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+  console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
+  console.log(`   Clock compensation: ${(serverClockOffset / 1000).toFixed(1)}s`);
   console.log('✅ ========================================\n');
   
   // Handle chat history
@@ -1143,8 +1163,17 @@ socketInstance.on('room_joined', (data) => {
   }
   
   // Force timer update immediately with fresh data
-  console.log('⏰ Starting timer updates...');
+  console.log('⏰ Starting timer updates with clock compensation...');
   updateTimer();
+});
+
+
+socketInstance.on('room_expiring_soon', (data) => {
+  console.warn('⚠️ Room expiring soon!');
+  console.warn(`   Expires in: ${(data.expiresIn / 1000).toFixed(0)}s`);
+  
+  // Optional: Show a warning toast
+  toast(`Room expires in ${Math.floor(data.expiresIn / 1000)} seconds`, 'warning');
 });
 
 
@@ -1159,8 +1188,10 @@ socketInstance.on('room_expired', (data) => {
   if (roomData && roomData.expiresAt) {
     const serverExpiry = new Date(roomData.expiresAt).toISOString();
     const clientNow = new Date().toISOString();
+    const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
     console.error(`   Client expiresAt was: ${serverExpiry}`);
     console.error(`   Client time now: ${clientNow}`);
+    console.error(`   Server time now (adjusted): ${serverNow}`);
   }
   
   console.error('💥 ========================================\n');
@@ -1500,7 +1531,6 @@ if (acceptCallBtn) {
     sessionStorage.removeItem('returningFromCall');
   }
 
-// Get room data from localStorage
 const roomDataStr = localStorage.getItem('currentRoom');
 if (!roomDataStr) {
   console.error('❌ No currentRoom in localStorage');
@@ -1517,18 +1547,10 @@ try {
   if (roomData.expiresAt) {
     console.log(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
     const remaining = roomData.expiresAt - Date.now();
-    console.log(`   Time remaining (initial): ${(remaining / 1000).toFixed(1)}s`);
+    console.log(`   Time remaining (initial, no offset): ${(remaining / 1000).toFixed(1)}s`);
+    console.warn(`   ⚠️ Note: This will be adjusted for clock skew when server responds`);
     
-    // CRITICAL: Check if room already expired in localStorage
-    if (remaining <= 0) {
-      console.error('❌ Room in localStorage has already expired!');
-      console.error(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
-      console.error(`   now: ${new Date().toISOString()}`);
-      toast('Room has expired', 'error');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 1500);
-      return;
-    }
+    // Don't check expiry yet - wait for server clock sync
   } else {
     console.warn('⚠️ No expiresAt in localStorage room data');
     console.warn('   Will wait for server to provide it');
