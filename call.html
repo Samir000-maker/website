@@ -278,19 +278,6 @@ let makingOffer = new Map();
   }
 }
       
-      
-      function clearChatState() {
-  try {
-    localStorage.removeItem('chat_state');
-    localStorage.removeItem('chat_messages');
-    localStorage.removeItem('chat_timestamp');
-    localStorage.removeItem('currentRoom');
-    console.log('🗑️ Chat state cleared from call page');
-  } catch (e) {
-    console.warn('⚠️ Failed to clear chat state:', e);
-  }
-}
-
 
       function createParticipantTile(user, isSelf = false) {
   console.log(`🎨 Creating tile for ${user.username} (userId: ${user.userId}, isSelf: ${isSelf})`);
@@ -1482,37 +1469,337 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
           });
           
           // Inside initCall() function, replace the 'authenticated' handler:
-          
-          
-          
-          // Add after other socket handlers in initCall()
 
-socketInstance.on('timer_update', (data) => {
-  // Update remaining time
-  const remaining = data.remaining;
-  const minutes = Math.floor(remaining / 60000);
-  const seconds = Math.floor((remaining % 60000) / 1000);
+socketInstance.on('authenticated', async () => {
+  console.log('✅ Authenticated');
   
-  console.log(`⏱️ [Call] Timer: ${minutes}:${seconds.toString().padStart(2, '0')} remaining`);
-  
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) {
-    const participantCount = document.getElementById('participantGrid')?.children.length || 0;
-    subtitle.textContent = `${participantCount} participant${participantCount !== 1 ? 's' : ''} • ${minutes}:${seconds.toString().padStart(2, '0')} left`;
+  // CRITICAL FIX: Prevent duplicate join attempts
+  if (isJoiningCall) {
+    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
+    return;
   }
   
-  // Warning at 1 minute
-  if (remaining <= 60000 && remaining > 59000) {
-    toast('Room expires in 1 minute', 'warning');
-    console.log('⚠️ 1 minute warning in call');
-  }
-  
-  // Final warning at 10 seconds
-  if (remaining <= 10000 && remaining > 9000) {
-    toast('Room expiring in 10 seconds!', 'error');
-    console.log('⚠️ 10 second warning in call');
+  if (!hasJoinedCall) {
+    isJoiningCall = true;
+    hasJoinedCall = true;
+    
+    try {
+      console.log(`📞 Attempting to join call ${callData.callId}...`);
+      await attemptJoinCall(callData.callId);
+      console.log(`✅ Successfully joined call ${callData.callId}`);
+    } catch (error) {
+      console.error('❌ Failed to join call:', error);
+      toast('Failed to join call. Returning to chat...', 'error');
+      setTimeout(() => {
+        window.location.href = '/chat.html';
+      }, 2000);
+    } finally {
+      isJoiningCall = false;
+    }
   }
 });
+          
+          
+socketInstance.on('webrtc_offer', (d) => {
+  console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
+  handleOffer(d.fromUserId, d.offer);
+});
+
+socketInstance.on('webrtc_answer', (d) => {
+  console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
+  handleAnswer(d.fromUserId, d.answer);
+});
+
+socketInstance.on('ice_candidate', (d) => {
+  console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
+  handleIceCandidate(d.fromUserId, d.candidate);
+});
+          
+          
+// Replace call_joined handler
+socketInstance.on('call_joined', async (data) => {
+  console.log(`✅ Call joined event received`);
+  console.log(`📊 Participants: ${data.participants.length}`);
+  console.log('🔍 Full participant data:', JSON.stringify(data.participants.map(p => ({
+    userId: p.userId,
+    username: p.username,
+    videoEnabled: p.videoEnabled,
+    audioEnabled: p.audioEnabled
+  })), null, 2));
+  
+  // CRITICAL FIX: Validate we have participants
+  if (!data.participants || data.participants.length === 0) {
+    console.error('❌ Received call_joined with 0 participants!');
+    console.error('❌ This indicates a server-side state issue');
+    toast('Call state error. Please try again.', 'error');
+    setTimeout(() => {
+      window.location.href = '/chat.html';
+    }, 2000);
+    return;
+  }
+  
+  const subtitle = document.getElementById('callSubtitle');
+  if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
+  
+  console.log(`🎬 Initializing local media...`);
+  try {
+    await initLocalMedia();
+    console.log(`✅ Local media initialized successfully`);
+  } catch (mediaError) {
+    console.error(`❌ Media initialization failed:`, mediaError);
+    toast('Failed to initialize media.', 'error');
+  }
+  
+  if (!localStream) {
+    console.error(`❌ CRITICAL: localStream is still null!`);
+    localStream = new MediaStream();
+  }
+  
+  console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
+  localStream.getTracks().forEach(t => {
+    console.log(`   - ${t.kind}: id=${t.id.substring(0, 8)}..., enabled=${t.enabled}, readyState=${t.readyState}`);
+  });
+  
+  const grid = document.getElementById('participantGrid');
+  if (!grid) {
+    console.error('❌ Grid element not found!');
+    return;
+  }
+  
+  const fragment = document.createDocumentFragment();
+  
+  console.log(`🧹 Clearing grid and tracking`);
+  grid.innerHTML = '';
+  renderedParticipants.clear();
+  
+  console.log(`📋 Rendering ${data.participants.length} tiles`);
+  
+  const sortedParticipants = [...data.participants].sort((a, b) => 
+    a.userId.localeCompare(b.userId)
+  );
+  
+  let selfTileRendered = false;
+  
+  sortedParticipants.forEach((p, index) => {
+    const isSelf = p.userId === currentUser.userId;
+    const videoState = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
+    const audioState = p.audioEnabled !== undefined ? p.audioEnabled : true;
+    
+    console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${videoState} audio=${audioState}`);
+    
+    const tile = createParticipantTile(p, isSelf);
+    if (tile) {
+      fragment.appendChild(tile);
+      console.log(`✅ [${index}] Tile created for ${p.username}`);
+      
+      if (isSelf) selfTileRendered = true;
+      
+      if (audioState === false) {
+        const micIndicator = tile.querySelector(`#mic-${p.userId}`);
+        if (micIndicator) micIndicator.classList.remove('hidden');
+      }
+      
+      if (!isSelf && videoState === false) {
+        const vid = tile.querySelector(`#video-${p.userId}`);
+        const pfp = tile.querySelector(`#pfp-${p.userId}`);
+        if (vid && pfp) {
+          vid.classList.add('hidden');
+          pfp.classList.remove('hidden');
+        }
+      }
+    }
+  });
+  
+  grid.appendChild(fragment);
+  
+  console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
+  console.log(`📊 Self rendered: ${selfTileRendered}`);
+  
+  if (selfTileRendered) {
+    console.log(`🎬 Setting up local video...`);
+    await setupLocalVideo();
+  } else {
+    console.warn(`⚠️ Self NOT in participants - will setup on user_joined_call`);
+  }
+  
+  // Setup WebRTC offers
+  const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
+  
+  for (let i = 0; i < remoteParticipants.length; i++) {
+    const p = remoteParticipants[i];
+    const shouldInitiateOffer = currentUser.userId < p.userId;
+    
+    console.log(`🔗 [${i}] ${p.username}: shouldInitiate=${shouldInitiateOffer}`);
+    
+    if (shouldInitiateOffer) {
+      const delay = 1000 + (i * 500);
+      setTimeout(() => {
+        console.log(`📤 [${i}] Creating offer to ${p.username}`);
+        createOffer(p.userId);
+      }, delay);
+    }
+  }
+  
+  callStartTime = Date.now();
+  durationInterval = setInterval(updateDuration, 1000);
+  isInitializing = false;
+  console.log('=== INIT COMPLETE ===');
+});
+          
+// Replace the entire user_joined_call handler
+socketInstance.on('user_joined_call', (data) => {
+  const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
+  const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
+  
+  console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
+  
+  // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
+  if (renderedParticipants.has(data.user.userId)) {
+    console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
+    return;
+  }
+  
+  const grid = document.getElementById('participantGrid');
+  const existingTile = document.getElementById(`participant-${data.user.userId}`);
+  
+  if (existingTile) {
+    console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
+    existingTile.remove();
+    renderedParticipants.delete(data.user.userId);
+  }
+  
+  console.log(`➕ Adding NEW participant ${data.user.username}`);
+  
+  if (grid) {
+    const isSelf = data.user.userId === currentUser.userId;
+    const tile = createParticipantTile(data.user, isSelf);
+    
+    if (tile) {
+      grid.appendChild(tile);
+      
+      const micIndicator = document.getElementById(`mic-${data.user.userId}`);
+      if (micIndicator && audioState === false) {
+        micIndicator.classList.remove('hidden');
+      }
+      
+      // CRITICAL FIX: If this is our own tile, setup local video NOW
+      if (isSelf) {
+        console.log(`✅ Self tile created via user_joined_call - setting up local video...`);
+        setupLocalVideo().catch(err => {
+          console.error('❌ Failed to setup local video for self:', err);
+        });
+      } else {
+        // For remote users, initiate connection with delay to avoid race
+        const shouldInitiateOffer = currentUser.userId < data.user.userId;
+        if (shouldInitiateOffer) {
+          setTimeout(() => {
+            console.log(`📤 Creating offer to late joiner ${data.user.username}`);
+            createOffer(data.user.userId);
+          }, 2000); // Increased delay to 2s
+        }
+      }
+      
+      console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
+    }
+  }
+});
+          
+         // Replace user_left_call handler
+socketInstance.on('user_left_call', (data) => {
+  console.log(`👋 User left: ${data.userId}`);
+  
+  // Remove tile
+  const tile = document.getElementById(`participant-${data.userId}`);
+  if (tile) tile.remove();
+  renderedParticipants.delete(data.userId);
+  
+  // Clean up peer connection
+  const pc = peerConnections.get(data.userId);
+  if (pc) { 
+    pc.close(); 
+    peerConnections.delete(data.userId); 
+  }
+  
+  // Clean up audio context
+  const ac = audioContexts.get(data.userId);
+  if (ac) { 
+    ac.close(); 
+    audioContexts.delete(data.userId); 
+  }
+  
+  // Clean up connection stats and monitoring
+  const stats = connectionStats.get(data.userId);
+  if (stats && stats.monitorInterval) {
+    clearInterval(stats.monitorInterval);
+  }
+  connectionStats.delete(data.userId);
+  
+  // Clean up pending candidates
+  pendingIceCandidates.delete(data.userId);
+  
+  // Clean up negotiation mutex
+  negotiationMutex.delete(data.userId);
+  makingOffer.delete(data.userId);
+  
+  console.log(`✅ Fully cleaned up resources for ${data.userId}`);
+});
+          
+          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
+          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
+          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
+          
+          socketInstance.on('speaking_state', (d) => {
+            const s = document.getElementById(`speaking-${d.userId}`);
+            const t = document.getElementById(`participant-${d.userId}`);
+            if (s && t) {
+              if (d.speaking) { s.classList.remove('hidden'); t.classList.add('active-speaker'); }
+              else { s.classList.add('hidden'); t.classList.remove('active-speaker'); }
+            }
+          });
+          
+          socketInstance.on('audio_state_changed', (data) => {
+  console.log(`🎤 Received audio_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
+  
+  const micIndicator = document.getElementById(`mic-${data.userId}`);
+  if (micIndicator) {
+    if (data.enabled) {
+      micIndicator.classList.add('hidden');
+    } else {
+      micIndicator.classList.remove('hidden');
+    }
+  }
+});
+
+socketInstance.on('video_state_changed', (data) => {
+  console.log(`📹 [SOCKET] Received video_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
+  
+  // CRITICAL FIX: Update visibility for BOTH self and remote users
+  if (data.userId === currentUser.userId) {
+    console.log(`📹 Confirming our own video state from server: ${data.enabled}`);
+    // Server confirms our state - update UI if out of sync
+    if (isVideoEnabled !== data.enabled) {
+      console.warn(`⚠️ Local state (${isVideoEnabled}) out of sync with server (${data.enabled}), correcting...`);
+      isVideoEnabled = data.enabled;
+      updateVideoButton();
+    }
+    updateVideoVisibility(currentUser.userId, data.enabled, true);
+  } else {
+    // For remote users, update visibility
+    console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
+    updateVideoVisibility(data.userId, data.enabled, true);
+  }
+});
+          
+          socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
+          
+          const mic = document.getElementById('micBtn');
+          const vid = document.getElementById('videoBtn');
+          const leave = document.getElementById('leaveCallBtn');
+          if (mic) mic.addEventListener('click', toggleMic);
+          if (vid) vid.addEventListener('click', toggleVideo);
+          if (leave) leave.addEventListener('click', leaveCall);
+          window.addEventListener('beforeunload', () => leaveCall());
+          
         } catch (e) {
           console.error('❌ Init error:', e);
           toast('Failed to initialize call', 'error');
