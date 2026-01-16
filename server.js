@@ -2049,49 +2049,83 @@ socket.on('disconnect', () => {
         console.log(`⏳ User ${user.username} disconnected - grace period for room ${roomId}`);
         
         setTimeout(() => {
-          const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+  const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+  
+  if (stillDisconnected) {
+    console.log(`👋 User ${user.username} did not reconnect after grace period`);
+    
+    // CRITICAL FIX: Check if room still exists
+    const currentRoom = matchmaking.getRoom(roomId);
+    if (!currentRoom) {
+      console.log(`ℹ️ Room ${roomId} already destroyed, skipping leave processing`);
+      return;
+    }
+    
+    // CRITICAL FIX: Check if other users are still active
+    const activeUsers = currentRoom.users.filter(u => {
+      return Array.from(socketUsers.values()).some(su => su.userId === u.userId);
+    });
+    
+    console.log(`📊 Room ${roomId} has ${activeUsers.length} active users (${currentRoom.users.length} total)`);
+    
+    // CRITICAL FIX: Only destroy if NO active users
+    if (activeUsers.length === 0) {
+      console.log(`🗑️ No active users in room ${roomId} - destroying`);
+      const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
+      
+      if (result.destroyed) {
+        console.log(`🗑️ Room ${result.roomId} destroyed - last user left`);
+        cancelRoomCleanup(result.roomId);
+        performRoomCleanup(result.roomId);
+      }
+    } else if (activeUsers.length === 1) {
+      console.log(`⚠️ Only 1 active user in room ${roomId} - waiting 30s for reconnection`);
+      
+      // EXTENDED GRACE: Give 30 more seconds for the other user to reconnect
+      setTimeout(() => {
+        const stillOnlyOne = matchmaking.getRoom(roomId);
+        if (!stillOnlyOne) {
+          console.log(`ℹ️ Room ${roomId} already cleaned up`);
+          return;
+        }
+        
+        const nowActive = stillOnlyOne.users.filter(u => {
+          return Array.from(socketUsers.values()).some(su => su.userId === u.userId);
+        });
+        
+        if (nowActive.length === 1) {
+          console.log(`🗑️ Still only 1 user after extended grace - destroying room ${roomId}`);
+          const result = matchmaking.leaveRoom(user.userId, false);
           
-          if (stillDisconnected) {
-            console.log(`👋 User ${user.username} did not reconnect, processing room ${roomId} leave`);
-            
-            // Re-validate room still exists
-            const currentRoom = matchmaking.getRoom(roomId);
-            if (!currentRoom) {
-              console.log(`ℹ️ Room ${roomId} already destroyed, skipping leave processing`);
-              return;
-            }
-            
-            // Check AGAIN for active calls before destroying
-            let stillHasActiveCall = false;
-            activeCalls.forEach((call) => {
-              if (call.roomId === roomId && call.participants.length > 0) {
-                stillHasActiveCall = true;
-              }
-            });
-            
-            console.log(`📊 Room ${roomId} state: users=${currentRoom.users?.length || 0}, activeCall=${stillHasActiveCall}`);
-            
-            // Pass the hasActiveCall flag to leaveRoom
-            const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
-            
-            if (result.roomId && !result.destroyed) {
-              io.to(result.roomId).emit('user_left', {
-                userId: user.userId,
-                username: user.username,
-                remainingUsers: result.remainingUsers
-              });
-              console.log(`📢 Notified room ${result.roomId}: ${user.username} left (${result.remainingUsers} remaining)`);
-            }
-            
-            if (result.destroyed) {
-              console.log(`🗑️ Room ${result.roomId} destroyed after user disconnect`);
-              cancelRoomCleanup(result.roomId);
-              performRoomCleanup(result.roomId);
-            }
-          } else {
-            console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
+          if (result.roomId) {
+            performRoomCleanup(result.roomId);
           }
-        }, 5000); // 5 second grace
+        } else if (nowActive.length >= 2) {
+          console.log(`✅ Both users reconnected - room ${roomId} preserved`);
+        } else {
+          console.log(`🗑️ No users left - destroying room ${roomId}`);
+          performRoomCleanup(roomId);
+        }
+      }, 30000); // 30 second extended grace
+    } else {
+      console.log(`✅ Room ${roomId} has ${activeUsers.length} active users - preserving room`);
+      
+      // Just remove this user from the room, don't destroy it
+      const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
+      
+      if (result.roomId && !result.destroyed) {
+        io.to(result.roomId).emit('user_left', {
+          userId: user.userId,
+          username: user.username,
+          remainingUsers: result.remainingUsers
+        });
+        console.log(`📢 Notified room ${result.roomId}: ${user.username} left (${result.remainingUsers} remaining)`);
+      }
+    }
+  } else {
+    console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
+  }
+}, 10000); // INCREASED to 10 seconds (was 5)
       }
     }
 
