@@ -253,7 +253,8 @@ const callGracePeriod = new Map(); // callId -> timeout
 
 // Room cleanup tracking
 const roomCleanupTimers = new Map(); // roomId -> timeout
-const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
+// const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
+const ROOM_EXPIRY_TIME = 7000; // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
 
 // WebRTC metrics
@@ -1201,7 +1202,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         // CRITICAL: Mark room as having active call and extend expiry
         if (room) {
           room.setActiveCall(true);
-          room.extendExpiry(15); // Extend by 15 minutes
+          room.extendExpiry(0); // Extend by 15 minutes
           console.log(`🛡️ Room ${roomId} marked as having active call and extended by 15 minutes`);
         }
       }
