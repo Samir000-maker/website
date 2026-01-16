@@ -2136,7 +2136,7 @@ setInterval(() => {
   const now = Date.now();
   
   // CRITICAL FIX: Get raw room objects, not the mapped data
-  const rooms = Array.from(activeRooms.values()).filter(r => !r.isExpired);
+  const roomsData = matchmaking.getActiveRooms();
   
   if (rooms.length === 0) {
     return; // No rooms to broadcast to
@@ -2190,7 +2190,7 @@ setInterval(() => {
 
 setInterval(() => {
   // CRITICAL FIX: Get raw room objects
-  const rooms = Array.from(activeRooms.values()).filter(r => !r.isExpired);
+  const roomsData = matchmaking.getActiveRooms();
   
   rooms.forEach(room => {
     // Validate room structure
