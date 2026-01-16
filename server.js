@@ -1099,7 +1099,6 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       return;
     }
 
-    // CRITICAL FIX: Validate user is in the room
     if (!room.hasUser(user.userId)) {
       console.error(`❌ User ${user.username} not in room ${roomId} when accepting call ${callId}`);
       socket.emit('error', { 
@@ -1121,11 +1120,9 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       console.log(`🔍 [accept_call] Before: participants=[${call.participants.join(', ')}]`);
       console.log(`🔍 [accept_call] User ${user.username} (${user.userId}) accepting`);
 
-      // Check if already in call
       if (call.participants.includes(user.userId)) {
         console.log(`⚠️ User ${user.username} already in call ${callId} - re-sending state`);
         
-        // CRITICAL FIX: Build participant data with VALIDATED room data
         const callUsers = call.participants.map(participantId => {
           const roomUser = room.users.find(u => u.userId === participantId);
           
@@ -1146,10 +1143,10 @@ socket.on('accept_call', async ({ callId, roomId }) => {
             videoEnabled: mediaState.videoEnabled,
             audioEnabled: mediaState.audioEnabled
           };
-        }).filter(u => u !== null); // Remove any null entries
+        }).filter(u => u !== null);
 
         if (callUsers.length !== call.participants.length) {
-          console.error(`❌ CRITICAL: Participant count mismatch! Expected ${call.participants.length}, got ${callUsers.length}`);
+          console.error(`❌ CRITICAL: Participant count mismatch!`);
           socket.emit('error', { 
             message: 'Call state inconsistent. Please try again.',
             code: 'STATE_MISMATCH'
@@ -1167,29 +1164,25 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         return;
       }
 
-      // Add participant atomically
       call.participants.push(user.userId);
       userCalls.set(user.userId, callId);
       
       console.log(`➕ Added ${user.username} to participants`);
       console.log(`🔍 [accept_call] After: participants=[${call.participants.join(', ')}]`);
       
-      // Initialize media state
       call.userMediaStates.set(user.userId, {
         videoEnabled: call.callType === 'video',
         audioEnabled: true
       });
       
-      // Mark as active when first user accepts
       if (call.status === 'pending') {
         call.status = 'active';
         console.log(`📊 Call status changed: pending → active`);
         
-        // CRITICAL: Mark room as having active call and extend expiry
+        // REMOVED: Room extension logic - calls use unified timer
         if (room) {
           room.setActiveCall(true);
-          room.extendExpiry(15); // Extend by 15 minutes
-          console.log(`🛡️ Room ${roomId} marked as having active call and extended by 15 minutes`);
+          console.log(`🛡️ Room ${roomId} marked as having active call (unified timer)`);
         }
       }
       
@@ -1197,7 +1190,6 @@ socket.on('accept_call', async ({ callId, roomId }) => {
 
       console.log(`✅ User ${user.username} accepted call ${callId} - now ${call.status.toUpperCase()}`);
 
-      // CRITICAL FIX: Build validated participant list from ROOM data
       const callUsers = call.participants.map(participantId => {
         const roomUser = room.users.find(u => u.userId === participantId);
         
@@ -1221,26 +1213,17 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       }).filter(u => u !== null);
 
       if (callUsers.length !== call.participants.length) {
-        console.error(`❌ CRITICAL: Participant validation failed! Expected ${call.participants.length}, got ${callUsers.length}`);
-        console.error(`   Room users: ${room.users.map(u => u.userId).join(', ')}`);
-        console.error(`   Call participants: ${call.participants.join(', ')}`);
+        console.error(`❌ CRITICAL: Participant validation failed!`);
         socket.emit('error', { 
           message: 'Unable to resolve all participants. Please try again.',
           code: 'PARTICIPANT_RESOLUTION_FAILED'
         });
-        // Rollback the participant addition
         call.participants = call.participants.filter(p => p !== user.userId);
         userCalls.delete(user.userId);
         call.userMediaStates.delete(user.userId);
         return;
       }
 
-      console.log(`📊 Broadcasting to ${callUsers.length} participants:`);
-      callUsers.forEach((u, idx) => {
-        console.log(`   [${idx}] ${u.username} (${u.userId})`);
-      });
-
-      // Emit to ALL participants simultaneously
       const emitPromises = callUsers.map(roomUser => {
         return new Promise((resolve) => {
           const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -1253,7 +1236,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
             console.log(`📤 Sent call_accepted to ${roomUser.username}`);
             resolve();
           } else {
-            console.error(`❌ No active socket for ${roomUser.username} (${roomUser.userId})`);
+            console.error(`❌ No active socket for ${roomUser.username}`);
             resolve();
           }
         });
@@ -1261,7 +1244,6 @@ socket.on('accept_call', async ({ callId, roomId }) => {
 
       await Promise.all(emitPromises);
 
-      // Broadcast call state to entire room
       io.to(roomId).emit('call_state_update', {
         callId: callId,
         isActive: true,
@@ -1929,7 +1911,6 @@ socket.on('disconnect', () => {
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
 
-    // Handle call disconnection with grace period
     const callId = userCalls.get(user.userId);
     if (callId) {
       const call = activeCalls.get(callId);
@@ -1953,11 +1934,9 @@ socket.on('disconnect', () => {
               username: user.username
             });
 
-            // Only clean up call if empty
             if (call.participants.length === 0) {
               console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
               
-              // Mark room as no longer having active call
               const room = matchmaking.getRoom(call.roomId);
               if (room) {
                 room.setActiveCall(false);
@@ -1981,22 +1960,19 @@ socket.on('disconnect', () => {
           } else {
             console.log(`✅ User ${user.username} rejoined call`);
           }
-        }, 10000); // 10 second grace period
+        }, 10000);
         
         callGracePeriod.set(callId, graceTimeout);
       }
     }
     
-    // Matchmaking cleanup
     matchmaking.cancelMatchmaking(user.userId);
     
-    // CRITICAL FIX: Room cleanup - check for active calls
     const roomId = matchmaking.getRoomIdByUser(user.userId);
     
     if (roomId) {
       const room = matchmaking.getRoom(roomId);
       
-      // Check if there's an active call in this room
       let hasActiveCall = false;
       activeCalls.forEach((call) => {
         if (call.roomId === roomId && call.participants.length > 0) {
@@ -2007,7 +1983,6 @@ socket.on('disconnect', () => {
       
       if (hasActiveCall) {
         console.log(`🛡️ User ${user.username} disconnected - room ${roomId} PRESERVED (active call)`);
-        // Do NOT remove user or start destruction
       } else {
         console.log(`⏳ User ${user.username} disconnected - grace period for room ${roomId}`);
         
@@ -2017,7 +1992,6 @@ socket.on('disconnect', () => {
           if (stillDisconnected) {
             console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
             
-            // Check AGAIN for active calls before destroying
             let stillHasActiveCall = false;
             activeCalls.forEach((call) => {
               if (call.roomId === roomId && call.participants.length > 0) {
@@ -2025,7 +1999,6 @@ socket.on('disconnect', () => {
               }
             });
             
-            // Pass the hasActiveCall flag to leaveRoom
             const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
             
             if (result.roomId && !result.destroyed) {
@@ -2044,7 +2017,7 @@ socket.on('disconnect', () => {
           } else {
             console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
           }
-        }, 5000); // 5 second grace
+        }, 5000);
       }
     }
 
