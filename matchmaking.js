@@ -5,7 +5,7 @@ import config from './config.js';
  * Enhanced Matchmaking System with Room Lifecycle Management
  * 
  * Features:
- * - 10-minute room expiration
+ * - 50-second room expiration (configurable)
  * - Automatic cleanup
  * - Ephemeral message storage
  * - Grace periods for reconnection
@@ -26,51 +26,62 @@ const roomActivity = new Map(); // roomId -> lastActivityTimestamp
 
 // Cleanup interval
 const CLEANUP_INTERVAL = 60 * 1000; // 1 minute
-const ROOM_LIFETIME = 50 * 1000; // 7 SECONDS FOR TESTING
-const ROOM_WARNING_TIME = 18 * 1000; // 5 seconds (2 second warning)g)
+const ROOM_LIFETIME = 50 * 1000; // 50 SECONDS
+const ROOM_WARNING_TIME = 30 * 1000; // 30 seconds (20 second warning before expiry)
 
 /**
  * Enhanced Room class with lifecycle management
  */
 class Room {
-constructor(mood, users) {
-  this.id = uuidv4();
-  this.mood = mood;
-  this.users = users;
-  this.messages = []; // Ephemeral message storage
-  this.createdAt = Date.now();
-  this.lastActivity = Date.now();
-  this.expiresAt = Date.now() + ROOM_LIFETIME;
-  this.cleanupTimer = null;
-  this.warningTimer = null;
-  this.isExpired = false;
-  this.io = null; // Socket.IO instance (set externally)
-  this.hasActiveCall = false; // CRITICAL: Track if room has active call
-  this.userJoinedRoom = false; // NEW: Track if users actually joined
+  constructor(mood, users) {
+    this.id = uuidv4();
+    this.mood = mood;
+    this.users = users;
+    this.messages = []; // Ephemeral message storage
+    this.createdAt = Date.now();
+    this.lastActivity = Date.now();
+    this.expiresAt = null; // Will be set when timer starts
+    this.cleanupTimer = null;
+    this.warningTimer = null;
+    this.isExpired = false;
+    this.io = null; // Socket.IO instance (set externally)
+    this.hasActiveCall = false; // Track if room has active call
+    this.userJoinedRoom = false; // Track if users actually joined
+    this.timerStartedAt = null; // Track when timer actually started
 
-  // DON'T setup timers here - wait until users confirm join
-  // this.setupLifecycleTimers();
-}
+    console.log(`🏠 Room ${this.id} created at ${new Date(this.createdAt).toISOString()}`);
+    console.log(`   Users: ${users.map(u => u.username).join(', ')}`);
+    console.log(`   ⏰ Timer will start when first user joins (NOT started yet)`);
+  }
 
-setupLifecycleTimers() {
-  // Calculate warning time (happens BEFORE expiry)
-  const timeUntilWarning = ROOM_WARNING_TIME;
-  const timeUntilExpiry = ROOM_LIFETIME;
-  
-  console.log(`⏱️ Room ${this.id} timers: warning in ${timeUntilWarning / 1000}s, expiry in ${timeUntilExpiry / 1000}s`);
-  
-  // Warning timer (fires at ROOM_WARNING_TIME)
-  this.warningTimer = setTimeout(() => {
-    this.emitWarning();
-  }, timeUntilWarning);
+  setupLifecycleTimers() {
+    if (this.cleanupTimer || this.warningTimer) {
+      console.warn(`⚠️ Timers already set for room ${this.id}, skipping`);
+      return;
+    }
 
-  // Cleanup timer (fires at ROOM_LIFETIME)
-  this.cleanupTimer = setTimeout(() => {
-    this.expire();
-  }, timeUntilExpiry);
+    // Set expiration time NOW
+    this.timerStartedAt = Date.now();
+    this.expiresAt = this.timerStartedAt + ROOM_LIFETIME;
 
-  console.log(`⏱️ Room ${this.id} lifecycle timers set (expires in ${ROOM_LIFETIME / 1000}s)`);
-}
+    const timeUntilWarning = ROOM_WARNING_TIME;
+    const timeUntilExpiry = ROOM_LIFETIME;
+    
+    console.log(`⏱️ Room ${this.id} timers STARTED at ${new Date(this.timerStartedAt).toISOString()}`);
+    console.log(`   ⏰ Will expire at: ${new Date(this.expiresAt).toISOString()}`);
+    console.log(`   ⚠️ Warning in: ${timeUntilWarning / 1000}s (at ${new Date(this.timerStartedAt + timeUntilWarning).toISOString()})`);
+    console.log(`   💥 Expiry in: ${timeUntilExpiry / 1000}s (at ${new Date(this.expiresAt).toISOString()})`);
+    
+    // Warning timer (fires at ROOM_WARNING_TIME)
+    this.warningTimer = setTimeout(() => {
+      this.emitWarning();
+    }, timeUntilWarning);
+
+    // Cleanup timer (fires at ROOM_LIFETIME)
+    this.cleanupTimer = setTimeout(() => {
+      this.expire();
+    }, timeUntilExpiry);
+  }
 
   /**
    * Update activity timestamp (extends room life)
@@ -78,70 +89,68 @@ setupLifecycleTimers() {
   updateActivity() {
     this.lastActivity = Date.now();
     roomActivity.set(this.id, this.lastActivity);
-
-    // NOTE: We do NOT extend expiration time
-    // Room always expires 10 minutes after creation
   }
 
   /**
-   * CRITICAL: Mark room as having active call
+   * Mark room as having active call
    */
   setActiveCall(isActive) {
     this.hasActiveCall = isActive;
+    console.log(`📞 Room ${this.id} active call status: ${isActive}`);
   }
 
- extendExpiry(additionalMinutes) {
-  // DISABLED: Calls now use same timer as chat
-}
+  startLifecycleTimers() {
+    if (this.cleanupTimer || this.warningTimer) {
+      console.log(`⚠️ Timers already running for room ${this.id}, skipping`);
+      return;
+    }
 
-startLifecycleTimers() {
-  if (this.cleanupTimer || this.warningTimer) {
-    console.log(`⚠️ Timers already set for room ${this.id}, skipping`);
-    return;
+    this.setupLifecycleTimers();
   }
 
-  // Reset expiration time to NOW + lifetime
-  this.expiresAt = Date.now() + ROOM_LIFETIME;
-  
-  this.setupLifecycleTimers();
-}
+  emitWarning() {
+    if (this.io && !this.isExpired) {
+      const remainingTime = (ROOM_LIFETIME - ROOM_WARNING_TIME) / 1000;
+      console.log(`⚠️ Room ${this.id} WARNING: ${remainingTime} seconds remaining`);
+      console.log(`   Current time: ${new Date().toISOString()}`);
+      console.log(`   Expires at: ${new Date(this.expiresAt).toISOString()}`);
 
-emitWarning() {
-  if (this.io && !this.isExpired) {
-    const warningTime = (ROOM_LIFETIME - ROOM_WARNING_TIME) / 1000;
-    console.log(`⚠️ Room ${this.id} will expire in ${warningTime} seconds`);
-
-    this.io.to(this.id).emit('room_expiring_soon', {
-      roomId: this.id,
-      expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME // Time remaining after warning
-    });
-  }
-}
-
-/**
- * Expire and destroy room
- */
-expire() {
-  if (this.isExpired) {
-    console.log(`⏭️ Room ${this.id} already expired, skipping`);
-    return;
+      this.io.to(this.id).emit('room_expiring_soon', {
+        roomId: this.id,
+        expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME,
+        expiresAt: this.expiresAt
+      });
+    }
   }
 
-  this.isExpired = true;
+  /**
+   * Expire and destroy room
+   */
+  expire() {
+    if (this.isExpired) {
+      console.log(`⏭️ Room ${this.id} already expired, skipping`);
+      return;
+    }
 
-  console.log(`⏱️ Room ${this.id} expired after ${ROOM_LIFETIME / 1000} seconds`);
+    this.isExpired = true;
 
-  // Notify all users
-  if (this.io) {
-    this.io.to(this.id).emit('room_expired', {
-      roomId: this.id,
-      message: `This conversation has ended after ${ROOM_LIFETIME / 1000} seconds`
-    });
+    console.log(`💥 Room ${this.id} EXPIRED`);
+    console.log(`   Created: ${new Date(this.createdAt).toISOString()}`);
+    console.log(`   Timer started: ${new Date(this.timerStartedAt).toISOString()}`);
+    console.log(`   Expired: ${new Date().toISOString()}`);
+    console.log(`   Total lifetime: ${(Date.now() - this.timerStartedAt) / 1000}s`);
+
+    // Notify all users
+    if (this.io) {
+      this.io.to(this.id).emit('room_expired', {
+        roomId: this.id,
+        message: `This conversation has ended after ${ROOM_LIFETIME / 1000} seconds`
+      });
+    }
+
+    // Destroy room
+    this.destroy();
   }
-
-  // Destroy room
-  this.destroy();
-}
 
   /**
    * Add message to room
@@ -157,7 +166,6 @@ expire() {
       this.messages = this.messages.slice(-100);
     }
 
-    // Update activity
     this.updateActivity();
   }
 
@@ -188,6 +196,10 @@ expire() {
    * Get time until expiration
    */
   getTimeUntilExpiration() {
+    if (!this.expiresAt) {
+      console.warn(`⚠️ Room ${this.id} has no expiration time set yet`);
+      return ROOM_LIFETIME; // Return full lifetime if timer not started
+    }
     return Math.max(0, this.expiresAt - Date.now());
   }
 
@@ -195,6 +207,8 @@ expire() {
    * Destroy room and clean up
    */
   destroy() {
+    console.log(`🗑️ Room ${this.id} destroying...`);
+    
     // Clear timers
     if (this.cleanupTimer) {
       clearTimeout(this.cleanupTimer);
@@ -211,6 +225,8 @@ expire() {
 
     // Remove from activity tracking
     roomActivity.delete(this.id);
+    
+    console.log(`✅ Room ${this.id} destroyed`);
   }
 }
 
@@ -234,10 +250,9 @@ export function addToQueue(userData) {
   }
 
   const queue = matchmakingQueues.get(mood);
-
-  // Add user to queue
   queue.push(userData);
 
+  console.log(`🎮 User ${username} queued for ${mood} (${queue.length}/${config.MAX_USERS_PER_ROOM})`);
 
   // Check if we have enough users to create a room
   if (queue.length >= config.MAX_USERS_PER_ROOM) {
@@ -267,6 +282,8 @@ function createRoom(mood, users) {
   roomActivity.set(room.id, room.lastActivity);
 
   const usernames = users.map(u => u.username).join(', ');
+  console.log(`🎉 Room ${room.id} created with users: ${usernames}`);
+  console.log(`   ⏰ Timer will start when first user joins room`);
 
   return room;
 }
@@ -320,7 +337,6 @@ export function getRoomIdByUser(userId) {
 
 /**
  * Remove user from room
- * Note: Does NOT destroy room if there are active calls
  */
 export function leaveRoom(userId, hasActiveCall = false) {
   const roomId = userRoomMap.get(userId);
@@ -338,13 +354,17 @@ export function leaveRoom(userId, hasActiveCall = false) {
   const remainingUsers = room.removeUser(userId);
   userRoomMap.delete(userId);
 
-  // CRITICAL FIX: Do NOT destroy room if there's an active call
+  console.log(`👋 User ${userId} left room ${roomId}, ${remainingUsers} remaining`);
+
+  // Do NOT destroy room if there's an active call
   if (hasActiveCall) {
+    console.log(`🛡️ Room ${roomId} preserved due to active call`);
     return { roomId, remainingUsers, destroyed: false };
   }
 
   // Destroy room if only 1 or 0 users remain (and no active call)
   if (remainingUsers <= 1) {
+    console.log(`🗑️ Room ${roomId} has ${remainingUsers} user(s), destroying...`);
     destroyRoom(roomId, 'Too few users');
     return { roomId, remainingUsers, destroyed: true };
   }
@@ -357,7 +377,12 @@ export function leaveRoom(userId, hasActiveCall = false) {
  */
 export function destroyRoom(roomId, reason = 'Unknown') {
   const room = activeRooms.get(roomId);
-  if (!room) return;
+  if (!room) {
+    console.log(`⚠️ Room ${roomId} not found, already destroyed`);
+    return;
+  }
+
+  console.log(`🗑️ Destroying room ${roomId}, reason: ${reason}`);
 
   // Remove all users from room map
   room.users.forEach(user => {
@@ -379,6 +404,7 @@ function removeFromAllQueues(userId) {
     const index = queue.findIndex(u => u.userId === userId);
     if (index !== -1) {
       const removed = queue.splice(index, 1)[0];
+      console.log(`❌ Removed ${removed.username} from ${mood} queue`);
     }
   }
 }
@@ -410,6 +436,7 @@ export function getActiveRooms() {
       userCount: room.users.length,
       messageCount: room.messages.length,
       createdAt: room.createdAt,
+      timerStartedAt: room.timerStartedAt,
       expiresAt: room.expiresAt,
       timeRemaining: room.getTimeUntilExpiration(),
       isExpired: room.isExpired
@@ -425,15 +452,15 @@ export function cleanupExpiredRooms() {
 
   for (const [roomId, room] of activeRooms.entries()) {
     // Check if room expired
-    if (room.expiresAt < now || room.isExpired) {
+    if (room.expiresAt && room.expiresAt < now || room.isExpired) {
+      console.log(`🧹 Cleanup: Room ${roomId} expired`);
       destroyRoom(roomId, 'Expired (cleanup)');
       cleaned++;
     }
   }
 
   if (cleaned > 0) {
-    
-    
+    console.log(`🧹 Cleaned up ${cleaned} expired room(s)`);
   }
 }
 
