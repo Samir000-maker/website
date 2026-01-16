@@ -1212,21 +1212,10 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         call.status = 'active';
         console.log(`📊 Call status changed: pending → active`);
         
-        // CRITICAL: Mark room as having active call and extend expiry
-        // CRITICAL: Mark room as having active call and extend expiry
 if (room) {
   room.setActiveCall(true);
-  
-  // CRITICAL FIX: For testing with 7s timer, extend by smaller amount
-  const isTestMode = ROOM_EXPIRY_TIME < 60000; // Less than 1 minute = test mode
-  const extensionMinutes = isTestMode ? 0.2 : 15; // 12 seconds for test, 15 min for prod
-  
-  if (extensionMinutes > 0) {
-    room.extendExpiry(extensionMinutes);
-    console.log(`🛡️ Room ${roomId} marked as having active call and extended by ${extensionMinutes} minutes`);
-  } else {
-    console.log(`🛡️ Room ${roomId} marked as having active call (no extension in test mode)`);
-  }
+  console.log(`🛡️ Room ${roomId} marked as having active call (timer continues normally)`);
+  console.log(`   Room will expire at: ${new Date(room.expiresAt).toLocaleTimeString()}`);
 }
       }
       
