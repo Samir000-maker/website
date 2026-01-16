@@ -275,6 +275,19 @@ const OFFER_DEDUPE_WINDOW = 2000; // 2 seconds
 // ROOM CLEANUP SYSTEM
 // ============================================
 
+
+function findActiveSocketForUser(userId) {
+  for (const [socketId, userData] of socketUsers.entries()) {
+    if (userData.userId === userId) {
+      const socketInstance = io.sockets.sockets.get(socketId);
+      if (socketInstance && socketInstance.connected) {
+        return socketInstance;
+      }
+    }
+  }
+  return null;
+}
+
 function scheduleRoomCleanup(roomId, expiresAt) {
   // Clear existing timer if any
   if (roomCleanupTimers.has(roomId)) {
