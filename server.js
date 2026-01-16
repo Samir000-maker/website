@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const callMutexes = new Map();
 
-const ROOM_LIFETIME = 7 * 1000;
+const ROOM_LIFETIME = 20 * 1000;
 
 function getUserDataForParticipant(participantId, socketUsers, room) {
   console.log(`🔍 Resolving user data for ${participantId}`);
@@ -254,7 +254,7 @@ const callGracePeriod = new Map(); // callId -> timeout
 // Room cleanup tracking
 const roomCleanupTimers = new Map(); // roomId -> timeout
 // const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
-const ROOM_EXPIRY_TIME = 7000; // 10 minutes
+const ROOM_EXPIRY_TIME = 20000; // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
 
 // WebRTC metrics
