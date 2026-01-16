@@ -1215,7 +1215,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         // CRITICAL: Mark room as having active call and extend expiry
         if (room) {
           room.setActiveCall(true);
-          room.extendExpiry(0); // Extend by 15 minutes
+          room.extendExpiry(15); // Extend by 15 minutes
           console.log(`🛡️ Room ${roomId} marked as having active call and extended by 15 minutes`);
         }
       }
