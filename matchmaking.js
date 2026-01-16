@@ -167,6 +167,7 @@ expire() {
     console.log(`   Room will still expire at: ${new Date(this.expiresAt).toLocaleTimeString()}`);
     return;
   }
+}
 
   /**
    * Add message to room
