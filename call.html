@@ -278,6 +278,19 @@ let makingOffer = new Map();
   }
 }
       
+      
+      function clearChatState() {
+  try {
+    localStorage.removeItem('chat_state');
+    localStorage.removeItem('chat_messages');
+    localStorage.removeItem('chat_timestamp');
+    localStorage.removeItem('currentRoom');
+    console.log('🗑️ Chat state cleared from call page');
+  } catch (e) {
+    console.warn('⚠️ Failed to clear chat state:', e);
+  }
+}
+
 
       function createParticipantTile(user, isSelf = false) {
   console.log(`🎨 Creating tile for ${user.username} (userId: ${user.userId}, isSelf: ${isSelf})`);
@@ -1469,6 +1482,81 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
           });
           
           // Inside initCall() function, replace the 'authenticated' handler:
+          
+          
+          
+          // Add after other socket handlers in initCall()
+
+socketInstance.on('timer_update', (data) => {
+  console.log(`⏱️ Timer update: ${Math.floor(data.remaining / 1000)}s remaining`);
+  
+  // Update call duration display to show remaining time
+  const remaining = data.remaining;
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  
+  const subtitle = document.getElementById('callSubtitle');
+  if (subtitle) {
+    const participantCount = document.getElementById('participantGrid')?.children.length || 0;
+    subtitle.textContent = `${participantCount} participant${participantCount !== 1 ? 's' : ''} • ${minutes}:${seconds.toString().padStart(2, '0')} left`;
+  }
+  
+  // Warning at 1 minute
+  if (remaining <= 60000 && remaining > 59000) {
+    toast('Room expires in 1 minute', 'warning');
+    console.log('⚠️ 1 minute warning in call');
+  }
+  
+  // Final warning at 10 seconds
+  if (remaining <= 10000 && remaining > 9000) {
+    toast('Room expiring in 10 seconds!', 'error');
+    console.log('⚠️ 10 second warning in call');
+  }
+});
+
+socketInstance.on('call_room_expired', (data) => {
+  console.log('⏰ Call room expired:', data);
+  toast('Room has expired - returning to mood selection', 'error');
+  
+  // Clean up call resources
+  audioContexts.forEach(c => c.close());
+  audioContexts.clear();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  
+  if (durationInterval) clearInterval(durationInterval);
+  
+  localStorage.removeItem('activeCall');
+  clearChatState(); // If you have this function
+  
+  // Immediate redirect
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 1000);
+});
+
+socketInstance.on('room_closed_solo', (data) => {
+  console.log('👤 Call room closed - solo user:', data);
+  toast('Call ended - no other participants', 'warning');
+  
+  // Clean up and redirect
+  audioContexts.forEach(c => c.close());
+  audioContexts.clear();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  
+  if (durationInterval) clearInterval(durationInterval);
+  
+  localStorage.removeItem('activeCall');
+  
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 1000);
+});
+          
+          
 
 socketInstance.on('authenticated', async () => {
   console.log('✅ Authenticated');
