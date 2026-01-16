@@ -1361,14 +1361,15 @@ async function toggleVideo() {
       function updateDuration() {
   if (!callData || !callData.roomId) return;
   
-  const room = sessionStorage.getItem('currentRoom');
-  if (!room) {
-    console.warn('⚠️ No room data in session - cannot sync timer');
+  // CRITICAL FIX: Get room data from localStorage (same as chat.html)
+  const roomStr = localStorage.getItem('currentRoom');
+  if (!roomStr) {
+    console.warn('⚠️ No room data - cannot sync timer');
     return;
   }
   
   try {
-    const roomData = JSON.parse(room);
+    const roomData = JSON.parse(roomStr);
     const now = Date.now();
     const remaining = Math.max(0, roomData.expiresAt - now);
     
@@ -1379,12 +1380,13 @@ async function toggleVideo() {
     
     const el = document.getElementById('callDuration');
     if (el) {
+      // Display remaining time (same as chat)
       el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
     }
     
     // Check if expired
     if (remaining === 0) {
-      console.log('⏰ Room expired during call - redirecting');
+      console.log('⏰ Room expired during call - ending call');
       if (durationInterval) clearInterval(durationInterval);
       toast('Room has expired', 'warning');
       leaveCall();
@@ -1500,7 +1502,6 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
 
 
 
-// Add room_expired handler in initCall() after socketInstance setup
 socketInstance.on('room_expired', (data) => {
   console.log('⏰ Room expired notification received:', data);
   toast(data.message || 'Room has expired', 'warning');
@@ -1671,7 +1672,6 @@ socketInstance.on('call_joined', async (data) => {
     }
   }
   
-  // CRITICAL: Start synced timer with room expiry
   console.log('⏰ Starting synced timer with room expiry');
   durationInterval = setInterval(updateDuration, 1000);
   updateDuration(); // Update immediately
