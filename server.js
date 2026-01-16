@@ -1935,12 +1935,13 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
       console.log(`👋 ${user.username} left room ${result.roomId}`);
     }
   });
+  
 
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
   if (user) {
-    console.log(`🔌 User ${user.username} disconnected`);
+    console.log(`🔌 User ${user.username} (${user.userId}) disconnected from socket ${socket.id}`);
 
     // Handle call disconnection with grace period
     const callId = userCalls.get(user.userId);
@@ -1957,39 +1958,43 @@ socket.on('disconnect', () => {
           if (!reconnected) {
             console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
             
-            call.participants = call.participants.filter(p => p !== user.userId);
-            userCalls.delete(user.userId);
-            call.userMediaStates.delete(user.userId);
+            const currentCall = activeCalls.get(callId);
+            if (currentCall) {
+              currentCall.participants = currentCall.participants.filter(p => p !== user.userId);
+              userCalls.delete(user.userId);
+              currentCall.userMediaStates.delete(user.userId);
 
-            io.to(`call-${callId}`).emit('user_left_call', {
-              userId: user.userId,
-              username: user.username
-            });
+              io.to(`call-${callId}`).emit('user_left_call', {
+                userId: user.userId,
+                username: user.username
+              });
 
-            // Only clean up call if empty
-            if (call.participants.length === 0) {
-              console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
-              
-              // Mark room as no longer having active call
-              const room = matchmaking.getRoom(call.roomId);
-              if (room) {
-                room.setActiveCall(false);
-              }
-              
-              setTimeout(() => {
-                const currentCall = activeCalls.get(callId);
-                if (currentCall && currentCall.participants.length === 0) {
-                  activeCalls.delete(callId);
-                  console.log(`🗑️ Call ${callId} fully cleaned up`);
-                  
-                  if (room) {
-                    io.to(call.roomId).emit('call_ended_notification', {
-                      callId: callId
-                    });
-                    console.log(`📢 Call ${callId} ended, room ${call.roomId} still active`);
-                  }
+              // Only clean up call if empty
+              if (currentCall.participants.length === 0) {
+                console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
+                
+                // Mark room as no longer having active call
+                const room = matchmaking.getRoom(currentCall.roomId);
+                if (room) {
+                  room.setActiveCall(false);
+                  console.log(`📞 Room ${currentCall.roomId} marked as call-free`);
                 }
-              }, 5000);
+                
+                setTimeout(() => {
+                  const stillEmptyCall = activeCalls.get(callId);
+                  if (stillEmptyCall && stillEmptyCall.participants.length === 0) {
+                    activeCalls.delete(callId);
+                    console.log(`🗑️ Call ${callId} fully cleaned up`);
+                    
+                    if (room) {
+                      io.to(currentCall.roomId).emit('call_ended_notification', {
+                        callId: callId
+                      });
+                      console.log(`📢 Call ${callId} ended, room ${currentCall.roomId} still active`);
+                    }
+                  }
+                }, 5000);
+              }
             }
           } else {
             console.log(`✅ User ${user.username} rejoined call`);
@@ -2003,18 +2008,24 @@ socket.on('disconnect', () => {
     // Matchmaking cleanup
     matchmaking.cancelMatchmaking(user.userId);
     
-    // CRITICAL FIX: Room cleanup - check for active calls
+    // Room cleanup with validation
     const roomId = matchmaking.getRoomIdByUser(user.userId);
     
     if (roomId) {
       const room = matchmaking.getRoom(roomId);
+      
+      if (!room) {
+        console.warn(`⚠️ Room ${roomId} not found for user ${user.username}`);
+        socketUsers.delete(socket.id);
+        return;
+      }
       
       // Check if there's an active call in this room
       let hasActiveCall = false;
       activeCalls.forEach((call) => {
         if (call.roomId === roomId && call.participants.length > 0) {
           hasActiveCall = true;
-          console.log(`🛡️ Room ${roomId} has active call ${call.callId}`);
+          console.log(`🛡️ Room ${roomId} has active call ${call.callId} with ${call.participants.length} participant(s)`);
         }
       });
       
@@ -2028,7 +2039,14 @@ socket.on('disconnect', () => {
           const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
           
           if (stillDisconnected) {
-            console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
+            console.log(`👋 User ${user.username} did not reconnect, processing room ${roomId} leave`);
+            
+            // Re-validate room still exists
+            const currentRoom = matchmaking.getRoom(roomId);
+            if (!currentRoom) {
+              console.log(`ℹ️ Room ${roomId} already destroyed, skipping leave processing`);
+              return;
+            }
             
             // Check AGAIN for active calls before destroying
             let stillHasActiveCall = false;
@@ -2037,6 +2055,8 @@ socket.on('disconnect', () => {
                 stillHasActiveCall = true;
               }
             });
+            
+            console.log(`📊 Room ${roomId} state: users=${currentRoom.users?.length || 0}, activeCall=${stillHasActiveCall}`);
             
             // Pass the hasActiveCall flag to leaveRoom
             const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
@@ -2047,6 +2067,7 @@ socket.on('disconnect', () => {
                 username: user.username,
                 remainingUsers: result.remainingUsers
               });
+              console.log(`📢 Notified room ${result.roomId}: ${user.username} left (${result.remainingUsers} remaining)`);
             }
             
             if (result.destroyed) {
@@ -2066,6 +2087,7 @@ socket.on('disconnect', () => {
     console.log('🔌 Unauthenticated client disconnected:', socket.id);
   }
 });
+
 });
 
 // ============================================
@@ -2090,7 +2112,17 @@ setInterval(() => {
   const now = Date.now();
   const rooms = matchmaking.getActiveRooms();
   
+  if (rooms.length === 0) {
+    return; // No rooms to broadcast to
+  }
+  
   rooms.forEach(room => {
+    // CRITICAL: Validate room structure
+    if (!room || !room.id || !room.expiresAt) {
+      console.warn(`⚠️ Invalid room structure in timer broadcast, skipping`);
+      return;
+    }
+    
     const remaining = Math.max(0, room.expiresAt - now);
     
     // Broadcast to chat room
@@ -2100,15 +2132,22 @@ setInterval(() => {
     });
     
     // Broadcast to active calls in this room
+    let callsInRoom = 0;
     activeCalls.forEach((call, callId) => {
       if (call.roomId === room.id && call.participants.length > 0) {
         io.to(`call-${callId}`).emit('timer_update', {
           remaining,
           expiresAt: room.expiresAt
         });
-        console.log(`⏱️ Timer broadcast to call-${callId}: ${Math.floor(remaining / 1000)}s remaining`);
+        callsInRoom++;
       }
     });
+    
+    // Log only at key intervals to reduce spam
+    const secondsRemaining = Math.floor(remaining / 1000);
+    if (secondsRemaining === 60 || secondsRemaining === 30 || secondsRemaining === 10 || secondsRemaining === 5) {
+      console.log(`⏱️ Room ${room.id}: ${secondsRemaining}s remaining (${room.users?.length || 0} users, ${callsInRoom} active call(s))`);
+    }
     
     // If expired, trigger cleanup
     if (remaining === 0) {
@@ -2119,19 +2158,31 @@ setInterval(() => {
 }, 1000); // Every second
 
 
+// ============================================
+// SINGLE USER ROOM CLEANUP
+// ============================================
+
+// Check every 2 seconds for rooms with only 1 user
 setInterval(() => {
   const rooms = matchmaking.getActiveRooms();
   
   rooms.forEach(room => {
+    // CRITICAL: Validate room and users array exist
+    if (!room || !room.users || !Array.isArray(room.users)) {
+      console.warn(`⚠️ Invalid room structure detected, skipping cleanup check`);
+      return;
+    }
+    
     if (room.users.length === 1) {
       const soloUser = room.users[0];
-      console.log(`👤 Room ${room.id} has only 1 user: ${soloUser.username}`);
+      console.log(`👤 Room ${room.id} has only 1 user: ${soloUser.username} (${soloUser.userId})`);
       
       // Check if there's an active call (if so, don't destroy yet)
       let hasActiveCall = false;
       activeCalls.forEach((call) => {
         if (call.roomId === room.id && call.participants.length > 0) {
           hasActiveCall = true;
+          console.log(`🛡️ Room ${room.id} has active call with ${call.participants.length} participant(s)`);
         }
       });
       
@@ -2146,7 +2197,9 @@ setInterval(() => {
             message: 'Room closed - you are the only user remaining',
             redirect: true
           });
-          console.log(`📢 Notified ${soloUser.username} of room closure`);
+          console.log(`📢 Notified ${soloUser.username} (${soloUser.userId}) of room closure`);
+        } else {
+          console.warn(`⚠️ No active socket found for solo user ${soloUser.username} (${soloUser.userId})`);
         }
         
         // Clean up the room
@@ -2154,6 +2207,9 @@ setInterval(() => {
       } else {
         console.log(`🛡️ Room ${room.id} preserved - active call in progress`);
       }
+    } else if (room.users.length === 0) {
+      console.log(`🗑️ Room ${room.id} has 0 users - destroying immediately`);
+      performRoomCleanup(room.id);
     }
   });
 }, 2000); // Check every 2 seconds
