@@ -51,20 +51,24 @@ class Room {
     this.setupLifecycleTimers();
   }
 
-/**
- * Setup lifecycle timers
- */
 setupLifecycleTimers() {
-  // Warning timer (2 seconds before expiration)
+  // Calculate warning time (happens BEFORE expiry)
+  const timeUntilWarning = ROOM_WARNING_TIME;
+  const timeUntilExpiry = ROOM_LIFETIME;
+  
+  console.log(`⏱️ Room ${this.id} timers: warning in ${timeUntilWarning / 1000}s, expiry in ${timeUntilExpiry / 1000}s`);
+  
+  // Warning timer (fires at ROOM_WARNING_TIME)
   this.warningTimer = setTimeout(() => {
     this.emitWarning();
-  }, ROOM_WARNING_TIME);
+  }, timeUntilWarning);
 
-  // Cleanup timer (expiration)
+  // Cleanup timer (fires at ROOM_LIFETIME)
   this.cleanupTimer = setTimeout(() => {
     this.expire();
-  }, ROOM_LIFETIME);
+  }, timeUntilExpiry);
 
+  console.log(`⏱️ Room ${this.id} lifecycle timers set (expires in ${ROOM_LIFETIME / 1000}s)`);
 }
 
   /**
@@ -89,17 +93,14 @@ setupLifecycleTimers() {
   // DISABLED: Calls now use same timer as chat
 }
 
-/**
- * Emit warning to room users
- */
 emitWarning() {
-  // REMOVED: hasActiveCall check - warning fires regardless
   if (this.io && !this.isExpired) {
     const warningTime = (ROOM_LIFETIME - ROOM_WARNING_TIME) / 1000;
+    console.log(`⚠️ Room ${this.id} will expire in ${warningTime} seconds`);
 
     this.io.to(this.id).emit('room_expiring_soon', {
       roomId: this.id,
-      expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME
+      expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME // Time remaining after warning
     });
   }
 }
@@ -108,11 +109,14 @@ emitWarning() {
  * Expire and destroy room
  */
 expire() {
-  if (this.isExpired) return;
+  if (this.isExpired) {
+    console.log(`⏭️ Room ${this.id} already expired, skipping`);
+    return;
+  }
 
-  // REMOVED: No longer checking hasActiveCall - unified expiry
   this.isExpired = true;
 
+  console.log(`⏱️ Room ${this.id} expired after ${ROOM_LIFETIME / 1000} seconds`);
 
   // Notify all users
   if (this.io) {
