@@ -33,23 +33,24 @@ const ROOM_WARNING_TIME = 18 * 1000; // 5 seconds (2 second warning)g)
  * Enhanced Room class with lifecycle management
  */
 class Room {
-  constructor(mood, users) {
-    this.id = uuidv4();
-    this.mood = mood;
-    this.users = users;
-    this.messages = []; // Ephemeral message storage
-    this.createdAt = Date.now();
-    this.lastActivity = Date.now();
-    this.expiresAt = Date.now() + ROOM_LIFETIME;
-    this.cleanupTimer = null;
-    this.warningTimer = null;
-    this.isExpired = false;
-    this.io = null; // Socket.IO instance (set externally)
-    this.hasActiveCall = false; // CRITICAL: Track if room has active call
+constructor(mood, users) {
+  this.id = uuidv4();
+  this.mood = mood;
+  this.users = users;
+  this.messages = []; // Ephemeral message storage
+  this.createdAt = Date.now();
+  this.lastActivity = Date.now();
+  this.expiresAt = Date.now() + ROOM_LIFETIME;
+  this.cleanupTimer = null;
+  this.warningTimer = null;
+  this.isExpired = false;
+  this.io = null; // Socket.IO instance (set externally)
+  this.hasActiveCall = false; // CRITICAL: Track if room has active call
+  this.userJoinedRoom = false; // NEW: Track if users actually joined
 
-    // Setup timers
-    this.setupLifecycleTimers();
-  }
+  // DON'T setup timers here - wait until users confirm join
+  // this.setupLifecycleTimers();
+}
 
 setupLifecycleTimers() {
   // Calculate warning time (happens BEFORE expiry)
@@ -91,6 +92,18 @@ setupLifecycleTimers() {
 
  extendExpiry(additionalMinutes) {
   // DISABLED: Calls now use same timer as chat
+}
+
+startLifecycleTimers() {
+  if (this.cleanupTimer || this.warningTimer) {
+    console.log(`⚠️ Timers already set for room ${this.id}, skipping`);
+    return;
+  }
+
+  // Reset expiration time to NOW + lifetime
+  this.expiresAt = Date.now() + ROOM_LIFETIME;
+  
+  this.setupLifecycleTimers();
 }
 
 emitWarning() {
