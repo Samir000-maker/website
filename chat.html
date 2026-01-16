@@ -1024,40 +1024,54 @@ const updateTimer = () => {
     });
 
     socketInstance.on('room_joined', (data) => {
-      console.log('✅ Room joined:', data);
+  console.log('✅ Room joined:', data);
+  
+  // CRITICAL FIX: Update roomData.expiresAt from server
+  if (data.expiresAt) {
+    roomData.expiresAt = data.expiresAt;
+    
+    // Update localStorage with fresh expiry time
+    const updatedRoomData = {
+      ...roomData,
+      expiresAt: data.expiresAt
+    };
+    localStorage.setItem('currentRoom', JSON.stringify(updatedRoomData));
+    
+    console.log(`⏰ Updated room expiry: ${new Date(data.expiresAt).toISOString()}`);
+  }
+  
+  // Handle chat history
+  if (data.chatHistory?.length > 0) {
+    console.log(`📜 Loading ${data.chatHistory.length} messages`);
+    
+    const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
+    
+    data.chatHistory.forEach(msg => {
+      const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+      if (existingIds.has(msgId)) return;
       
-      // Handle chat history
-      if (data.chatHistory?.length > 0) {
-        console.log(`📜 Loading ${data.chatHistory.length} messages`);
-        
-        const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
-        
-        data.chatHistory.forEach(msg => {
-          const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-          if (existingIds.has(msgId)) return;
-          
-          const isCurrentUser = msg.userId === currentUser.userId;
-          const msgEl = createMessageElement(msg, isCurrentUser);
-          messagesList?.appendChild(msgEl);
-          messagesCache.push(msg);
-        });
-        
-        if (messagesList) {
-          messagesList.scrollTop = messagesList.scrollHeight;
-        }
-        
-        saveChatState(roomData.roomId, messagesCache);
-      }
-      
-      // Handle active call state
-      if (data.activeCall) {
-        console.log('📞 Active call confirmed:', data.activeCall);
-        updateCallButtonState(true, data.activeCall);
-      } else {
-        console.log('📞 No active call');
-        updateCallButtonState(false);
-      }
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      messagesList?.appendChild(msgEl);
+      messagesCache.push(msg);
     });
+    
+    if (messagesList) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+    
+    saveChatState(roomData.roomId, messagesCache);
+  }
+  
+  // Handle active call state
+  if (data.activeCall) {
+    console.log('📞 Active call confirmed:', data.activeCall);
+    updateCallButtonState(true, data.activeCall);
+  } else {
+    console.log('📞 No active call');
+    updateCallButtonState(false);
+  }
+});
 
     socketInstance.on('error', (data) => {
       console.error('❌ Socket error:', data);
