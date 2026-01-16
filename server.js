@@ -863,7 +863,7 @@ socket.on('join_room', ({ roomId }) => {
       return;
     }
 
-    console.log(`🚪 User ${user.username} confirming room ${roomId}`);
+    console.log(`🚪 User ${user.username} (${user.userId}) confirming room ${roomId}`);
 
     const room = matchmaking.getRoom(roomId);
     
@@ -892,18 +892,27 @@ socket.on('join_room', ({ roomId }) => {
       console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
     }
 
-    // NEW: Start room lifecycle timers when FIRST user actually joins
+    // CRITICAL: Start room lifecycle timers when FIRST user actually joins
     if (!room.userJoinedRoom) {
       room.userJoinedRoom = true;
       room.startLifecycleTimers();
-      console.log(`⏱️ Room ${roomId} lifecycle timers STARTED (first user joined)`);
+      console.log(`⏱️ Room ${roomId} lifecycle timers STARTED by ${user.username}`);
+      console.log(`   Timer started at: ${new Date(room.timerStartedAt).toISOString()}`);
+      console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
+    } else {
+      const timeElapsed = Date.now() - room.timerStartedAt;
+      const timeRemaining = room.getTimeUntilExpiration();
+      console.log(`ℹ️ User ${user.username} joining room ${roomId} (timer already running)`);
+      console.log(`   Time elapsed since first join: ${(timeElapsed / 1000).toFixed(1)}s`);
+      console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+      console.log(`   Expires at: ${new Date(room.expiresAt).toISOString()}`);
     }
 
     // Get chat history from the room
     const chatHistory = room.getMessages ? room.getMessages() : [];
     console.log(`📜 Sending ${chatHistory.length} chat messages to ${user.username}`);
 
-    // CRITICAL FIX: Check for active calls in this room and send state
+    // Check for active calls in this room
     let activeCallState = null;
     activeCalls.forEach((call, callId) => {
       if (call.roomId === roomId && call.participants.length > 0) {
@@ -917,17 +926,23 @@ socket.on('join_room', ({ roomId }) => {
       }
     });
 
-    // Send room joined confirmation with call state AND expiresAt
+    // CRITICAL: Send the server's expiresAt timestamp
     const responseData = { 
       roomId,
       chatHistory: chatHistory,
-      expiresAt: room.expiresAt  // NEW: Send the actual expiration timestamp
+      expiresAt: room.expiresAt,  // ← CRITICAL: Absolute timestamp
+      timerStartedAt: room.timerStartedAt,  // For debugging
+      serverTime: Date.now()  // For clock sync verification
     };
 
     if (activeCallState) {
       responseData.activeCall = activeCallState;
       console.log(`📤 Sending active call state to ${user.username}:`, activeCallState);
     }
+
+    console.log(`📤 Sending room_joined to ${user.username}:`);
+    console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
+    console.log(`   timeRemaining: ${(room.getTimeUntilExpiration() / 1000).toFixed(1)}s`);
 
     socket.emit('room_joined', responseData);
     
