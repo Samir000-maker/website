@@ -29,190 +29,55 @@ const CLEANUP_INTERVAL = 60 * 1000; // 1 minute
 const ROOM_LIFETIME = 50 * 1000; // 7 SECONDS FOR TESTING
 const ROOM_WARNING_TIME = 18 * 1000; // 5 seconds (2 second warning)g)
 
-/**
- * Enhanced Room class with lifecycle management
- */
 class Room {
-constructor(mood, users) {
-  this.id = uuidv4();
-  this.mood = mood;
-  this.users = users;
-  this.messages = []; // Ephemeral message storage
-  this.createdAt = Date.now();
-  this.lastActivity = Date.now();
-  this.expiresAt = Date.now() + ROOM_LIFETIME;
-  this.cleanupTimer = null;
-  this.warningTimer = null;
-  this.isExpired = false;
-  this.io = null; // Socket.IO instance (set externally)
-  this.hasActiveCall = false; // CRITICAL: Track if room has active call
-  this.userJoinedRoom = false; // NEW: Track if users actually joined
-
-  // DON'T setup timers here - wait until users confirm join
-  // this.setupLifecycleTimers();
-}
-
-setupLifecycleTimers() {
-  // Calculate warning time (happens BEFORE expiry)
-  const timeUntilWarning = ROOM_WARNING_TIME;
-  const timeUntilExpiry = ROOM_LIFETIME;
-  
-  console.log(`⏱️ Room ${this.id} timers: warning in ${timeUntilWarning / 1000}s, expiry in ${timeUntilExpiry / 1000}s`);
-  
-  // Warning timer (fires at ROOM_WARNING_TIME)
-  this.warningTimer = setTimeout(() => {
-    this.emitWarning();
-  }, timeUntilWarning);
-
-  // Cleanup timer (fires at ROOM_LIFETIME)
-  this.cleanupTimer = setTimeout(() => {
-    this.expire();
-  }, timeUntilExpiry);
-
-  console.log(`⏱️ Room ${this.id} lifecycle timers set (expires in ${ROOM_LIFETIME / 1000}s)`);
-}
-
-  /**
-   * Update activity timestamp (extends room life)
-   */
-  updateActivity() {
-    this.lastActivity = Date.now();
-    roomActivity.set(this.id, this.lastActivity);
-
-    // NOTE: We do NOT extend expiration time
-    // Room always expires 10 minutes after creation
-  }
-
-  /**
-   * CRITICAL: Mark room as having active call
-   */
-  setActiveCall(isActive) {
-    this.hasActiveCall = isActive;
-  }
-
- extendExpiry(additionalMinutes) {
-  // DISABLED: Calls now use same timer as chat
-}
-
-startLifecycleTimers() {
-  if (this.cleanupTimer || this.warningTimer) {
-    console.log(`⚠️ Timers already set for room ${this.id}, skipping`);
-    return;
-  }
-
-  // Reset expiration time to NOW + lifetime
-  this.expiresAt = Date.now() + ROOM_LIFETIME;
-  
-  this.setupLifecycleTimers();
-}
-
-emitWarning() {
-  if (this.io && !this.isExpired) {
-    const warningTime = (ROOM_LIFETIME - ROOM_WARNING_TIME) / 1000;
-    console.log(`⚠️ Room ${this.id} will expire in ${warningTime} seconds`);
-
-    this.io.to(this.id).emit('room_expiring_soon', {
-      roomId: this.id,
-      expiresIn: ROOM_LIFETIME - ROOM_WARNING_TIME // Time remaining after warning
-    });
-  }
-}
-
-/**
- * Expire and destroy room
- */
-expire() {
-  if (this.isExpired) {
-    console.log(`⏭️ Room ${this.id} already expired, skipping`);
-    return;
-  }
-
-  this.isExpired = true;
-
-  console.log(`⏱️ Room ${this.id} expired after ${ROOM_LIFETIME / 1000} seconds`);
-
-  // Notify all users
-  if (this.io) {
-    this.io.to(this.id).emit('room_expired', {
-      roomId: this.id,
-      message: `This conversation has ended after ${ROOM_LIFETIME / 1000} seconds`
-    });
-  }
-
-  // Destroy room
-  this.destroy();
-}
-
-  /**
-   * Add message to room
-   */
-  addMessage(message) {
-    this.messages.push({
-      ...message,
-      timestamp: Date.now()
-    });
-
-    // Limit messages to prevent memory issues
-    if (this.messages.length > 200) {
-      this.messages = this.messages.slice(-100);
-    }
-
-    // Update activity
-    this.updateActivity();
-  }
-
-  /**
-   * Get messages
-   */
-  getMessages() {
-    return [...this.messages];
-  }
-
-  /**
-   * Remove user from room
-   */
-  removeUser(userId) {
-    this.users = this.users.filter(u => u.userId !== userId);
-    this.updateActivity();
-    return this.users.length;
-  }
-
-  /**
-   * Check if user is in room
-   */
-  hasUser(userId) {
-    return this.users.some(u => u.userId === userId);
-  }
-
-  /**
-   * Get time until expiration
-   */
-  getTimeUntilExpiration() {
-    return Math.max(0, this.expiresAt - Date.now());
-  }
-
-  /**
-   * Destroy room and clean up
-   */
-  destroy() {
-    // Clear timers
-    if (this.cleanupTimer) {
-      clearTimeout(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-
-    if (this.warningTimer) {
-      clearTimeout(this.warningTimer);
-      this.warningTimer = null;
-    }
-
-    // Clear messages (ephemeral)
+  constructor(mood, users) {
+    this.id = uuidv4();
+    this.mood = mood;
+    this.users = users;
     this.messages = [];
+    this.createdAt = Date.now();
+    this.lastActivity = Date.now();
+    this.expiresAt = Date.now() + ROOM_LIFETIME; // ✅ Set ONCE at creation
+    this.cleanupTimer = null;
+    this.warningTimer = null;
+    this.isExpired = false;
+    this.io = null;
+    this.hasActiveCall = false;
+    this.userJoinedRoom = false;
 
-    // Remove from activity tracking
-    roomActivity.delete(this.id);
+    // DON'T setup timers here - wait until users confirm join
   }
-}
+
+  setupLifecycleTimers() {
+    // CRITICAL FIX: DO NOT recalculate expiresAt - use the ORIGINAL timestamp
+    const now = Date.now();
+    const timeUntilExpiry = this.expiresAt - now; // Time until ORIGINAL expiry
+    const timeUntilWarning = timeUntilExpiry - (ROOM_LIFETIME - ROOM_WARNING_TIME);
+    
+    console.log(`⏱️ Room ${this.id} timers: expires in ${timeUntilExpiry / 1000}s (created ${(now - this.createdAt) / 1000}s ago)`);
+    
+    if (timeUntilWarning > 0) {
+      this.warningTimer = setTimeout(() => {
+        this.emitWarning();
+      }, timeUntilWarning);
+    }
+
+    if (timeUntilExpiry > 0) {
+      this.cleanupTimer = setTimeout(() => {
+        this.expire();
+      }, timeUntilExpiry);
+    }
+  }
+
+  startLifecycleTimers() {
+    if (this.cleanupTimer || this.warningTimer) {
+      console.log(`⚠️ Timers already set for room ${this.id}, skipping`);
+      return;
+    }
+
+    // DO NOT reset expiresAt - keep original timestamp
+    this.setupLifecycleTimers();
+  }
 
 /**
  * Add user to matchmaking queue
