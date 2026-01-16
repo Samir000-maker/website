@@ -803,9 +803,6 @@ io.on('connection', (socket) => {
       if (room) {
         console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
-        // Schedule room cleanup
-        scheduleRoomCleanup(room.id, room.expiresAt);
-
         room.users.forEach(roomUser => {
           const userSocket = findActiveSocketForUser(roomUser.userId);
           
@@ -893,6 +890,13 @@ io.on('connection', (socket) => {
       console.log(`✅ User ${user.username} joined Socket.IO room ${roomId}`);
     } else {
       console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
+    }
+    
+    
+        if (!room.userJoinedRoom) {
+      room.userJoinedRoom = true;
+      room.startLifecycleTimers();
+      console.log(`⏱️ Room ${roomId} lifecycle timers STARTED (first user joined)`);
     }
 
     // Get chat history from the room
