@@ -1024,7 +1024,17 @@ const updateTimer = () => {
     });
 
     socketInstance.on('room_joined', (data) => {
-  console.log('✅ Room joined:', data);
+  console.log('✅ Room joined event received');
+  console.log(`   roomId: ${data.roomId}`);
+  console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
+  console.log(`   Timer started: ${new Date(data.timerStartedAt).toISOString()}`);
+  console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
+  
+  const now = Date.now();
+  const timeRemaining = data.expiresAt - now;
+  console.log(`   Client time: ${new Date(now).toISOString()}`);
+  console.log(`   Time remaining (calculated): ${(timeRemaining / 1000).toFixed(1)}s`);
+  console.log(`   Clock skew: ${(data.serverTime - now)}ms`);
   
   // CRITICAL FIX: Update roomData.expiresAt from server
   if (data.expiresAt) {
@@ -1037,7 +1047,7 @@ const updateTimer = () => {
     };
     localStorage.setItem('currentRoom', JSON.stringify(updatedRoomData));
     
-    console.log(`⏰ Updated room expiry: ${new Date(data.expiresAt).toISOString()}`);
+    console.log(`⏰ Room data updated with server expiry time`);
   }
   
   // Handle chat history
@@ -1068,9 +1078,12 @@ const updateTimer = () => {
     console.log('📞 Active call confirmed:', data.activeCall);
     updateCallButtonState(true, data.activeCall);
   } else {
-    console.log('📞 No active call');
+    console.log('📞 No active call in room');
     updateCallButtonState(false);
   }
+  
+  // Force timer update immediately
+  updateTimer();
 });
 
     socketInstance.on('error', (data) => {
