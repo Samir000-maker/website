@@ -1213,11 +1213,21 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         console.log(`📊 Call status changed: pending → active`);
         
         // CRITICAL: Mark room as having active call and extend expiry
-        if (room) {
-          room.setActiveCall(true);
-          room.extendExpiry(15); // Extend by 15 minutes
-          console.log(`🛡️ Room ${roomId} marked as having active call and extended by 15 minutes`);
-        }
+        // CRITICAL: Mark room as having active call and extend expiry
+if (room) {
+  room.setActiveCall(true);
+  
+  // CRITICAL FIX: For testing with 7s timer, extend by smaller amount
+  const isTestMode = ROOM_EXPIRY_TIME < 60000; // Less than 1 minute = test mode
+  const extensionMinutes = isTestMode ? 0.2 : 15; // 12 seconds for test, 15 min for prod
+  
+  if (extensionMinutes > 0) {
+    room.extendExpiry(extensionMinutes);
+    console.log(`🛡️ Room ${roomId} marked as having active call and extended by ${extensionMinutes} minutes`);
+  } else {
+    console.log(`🛡️ Room ${roomId} marked as having active call (no extension in test mode)`);
+  }
+}
       }
       
       call.lastActivity = Date.now();
@@ -2124,7 +2134,9 @@ setInterval(() => {
 
 setInterval(() => {
   const now = Date.now();
-  const rooms = matchmaking.getActiveRooms();
+  
+  // CRITICAL FIX: Get raw room objects, not the mapped data
+  const rooms = Array.from(activeRooms.values()).filter(r => !r.isExpired);
   
   if (rooms.length === 0) {
     return; // No rooms to broadcast to
@@ -2176,14 +2188,14 @@ setInterval(() => {
 // SINGLE USER ROOM CLEANUP
 // ============================================
 
-// Check every 2 seconds for rooms with only 1 user
 setInterval(() => {
-  const rooms = matchmaking.getActiveRooms();
+  // CRITICAL FIX: Get raw room objects
+  const rooms = Array.from(activeRooms.values()).filter(r => !r.isExpired);
   
   rooms.forEach(room => {
-    // CRITICAL: Validate room and users array exist
+    // Validate room structure
     if (!room || !room.users || !Array.isArray(room.users)) {
-      console.warn(`⚠️ Invalid room structure detected, skipping cleanup check`);
+      console.warn(`⚠️ Invalid room structure detected: ${room?.id}, skipping cleanup check`);
       return;
     }
     
