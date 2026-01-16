@@ -975,29 +975,28 @@
     });
   }
 
-  // ============================================
-  // TIMER UPDATE
-  // ============================================
+const updateTimer = () => {
+  if (!roomData || !roomData.expiresAt) {
+    console.warn('⚠️ No room data with expiresAt');
+    return;
+  }
   
-  const updateTimer = () => {
-    if (!roomData) return;
-    
-    const now = Date.now();
-    const remaining = Math.max(0, roomData.expiresAt - now);
-    const minutes = Math.floor(remaining / 60000);
-    const seconds = Math.floor((remaining % 60000) / 1000);
-    
-    if (timeRemaining) {
-      timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
-    }
+  const now = Date.now();
+  const remaining = Math.max(0, roomData.expiresAt - now);
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  
+  if (timeRemaining) {
+    timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+  }
 
-    if (remaining === 0) {
-      if (timerInterval) clearInterval(timerInterval);
-      toast('Room has expired', 'warning');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    }
-  };
+  if (remaining === 0) {
+    if (timerInterval) clearInterval(timerInterval);
+    toast('Room has expired', 'warning');
+    clearChatState();
+    setTimeout(() => window.location.href = '/mood.html', 2000);
+  }
+};
 
   // ============================================
   // SOCKET EVENT HANDLERS
