@@ -26,7 +26,8 @@ const roomActivity = new Map(); // roomId -> lastActivityTimestamp
 
 // Cleanup interval
 const CLEANUP_INTERVAL = 60 * 1000; // 1 minute
-const ROOM_LIFETIME = 10 * 60 * 1000; // 10 minutes
+// const ROOM_LIFETIME = 10 * 60 * 1000; // 10 minutes
+const ROOM_EXPIRY_TIME = 7000; // 10 minutes
 const ROOM_WARNING_TIME = 9 * 60 * 1000; // 9 minutes (1 minute warning)
 
 /**
