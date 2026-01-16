@@ -255,7 +255,7 @@ const callGracePeriod = new Map(); // callId -> timeout
 // Room cleanup tracking
 const roomCleanupTimers = new Map(); // roomId -> timeout
 // const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
-const ROOM_EXPIRY_TIME = 20000 // 10 minutes
+const ROOM_EXPIRY_TIME = 50000 // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
 
 // WebRTC metrics
