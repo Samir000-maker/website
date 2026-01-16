@@ -1009,12 +1009,10 @@
     // Add to setupSocketHandlers() function
 
 socketInstance.on('timer_update', (data) => {
-  if (!roomData || data.expiresAt !== roomData.expiresAt) {
-    // Update stored expiry time if changed
-    if (roomData) {
-      roomData.expiresAt = data.expiresAt;
-      localStorage.setItem('currentRoom', JSON.stringify(roomData));
-    }
+  // CRITICAL: Always update expiry from server
+  if (roomData) {
+    roomData.expiresAt = data.expiresAt;
+    localStorage.setItem('currentRoom', JSON.stringify(roomData));
   }
   
   // Update UI
@@ -1026,12 +1024,7 @@ socketInstance.on('timer_update', (data) => {
     timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
   }
   
-  // Warning at 1 minute
-  if (remaining <= 60000 && remaining > 59000) {
-    toast('Room expires in 1 minute', 'warning');
-    console.log('⚠️ 1 minute warning shown');
-  }
-});
+  console.log(`⏱️ [Chat] Timer: ${minutes}:${seconds.toString().padStart(2, '0')} remaining`);
 
 socketInstance.on('room_expired', (data) => {
   console.log('⏰ Room expired event received:', data);
