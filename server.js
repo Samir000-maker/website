@@ -2132,20 +2132,26 @@ setInterval(() => {
 }, 60000);
 
 
+// ============================================
+// ROOM TIMER BROADCASTING
+// ============================================
+
+// Broadcast timer updates every second to all rooms
 setInterval(() => {
   const now = Date.now();
   
-  // CRITICAL FIX: Get raw room objects, not the mapped data
+  // CRITICAL FIX: Use matchmaking.getActiveRooms() which returns valid room data
   const roomsData = matchmaking.getActiveRooms();
   
-  if (rooms.length === 0) {
+  if (roomsData.length === 0) {
     return; // No rooms to broadcast to
   }
   
-  rooms.forEach(room => {
-    // CRITICAL: Validate room structure
-    if (!room || !room.id || !room.expiresAt) {
-      console.warn(`⚠️ Invalid room structure in timer broadcast, skipping`);
+  roomsData.forEach(roomData => {
+    // Get actual room object
+    const room = matchmaking.getRoom(roomData.id);
+    if (!room) {
+      console.warn(`⚠️ Room ${roomData.id} not found for timer broadcast`);
       return;
     }
     
@@ -2184,18 +2190,20 @@ setInterval(() => {
 }, 1000); // Every second
 
 
-// ============================================
-// SINGLE USER ROOM CLEANUP
-// ============================================
 
+
+// Check every 2 seconds for rooms with only 1 user
 setInterval(() => {
-  // CRITICAL FIX: Get raw room objects
+  // CRITICAL FIX: Use matchmaking.getActiveRooms() which returns valid room data
   const roomsData = matchmaking.getActiveRooms();
   
-  rooms.forEach(room => {
+  roomsData.forEach(roomData => {
+    // Get actual room object
+    const room = matchmaking.getRoom(roomData.id);
+    
     // Validate room structure
     if (!room || !room.users || !Array.isArray(room.users)) {
-      console.warn(`⚠️ Invalid room structure detected: ${room?.id}, skipping cleanup check`);
+      console.warn(`⚠️ Invalid room structure detected: ${roomData.id}, skipping cleanup check`);
       return;
     }
     
