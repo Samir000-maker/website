@@ -978,6 +978,9 @@
 const updateTimer = () => {
   if (!roomData || !roomData.expiresAt) {
     console.warn('⚠️ No room data with expiresAt');
+    if (timeRemaining) {
+      timeRemaining.textContent = '-- remaining';
+    }
     return;
   }
   
@@ -986,15 +989,28 @@ const updateTimer = () => {
   const minutes = Math.floor(remaining / 60000);
   const seconds = Math.floor((remaining % 60000) / 1000);
   
+  // DEBUGGING: Log every 5 seconds
+  if (Math.floor(now / 5000) !== Math.floor((now - 1000) / 5000)) {
+    console.log(`⏰ Timer update:`);
+    console.log(`   Server expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
+    console.log(`   Client now: ${new Date(now).toISOString()}`);
+    console.log(`   Remaining: ${minutes}:${seconds.toString().padStart(2, '0')} (${(remaining / 1000).toFixed(1)}s)`);
+  }
+  
   if (timeRemaining) {
     timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
   }
 
+  // CRITICAL: Only redirect if truly expired
   if (remaining === 0) {
+    console.error('❌ Room expired - redirecting');
     if (timerInterval) clearInterval(timerInterval);
     toast('Room has expired', 'warning');
     clearChatState();
     setTimeout(() => window.location.href = '/mood.html', 2000);
+  } else if (remaining < 10000 && remaining > 9000) {
+    // Warning at 10 seconds remaining
+    console.warn('⚠️ Room expiring in less than 10 seconds');
   }
 };
 
@@ -1023,32 +1039,76 @@ const updateTimer = () => {
       socketInstance.emit('join_room', { roomId: roomData.roomId });
     });
 
-    socketInstance.on('room_joined', (data) => {
-  console.log('✅ Room joined event received');
+
+socketInstance.on('room_joined', (data) => {
+  console.log('✅ ========================================');
+  console.log('✅ ROOM_JOINED EVENT RECEIVED');
+  console.log('✅ ========================================');
   console.log(`   roomId: ${data.roomId}`);
+  
+  // CRITICAL: Validate server timestamps
+  if (!data.expiresAt) {
+    console.error('❌ CRITICAL: No expiresAt in room_joined data!');
+    toast('Error: Invalid room data', 'error');
+    return;
+  }
+  
+  if (!data.serverTime) {
+    console.warn('⚠️ No serverTime in response, using client time');
+    data.serverTime = Date.now();
+  }
+  
   console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
   console.log(`   Timer started: ${new Date(data.timerStartedAt).toISOString()}`);
   console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
   
   const now = Date.now();
   const timeRemaining = data.expiresAt - now;
-  console.log(`   Client time: ${new Date(now).toISOString()}`);
-  console.log(`   Time remaining (calculated): ${(timeRemaining / 1000).toFixed(1)}s`);
-  console.log(`   Clock skew: ${(data.serverTime - now)}ms`);
+  const clockSkew = data.serverTime - now;
   
-  // CRITICAL FIX: Update roomData.expiresAt from server
-  if (data.expiresAt) {
-    roomData.expiresAt = data.expiresAt;
-    
-    // Update localStorage with fresh expiry time
-    const updatedRoomData = {
-      ...roomData,
-      expiresAt: data.expiresAt
-    };
-    localStorage.setItem('currentRoom', JSON.stringify(updatedRoomData));
-    
-    console.log(`⏰ Room data updated with server expiry time`);
+  console.log(`   Client time: ${new Date(now).toISOString()}`);
+  console.log(`   Time remaining (raw): ${(timeRemaining / 1000).toFixed(1)}s`);
+  console.log(`   Clock skew: ${clockSkew}ms`);
+  
+  // CRITICAL: Warn if clock skew is large
+  if (Math.abs(clockSkew) > 5000) {
+    console.warn(`⚠️ WARNING: Large clock skew detected (${clockSkew}ms)`);
+    console.warn('   This may cause timer issues');
   }
+  
+  // CRITICAL: Validate expiresAt is in the future
+  if (data.expiresAt <= now) {
+    console.error('❌ CRITICAL: expiresAt is in the past!');
+    console.error(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
+    console.error(`   now: ${new Date(now).toISOString()}`);
+    console.error(`   Difference: ${((data.expiresAt - now) / 1000).toFixed(1)}s`);
+    toast('Room has already expired', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 2000);
+    return;
+  }
+  
+  // CRITICAL FIX: Update roomData.expiresAt from server (ABSOLUTE TIMESTAMP)
+  const oldExpiresAt = roomData.expiresAt;
+  roomData.expiresAt = data.expiresAt;
+  
+  if (oldExpiresAt && oldExpiresAt !== data.expiresAt) {
+    console.warn(`⚠️ expiresAt changed:`);
+    console.warn(`   Old: ${new Date(oldExpiresAt).toISOString()}`);
+    console.warn(`   New: ${new Date(data.expiresAt).toISOString()}`);
+    console.warn(`   Diff: ${((data.expiresAt - oldExpiresAt) / 1000).toFixed(1)}s`);
+  }
+  
+  // Update localStorage with fresh expiry time
+  const updatedRoomData = {
+    ...roomData,
+    expiresAt: data.expiresAt
+  };
+  localStorage.setItem('currentRoom', JSON.stringify(updatedRoomData));
+  
+  console.log(`✅ Room data updated with server expiry time`);
+  console.log(`   Will expire at: ${new Date(roomData.expiresAt).toISOString()}`);
+  console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+  console.log('✅ ========================================\n');
   
   // Handle chat history
   if (data.chatHistory?.length > 0) {
@@ -1082,8 +1142,33 @@ const updateTimer = () => {
     updateCallButtonState(false);
   }
   
-  // Force timer update immediately
+  // Force timer update immediately with fresh data
+  console.log('⏰ Starting timer updates...');
   updateTimer();
+});
+
+
+socketInstance.on('room_expired', (data) => {
+  console.error('💥 ========================================');
+  console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
+  console.error('💥 ========================================');
+  console.error(`   roomId: ${data.roomId}`);
+  console.error(`   message: ${data.message}`);
+  console.error(`   Server says room expired at: ${new Date().toISOString()}`);
+  
+  if (roomData && roomData.expiresAt) {
+    const serverExpiry = new Date(roomData.expiresAt).toISOString();
+    const clientNow = new Date().toISOString();
+    console.error(`   Client expiresAt was: ${serverExpiry}`);
+    console.error(`   Client time now: ${clientNow}`);
+  }
+  
+  console.error('💥 ========================================\n');
+  
+  if (timerInterval) clearInterval(timerInterval);
+  toast('Room has expired', 'warning');
+  clearChatState();
+  setTimeout(() => window.location.href = '/mood.html', 2000);
 });
 
     socketInstance.on('error', (data) => {
@@ -1415,23 +1500,50 @@ if (acceptCallBtn) {
     sessionStorage.removeItem('returningFromCall');
   }
 
-  // Get room data
-  const roomDataStr = localStorage.getItem('currentRoom');
-  if (!roomDataStr) {
-    toast('No active room found', 'error');
-    setTimeout(() => window.location.href = '/mood.html', 1500);
-    return;
-  }
+// Get room data from localStorage
+const roomDataStr = localStorage.getItem('currentRoom');
+if (!roomDataStr) {
+  console.error('❌ No currentRoom in localStorage');
+  toast('No active room found', 'error');
+  setTimeout(() => window.location.href = '/mood.html', 1500);
+  return;
+}
 
-  try {
-    roomData = JSON.parse(roomDataStr);
-    if (!roomData.roomId) throw new Error('Invalid room data');
-  } catch (err) {
-    console.error('❌ Invalid room data:', err);
-    toast('Invalid room data', 'error');
-    setTimeout(() => window.location.href = '/mood.html', 1500);
-    return;
+try {
+  roomData = JSON.parse(roomDataStr);
+  console.log('📦 Loaded room data from localStorage:');
+  console.log(`   roomId: ${roomData.roomId}`);
+  
+  if (roomData.expiresAt) {
+    console.log(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
+    const remaining = roomData.expiresAt - Date.now();
+    console.log(`   Time remaining (initial): ${(remaining / 1000).toFixed(1)}s`);
+    
+    // CRITICAL: Check if room already expired in localStorage
+    if (remaining <= 0) {
+      console.error('❌ Room in localStorage has already expired!');
+      console.error(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
+      console.error(`   now: ${new Date().toISOString()}`);
+      toast('Room has expired', 'error');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 1500);
+      return;
+    }
+  } else {
+    console.warn('⚠️ No expiresAt in localStorage room data');
+    console.warn('   Will wait for server to provide it');
   }
+  
+  if (!roomData.roomId) {
+    throw new Error('Invalid room data: missing roomId');
+  }
+} catch (err) {
+  console.error('❌ Invalid room data:', err);
+  toast('Invalid room data', 'error');
+  clearChatState();
+  setTimeout(() => window.location.href = '/mood.html', 1500);
+  return;
+}
 
   // Get Firebase user
   const firebaseUser = firebase.auth().currentUser;
@@ -1506,7 +1618,7 @@ if (acceptCallBtn) {
       onlineCount.textContent = `${roomData.users.length} Online`;
     }
   }
-
+console.log('⏰ Starting timer interval (1 second)');
   // Start timer
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
