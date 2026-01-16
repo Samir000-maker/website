@@ -234,7 +234,7 @@ let makingOffer = new Map();
 };
       let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
-      let callStartTime = null, durationInterval = null, isInitializing = false, hasJoinedCall = false;
+      let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
 
@@ -1358,10 +1358,7 @@ async function toggleVideo() {
   }, 200);
 }
 
-      function updateDuration() {
-  if (!callData || !callData.roomId) return;
-  
-  // CRITICAL FIX: Get room data from localStorage (same as chat.html)
+     function updateDuration() {
   const roomStr = localStorage.getItem('currentRoom');
   if (!roomStr) {
     console.warn('⚠️ No room data - cannot sync timer');
@@ -1370,6 +1367,12 @@ async function toggleVideo() {
   
   try {
     const roomData = JSON.parse(roomStr);
+    
+    if (!roomData.expiresAt) {
+      console.error('❌ No expiresAt in room data');
+      return;
+    }
+    
     const now = Date.now();
     const remaining = Math.max(0, roomData.expiresAt - now);
     
@@ -1380,11 +1383,9 @@ async function toggleVideo() {
     
     const el = document.getElementById('callDuration');
     if (el) {
-      // Display remaining time (same as chat)
       el.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
     }
     
-    // Check if expired
     if (remaining === 0) {
       console.log('⏰ Room expired during call - ending call');
       if (durationInterval) clearInterval(durationInterval);
