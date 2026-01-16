@@ -853,7 +853,7 @@ io.on('connection', (socket) => {
     return null;
   }
 
-  socket.on('join_room', ({ roomId }) => {
+socket.on('join_room', ({ roomId }) => {
   try {
     const user = socketUsers.get(socket.id);
     
@@ -891,9 +891,9 @@ io.on('connection', (socket) => {
     } else {
       console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
     }
-    
-    
-        if (!room.userJoinedRoom) {
+
+    // NEW: Start room lifecycle timers when FIRST user actually joins
+    if (!room.userJoinedRoom) {
       room.userJoinedRoom = true;
       room.startLifecycleTimers();
       console.log(`⏱️ Room ${roomId} lifecycle timers STARTED (first user joined)`);
@@ -917,10 +917,11 @@ io.on('connection', (socket) => {
       }
     });
 
-    // Send room joined confirmation with call state
+    // Send room joined confirmation with call state AND expiresAt
     const responseData = { 
       roomId,
-      chatHistory: chatHistory 
+      chatHistory: chatHistory,
+      expiresAt: room.expiresAt  // NEW: Send the actual expiration timestamp
     };
 
     if (activeCallState) {
