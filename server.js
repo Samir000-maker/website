@@ -27,7 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const callMutexes = new Map();
 
-
+const ROOM_LIFETIME = 7 * 1000;
 
 function getUserDataForParticipant(participantId, socketUsers, room) {
   console.log(`🔍 Resolving user data for ${participantId}`);
