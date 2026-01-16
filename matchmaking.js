@@ -82,10 +82,12 @@ class Room {
   /**
    * CRITICAL: Mark room as having active call
    */
-  setActiveCall(isActive) {
-    this.hasActiveCall = isActive;
-    console.log(`📞 Room ${this.id} active call status: ${isActive}`);
-  }
+setActiveCall(isActive) {
+  this.hasActiveCall = isActive;
+  const timeRemaining = Math.floor((this.expiresAt - Date.now()) / 1000);
+  console.log(`📞 Room ${this.id} active call status: ${isActive}`);
+  console.log(`   Time remaining until expiry: ${timeRemaining}s`);
+}
 
   /**
    * CRITICAL: Extend room expiry (for active calls)
@@ -156,39 +158,14 @@ extendExpiry(additionalMinutes) {
   /**
    * Expire and destroy room
    */
-  expire() {
-    if (this.isExpired) return;
-    
-// CRITICAL: Don't expire if call is active
-if (this.hasActiveCall) {
-  console.log(`⏭️ Postponing expiry for room ${this.id} - active call in progress`);
+expire() {
+  if (this.isExpired) return;
   
-  // CRITICAL FIX: For testing with 7s timer, extend by smaller amount
-  const ROOM_LIFETIME_MINUTES = ROOM_LIFETIME / (60 * 1000);
-  const isTestMode = ROOM_LIFETIME_MINUTES < 1; // Less than 1 minute = test mode
-  const extensionMinutes = isTestMode ? 0.2 : 15; // 12 seconds for test, 15 min for prod
-  
-  if (extensionMinutes > 0) {
-    this.extendExpiry(extensionMinutes);
-    console.log(`⏭️ Extended room ${this.id} by ${extensionMinutes} minutes due to active call`);
-  }
-  return;
-}
-    
-    this.isExpired = true;
-    
-    console.log(`⏱️ Room ${this.id} expired after 10 minutes`);
-    
-    // Notify all users
-    if (this.io) {
-      this.io.to(this.id).emit('room_expired', {
-        roomId: this.id,
-        message: 'This conversation has ended after 10 minutes'
-      });
-    }
-    
-    // Destroy room
-    this.destroy();
+  // CRITICAL: Don't expire if call is active - just keep the same timer running
+  if (this.hasActiveCall) {
+    console.log(`⏭️ Room ${this.id} has active call - letting timer continue normally`);
+    console.log(`   Room will still expire at: ${new Date(this.expiresAt).toLocaleTimeString()}`);
+    return;
   }
 
   /**
