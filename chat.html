@@ -929,7 +929,7 @@ function initializeFloatingCallSocket() {
 
 function returnToActiveCall() {
   console.log('🔙 ========================================');
-  console.log('🔙 RETURNING TO ACTIVE CALL');
+  console.log('🔙 RETURNING TO ACTIVE CALL FROM CHAT');
   console.log('🔙 ========================================');
   
   const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -944,13 +944,27 @@ function returnToActiveCall() {
     const activeCallData = JSON.parse(activeCallStr);
     console.log(`   callId: ${activeCallData.callId}`);
     console.log(`   callType: ${activeCallData.callType}`);
+    console.log(`   backgroundMode: ${activeCallData.backgroundMode}`);
     
-    // Mark that we're navigating to call
+    // Mark that we're returning to call (not starting new call)
     navigatingToCall = true;
+    
+    // CRITICAL: Remove background mode flag so call page knows we're coming back
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    
+    // Mark that we're returning to existing call
+    sessionStorage.setItem('returningToBackgroundCall', 'true');
     
     // Save current chat state
     saveChatState(roomData.roomId, messagesCache);
-    sessionStorage.setItem('returningFromCall', 'true');
+    
+    // Disconnect floating socket before navigating
+    if (floatingCallSocket) {
+      console.log('🔌 Disconnecting floating socket (will reconnect on call page)');
+      floatingCallSocket.disconnect();
+      floatingCallSocket = null;
+    }
     
     console.log('✅ Navigating back to call page');
     window.location.href = '/call.html';
@@ -1837,19 +1851,39 @@ if (acceptCallBtn) {
       }
     });
 
-    // Before unload
+// Before unload
 window.addEventListener('beforeunload', (e) => {
-  if (navigatingToCall) {
-    console.log('🔒 Navigating to call - keeping socket');
+  console.log('🚪 Chat page beforeunload event');
+  
+  // CRITICAL: Check if in background call mode
+  if (isInBackgroundCall) {
+    console.log('🔒 Background call active - preserving floating socket');
     saveChatState(roomData.roomId, messagesCache);
-    // Don't clean up floating socket if returning to call
+    
+    // Don't disconnect floating socket - let it persist
+    if (floatingCallSocket) {
+      console.log('✅ Keeping floating call socket alive');
+    }
+    
+    // Only disconnect main chat socket
+    if (socketInstance) {
+      socketInstance.emit('leave_room');
+      socketInstance.disconnect();
+    }
+    
     return;
   }
   
-  console.log('🚪 Closing - cleanup');
+  if (navigatingToCall) {
+    console.log('🔒 Navigating to call - keeping socket');
+    saveChatState(roomData.roomId, messagesCache);
+    return;
+  }
+  
+  console.log('🗑️ Normal chat exit - full cleanup');
   
   // Clean up floating call popup if exists
-  if (isInBackgroundCall) {
+  if (floatingCallPopup) {
     hideFloatingCallPopup();
   }
   
@@ -1866,6 +1900,18 @@ window.addEventListener('beforeunload', (e) => {
   // ============================================
   
   try {
+  
+  
+    const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
+  
+  if (!isBackgroundCall) {
+    clearAllChatData();
+  } else {
+    console.log('🎈 Background call mode detected - preserving call state');
+    // Clear only the background call flag
+    sessionStorage.removeItem('backgroundCallMode');
+  }
+  
     // CRITICAL: Clear all chat state on entry
     clearAllChatData();
     
@@ -1878,15 +1924,16 @@ window.addEventListener('beforeunload', (e) => {
   }
   
   
-  console.log('🎈 Pre-initializing floating call popup');
+// CRITICAL: Initialize floating call popup elements early
+console.log('🎈 Pre-initializing floating call popup');
 initializeFloatingCallPopup();
 
-  // Check if returning from call
-  const returningFromCall = sessionStorage.getItem('returningFromCall');
-  if (returningFromCall === 'true') {
-    console.log('🔄 Returning from call');
-    sessionStorage.removeItem('returningFromCall');
-  }
+// Check if returning from call
+const returningFromCall = sessionStorage.getItem('returningFromCall');
+if (returningFromCall === 'true') {
+  console.log('🔄 Returning from call - popup will be shown after room_joined');
+  console.log('🔍 Active call check:', !!localStorage.getItem(ACTIVE_CALL_KEY));
+}
 
   const roomDataStr = localStorage.getItem('currentRoom');
   if (!roomDataStr) {
