@@ -186,10 +186,6 @@
         </div>
     </footer>
     
-    
-    <div id="chatContainer" class="hidden fixed inset-0 z-[9999] bg-white">
-    <iframe id="chatIframe" src="" class="w-full h-full border-none"></iframe>
-</div>
 
 <!-- Floating Call Indicator (shown when chat is active) -->
 <div id="miniCallIndicator" class="hidden fixed top-4 right-4 z-[10000] bg-primary rounded-2xl shadow-2xl p-4 cursor-pointer hover:shadow-xl transition-all">
@@ -296,22 +292,36 @@ let makingOffer = new Map();
       function setupCallBackButtonHandler() {
   console.log('🔙 Setting up call page back button handler');
   
-  history.pushState({ page: 'call' }, '', window.location.href);
+  history.pushState({ page: 'call', inBackground: false }, '', window.location.href);
   
   window.addEventListener('popstate', async (event) => {
-    console.log('⬅️ BACK BUTTON PRESSED - Switching to chat view');
+    console.log('⬅️ ========================================');
+    console.log('⬅️ BACK BUTTON PRESSED');
+    console.log('⬅️ ========================================');
+    console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
+    console.log(`   event.state:`, event.state);
     
-    // Prevent actual navigation
-    history.pushState({ page: 'call' }, '', window.location.href);
+    // CRITICAL: Prevent navigation
+    event.preventDefault();
     
+    // Check current state
+    if (isNavigatingToChat) {
+      // We're in chat view, go back to call
+      console.log('📱 Currently in chat - returning to call view');
+      history.pushState({ page: 'call', inBackground: true }, '', window.location.href);
+      returnToCallView();
+      return;
+    }
+    
+    // We're in call view, minimize to chat
     if (!callData || !localStream) {
-      console.log('⚠️ No active call');
+      console.log('⚠️ No active call - allowing navigation');
       window.location.href = '/chat.html';
       return;
     }
     
-    console.log('📦 Saving call state...');
-    console.log(`   WebRTC connections: ${peerConnections.size}`);
+    console.log('📱 Currently in call - minimizing to chat view');
+    console.log(`   Active connections: ${peerConnections.size}`);
     console.log(`   Local tracks: ${localStream.getTracks().length}`);
     
     // Save state
@@ -320,28 +330,43 @@ let makingOffer = new Map();
       roomId: callData.roomId,
       callType: callData.callType,
       participants: Array.from(peerConnections.keys()).concat([currentUser.userId]),
-      backgroundMode: true
+      backgroundMode: true,
+      timestamp: Date.now()
     };
     
     localStorage.setItem('activeCall', JSON.stringify(callState));
     sessionStorage.setItem('returningFromCall', 'true');
     sessionStorage.setItem('backgroundCallMode', 'true');
     
-    // CRITICAL: Don't navigate - just switch views
+    // Push new state for chat view
+    history.pushState({ page: 'chat', inBackground: true }, '', window.location.href);
+    
+    // Switch to chat view
     showChatView();
     
-    console.log('✅ Switched to chat view - call still active in background');
+    console.log('✅ Minimized to chat - connections preserved');
+    console.log('⬅️ ========================================\n');
   });
 }
 
 function showChatView() {
   console.log('🎨 ========================================');
-  console.log('🎨 SHOWING CHAT VIEW');
+  console.log('🎨 SHOWING CHAT VIEW (MINIMIZING CALL)');
   console.log('🎨 ========================================');
   
-  // Hide call UI
-  const callContainer = document.querySelector('body > *:not(script)');
-  document.body.style.overflow = 'hidden';
+  // CRITICAL: Mark that we're in background mode
+  isNavigatingToChat = true;
+  
+  // Get main container
+  const mainContent = document.querySelector('body > div:first-of-type');
+  const header = document.querySelector('header');
+  const main = document.querySelector('main');
+  const footer = document.querySelector('footer');
+  
+  // Hide call UI elements
+  if (header) header.style.display = 'none';
+  if (main) main.style.display = 'none';
+  if (footer) footer.style.display = 'none';
   
   // Show chat container
   const chatContainer = document.getElementById('chatContainer');
@@ -349,7 +374,9 @@ function showChatView() {
   
   if (chatContainer && chatIframe) {
     chatContainer.classList.remove('hidden');
-    chatIframe.src = '/chat.html';
+    
+    // Load chat with query parameter to indicate background call
+    chatIframe.src = '/chat.html?backgroundCall=true';
     
     console.log('✅ Chat iframe loaded');
   }
@@ -361,7 +388,7 @@ function showChatView() {
     
     // Setup click to return to call
     miniIndicator.onclick = () => {
-      console.log('🔙 Returning to call view');
+      console.log('🔙 Mini indicator clicked - returning to call');
       returnToCallView();
     };
     
@@ -369,7 +396,44 @@ function showChatView() {
     updateMiniCallIndicator();
   }
   
+  console.log('✅ Call minimized - WebRTC connections still active');
+  console.log(`   PeerConnections: ${peerConnections.size}`);
+  console.log(`   LocalStream tracks: ${localStream?.getTracks().length || 0}`);
   console.log('🎨 ========================================\n');
+}
+
+function returnToCallView() {
+  console.log('🔙 ========================================');
+  console.log('🔙 RETURNING TO CALL VIEW (MAXIMIZING)');
+  console.log('🔙 ========================================');
+  
+  // CRITICAL: Mark that we're no longer navigating
+  isNavigatingToChat = false;
+  
+  // Hide chat container
+  const chatContainer = document.getElementById('chatContainer');
+  const miniIndicator = document.getElementById('miniCallIndicator');
+  
+  if (chatContainer) chatContainer.classList.add('hidden');
+  if (miniIndicator) miniIndicator.classList.add('hidden');
+  
+  // Show call UI elements
+  const header = document.querySelector('header');
+  const main = document.querySelector('main');
+  const footer = document.querySelector('footer');
+  
+  if (header) header.style.display = '';
+  if (main) main.style.display = '';
+  if (footer) footer.style.display = '';
+  
+  // Clear session flags
+  sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  
+  console.log('✅ Call maximized - UI restored');
+  console.log(`   PeerConnections still active: ${peerConnections.size}`);
+  console.log(`   LocalStream still active: ${localStream?.getTracks().length || 0} tracks`);
+  console.log('🔙 ========================================\n');
 }
 
 function returnToCallView() {
@@ -468,43 +532,66 @@ function showChatOverlay() {
   console.log('✅ Chat overlay created');
 }
 
-
 function setupCallCleanup() {
   window.addEventListener('beforeunload', (e) => {
     console.log('🚪 Call page beforeunload event');
+    console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
     
-    // CRITICAL: Only cleanup if NOT navigating to chat
+    // CRITICAL: Only cleanup if NOT in background mode
     if (isNavigatingToChat) {
-      console.log('🔒 Moving to chat with background call - preserving everything');
+      console.log('🔒 Call is in background mode - preserving everything');
       // Don't cleanup anything - let it persist
       return;
     }
     
     console.log('🗑️ Actually closing call - performing cleanup');
-    // Normal cleanup when actually leaving
+    
+    // Stop timer
     if (durationInterval) clearInterval(durationInterval);
     
-    audioContexts.forEach(c => {
+    // Close audio contexts
+    audioContexts.forEach((ac, userId) => {
       try {
-        if (c.state !== 'closed') c.close();
+        if (ac.stop) ac.stop();
+        if (ac.context && ac.context.state !== 'closed') {
+          ac.context.close().catch(e => console.warn(`Failed to close audio context for ${userId}:`, e));
+        }
       } catch (e) {
-        console.warn('Failed to close audio context:', e);
+        console.warn(`Failed to cleanup audio context for ${userId}:`, e);
       }
     });
     audioContexts.clear();
     
+    // Stop local stream
     if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
+      localStream.getTracks().forEach(t => {
+        try {
+          t.stop();
+        } catch (e) {
+          console.warn('Failed to stop track:', e);
+        }
+      });
     }
     
-    peerConnections.forEach(pc => pc.close());
+    // Close peer connections
+    peerConnections.forEach((pc, userId) => {
+      try {
+        pc.close();
+      } catch (e) {
+        console.warn(`Failed to close PC for ${userId}:`, e);
+      }
+    });
     peerConnections.clear();
     
+    // Emit leave call
     if (socketInstance && socketInstance.connected) {
       socketInstance.emit('leave_call', { callId: callData.callId });
     }
     
+    // Clear storage
     localStorage.removeItem('activeCall');
+    
+    console.log('✅ Cleanup complete');
   });
 }
 
@@ -702,10 +789,9 @@ function monitorConnectionQuality(userId, pc) {
     source.connect(analyser);
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     let isSpeaking = false, lastSpeakTime = 0;
-    let stopped = false; // Track if detection has been stopped
+    let stopped = false;
     
     function detect() {
-      // CRITICAL: Check if audio context is closed
       if (stopped || audioContext.state === 'closed') {
         console.log(`🔇 Audio detection stopped for ${userId}`);
         return;
@@ -747,7 +833,12 @@ function monitorConnectionQuality(userId, pc) {
       requestAnimationFrame(detect);
     }
     detect();
-    audioContexts.set(userId, { context: audioContext, stopped: () => { stopped = true; } });
+    
+    // CRITICAL FIX: Store object with context and stop function
+    audioContexts.set(userId, { 
+      context: audioContext, 
+      stop: () => { stopped = true; } 
+    });
   } catch (e) { 
     console.error('Audio detection error:', e); 
   }
@@ -2182,7 +2273,6 @@ socketInstance.on('user_joined_call', (data) => {
   }
 });
           
-         // Replace user_left_call handler
 socketInstance.on('user_left_call', (data) => {
   console.log(`👋 User left: ${data.userId}`);
   
@@ -2198,11 +2288,14 @@ socketInstance.on('user_left_call', (data) => {
     peerConnections.delete(data.userId); 
   }
   
-  // Clean up audio context
+  // CRITICAL FIX: Clean up audio context properly
   const ac = audioContexts.get(data.userId);
-  if (ac) { 
-    ac.close(); 
-    audioContexts.delete(data.userId); 
+  if (ac) {
+    if (ac.stop) ac.stop(); // Stop detection first
+    if (ac.context && ac.context.state !== 'closed') {
+      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+    }
+    audioContexts.delete(data.userId);
   }
   
   // Clean up connection stats and monitoring
