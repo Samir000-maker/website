@@ -426,6 +426,16 @@
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+
+@keyframes pulse-slow {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 2s ease-in-out infinite;
+}
         
     </style>
 </head>
@@ -589,6 +599,15 @@
                 <span class="material-symbols-outlined text-sm">call</span>
                 <span>Return</span>
             </button>
+        </div>
+    </div>
+</div>
+
+<div id="floatingReturnToCall" class="hidden fixed bottom-20 right-4 z-[60] bg-green-600 rounded-full shadow-2xl p-4 cursor-pointer hover:scale-110 transition-all active:scale-95 animate-pulse-slow">
+    <div class="relative flex items-center justify-center">
+        <span class="material-symbols-outlined text-white text-3xl">call</span>
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-white rounded-full border-2 border-green-600 flex items-center justify-center">
+            <span class="material-symbols-outlined text-green-600 text-xs">arrow_back</span>
         </div>
     </div>
 </div>
@@ -978,37 +997,31 @@ function returnToActiveCall() {
 }
 
 function checkForBackgroundCall() {
-  console.log('🔍 Checking for background call on page load');
+  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+  const activeCallStr = localStorage.getItem('activeCall');
   
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  const returningFromCall = sessionStorage.getItem('returningFromCall');
+  console.log('🔍 Checking for background call...');
+  console.log(`   hasBackgroundCall flag: ${hasBackgroundCall}`);
+  console.log(`   activeCall in storage: ${!!activeCallStr}`);
   
-  console.log(`   activeCall exists: ${!!activeCallStr}`);
-  console.log(`   returningFromCall: ${returningFromCall}`);
-  
-  if (activeCallStr && returningFromCall === 'true') {
-    try {
-      const activeCallData = JSON.parse(activeCallStr);
+  if (hasBackgroundCall && activeCallStr) {
+    console.log('✅ Background call detected - showing return button');
+    
+    const returnBtn = document.getElementById('floatingReturnToCall');
+    if (returnBtn) {
+      returnBtn.classList.remove('hidden');
       
-      // Check if call is in current room
-      if (activeCallData.roomId === roomData?.roomId) {
-        console.log('✅ Background call detected - will show popup after room_joined');
-        
-        // Don't clear returningFromCall flag - we need it for room_joined handler
-        return true;
-      } else {
-        console.log('⚠️ Call is in different room, clearing');
-        localStorage.removeItem(ACTIVE_CALL_KEY);
-        sessionStorage.removeItem('returningFromCall');
-      }
-    } catch (e) {
-      console.error('❌ Failed to parse active call data:', e);
-      localStorage.removeItem(ACTIVE_CALL_KEY);
-      sessionStorage.removeItem('returningFromCall');
+      returnBtn.onclick = () => {
+        console.log('📞 Return to call clicked');
+        sessionStorage.removeItem('hasBackgroundCall');
+        window.location.href = '/call.html';
+      };
+      
+      console.log('✅ Return to call button activated');
     }
+  } else {
+    console.log('ℹ️ No background call detected');
   }
-  
-  return false;
 }
   
   
@@ -1959,6 +1972,7 @@ if (returningFromCall === 'true') {
     if (!roomData.roomId) {
       throw new Error('Invalid room data: missing roomId');
     }
+    checkForBackgroundCall();
   } catch (err) {
     console.error('❌ Invalid room data:', err);
     toast('Invalid room data', 'error');
