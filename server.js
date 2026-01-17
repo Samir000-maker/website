@@ -729,6 +729,52 @@ const socketUsers = new Map();
 
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
+  
+  
+
+socket.on('request_room_sync', ({ roomId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.warn('⚠️ Unauthenticated socket requested room sync');
+      return;
+    }
+    
+    const room = matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found for sync request`);
+      socket.emit('error', { 
+        message: 'Room not found',
+        code: 'ROOM_NOT_FOUND'
+      });
+      return;
+    }
+    
+    console.log(`📡 Room sync requested by ${user.username} for room ${roomId}`);
+    
+    // Send clock sync data
+    const syncData = {
+      roomId: room.id,
+      expiresAt: room.expiresAt,
+      timerStartedAt: room.timerStartedAt,
+      serverTime: Date.now(), // CRITICAL: Current server time for clock sync
+      timeRemaining: room.getTimeUntilExpiration()
+    };
+    
+    console.log(`📤 Sending room sync data to ${user.username}:`);
+    console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
+    console.log(`   serverTime: ${new Date(syncData.serverTime).toISOString()}`);
+    console.log(`   timeRemaining: ${(syncData.timeRemaining / 1000).toFixed(1)}s`);
+    
+    socket.emit('room_sync_data', syncData);
+    
+  } catch (error) {
+    console.error('❌ Room sync error:', error);
+    socket.emit('error', { message: 'Failed to sync room data' });
+  }
+});
 
   socket.on('authenticate', async ({ token, userId }) => {
     try {
