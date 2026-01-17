@@ -129,6 +129,15 @@
         transform: translateX(0);
     }
 }
+
+@keyframes bounce-slow {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+.animate-bounce-slow {
+    animation: bounce-slow 2s ease-in-out infinite;
+}
         
         
     </style>
@@ -186,22 +195,10 @@
         </div>
     </footer>
     
-
-<!-- Floating Call Indicator (shown when chat is active) -->
-<div id="miniCallIndicator" class="hidden fixed top-4 right-4 z-[10000] bg-primary rounded-2xl shadow-2xl p-4 cursor-pointer hover:shadow-xl transition-all">
-    <div class="flex items-center gap-3">
-        <div class="relative">
-            <div id="miniCallAvatar" class="w-12 h-12 rounded-full bg-primary/20 border-2 border-white overflow-hidden">
-                <!-- Avatar -->
-            </div>
-            <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
-                <span class="material-symbols-outlined text-white text-xs">call</span>
-            </div>
-        </div>
-        <div class="text-white">
-            <div class="text-sm font-bold">Call Active</div>
-            <div id="miniCallDuration" class="text-xs opacity-80">00:00</div>
-        </div>
+<div id="miniCallIndicator" class="hidden fixed bottom-20 right-4 z-[10000] bg-primary rounded-full shadow-2xl p-3 cursor-pointer hover:scale-110 transition-all active:scale-95 animate-bounce-slow">
+    <div class="relative">
+        <span class="material-symbols-outlined text-white text-3xl">call</span>
+        <div class="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
     </div>
 </div>
 
@@ -288,118 +285,109 @@ let makingOffer = new Map();
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
       let isNavigatingToChat = false;
+      let isInChatView = false;
       
       function setupCallBackButtonHandler() {
   console.log('🔙 Setting up call page back button handler');
   
-  history.pushState({ page: 'call', inBackground: false }, '', window.location.href);
+  // Set initial state
+  history.pushState({ view: 'call' }, '', window.location.href);
   
-  window.addEventListener('popstate', async (event) => {
+  window.addEventListener('popstate', (event) => {
     console.log('⬅️ ========================================');
     console.log('⬅️ BACK BUTTON PRESSED');
     console.log('⬅️ ========================================');
-    console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
-    console.log(`   event.state:`, event.state);
+    console.log(`   Current view: ${isInChatView ? 'chat' : 'call'}`);
     
-    // CRITICAL: Prevent navigation
+    // CRITICAL: Prevent actual page navigation
     event.preventDefault();
+    history.pushState({ view: isInChatView ? 'call' : 'chat' }, '', window.location.href);
     
-    // Check current state
-    if (isNavigatingToChat) {
-      // We're in chat view, go back to call
-      console.log('📱 Currently in chat - returning to call view');
-      history.pushState({ page: 'call', inBackground: true }, '', window.location.href);
-      returnToCallView();
-      return;
-    }
-    
-    // We're in call view, minimize to chat
     if (!callData || !localStream) {
-      console.log('⚠️ No active call - allowing navigation');
+      console.log('⚠️ No active call - navigating to chat');
       window.location.href = '/chat.html';
       return;
     }
     
-    console.log('📱 Currently in call - minimizing to chat view');
-    console.log(`   Active connections: ${peerConnections.size}`);
-    console.log(`   Local tracks: ${localStream.getTracks().length}`);
+    if (isInChatView) {
+      // Currently showing chat - switch back to call
+      console.log('📞 Switching from chat to call view');
+      showCallView();
+    } else {
+      // Currently showing call - switch to chat
+      console.log('💬 Switching from call to chat view');
+      console.log(`   Active connections: ${peerConnections.size}`);
+      console.log(`   Local tracks: ${localStream.getTracks().length}`);
+      
+      // Save call state
+      const callState = {
+        callId: callData.callId,
+        roomId: callData.roomId,
+        callType: callData.callType,
+        backgroundMode: true,
+        timestamp: Date.now()
+      };
+      
+      localStorage.setItem('activeCall', JSON.stringify(callState));
+      sessionStorage.setItem('backgroundCallActive', 'true');
+      
+      showChatView();
+    }
     
-    // Save state
-    const callState = {
-      callId: callData.callId,
-      roomId: callData.roomId,
-      callType: callData.callType,
-      participants: Array.from(peerConnections.keys()).concat([currentUser.userId]),
-      backgroundMode: true,
-      timestamp: Date.now()
-    };
-    
-    localStorage.setItem('activeCall', JSON.stringify(callState));
-    sessionStorage.setItem('returningFromCall', 'true');
-    sessionStorage.setItem('backgroundCallMode', 'true');
-    
-    // Push new state for chat view
-    history.pushState({ page: 'chat', inBackground: true }, '', window.location.href);
-    
-    // Switch to chat view
-    showChatView();
-    
-    console.log('✅ Minimized to chat - connections preserved');
     console.log('⬅️ ========================================\n');
   });
 }
 
 function showChatView() {
-  console.log('🎨 ========================================');
-  console.log('🎨 SHOWING CHAT VIEW (MINIMIZING CALL)');
-  console.log('🎨 ========================================');
+  console.log('💬 ========================================');
+  console.log('💬 SHOWING CHAT VIEW');
+  console.log('💬 ========================================');
   
-  // CRITICAL: Mark that we're in background mode
-  isNavigatingToChat = true;
+  isInChatView = true;
   
-  // Get main container
-  const mainContent = document.querySelector('body > div:first-of-type');
+  // CRITICAL: Navigate to actual chat page while keeping call alive
+  // Save that we have background call
+  sessionStorage.setItem('hasBackgroundCall', 'true');
+  
+  console.log('✅ Navigating to chat with background call');
+  console.log(`   PeerConnections: ${peerConnections.size} (will remain connected)`);
+  console.log(`   LocalStream: ${localStream?.getTracks().length} tracks (will remain active)`);
+  
+  // Navigate to chat page
+  window.location.href = '/chat.html';
+  
+  console.log('💬 ========================================\n');
+}
+
+
+function showCallView() {
+  console.log('📞 ========================================');
+  console.log('📞 SHOWING CALL VIEW');
+  console.log('📞 ========================================');
+  
+  isInChatView = false;
+  
+  // Get all main elements
   const header = document.querySelector('header');
   const main = document.querySelector('main');
   const footer = document.querySelector('footer');
-  
-  // Hide call UI elements
-  if (header) header.style.display = 'none';
-  if (main) main.style.display = 'none';
-  if (footer) footer.style.display = 'none';
-  
-  // Show chat container
-  const chatContainer = document.getElementById('chatContainer');
-  const chatIframe = document.getElementById('chatIframe');
-  
-  if (chatContainer && chatIframe) {
-    chatContainer.classList.remove('hidden');
-    
-    // Load chat with query parameter to indicate background call
-    chatIframe.src = '/chat.html?backgroundCall=true';
-    
-    console.log('✅ Chat iframe loaded');
-  }
-  
-  // Show mini call indicator
   const miniIndicator = document.getElementById('miniCallIndicator');
-  if (miniIndicator) {
-    miniIndicator.classList.remove('hidden');
-    
-    // Setup click to return to call
-    miniIndicator.onclick = () => {
-      console.log('🔙 Mini indicator clicked - returning to call');
-      returnToCallView();
-    };
-    
-    // Update mini indicator
-    updateMiniCallIndicator();
-  }
   
-  console.log('✅ Call minimized - WebRTC connections still active');
-  console.log(`   PeerConnections: ${peerConnections.size}`);
-  console.log(`   LocalStream tracks: ${localStream?.getTracks().length || 0}`);
-  console.log('🎨 ========================================\n');
+  // Show call UI
+  if (header) header.style.display = '';
+  if (main) main.style.display = '';
+  if (footer) footer.style.display = '';
+  
+  // Hide mini indicator
+  if (miniIndicator) miniIndicator.classList.add('hidden');
+  
+  // Clear session flags
+  sessionStorage.removeItem('hasBackgroundCall');
+  
+  console.log('✅ Call view restored');
+  console.log(`   PeerConnections active: ${peerConnections.size}`);
+  console.log(`   LocalStream active: ${localStream?.getTracks().length} tracks`);
+  console.log('📞 ========================================\n');
 }
 
 function returnToCallView() {
@@ -534,33 +522,46 @@ function showChatOverlay() {
 
 function setupCallCleanup() {
   window.addEventListener('beforeunload', (e) => {
-    console.log('🚪 Call page beforeunload event');
-    console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
+    console.log('🚪 ========================================');
+    console.log('🚪 CALL PAGE UNLOAD');
+    console.log('🚪 ========================================');
     
-    // CRITICAL: Only cleanup if NOT in background mode
-    if (isNavigatingToChat) {
-      console.log('🔒 Call is in background mode - preserving everything');
-      // Don't cleanup anything - let it persist
+    const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+    
+    console.log(`   hasBackgroundCall: ${hasBackgroundCall}`);
+    console.log(`   isInChatView: ${isInChatView}`);
+    
+    // CRITICAL: Don't cleanup if navigating to chat with background call
+    if (hasBackgroundCall || isInChatView) {
+      console.log('🔒 Background call active - PRESERVING all connections');
+      console.log('   ✅ Socket will remain connected');
+      console.log('   ✅ PeerConnections will remain open');
+      console.log('   ✅ Media tracks will keep streaming');
+      console.log('🚪 ========================================\n');
       return;
     }
     
-    console.log('🗑️ Actually closing call - performing cleanup');
+    console.log('🗑️ No background call - performing full cleanup');
     
     // Stop timer
-    if (durationInterval) clearInterval(durationInterval);
+    if (durationInterval) {
+      clearInterval(durationInterval);
+      console.log('   ✓ Timer stopped');
+    }
     
     // Close audio contexts
     audioContexts.forEach((ac, userId) => {
       try {
         if (ac.stop) ac.stop();
         if (ac.context && ac.context.state !== 'closed') {
-          ac.context.close().catch(e => console.warn(`Failed to close audio context for ${userId}:`, e));
+          ac.context.close().catch(e => console.warn(`Failed to close audio context:`, e));
         }
       } catch (e) {
         console.warn(`Failed to cleanup audio context for ${userId}:`, e);
       }
     });
     audioContexts.clear();
+    console.log('   ✓ Audio contexts closed');
     
     // Stop local stream
     if (localStream) {
@@ -571,6 +572,7 @@ function setupCallCleanup() {
           console.warn('Failed to stop track:', e);
         }
       });
+      console.log('   ✓ Local stream stopped');
     }
     
     // Close peer connections
@@ -582,16 +584,20 @@ function setupCallCleanup() {
       }
     });
     peerConnections.clear();
+    console.log('   ✓ Peer connections closed');
     
     // Emit leave call
     if (socketInstance && socketInstance.connected) {
       socketInstance.emit('leave_call', { callId: callData.callId });
+      console.log('   ✓ Leave call emitted');
     }
     
     // Clear storage
     localStorage.removeItem('activeCall');
+    sessionStorage.removeItem('hasBackgroundCall');
     
-    console.log('✅ Cleanup complete');
+    console.log('✅ Full cleanup complete');
+    console.log('🚪 ========================================\n');
   });
 }
 
