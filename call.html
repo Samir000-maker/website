@@ -237,6 +237,110 @@ let makingOffer = new Map();
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
+      let isNavigatingToChat = false;
+      
+      function setupCallBackButtonHandler() {
+  console.log('🔙 Setting up call page back button handler');
+  
+  // Push initial state
+  history.pushState({ page: 'call' }, '', window.location.href);
+  
+  window.addEventListener('popstate', async (event) => {
+    console.log('⬅️ ========================================');
+    console.log('⬅️ BACK BUTTON PRESSED IN CALL');
+    console.log('⬅️ ========================================');
+    
+    // Prevent default back navigation temporarily
+    history.pushState({ page: 'call' }, '', window.location.href);
+    
+    // Check if we're in an active call
+    if (!callData || !localStream) {
+      console.log('⚠️ No active call, allowing normal navigation');
+      window.location.href = '/chat.html';
+      return;
+    }
+    
+    console.log(`   callId: ${callData.callId}`);
+    console.log(`   participants: ${peerConnections.size + 1}`);
+    console.log(`   localStream tracks: ${localStream.getTracks().length}`);
+    
+    // Mark that we're moving to background
+    isNavigatingToChat = true;
+    
+    console.log('📦 Preserving call state for background mode...');
+    
+    // Save complete call state to localStorage
+    const callStateToPreserve = {
+      callId: callData.callId,
+      roomId: callData.roomId,
+      callType: callData.callType,
+      participants: Array.from(peerConnections.keys()).concat([currentUser.userId]),
+      timestamp: Date.now(),
+      backgroundMode: true
+    };
+    
+    localStorage.setItem('activeCall', JSON.stringify(callStateToPreserve));
+    console.log('✅ Call state preserved in localStorage');
+    
+    // Mark in sessionStorage that we're entering background call mode
+    sessionStorage.setItem('returningFromCall', 'true');
+    sessionStorage.setItem('backgroundCallMode', 'true');
+    console.log('✅ Background call flags set');
+    
+    // CRITICAL: Do NOT disconnect socket or close peer connections
+    // Do NOT call leaveCall() - we want to keep everything alive
+    
+    console.log('🚀 Navigating to chat with call in background...');
+    console.log('   Socket will remain connected');
+    console.log('   PeerConnections will remain open');
+    console.log('   Media tracks will keep streaming');
+    
+    // Navigate to chat
+    window.location.href = '/chat.html';
+    
+    console.log('⬅️ ========================================\n');
+  });
+}
+
+
+function setupCallCleanup() {
+  window.addEventListener('beforeunload', (e) => {
+    console.log('🚪 Call page beforeunload event');
+    
+    // CRITICAL: Only cleanup if NOT navigating to chat
+    if (isNavigatingToChat) {
+      console.log('🔒 Moving to chat with background call - preserving everything');
+      // Don't cleanup anything - let it persist
+      return;
+    }
+    
+    console.log('🗑️ Actually closing call - performing cleanup');
+    // Normal cleanup when actually leaving
+    if (durationInterval) clearInterval(durationInterval);
+    
+    audioContexts.forEach(c => {
+      try {
+        if (c.state !== 'closed') c.close();
+      } catch (e) {
+        console.warn('Failed to close audio context:', e);
+      }
+    });
+    audioContexts.clear();
+    
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+    }
+    
+    peerConnections.forEach(pc => pc.close());
+    peerConnections.clear();
+    
+    if (socketInstance && socketInstance.connected) {
+      socketInstance.emit('leave_call', { callId: callData.callId });
+    }
+    
+    localStorage.removeItem('activeCall');
+  });
+}
 
       function createProfilePicture(pfpUrl, username) {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
@@ -424,48 +528,64 @@ function monitorConnectionQuality(userId, pc) {
 }
 
       function setupAudioDetection(userId, stream) {
-        try {
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          let isSpeaking = false, lastSpeakTime = 0;
-          
-          function detect() {
-            const speaking = document.getElementById(`speaking-${userId}`);
-            const tile = document.getElementById(`participant-${userId}`);
-            if (!speaking || !tile) { audioContext.close(); return; }
-            
-            analyser.getByteFrequencyData(dataArray);
-            const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
-            const now = Date.now();
-            
-            if (avg > 30) {
-              if (!isSpeaking) {
-                isSpeaking = true;
-                speaking.classList.remove('hidden');
-                tile.classList.add('active-speaker');
-                if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
-                }
-              }
-              lastSpeakTime = now;
-            } else if (isSpeaking && now - lastSpeakTime > 300) {
-              isSpeaking = false;
-              speaking.classList.add('hidden');
-              tile.classList.remove('active-speaker');
-              if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
-              }
-            }
-            requestAnimationFrame(detect);
-          }
-          detect();
-          audioContexts.set(userId, audioContext);
-        } catch (e) { console.error('Audio detection error:', e); }
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let isSpeaking = false, lastSpeakTime = 0;
+    let stopped = false; // Track if detection has been stopped
+    
+    function detect() {
+      // CRITICAL: Check if audio context is closed
+      if (stopped || audioContext.state === 'closed') {
+        console.log(`🔇 Audio detection stopped for ${userId}`);
+        return;
       }
+      
+      const speaking = document.getElementById(`speaking-${userId}`);
+      const tile = document.getElementById(`participant-${userId}`);
+      
+      if (!speaking || !tile) { 
+        stopped = true;
+        if (audioContext.state !== 'closed') {
+          audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
+        }
+        return; 
+      }
+      
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a,b)=>a+b) / dataArray.length;
+      const now = Date.now();
+      
+      if (avg > 30) {
+        if (!isSpeaking) {
+          isSpeaking = true;
+          speaking.classList.remove('hidden');
+          tile.classList.add('active-speaker');
+          if (socketInstance && userId === currentUser.userId) {
+            socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
+          }
+        }
+        lastSpeakTime = now;
+      } else if (isSpeaking && now - lastSpeakTime > 300) {
+        isSpeaking = false;
+        speaking.classList.add('hidden');
+        tile.classList.remove('active-speaker');
+        if (socketInstance && userId === currentUser.userId) {
+          socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
+        }
+      }
+      requestAnimationFrame(detect);
+    }
+    detect();
+    audioContexts.set(userId, { context: audioContext, stopped: () => { stopped = true; } });
+  } catch (e) { 
+    console.error('Audio detection error:', e); 
+  }
+}
 
       // Replace initLocalMedia function
 async function initLocalMedia() {
@@ -1475,6 +1595,23 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
       
 
       async function initCall() {
+      
+        const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+  
+  if (returningToBackground) {
+    console.log('🔄 ========================================');
+    console.log('🔄 RETURNING TO BACKGROUND CALL');
+    console.log('🔄 ========================================');
+    
+    sessionStorage.removeItem('returningToBackgroundCall');
+    
+    // Call is already active, we're just returning to the UI
+    console.log('ℹ️ Call connections should already be active');
+    console.log('ℹ️ Reconnecting to existing call state...');
+    
+    // The rest of initCall will handle reconnection
+  }
+      
         if (isInitializing) return;
         isInitializing = true;
         console.log('=== INIT CALL ===');
@@ -1972,8 +2109,15 @@ socketInstance.on('video_state_changed', (data) => {
           const leave = document.getElementById('leaveCallBtn');
           if (mic) mic.addEventListener('click', toggleMic);
           if (vid) vid.addEventListener('click', toggleVideo);
-          if (leave) leave.addEventListener('click', leaveCall);
-          window.addEventListener('beforeunload', () => leaveCall());
+          if (leave) leave.addEventListener('click', leaveCall, { passive: true });
+
+// Setup back button handler for background call
+setupCallBackButtonHandler();
+
+// Setup cleanup handler
+setupCallCleanup();
+
+console.log('✅ Call page event handlers initialized');
           
         } catch (e) {
           console.error('❌ Init error:', e);
