@@ -100,6 +100,37 @@
                 max-width: 100%;
             }
         }
+        
+        
+        #chatContainer {
+    animation: slideInFromBottom 0.3s ease-out;
+}
+
+@keyframes slideInFromBottom {
+    from {
+        transform: translateY(100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+#miniCallIndicator {
+    animation: slideInFromRight 0.3s ease-out;
+}
+
+@keyframes slideInFromRight {
+    from {
+        opacity: 0;
+        transform: translateX(100px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+        
+        
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
@@ -154,6 +185,29 @@
             </div>
         </div>
     </footer>
+    
+    
+    <div id="chatContainer" class="hidden fixed inset-0 z-[9999] bg-white">
+    <iframe id="chatIframe" src="" class="w-full h-full border-none"></iframe>
+</div>
+
+<!-- Floating Call Indicator (shown when chat is active) -->
+<div id="miniCallIndicator" class="hidden fixed top-4 right-4 z-[10000] bg-primary rounded-2xl shadow-2xl p-4 cursor-pointer hover:shadow-xl transition-all">
+    <div class="flex items-center gap-3">
+        <div class="relative">
+            <div id="miniCallAvatar" class="w-12 h-12 rounded-full bg-primary/20 border-2 border-white overflow-hidden">
+                <!-- Avatar -->
+            </div>
+            <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                <span class="material-symbols-outlined text-white text-xs">call</span>
+            </div>
+        </div>
+        <div class="text-white">
+            <div class="text-sm font-bold">Call Active</div>
+            <div id="miniCallDuration" class="text-xs opacity-80">00:00</div>
+        </div>
+    </div>
+</div>
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -242,64 +296,176 @@ let makingOffer = new Map();
       function setupCallBackButtonHandler() {
   console.log('🔙 Setting up call page back button handler');
   
-  // Push initial state
   history.pushState({ page: 'call' }, '', window.location.href);
   
   window.addEventListener('popstate', async (event) => {
-    console.log('⬅️ ========================================');
-    console.log('⬅️ BACK BUTTON PRESSED IN CALL');
-    console.log('⬅️ ========================================');
+    console.log('⬅️ BACK BUTTON PRESSED - Switching to chat view');
     
-    // Prevent default back navigation temporarily
+    // Prevent actual navigation
     history.pushState({ page: 'call' }, '', window.location.href);
     
-    // Check if we're in an active call
     if (!callData || !localStream) {
-      console.log('⚠️ No active call, allowing normal navigation');
+      console.log('⚠️ No active call');
       window.location.href = '/chat.html';
       return;
     }
     
-    console.log(`   callId: ${callData.callId}`);
-    console.log(`   participants: ${peerConnections.size + 1}`);
-    console.log(`   localStream tracks: ${localStream.getTracks().length}`);
+    console.log('📦 Saving call state...');
+    console.log(`   WebRTC connections: ${peerConnections.size}`);
+    console.log(`   Local tracks: ${localStream.getTracks().length}`);
     
-    // Mark that we're moving to background
-    isNavigatingToChat = true;
-    
-    console.log('📦 Preserving call state for background mode...');
-    
-    // Save complete call state to localStorage
-    const callStateToPreserve = {
+    // Save state
+    const callState = {
       callId: callData.callId,
       roomId: callData.roomId,
       callType: callData.callType,
       participants: Array.from(peerConnections.keys()).concat([currentUser.userId]),
-      timestamp: Date.now(),
       backgroundMode: true
     };
     
-    localStorage.setItem('activeCall', JSON.stringify(callStateToPreserve));
-    console.log('✅ Call state preserved in localStorage');
-    
-    // Mark in sessionStorage that we're entering background call mode
+    localStorage.setItem('activeCall', JSON.stringify(callState));
     sessionStorage.setItem('returningFromCall', 'true');
     sessionStorage.setItem('backgroundCallMode', 'true');
-    console.log('✅ Background call flags set');
     
-    // CRITICAL: Do NOT disconnect socket or close peer connections
-    // Do NOT call leaveCall() - we want to keep everything alive
+    // CRITICAL: Don't navigate - just switch views
+    showChatView();
     
-    console.log('🚀 Navigating to chat with call in background...');
-    console.log('   Socket will remain connected');
-    console.log('   PeerConnections will remain open');
-    console.log('   Media tracks will keep streaming');
-    
-    // Navigate to chat
-    window.location.href = '/chat.html';
-    
-    console.log('⬅️ ========================================\n');
+    console.log('✅ Switched to chat view - call still active in background');
   });
+}
+
+function showChatView() {
+  console.log('🎨 ========================================');
+  console.log('🎨 SHOWING CHAT VIEW');
+  console.log('🎨 ========================================');
+  
+  // Hide call UI
+  const callContainer = document.querySelector('body > *:not(script)');
+  document.body.style.overflow = 'hidden';
+  
+  // Show chat container
+  const chatContainer = document.getElementById('chatContainer');
+  const chatIframe = document.getElementById('chatIframe');
+  
+  if (chatContainer && chatIframe) {
+    chatContainer.classList.remove('hidden');
+    chatIframe.src = '/chat.html';
+    
+    console.log('✅ Chat iframe loaded');
+  }
+  
+  // Show mini call indicator
+  const miniIndicator = document.getElementById('miniCallIndicator');
+  if (miniIndicator) {
+    miniIndicator.classList.remove('hidden');
+    
+    // Setup click to return to call
+    miniIndicator.onclick = () => {
+      console.log('🔙 Returning to call view');
+      returnToCallView();
+    };
+    
+    // Update mini indicator
+    updateMiniCallIndicator();
+  }
+  
+  console.log('🎨 ========================================\n');
+}
+
+function returnToCallView() {
+  console.log('🔙 Returning to call view');
+  
+  const chatContainer = document.getElementById('chatContainer');
+  const miniIndicator = document.getElementById('miniCallIndicator');
+  
+  if (chatContainer) chatContainer.classList.add('hidden');
+  if (miniIndicator) miniIndicator.classList.add('hidden');
+  
+  document.body.style.overflow = '';
+  
+  // Clear session flags
+  sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  
+  console.log('✅ Returned to call view');
+}
+
+function updateMiniCallIndicator() {
+  const miniAvatar = document.getElementById('miniCallAvatar');
+  
+  if (miniAvatar && currentUser) {
+    miniAvatar.innerHTML = '';
+    const initial = currentUser.username?.charAt(0).toUpperCase() || 'U';
+    miniAvatar.innerHTML = `<div class="w-full h-full bg-primary text-white flex items-center justify-center font-bold text-lg">${initial}</div>`;
+  }
+  
+  // Update duration periodically
+  setInterval(() => {
+    const miniDuration = document.getElementById('miniCallDuration');
+    const mainDuration = document.getElementById('callDuration');
+    
+    if (miniDuration && mainDuration) {
+      miniDuration.textContent = mainDuration.textContent;
+    }
+  }, 1000);
+}
+
+// Fallback: Create iframe overlay for chat
+function showChatOverlay() {
+  console.log('🎨 Creating chat overlay on call page');
+  
+  // Create overlay container
+  const overlay = document.createElement('div');
+  overlay.id = 'chatOverlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    background: white;
+  `;
+  
+  // Create iframe
+  const iframe = document.createElement('iframe');
+  iframe.src = '/chat.html';
+  iframe.style.cssText = `
+    width: 100%;
+    height: 100%;
+    border: none;
+  `;
+  
+  // Create close button
+  const closeBtn = document.createElement('button');
+  closeBtn.innerHTML = '← Back to Call';
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    z-index: 10000;
+    background: #367d7d;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    border: none;
+    font-weight: 600;
+    cursor: pointer;
+  `;
+  
+  closeBtn.onclick = () => {
+    console.log('🔙 Returning to call from overlay');
+    document.body.removeChild(overlay);
+    isNavigatingToChat = false;
+  };
+  
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(iframe);
+  document.body.appendChild(overlay);
+  
+  isNavigatingToChat = true;
+  
+  console.log('✅ Chat overlay created');
 }
 
 
