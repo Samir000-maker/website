@@ -732,6 +732,60 @@ io.on('connection', (socket) => {
   
   
 
+socket.on('validate_room', ({ roomId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.warn('⚠️ Unauthenticated socket tried to validate room');
+      socket.emit('room_invalid', { 
+        roomId,
+        reason: 'Not authenticated' 
+      });
+      return;
+    }
+    
+    const room = matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.log(`❌ Room ${roomId} not found (validation request from ${user.username})`);
+      socket.emit('room_invalid', { 
+        roomId,
+        reason: 'Room not found or expired' 
+      });
+      return;
+    }
+    
+    if (room.isExpired) {
+      console.log(`❌ Room ${roomId} is expired (validation request from ${user.username})`);
+      socket.emit('room_invalid', { 
+        roomId,
+        reason: 'Room has expired' 
+      });
+      return;
+    }
+    
+    // Room is valid, send fresh data
+    console.log(`✅ Room ${roomId} is valid for ${user.username}`);
+    console.log(`   Time remaining: ${(room.getTimeUntilExpiration() / 1000).toFixed(1)}s`);
+    
+    socket.emit('room_valid', {
+      roomId: room.id,
+      expiresAt: room.expiresAt,
+      serverTime: Date.now(),
+      timeRemaining: room.getTimeUntilExpiration()
+    });
+    
+  } catch (error) {
+    console.error('❌ Room validation error:', error);
+    socket.emit('room_invalid', { 
+      roomId,
+      reason: 'Validation error' 
+    });
+  }
+});
+
+
 socket.on('request_room_sync', ({ roomId }) => {
   try {
     const user = socketUsers.get(socket.id);
