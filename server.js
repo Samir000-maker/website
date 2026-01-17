@@ -808,7 +808,7 @@ socket.on('request_room_sync', ({ roomId }) => {
     
     console.log(`📡 Room sync requested by ${user.username} for room ${roomId}`);
     
-    // Send clock sync data
+    // Send fresh server time and expiry
     const syncData = {
       roomId: room.id,
       expiresAt: room.expiresAt,
@@ -817,7 +817,7 @@ socket.on('request_room_sync', ({ roomId }) => {
       timeRemaining: room.getTimeUntilExpiration()
     };
     
-    console.log(`📤 Sending room sync data to ${user.username}:`);
+    console.log(`📤 Sending room sync to ${user.username}:`);
     console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
     console.log(`   serverTime: ${new Date(syncData.serverTime).toISOString()}`);
     console.log(`   timeRemaining: ${(syncData.timeRemaining / 1000).toFixed(1)}s`);
