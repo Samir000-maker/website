@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1040,10 +1041,47 @@ const updateTimer = () => {
       });
     });
 
-    socketInstance.on('authenticated', (data) => {
-      console.log('✅ Authenticated:', data);
-      socketInstance.emit('join_room', { roomId: roomData.roomId });
-    });
+socketInstance.on('room_valid', (data) => {
+  console.log('✅ Room validation: VALID');
+  console.log(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
+  console.log(`   timeRemaining: ${(data.timeRemaining / 1000).toFixed(1)}s`);
+  
+  // Update room data with fresh expiry
+  roomData.expiresAt = data.expiresAt;
+  
+  const updatedRoomData = {
+    ...roomData,
+    expiresAt: data.expiresAt
+  };
+  localStorage.setItem('currentRoom', JSON.stringify(updatedRoomData));
+  
+  // Cancel any pending redirects
+  console.log('✅ Room still active, continuing...');
+});
+
+socketInstance.on('room_invalid', (data) => {
+  console.error('❌ Room validation: INVALID');
+  console.error(`   Reason: ${data.reason}`);
+  
+  toast('Room no longer available', 'error');
+  clearChatState();
+  setTimeout(() => {
+    window.location.href = '/mood.html';
+  }, 1500);
+});
+
+// In your authenticated handler, validate room first:
+socketInstance.on('authenticated', () => {
+  console.log('✅ Authenticated');
+  
+  // CRITICAL: Validate room before joining
+  console.log(`🔍 Validating room ${roomData.roomId}...`);
+  socketInstance.emit('validate_room', { roomId: roomData.roomId });
+  
+  // Don't emit join_room yet - wait for validation response
+});
+
+
 
 
 socketInstance.on('room_joined', (data) => {
@@ -1548,9 +1586,33 @@ try {
     console.log(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
     const remaining = roomData.expiresAt - Date.now();
     console.log(`   Time remaining (initial, no offset): ${(remaining / 1000).toFixed(1)}s`);
-    console.warn(`   ⚠️ Note: This will be adjusted for clock skew when server responds`);
     
-    // Don't check expiry yet - wait for server clock sync
+    // CRITICAL FIX: Check if room expired while in call
+    if (remaining <= 0) {
+      console.error('❌ Room expired while in call!');
+      console.error(`   expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
+      console.error(`   now: ${new Date().toISOString()}`);
+      console.error(`   Expired ${Math.abs(remaining / 1000).toFixed(1)}s ago`);
+      
+      toast('Room has expired', 'warning');
+      clearChatState();
+      
+      // Don't redirect immediately - let socket verify first
+      // Server might have extended the room or it might still be active
+      console.log('⏳ Waiting for server verification before redirecting...');
+      
+      // Set a fallback timeout in case server doesn't respond
+      setTimeout(() => {
+        const stillExpired = roomData.expiresAt <= Date.now();
+        if (stillExpired) {
+          console.error('❌ Server did not extend room, redirecting...');
+          window.location.href = '/mood.html';
+        }
+      }, 3000); // Wait 3 seconds for server response
+      
+    } else {
+      console.warn(`   ⚠️ Note: This will be adjusted for clock skew when server responds`);
+    }
   } else {
     console.warn('⚠️ No expiresAt in localStorage room data');
     console.warn('   Will wait for server to provide it');
