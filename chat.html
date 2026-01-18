@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -315,15 +314,25 @@
         
         
         
-@keyframes pulse-slow {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
+        /* Floating Call Popup Styles */
+#floatingCallPopup {
+    animation: slideInFromRight 0.3s ease-out;
 }
 
-.animate-pulse-slow {
-    animation: pulse-slow 2s ease-in-out infinite;
+@keyframes slideInFromRight {
+    from {
+        opacity: 0;
+        transform: translateX(100px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
+#floatingCallPopup.minimized {
+    animation: slideOutToRight 0.3s ease-in;
+}
 
 @keyframes slideOutToRight {
     from {
@@ -560,6 +569,38 @@
     <div id="confirmationOverlay" style="display: none;"></div>
     
     
+    
+    <div id="floatingCallPopup" class="hidden fixed top-20 right-4 sm:top-24 sm:right-6 z-50 animate-fade-in">
+    <div class="bg-white rounded-2xl shadow-2xl border-2 border-primary/20 p-3 sm:p-4 w-32 sm:w-36">
+        <div class="flex flex-col items-center gap-2">
+            <div class="relative">
+                <div id="floatingCallAvatar" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-primary/20 border-2 border-primary">
+                    <!-- Avatar will be inserted here -->
+                </div>
+                <div class="absolute -bottom-1 -right-1 w-5 h-5 sm:w-6 sm:h-6 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                    <span class="material-symbols-outlined text-white text-xs">mic</span>
+                </div>
+            </div>
+            <div class="text-center">
+                <div id="floatingCallUsername" class="text-xs sm:text-sm font-semibold text-gray-900 truncate max-w-full">
+                    User
+                </div>
+                <div class="flex items-center justify-center gap-1 text-[10px] sm:text-xs text-primary">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                    </span>
+                    <span id="floatingCallStatus">Speaking...</span>
+                </div>
+            </div>
+            <button id="returnToCallBtn" 
+                class="w-full mt-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs sm:text-sm font-semibold hover:bg-primary/90 transition-all flex items-center justify-center gap-1">
+                <span class="material-symbols-outlined text-sm">call</span>
+                <span>Return</span>
+            </button>
+        </div>
+    </div>
+</div>
 
 <div id="floatingReturnToCall" class="hidden fixed bottom-20 right-4 z-[60] bg-green-600 rounded-full shadow-2xl p-4 cursor-pointer hover:scale-110 transition-all active:scale-95 animate-pulse-slow">
     <div class="relative flex items-center justify-center">
@@ -970,16 +1011,12 @@ function checkForBackgroundCall() {
       returnBtn.classList.remove('hidden');
       
       returnBtn.onclick = () => {
-        console.log('📞 Floating button clicked - returning to call');
-        
-        // CRITICAL: Don't clear hasBackgroundCall flag
-        // Just navigate back to call
+        console.log('📞 Return to call clicked');
+        sessionStorage.removeItem('hasBackgroundCall');
         window.location.href = '/call.html';
       };
       
-      console.log('✅ Floating return button activated');
-    } else {
-      console.error('❌ floatingReturnToCall button not found in DOM!');
+      console.log('✅ Return to call button activated');
     }
   } else {
     console.log('ℹ️ No background call detected');
@@ -1385,54 +1422,41 @@ function checkForBackgroundCall() {
       }
     });
   }
-const updateTimer = () => {
-  if (!serverExpiresAt) {
-    // Don't show anything if no server time yet
-    return;
-  }
-  
-  // Use server-adjusted time
-  const clientNow = Date.now();
-  const serverNow = clientNow + serverClockOffset;
-  const remaining = Math.max(0, serverExpiresAt - serverNow);
-  
-  const minutes = Math.floor(remaining / 60000);
-  const seconds = Math.floor((remaining % 60000) / 1000);
-  
-  if (timeRemaining) {
-    timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
-  }
-  
-  // Check for expiry
-  if (remaining === 0) {
-    console.error('⏰ CHAT: TIMER EXPIRED');
-    
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
+
+  const updateTimer = () => {
+    if (!serverExpiresAt) {
+      console.warn('⚠️ No server expiresAt available');
+      if (timeRemaining) {
+        timeRemaining.textContent = '-- remaining';
+      }
+      return;
     }
     
-    // Disconnect socket
-    if (socketInstance) {
-      socketInstance.disconnect();
+    // CRITICAL: Always use server-adjusted time
+    const clientNow = Date.now();
+    const serverNow = clientNow + serverClockOffset;
+    const remaining = Math.max(0, serverExpiresAt - serverNow);
+    
+    const minutes = Math.floor(remaining / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    
+    if (timeRemaining) {
+      timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
     }
     
-    // Clear ALL storage - both call and room
-    localStorage.removeItem('activeCall');
-    localStorage.removeItem('currentRoom');
-    sessionStorage.removeItem('hasBackgroundCall');
-    sessionStorage.removeItem('returningFromCall');
-    sessionStorage.removeItem('backgroundCallMode');
-    sessionStorage.removeItem('returningToBackgroundCall');
-    clearChatState();
+    // Debug log every 10 seconds
+    if (Math.floor(serverNow / 10000) !== Math.floor((serverNow - 1000) / 10000)) {
+      console.log(`⏰ Timer: ${minutes}:${seconds.toString().padStart(2, '0')} (offset: ${(serverClockOffset/1000).toFixed(1)}s)`);
+    }
     
-    toast('Room has expired', 'warning');
-    
-    setTimeout(() => { 
-      window.location.href = '/mood.html'; 
-    }, 1500);
-  }
-};
+    if (remaining === 0) {
+      console.error('❌ Room expired - redirecting');
+      if (timerInterval) clearInterval(timerInterval);
+      toast('Room has expired', 'warning');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    }
+  };
 
   // ============================================
   // SOCKET EVENT HANDLERS
@@ -1455,14 +1479,11 @@ const updateTimer = () => {
     });
 
     socketInstance.on('authenticated', () => {
-  console.log('✅ Authenticated - joining room');
-  
-  // Request room sync data for timer
-  socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
-  
-  // Join room
-  socketInstance.emit('join_room', { roomId: roomData.roomId });
-});;
+      console.log('✅ Authenticated - joining room');
+      
+      // Join room immediately after authentication
+      socketInstance.emit('join_room', { roomId: roomData.roomId });
+    });
 
     socketInstance.on('room_joined', (data) => {
   console.log('✅ ========================================');
@@ -1540,47 +1561,15 @@ const updateTimer = () => {
   // Start timer updates immediately
   console.log('⏰ Starting timer updates with server time...');
   updateTimer();
-  
-  if (data.expiresAt) {
-    serverExpiresAt = data.expiresAt;
-    
-    // Calculate server time offset if provided
-    if (data.serverTime) {
-      const clientNow = Date.now();
-      serverClockOffset = data.serverTime - clientNow;
-      
-      console.log(`⏰ Clock sync: offset = ${(serverClockOffset / 1000).toFixed(1)}s`);
-    }
-    
-    // Update localStorage
-    const roomStr = localStorage.getItem('currentRoom');
-    if (roomStr) {
-      try {
-        const roomData = JSON.parse(roomStr);
-        roomData.expiresAt = data.expiresAt;
-        localStorage.setItem('currentRoom', JSON.stringify(roomData));
-      } catch (e) {}
-    }
-    
-    console.log(`✅ Timer data received: expires at ${new Date(serverExpiresAt).toISOString()}`);
-    updateTimer(); // Update immediately
-  }
-  
 });
 
     socketInstance.on('room_expired', (data) => {
-  console.error('💥 Room expired event from server');
-  if (timerInterval) clearInterval(timerInterval);
-  
-  // ADD THIS: Clear call-related storage
-  localStorage.removeItem('activeCall');
-  sessionStorage.removeItem('hasBackgroundCall');
-  sessionStorage.removeItem('returningFromCall');
-  
-  toast('Room has expired', 'warning');
-  clearChatState();
-  setTimeout(() => window.location.href = '/mood.html', 2000);
-});
+      console.error('💥 Room expired event from server');
+      if (timerInterval) clearInterval(timerInterval);
+      toast('Room has expired', 'warning');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 2000);
+    });
 
     socketInstance.on('error', (data) => {
       console.error('❌ Socket error:', data);
@@ -1627,25 +1616,11 @@ const updateTimer = () => {
       }
     });
 
-socketInstance.on('left_room', (data) => {
-  console.log('✅ LEFT_ROOM confirmed by server');
-  
-  // Clear ALL storage
-  localStorage.removeItem('activeCall');
-  localStorage.removeItem('currentRoom');
-  sessionStorage.removeItem('hasBackgroundCall');
-  sessionStorage.removeItem('returningFromCall');
-  sessionStorage.removeItem('backgroundCallMode');
-  sessionStorage.removeItem('returningToBackgroundCall');
-  clearChatState();
-  
-  toast('Left room', 'success');
-  
-  // Go to mood.html
-  setTimeout(() => { 
-    window.location.href = '/mood.html'; 
-  }, 1000);
-});
+    socketInstance.on('left_room', (data) => {
+      toast('Left room', 'success');
+      clearChatState();
+      setTimeout(() => window.location.href = '/mood.html', 1000);
+    });
 
     socketInstance.on('incoming_call', (data) => {
   pendingCallData = data;
@@ -1873,24 +1848,10 @@ if (acceptCallBtn) {
       });
     }
 
-// Leave button
-leaveBtn?.addEventListener('click', () => {
-  console.log('🚪 Leave button clicked - clearing everything');
-  
-  // Clear ALL storage
-  localStorage.removeItem('activeCall');
-  localStorage.removeItem('currentRoom');
-  sessionStorage.removeItem('hasBackgroundCall');
-  sessionStorage.removeItem('returningFromCall');
-  sessionStorage.removeItem('backgroundCallMode');
-  sessionStorage.removeItem('returningToBackgroundCall');
-  clearChatState();
-  
-  // Disconnect and leave
-  socketInstance?.emit('leave_room');
-  
-  console.log('✅ All storage cleared, leaving room');
-}, { passive: true });
+    // Leave button
+    leaveBtn?.addEventListener('click', () => {
+      socketInstance?.emit('leave_room');
+    }, { passive: true });
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
@@ -1950,16 +1911,21 @@ window.addEventListener('beforeunload', (e) => {
   // INITIALIZATION
   // ============================================
   
-try {
-  // CRITICAL: Check if we're returning from a call
-  const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
-  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+  try {
   
-  if (returningFromCall || hasBackgroundCall) {
-    console.log('🔄 Returning from call - preserving room state');
-    // DON'T clear anything when returning from call
+  
+    const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
+  
+  if (!isBackgroundCall) {
+    clearAllChatData();
   } else {
+    console.log('🎈 Background call mode detected - preserving call state');
+    // Clear only the background call flag
+    sessionStorage.removeItem('backgroundCallMode');
   }
+  
+    // CRITICAL: Clear all chat state on entry
+    clearAllChatData();
     
     // Auth check
     await _Auth.requireAuth();
@@ -1981,24 +1947,14 @@ if (returningFromCall === 'true') {
   console.log('🔍 Active call check:', !!localStorage.getItem(ACTIVE_CALL_KEY));
 }
 
-const roomDataStr = localStorage.getItem('currentRoom');
-if (!roomDataStr) {
-  console.error('❌ No currentRoom in localStorage');
-  
-  // Check if we have background call - if so, something went wrong
-  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
-  if (hasBackgroundCall) {
-    console.error('❌ CRITICAL: Had background call but no room data!');
-    // Clear the broken flags
-    localStorage.removeItem('activeCall');
-    sessionStorage.removeItem('hasBackgroundCall');
-    sessionStorage.removeItem('returningFromCall');
+  const roomDataStr = localStorage.getItem('currentRoom');
+  if (!roomDataStr) {
+    console.error('❌ No currentRoom in localStorage');
+    toast('No active room found', 'error');
+    setTimeout(() => window.location.href = '/mood.html', 1500);
+    return;
   }
-  
-  toast('No active room found', 'error');
-  setTimeout(() => window.location.href = '/mood.html', 1500);
-  return;
-}
+
   try {
     roomData = JSON.parse(roomDataStr);
     console.log('📦 Loaded room data from localStorage:');
@@ -2048,7 +2004,6 @@ if (!roomDataStr) {
 
   // Set initial call button state
   setInitialCallButtonState();
-  checkForBackgroundCall();
 
   // Render initial users
   if (usersList && Array.isArray(roomData.users)) {
