@@ -1861,7 +1861,16 @@ async function toggleVideo() {
       function leaveCall() {
         if (isInitializing) return;
         isInitializing = true;
-        audioContexts.forEach(c => c.close());
+       audioContexts.forEach(ac => {
+  try {
+    if (ac.stop) ac.stop();
+    if (ac.context && ac.context.state !== 'closed') {
+      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+    }
+  } catch (e) {
+    console.warn('Failed to cleanup audio context:', e);
+  }
+});
         audioContexts.clear();
         if (localStream) localStream.getTracks().forEach(t => t.stop());
         peerConnections.forEach(pc => pc.close());
