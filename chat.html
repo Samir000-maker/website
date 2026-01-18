@@ -1340,50 +1340,69 @@ function checkForBackgroundCall() {
       
       if (btnLeave) {
   btnLeave.addEventListener('click', async () => {
-    console.log('✅ User confirmed leaving via dialog');
+    console.log('✅ User confirmed leaving via dialog - starting cleanup');
     overlay.style.display = 'none';
     
-    // CRITICAL: Clean up background call before leaving
+    // CRITICAL: Clean up background call FIRST before leaving
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     
     if (activeCallStr) {
       console.log('📞 Active call detected - cleaning up');
       
-      // Hide floating popup
-      hideFloatingCallPopup();
-      
-      // Emit leave_call to server
-      if (socketInstance && socketInstance.connected) {
-        try {
-          const callData = JSON.parse(activeCallStr);
+      try {
+        const callData = JSON.parse(activeCallStr);
+        
+        // 1. Emit leave_call to server
+        if (socketInstance && socketInstance.connected) {
+          console.log('📤 Emitting leave_call to server...');
           socketInstance.emit('leave_call', { callId: callData.callId });
-          console.log('✅ Emitted leave_call to server');
           
-          // Wait a moment for server to process
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (e) {
-          console.error('❌ Failed to emit leave_call:', e);
+          // Wait for server to process
+          await new Promise(resolve => setTimeout(resolve, 500));
+          console.log('✅ Leave_call emitted and processed');
         }
+        
+        // 2. Hide floating popup if it exists
+        if (floatingCallPopup && floatingCallPopup.container) {
+          console.log('🎈 Hiding floating popup');
+          hideFloatingCallPopup();
+        }
+        
+        // 3. Clear all call-related storage
+        localStorage.removeItem(ACTIVE_CALL_KEY);
+        sessionStorage.removeItem('hasBackgroundCall');
+        sessionStorage.removeItem('returningFromCall');
+        sessionStorage.removeItem('backgroundCallMode');
+        sessionStorage.removeItem('returningToBackgroundCall');
+        
+        console.log('✅ Background call destroyed');
+        
+      } catch (e) {
+        console.error('❌ Failed during call cleanup:', e);
       }
-      
-      // Clear all call-related storage
-      localStorage.removeItem(ACTIVE_CALL_KEY);
-      sessionStorage.removeItem('hasBackgroundCall');
-      sessionStorage.removeItem('returningFromCall');
-      sessionStorage.removeItem('backgroundCallMode');
-      sessionStorage.removeItem('returningToBackgroundCall');
-      
-      console.log('✅ Background call destroyed');
     }
     
-    // Now leave chat room
-    if (socketInstance?.connected) {
+    // 4. Leave chat room
+    if (socketInstance && socketInstance.connected) {
+      console.log('📤 Emitting leave_room...');
       socketInstance.emit('leave_room');
+      
+      // Wait for server to process
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
     
+    // 5. Clear chat state
     clearChatState();
     
+    // 6. Finally navigate
+    console.log('✅ Cleanup complete - navigating to mood.html');
     resolve(true);
+    
+    // Navigate after resolve
+    setTimeout(() => {
+      window.location.href = '/mood.html';
+    }, 100);
+    
   }, { once: true });
 }
     });
@@ -1619,14 +1638,16 @@ socketInstance.on('room_expired', (data) => {
     });
 
 socketInstance.on('left_room', (data) => {
+  console.log('👋 Received left_room confirmation from server');
   toast('Left room', 'success');
   
-  // CRITICAL: Clear active call to remove floating button
-  localStorage.removeItem('activeCall');
-  sessionStorage.removeItem('hasBackgroundCall');
+  // CRITICAL: Don't clear storage here - already done in leave button handler
+  // Just disconnect socket
+  if (socketInstance) {
+    socketInstance.disconnect();
+  }
   
-  clearChatState();
-  setTimeout(() => window.location.href = '/mood.html', 1000);
+  console.log('✅ Socket disconnected after leaving room');
 });
 
     socketInstance.on('incoming_call', (data) => {
@@ -1856,7 +1877,7 @@ if (acceptCallBtn) {
     }
 
 leaveBtn?.addEventListener('click', async () => {
-  console.log('🚪 Leave button clicked');
+  console.log('🚪 Leave button clicked - starting cleanup sequence');
   
   // CRITICAL: Check if there's a background call running
   const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -1864,30 +1885,55 @@ leaveBtn?.addEventListener('click', async () => {
   if (activeCallStr) {
     console.log('📞 Active call detected - cleaning up before leaving');
     
-    // Hide floating popup immediately
-    hideFloatingCallPopup();
-    
-    // Emit leave_call to server to disconnect from call
-    if (socketInstance && socketInstance.connected) {
-      socketInstance.emit('leave_call', { 
-        callId: JSON.parse(activeCallStr).callId 
-      });
-      console.log('✅ Emitted leave_call to server');
+    try {
+      const callData = JSON.parse(activeCallStr);
+      
+      // 1. Emit leave_call to server FIRST
+      if (socketInstance && socketInstance.connected) {
+        console.log('📤 Emitting leave_call to server...');
+        socketInstance.emit('leave_call', { callId: callData.callId });
+        
+        // Wait for server to process the leave_call
+        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('✅ Leave_call processed');
+      }
+      
+      // 2. Hide floating popup if it exists
+      if (floatingCallPopup && floatingCallPopup.container) {
+        console.log('🎈 Hiding floating popup');
+        hideFloatingCallPopup();
+      }
+      
+      // 3. Clear all call-related storage
+      localStorage.removeItem(ACTIVE_CALL_KEY);
+      sessionStorage.removeItem('hasBackgroundCall');
+      sessionStorage.removeItem('returningFromCall');
+      sessionStorage.removeItem('backgroundCallMode');
+      sessionStorage.removeItem('returningToBackgroundCall');
+      
+      console.log('✅ All call data cleared');
+      
+    } catch (e) {
+      console.error('❌ Error during call cleanup:', e);
     }
-    
-    // Clear all call-related storage
-    localStorage.removeItem(ACTIVE_CALL_KEY);
-    sessionStorage.removeItem('hasBackgroundCall');
-    sessionStorage.removeItem('returningFromCall');
-    sessionStorage.removeItem('backgroundCallMode');
-    sessionStorage.removeItem('returningToBackgroundCall');
-    
-    console.log('✅ All call data cleared');
   }
   
-  // Now leave the chat room
-  socketInstance?.emit('leave_room');
-}, { passive: true });
+  // 4. Now leave the chat room
+  if (socketInstance && socketInstance.connected) {
+    console.log('📤 Emitting leave_room...');
+    socketInstance.emit('leave_room');
+    
+    // Wait for server to process
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  // 5. Clear chat state
+  clearChatState();
+  
+  // 6. Finally navigate
+  console.log('✅ Cleanup complete - navigating to mood.html');
+  window.location.href = '/mood.html';
+}, { passive: false }); // Changed to false so we can use await
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
@@ -1927,36 +1973,10 @@ window.addEventListener('beforeunload', (e) => {
     return;
   }
   
-  console.log('🗑️ Normal chat exit - full cleanup');
+  console.log('🗑️ Normal chat exit - cleanup already done in leave handler');
   
-  // CRITICAL: Clean up background call if exists
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  if (activeCallStr && !navigatingToCall) {
-    console.log('📞 Cleaning up background call on exit');
-    
-    // Hide popup
-    hideFloatingCallPopup();
-    
-    // Emit leave_call
-    if (socketInstance && socketInstance.connected) {
-      try {
-        const callData = JSON.parse(activeCallStr);
-        socketInstance.emit('leave_call', { callId: callData.callId });
-      } catch (e) {
-        console.error('❌ Failed to parse activeCall on exit:', e);
-      }
-    }
-    
-    // Clear storage
-    localStorage.removeItem(ACTIVE_CALL_KEY);
-    sessionStorage.removeItem('hasBackgroundCall');
-    sessionStorage.removeItem('returningFromCall');
-    sessionStorage.removeItem('backgroundCallMode');
-    sessionStorage.removeItem('returningToBackgroundCall');
-  }
-  
+  // Only disconnect sockets - cleanup was already done by leave button handlers
   if (socketInstance) {
-    socketInstance.emit('leave_room');
     socketInstance.disconnect();
   }
   if (timerInterval) clearInterval(timerInterval);
