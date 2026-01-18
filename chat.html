@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1513,13 +1514,18 @@ function checkForBackgroundCall() {
   updateTimer();
 });
 
-    socketInstance.on('room_expired', (data) => {
-      console.error('💥 Room expired event from server');
-      if (timerInterval) clearInterval(timerInterval);
-      toast('Room has expired', 'warning');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    });
+socketInstance.on('room_expired', (data) => {
+  console.error('💥 Room expired event from server');
+  if (timerInterval) clearInterval(timerInterval);
+  
+  // CRITICAL: Clear active call to remove floating button
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  
+  toast('Room has expired', 'warning');
+  clearChatState();
+  setTimeout(() => window.location.href = '/mood.html', 2000);
+});
 
     socketInstance.on('error', (data) => {
       console.error('❌ Socket error:', data);
@@ -1566,11 +1572,16 @@ function checkForBackgroundCall() {
       }
     });
 
-    socketInstance.on('left_room', (data) => {
-      toast('Left room', 'success');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 1000);
-    });
+socketInstance.on('left_room', (data) => {
+  toast('Left room', 'success');
+  
+  // CRITICAL: Clear active call to remove floating button
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  
+  clearChatState();
+  setTimeout(() => window.location.href = '/mood.html', 1000);
+});
 
     socketInstance.on('incoming_call', (data) => {
   pendingCallData = data;
@@ -1798,10 +1809,13 @@ if (acceptCallBtn) {
       });
     }
 
-    // Leave button
-    leaveBtn?.addEventListener('click', () => {
-      socketInstance?.emit('leave_room');
-    }, { passive: true });
+leaveBtn?.addEventListener('click', () => {
+  // CRITICAL: Clear active call immediately
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  
+  socketInstance?.emit('leave_room');
+}, { passive: true });
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
