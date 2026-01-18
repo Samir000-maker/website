@@ -592,77 +592,54 @@ function showChatOverlay() {
 
 function setupCallCleanup() {
   window.addEventListener('beforeunload', (e) => {
-    console.log('🚪 ========================================');
-    console.log('🚪 CALL PAGE BEFOREUNLOAD');
-    console.log('🚪 ========================================');
+    console.log('🚪 CALL PAGE BEFOREUNLOAD - cleaning up');
     
-    // Check if chat is showing (means we're not actually leaving)
+    // Check if showing chat overlay
     const chatOverlay = document.getElementById('chatOverlayContainer');
     const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
     
     if (isShowingChat) {
-      console.log('🔒 Chat overlay active - NOT cleaning up');
-      console.log('   This should not happen - preventing navigation');
-      console.log('🚪 ========================================\n');
+      console.log('🔒 Chat overlay active - preserving call');
       return;
     }
     
-    console.log('🗑️ Performing full cleanup');
+    // Full cleanup
+    if (durationInterval) clearInterval(durationInterval);
     
-    // Stop timer
-    if (durationInterval) {
-      clearInterval(durationInterval);
-      console.log('   ✓ Timer stopped');
-    }
-    
-    // Close audio contexts
-    audioContexts.forEach((ac, userId) => {
+    audioContexts.forEach((ac) => {
       try {
         if (ac.stop) ac.stop();
         if (ac.context && ac.context.state !== 'closed') {
-          ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+          ac.context.close().catch(() => {});
         }
-      } catch (e) {
-        console.warn(`Failed to cleanup audio context for ${userId}:`, e);
-      }
+      } catch (e) {}
     });
     audioContexts.clear();
-    console.log('   ✓ Audio contexts closed');
     
-    // Stop local stream
     if (localStream) {
       localStream.getTracks().forEach(t => {
-        try {
-          t.stop();
-        } catch (e) {
-          console.warn('Failed to stop track:', e);
-        }
+        try { t.stop(); } catch (e) {}
       });
-      console.log('   ✓ Local stream stopped');
     }
     
-    // Close peer connections
-    peerConnections.forEach((pc, userId) => {
-      try {
-        pc.close();
-      } catch (e) {
-        console.warn(`Failed to close PC for ${userId}:`, e);
-      }
+    peerConnections.forEach((pc) => {
+      try { pc.close(); } catch (e) {}
     });
     peerConnections.clear();
-    console.log('   ✓ Peer connections closed');
     
-    // Emit leave call
     if (socketInstance && socketInstance.connected) {
       socketInstance.emit('leave_call', { callId: callData.callId });
-      console.log('   ✓ Leave call emitted');
     }
     
-    // Clear storage
+    // Clear ALL storage
     localStorage.removeItem('activeCall');
+    localStorage.removeItem('currentRoom');
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    sessionStorage.removeItem('returningToBackgroundCall');
     
-    console.log('✅ Full cleanup complete');
-    console.log('🚪 ========================================\n');
+    console.log('✅ Call cleanup complete');
   });
 }
 
@@ -1849,16 +1826,69 @@ async function toggleVideo() {
     }
     
     if (remaining === 0) {
-  console.log('⏰ Room expired during call - ending call');
-  if (durationInterval) clearInterval(durationInterval);
+  console.log('⏰ ========================================');
+  console.log('⏰ ROOM EXPIRED DURING CALL');
+  console.log('⏰ ========================================');
   
-  // ADD THIS: Clear activeCall from localStorage
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    durationInterval = null;
+  }
+  
+  // Full cleanup
+  audioContexts.forEach((ac, userId) => {
+    try {
+      if (ac.stop) ac.stop();
+      if (ac.context && ac.context.state !== 'closed') {
+        ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+      }
+    } catch (e) {
+      console.warn(`Failed to cleanup audio context for ${userId}:`, e);
+    }
+  });
+  audioContexts.clear();
+  
+  if (localStream) {
+    localStream.getTracks().forEach(t => {
+      try {
+        t.stop();
+      } catch (e) {
+        console.warn('Failed to stop track:', e);
+      }
+    });
+  }
+  
+  peerConnections.forEach((pc, userId) => {
+    try {
+      pc.close();
+    } catch (e) {
+      console.warn(`Failed to close PC for ${userId}:`, e);
+    }
+  });
+  peerConnections.clear();
+  
+  if (socketInstance && socketInstance.connected) {
+    socketInstance.emit('leave_call', { callId: callData.callId });
+  }
+  
+  // Clear ALL storage
   localStorage.removeItem('activeCall');
+  localStorage.removeItem('currentRoom');
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  
+  console.log('✅ Full cleanup complete');
+  console.log('⏰ ========================================\n');
   
   toast('Room has expired', 'warning');
-  leaveCall();
+  
+  // CRITICAL: Go directly to mood.html, not chat
+  setTimeout(() => { 
+    window.location.href = '/mood.html'; 
+  }, 1500);
+  return; // Prevent further execution
 }
   } catch (e) {
     console.error('❌ Timer sync error:', e);
@@ -1866,22 +1896,80 @@ async function toggleVideo() {
 }
 
       function leaveCall() {
-  if (isInitializing) return;
-  isInitializing = true;
-  audioContexts.forEach(c => c.close());
-  audioContexts.clear();
-  if (localStream) localStream.getTracks().forEach(t => t.stop());
-  peerConnections.forEach(pc => pc.close());
-  peerConnections.clear();
-  if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-  if (durationInterval) clearInterval(durationInterval);
+  console.log('🚪 ========================================');
+  console.log('🚪 LEAVING CALL');
+  console.log('🚪 ========================================');
   
-  // ADD THIS: Clear all call-related storage
+  if (isInitializing) {
+    console.log('⚠️ Already leaving, ignoring duplicate call');
+    return;
+  }
+  isInitializing = true;
+  
+  // Stop timer
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    console.log('   ✓ Timer stopped');
+  }
+  
+  // Close audio contexts (FIXED: use proper cleanup)
+  audioContexts.forEach((ac, userId) => {
+    try {
+      if (ac.stop) ac.stop(); // Stop detection function
+      if (ac.context && ac.context.state !== 'closed') {
+        ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+      }
+    } catch (e) {
+      console.warn(`Failed to cleanup audio context for ${userId}:`, e);
+    }
+  });
+  audioContexts.clear();
+  console.log('   ✓ Audio contexts closed');
+  
+  // Stop local stream
+  if (localStream) {
+    localStream.getTracks().forEach(t => {
+      try {
+        t.stop();
+      } catch (e) {
+        console.warn('Failed to stop track:', e);
+      }
+    });
+    console.log('   ✓ Local stream stopped');
+  }
+  
+  // Close peer connections
+  peerConnections.forEach((pc, userId) => {
+    try {
+      pc.close();
+    } catch (e) {
+      console.warn(`Failed to close PC for ${userId}:`, e);
+    }
+  });
+  peerConnections.clear();
+  console.log('   ✓ Peer connections closed');
+  
+  // Emit leave call
+  if (socketInstance && socketInstance.connected) {
+    socketInstance.emit('leave_call', { callId: callData.callId });
+    console.log('   ✓ Leave call emitted');
+  }
+  
+  // CRITICAL: Clear all call-related storage
   localStorage.removeItem('activeCall');
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  console.log('   ✓ Storage cleared');
   
-  setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+  console.log('✅ Full cleanup complete');
+  console.log('🚪 ========================================\n');
+  
+  // Navigate to chat
+  setTimeout(() => { 
+    window.location.href = '/chat.html'; 
+  }, 500);
 }
       
       
@@ -1995,28 +2083,38 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
 
 socketInstance.on('room_expired', (data) => {
   console.error('💥 ========================================');
-  console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
+  console.error('💥 CHAT: ROOM EXPIRED');
   console.error('💥 ========================================');
-  console.error(`   roomId: ${data.roomId}`);
-  console.error(`   message: ${data.message}`);
-  console.error(`   Server says room expired at: ${new Date().toISOString()}`);
+  console.error(`   Message: ${data.message}`);
   
-  if (roomExpiresAt) {
-    const serverExpiry = new Date(roomExpiresAt).toISOString();
-    const clientNow = new Date().toISOString();
-    const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
-    console.error(`   expiresAt was: ${serverExpiry}`);
-    console.error(`   Client time now: ${clientNow}`);
-    console.error(`   Server time now (adjusted): ${serverNow}`);
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
   }
   
+  // Disconnect socket immediately
+  if (socketInstance) {
+    socketInstance.disconnect();
+  }
+  
+  // Clear ALL storage
+  localStorage.removeItem('activeCall');
+  localStorage.removeItem('currentRoom');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  clearChatState();
+  
+  console.error('✅ All storage cleared');
   console.error('💥 ========================================\n');
   
-  if (durationInterval) clearInterval(durationInterval);
-  toast(data.message || 'Room has expired', 'warning');
+  toast('Room has expired', 'warning');
   
-  // Clean up and redirect
-  leaveCall();
+  // CRITICAL: Go directly to mood.html
+  setTimeout(() => { 
+    window.location.href = '/mood.html'; 
+  }, 1500);
 });
 
 socketInstance.on('room_expiring_soon', (data) => {
@@ -2038,60 +2136,26 @@ socketInstance.on('room_expiring_soon', (data) => {
   toast(`Room expiring soon!`, 'warning');
 });
 
-socketInstance.on('authenticated', async () => {
-  console.log('✅ Authenticated');
+socketInstance.on('authenticated', () => {
+  console.log('✅ Authenticated - joining room');
   
-  // CRITICAL: Request room data from server to get clock sync
-  const roomStr = localStorage.getItem('currentRoom');
-  if (roomStr) {
-    try {
-      const roomData = JSON.parse(roomStr);
-      console.log('📦 Requesting fresh room data for clock sync...');
-      
-      // Emit a request for fresh room data (you'll need to add this handler on server)
-      socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
-      
-    } catch (e) {
-      console.error('❌ Failed to parse room data:', e);
-    }
-  }
+  // Request room sync data for timer
+  socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
   
-  // CRITICAL FIX: Prevent duplicate join attempts
-  if (isJoiningCall) {
-    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
-    return;
-  }
-  
-  if (!hasJoinedCall) {
-    isJoiningCall = true;
-    hasJoinedCall = true;
-    
-    try {
-      console.log(`📞 Attempting to join call ${callData.callId}...`);
-      await attemptJoinCall(callData.callId);
-      console.log(`✅ Successfully joined call ${callData.callId}`);
-    } catch (error) {
-      console.error('❌ Failed to join call:', error);
-      toast('Failed to join call. Returning to chat...', 'error');
-      setTimeout(() => {
-        window.location.href = '/chat.html';
-      }, 2000);
-    } finally {
-      isJoiningCall = false;
-    }
-  }
+  // Join room
+  socketInstance.emit('join_room', { roomId: roomData.roomId });
 });
 
 
 socketInstance.on('room_sync_data', (data) => {
   console.log('⏰ ========================================');
-  console.log('⏰ ROOM SYNC DATA RECEIVED');
+  console.log('⏰ CHAT: ROOM SYNC DATA RECEIVED');
   console.log('⏰ ========================================');
   
   const clientNow = Date.now();
   
   if (!data.serverTime) {
-    console.warn('⚠️ No serverTime in sync data, assuming no clock skew');
+    console.warn('⚠️ No serverTime in sync data');
     data.serverTime = clientNow;
   }
   
@@ -2102,23 +2166,16 @@ socketInstance.on('room_sync_data', (data) => {
   console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
   console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
   
-  if (Math.abs(serverClockOffset) > 5000) {
-    console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
-    console.warn(`   Timer will be adjusted to compensate`);
-  }
-  
   if (data.expiresAt) {
-    roomExpiresAt = data.expiresAt;
+    serverExpiresAt = data.expiresAt;
     
-    // Calculate time remaining using server-adjusted time
     const serverNow = clientNow + serverClockOffset;
     const timeRemaining = data.expiresAt - serverNow;
     
     console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
-    console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-    console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
+    console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
     
-    // Update localStorage with synced data
+    // Update localStorage
     const roomStr = localStorage.getItem('currentRoom');
     if (roomStr) {
       try {
@@ -2134,8 +2191,8 @@ socketInstance.on('room_sync_data', (data) => {
   
   console.log('⏰ ========================================\n');
   
-  // Force timer update with new data
-  updateDuration();
+  // Force timer update
+  updateTimer();
 });
           
           
