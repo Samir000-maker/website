@@ -795,13 +795,6 @@ io.on('connection', (socket) => {
 
 
 
-socketInstance.on('cached_call_valid', (data) => {
-    console.log('✅ Cached call validated by server:', data.callId);
-    console.log(`   Showing modal for call from ${data.callerUsername}`);
-    
-    showCachedCallModal(data);
-});
-
 socketInstance.on('cached_call_invalid', (data) => {
     console.log('❌ Cached call invalid:', data.callId);
     localStorage.removeItem(CACHED_CALL_KEY);
