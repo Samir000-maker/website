@@ -963,7 +963,7 @@ function checkForBackgroundCall() {
       
       returnBtn.onclick = () => {
         console.log('📞 Return to call clicked');
-        sessionStorage.removeItem('hasBackgroundCall');
+        // Don't clear flags - call is still active
         window.location.href = '/call.html';
       };
       
@@ -1375,9 +1375,7 @@ function checkForBackgroundCall() {
   }
 const updateTimer = () => {
   if (!serverExpiresAt) {
-    if (timeRemaining) {
-      timeRemaining.textContent = '-- remaining';
-    }
+    // Don't show anything if no server time yet
     return;
   }
   
@@ -1395,9 +1393,7 @@ const updateTimer = () => {
   
   // Check for expiry
   if (remaining === 0) {
-    console.error('⏰ ========================================');
     console.error('⏰ CHAT: TIMER EXPIRED');
-    console.error('⏰ ========================================');
     
     if (timerInterval) {
       clearInterval(timerInterval);
@@ -1409,7 +1405,7 @@ const updateTimer = () => {
       socketInstance.disconnect();
     }
     
-    // Clear ALL storage
+    // Clear ALL storage - both call and room
     localStorage.removeItem('activeCall');
     localStorage.removeItem('currentRoom');
     sessionStorage.removeItem('hasBackgroundCall');
@@ -1417,9 +1413,6 @@ const updateTimer = () => {
     sessionStorage.removeItem('backgroundCallMode');
     sessionStorage.removeItem('returningToBackgroundCall');
     clearChatState();
-    
-    console.error('✅ Timer expired - redirecting to mood.html');
-    console.error('⏰ ========================================\n');
     
     toast('Room has expired', 'warning');
     
@@ -1532,6 +1525,13 @@ const updateTimer = () => {
   // Start timer updates immediately
   console.log('⏰ Starting timer updates with server time...');
   updateTimer();
+  
+    if (data.expiresAt) {
+    serverExpiresAt = data.expiresAt;
+    console.log('✅ Timer data received, starting updates');
+    updateTimer(); // Update immediately
+  }
+  
 });
 
     socketInstance.on('room_expired', (data) => {
