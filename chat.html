@@ -1515,12 +1515,18 @@ function checkForBackgroundCall() {
 });
 
     socketInstance.on('room_expired', (data) => {
-      console.error('💥 Room expired event from server');
-      if (timerInterval) clearInterval(timerInterval);
-      toast('Room has expired', 'warning');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    });
+  console.error('💥 Room expired event from server');
+  if (timerInterval) clearInterval(timerInterval);
+  
+  // ADD THIS: Clear call-related storage
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  
+  toast('Room has expired', 'warning');
+  clearChatState();
+  setTimeout(() => window.location.href = '/mood.html', 2000);
+});
 
     socketInstance.on('error', (data) => {
       console.error('❌ Socket error:', data);
@@ -1568,10 +1574,16 @@ function checkForBackgroundCall() {
     });
 
     socketInstance.on('left_room', (data) => {
-      toast('Left room', 'success');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 1000);
-    });
+  toast('Left room', 'success');
+  clearChatState();
+  
+  // ADD THIS: Clear call-related storage
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  
+  setTimeout(() => window.location.href = '/mood.html', 1000);
+});
 
     socketInstance.on('incoming_call', (data) => {
   pendingCallData = data;
@@ -1799,10 +1811,14 @@ if (acceptCallBtn) {
       });
     }
 
-    // Leave button
-    leaveBtn?.addEventListener('click', () => {
-      socketInstance?.emit('leave_room');
-    }, { passive: true });
+leaveBtn?.addEventListener('click', () => {
+  // ADD THIS: Clear call-related storage when leaving room
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  
+  socketInstance?.emit('leave_room');
+}, { passive: true });
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
