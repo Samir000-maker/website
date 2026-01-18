@@ -794,14 +794,6 @@ io.on('connection', (socket) => {
 });
 
 
-
-socketInstance.on('cached_call_invalid', (data) => {
-    console.log('❌ Cached call invalid:', data.callId);
-    localStorage.removeItem(CACHED_CALL_KEY);
-    console.log('🗑️ Cleared invalid cached call');
-});
-
-
 socket.on('validate_room', ({ roomId }) => {
   try {
     const user = socketUsers.get(socket.id);
