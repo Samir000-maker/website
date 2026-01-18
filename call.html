@@ -300,17 +300,20 @@ let makingOffer = new Map();
   history.pushState({ page: 'call' }, 'Call', window.location.href);
   
   window.addEventListener('popstate', (event) => {
-    console.log('⬅️ Back button pressed on call page');
+    console.log('⬅️ Back button pressed - minimizing call to background');
     
     // Prevent navigation
     event.preventDefault();
     history.pushState({ page: 'call' }, 'Call', window.location.href);
     
-    // Show confirmation
-    if (confirm('Leave call and return to chat?')) {
-      // Trigger leave call button click
-      document.getElementById('leaveCallBtn')?.click();
-    }
+    // Set flag that call is running in background
+    sessionStorage.setItem('hasBackgroundCall', 'true');
+    sessionStorage.setItem('returningFromCall', 'true');
+    
+    console.log('✅ Background call flags set - navigating to chat');
+    
+    // Navigate to chat with call running in background
+    window.location.href = '/chat.html';
   });
 }
 
@@ -2525,11 +2528,11 @@ socketInstance.on('video_state_changed', (data) => {
           if (vid) vid.addEventListener('click', toggleVideo);
           if (leave) {
   leave.addEventListener('click', () => {
-    console.log('🚪 Leave call button clicked');
+    console.log('🚪 ========================================');
+    console.log('🚪 LEAVE CALL BUTTON CLICKED');
+    console.log('🚪 ========================================');
     
-    // IMPORTANT: Only leave the call, not the room
-    // User should return to chat, room stays active
-    
+    // Stop timer
     if (durationInterval) {
       clearInterval(durationInterval);
       durationInterval = null;
@@ -2564,16 +2567,17 @@ socketInstance.on('video_state_changed', (data) => {
       socketInstance.emit('leave_call', { callId: callData.callId });
     }
     
-    // Clear ONLY call storage, NOT room storage
+    // Clear ONLY call-related storage, NOT currentRoom
     localStorage.removeItem('activeCall');
     sessionStorage.removeItem('hasBackgroundCall');
     sessionStorage.removeItem('returningFromCall');
     sessionStorage.removeItem('backgroundCallMode');
     sessionStorage.removeItem('returningToBackgroundCall');
     
-    console.log('✅ Call ended - returning to chat');
+    console.log('✅ Call ended - chat room still active');
+    console.log('🚪 ========================================\n');
     
-    // Return to chat (room stays active)
+    // Return to chat
     setTimeout(() => { 
       window.location.href = '/chat.html'; 
     }, 500);
