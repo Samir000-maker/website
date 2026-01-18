@@ -656,6 +656,36 @@ let isInBackgroundCall = false;
   
   
   
+  // Function to hide floating button in parent call.html
+function hideCallPageFloatingButton() {
+  console.log('🎈 Attempting to hide call.html floating button');
+  
+  // Check if we're in an iframe (chat overlay)
+  if (window.parent && window.parent !== window) {
+    console.log('📱 We are in iframe - accessing parent window');
+    try {
+      const parentFloatingBtn = window.parent.document.getElementById('floatingReturnToCall');
+      if (parentFloatingBtn) {
+        parentFloatingBtn.classList.add('hidden');
+        console.log('✅ Parent floating button hidden');
+      } else {
+        console.warn('⚠️ Parent floating button not found');
+      }
+    } catch (e) {
+      console.error('❌ Cannot access parent window (CORS?):', e);
+    }
+  } else {
+    console.log('ℹ️ Not in iframe - checking local DOM');
+    // If not in iframe, might be standalone chat page
+    const localFloatingBtn = document.getElementById('floatingReturnToCall');
+    if (localFloatingBtn) {
+      localFloatingBtn.classList.add('hidden');
+      console.log('✅ Local floating button hidden');
+    }
+  }
+}
+  
+  
   function initializeFloatingCallPopup() {
   console.log('🎈 Initializing floating call popup elements');
   
@@ -1352,7 +1382,10 @@ function checkForBackgroundCall() {
       try {
         const callData = JSON.parse(activeCallStr);
         
-        // 1. Emit leave_call to server
+        // 1. Hide the floating button from call.html FIRST
+        hideCallPageFloatingButton();
+        
+        // 2. Emit leave_call to server
         if (socketInstance && socketInstance.connected) {
           console.log('📤 Emitting leave_call to server...');
           socketInstance.emit('leave_call', { callId: callData.callId });
@@ -1362,13 +1395,13 @@ function checkForBackgroundCall() {
           console.log('✅ Leave_call emitted and processed');
         }
         
-        // 2. Hide floating popup if it exists
+        // 3. Hide floating popup if chat.html has one
         if (floatingCallPopup && floatingCallPopup.container) {
-          console.log('🎈 Hiding floating popup');
+          console.log('🎈 Hiding chat.html floating popup');
           hideFloatingCallPopup();
         }
         
-        // 3. Clear all call-related storage
+        // 4. Clear all call-related storage
         localStorage.removeItem(ACTIVE_CALL_KEY);
         sessionStorage.removeItem('hasBackgroundCall');
         sessionStorage.removeItem('returningFromCall');
@@ -1382,7 +1415,7 @@ function checkForBackgroundCall() {
       }
     }
     
-    // 4. Leave chat room
+    // 5. Leave chat room
     if (socketInstance && socketInstance.connected) {
       console.log('📤 Emitting leave_room...');
       socketInstance.emit('leave_room');
@@ -1391,14 +1424,13 @@ function checkForBackgroundCall() {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
     
-    // 5. Clear chat state
+    // 6. Clear chat state
     clearChatState();
     
-    // 6. Finally navigate
-    console.log('✅ Cleanup complete - navigating to mood.html');
     resolve(true);
     
-    // Navigate after resolve
+    // 7. Navigate after everything is done
+    console.log('✅ Cleanup complete - navigating to mood.html');
     setTimeout(() => {
       window.location.href = '/mood.html';
     }, 100);
@@ -1888,7 +1920,10 @@ leaveBtn?.addEventListener('click', async () => {
     try {
       const callData = JSON.parse(activeCallStr);
       
-      // 1. Emit leave_call to server FIRST
+      // 1. Hide the floating button from call.html FIRST
+      hideCallPageFloatingButton();
+      
+      // 2. Emit leave_call to server
       if (socketInstance && socketInstance.connected) {
         console.log('📤 Emitting leave_call to server...');
         socketInstance.emit('leave_call', { callId: callData.callId });
@@ -1898,13 +1933,13 @@ leaveBtn?.addEventListener('click', async () => {
         console.log('✅ Leave_call processed');
       }
       
-      // 2. Hide floating popup if it exists
+      // 3. Hide floating popup if chat.html has one
       if (floatingCallPopup && floatingCallPopup.container) {
-        console.log('🎈 Hiding floating popup');
+        console.log('🎈 Hiding chat.html floating popup');
         hideFloatingCallPopup();
       }
       
-      // 3. Clear all call-related storage
+      // 4. Clear all call-related storage
       localStorage.removeItem(ACTIVE_CALL_KEY);
       sessionStorage.removeItem('hasBackgroundCall');
       sessionStorage.removeItem('returningFromCall');
@@ -1918,7 +1953,7 @@ leaveBtn?.addEventListener('click', async () => {
     }
   }
   
-  // 4. Now leave the chat room
+  // 5. Now leave the chat room
   if (socketInstance && socketInstance.connected) {
     console.log('📤 Emitting leave_room...');
     socketInstance.emit('leave_room');
@@ -1927,13 +1962,13 @@ leaveBtn?.addEventListener('click', async () => {
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   
-  // 5. Clear chat state
+  // 6. Clear chat state
   clearChatState();
   
-  // 6. Finally navigate
+  // 7. Finally navigate
   console.log('✅ Cleanup complete - navigating to mood.html');
   window.location.href = '/mood.html';
-}, { passive: false }); // Changed to false so we can use await
+});
 
     // Visibility change
     document.addEventListener('visibilitychange', () => {
