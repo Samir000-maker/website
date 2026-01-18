@@ -1373,41 +1373,61 @@ function checkForBackgroundCall() {
       }
     });
   }
-
-  const updateTimer = () => {
-    if (!serverExpiresAt) {
-      console.warn('⚠️ No server expiresAt available');
-      if (timeRemaining) {
-        timeRemaining.textContent = '-- remaining';
-      }
-      return;
-    }
-    
-    // CRITICAL: Always use server-adjusted time
-    const clientNow = Date.now();
-    const serverNow = clientNow + serverClockOffset;
-    const remaining = Math.max(0, serverExpiresAt - serverNow);
-    
-    const minutes = Math.floor(remaining / 60000);
-    const seconds = Math.floor((remaining % 60000) / 1000);
-    
+const updateTimer = () => {
+  if (!serverExpiresAt) {
     if (timeRemaining) {
-      timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+      timeRemaining.textContent = '-- remaining';
+    }
+    return;
+  }
+  
+  // Use server-adjusted time
+  const clientNow = Date.now();
+  const serverNow = clientNow + serverClockOffset;
+  const remaining = Math.max(0, serverExpiresAt - serverNow);
+  
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  
+  if (timeRemaining) {
+    timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
+  }
+  
+  // Check for expiry
+  if (remaining === 0) {
+    console.error('⏰ ========================================');
+    console.error('⏰ CHAT: TIMER EXPIRED');
+    console.error('⏰ ========================================');
+    
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
     }
     
-    // Debug log every 10 seconds
-    if (Math.floor(serverNow / 10000) !== Math.floor((serverNow - 1000) / 10000)) {
-      console.log(`⏰ Timer: ${minutes}:${seconds.toString().padStart(2, '0')} (offset: ${(serverClockOffset/1000).toFixed(1)}s)`);
+    // Disconnect socket
+    if (socketInstance) {
+      socketInstance.disconnect();
     }
     
-    if (remaining === 0) {
-      console.error('❌ Room expired - redirecting');
-      if (timerInterval) clearInterval(timerInterval);
-      toast('Room has expired', 'warning');
-      clearChatState();
-      setTimeout(() => window.location.href = '/mood.html', 2000);
-    }
-  };
+    // Clear ALL storage
+    localStorage.removeItem('activeCall');
+    localStorage.removeItem('currentRoom');
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    sessionStorage.removeItem('returningToBackgroundCall');
+    clearChatState();
+    
+    console.error('✅ Timer expired - redirecting to mood.html');
+    console.error('⏰ ========================================\n');
+    
+    toast('Room has expired', 'warning');
+    
+    setTimeout(() => { 
+      window.location.href = '/mood.html'; 
+    }, 1500);
+  }
+};
 
   // ============================================
   // SOCKET EVENT HANDLERS
@@ -1573,16 +1593,24 @@ function checkForBackgroundCall() {
       }
     });
 
-    socketInstance.on('left_room', (data) => {
-  toast('Left room', 'success');
-  clearChatState();
+socketInstance.on('left_room', (data) => {
+  console.log('✅ LEFT_ROOM confirmed by server');
   
-  // ADD THIS: Clear call-related storage
+  // Clear ALL storage
   localStorage.removeItem('activeCall');
+  localStorage.removeItem('currentRoom');
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  clearChatState();
   
-  setTimeout(() => window.location.href = '/mood.html', 1000);
+  toast('Left room', 'success');
+  
+  // Go to mood.html
+  setTimeout(() => { 
+    window.location.href = '/mood.html'; 
+  }, 1000);
 });
 
     socketInstance.on('incoming_call', (data) => {
@@ -1811,13 +1839,23 @@ if (acceptCallBtn) {
       });
     }
 
+// Leave button
 leaveBtn?.addEventListener('click', () => {
-  // ADD THIS: Clear call-related storage when leaving room
+  console.log('🚪 Leave button clicked - clearing everything');
+  
+  // Clear ALL storage
   localStorage.removeItem('activeCall');
+  localStorage.removeItem('currentRoom');
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  clearChatState();
   
+  // Disconnect and leave
   socketInstance?.emit('leave_room');
+  
+  console.log('✅ All storage cleared, leaving room');
 }, { passive: true });
 
     // Visibility change
