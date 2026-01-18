@@ -1666,6 +1666,20 @@ function updateCallButtonState(isActive, callData = null) {
   function setupSocketHandlers() {
     if (!socketInstance) return;
     
+    
+    socketInstance.on('cached_call_valid', (data) => {
+    console.log('✅ Cached call validated by server:', data.callId);
+    console.log(`   Showing modal for call from ${data.callerUsername}`);
+    
+    showCachedCallModal(data);
+});
+
+socketInstance.on('cached_call_invalid', (data) => {
+    console.log('❌ Cached call invalid:', data.callId);
+    localStorage.removeItem(CACHED_CALL_KEY);
+    console.log('🗑️ Cleared invalid cached call');
+});
+    
     socketInstance.on('connect', () => {
       console.log('🔌 Socket connected:', socketInstance.id);
       
@@ -2068,23 +2082,54 @@ socketInstance.on('left_room', (data) => {
 });
 
     socketInstance.on('call_accepted', (data) => {
-      console.log('✅ Call accepted:', data);
-      isInitiatingCall = false;
-      navigatingToCall = true;
-      
-      saveChatState(roomData.roomId, messagesCache);
-      sessionStorage.setItem('returningFromCall', 'true');
-      
-      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+    console.log('✅ Call accepted:', data);
+    
+    // Clear loading states
+    isInitiatingCall = false;
+    if (audioCallBtn) {
+        audioCallBtn.classList.remove('call-btn-loading');
+        audioCallBtn.classList.remove('calling');
+        audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.remove('call-btn-loading');
+        videoCallBtn.classList.remove('calling');
+        videoCallBtn.disabled = false;
+    }
+    
+    navigatingToCall = true;
+    
+    saveChatState(roomData.roomId, messagesCache);
+    sessionStorage.setItem('returningFromCall', 'true');
+    
+    localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
         callId: data.callId,
         roomId: roomData.roomId,
         callType: data.callType,
         users: data.users
-      }));
-      
-      console.log('🚀 Navigating to call');
-      window.location.href = '/call.html';
-    });
+    }));
+    
+    console.log('🚀 Navigating to call');
+    window.location.href = '/call.html';
+});
+
+socketInstance.on('call_declined', (data) => {
+    console.log('❌ Call was declined');
+    
+    // Clear loading states
+    toast('Call was declined', 'warning');
+    isInitiatingCall = false;
+    if (audioCallBtn) {
+        audioCallBtn.classList.remove('call-btn-loading');
+        audioCallBtn.classList.remove('calling');
+        audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.remove('call-btn-loading');
+        videoCallBtn.classList.remove('calling');
+        videoCallBtn.disabled = false;
+    }
+});
 
     socketInstance.on('call_declined', (data) => {
       toast('Call was declined', 'warning');
@@ -2140,29 +2185,91 @@ socketInstance.on('left_room', (data) => {
     // Reply
     cancelReplyBtn?.addEventListener('click', hideReplyPreview, { passive: true });
     
-    // Call buttons
     if (audioCallBtn) {
-      audioCallBtn.addEventListener('click', () => {
-        if (isInitiatingCall) return;
+    audioCallBtn.addEventListener('click', () => {
+        if (isInitiatingCall) {
+            console.log('⚠️ Call already being initiated, ignoring click');
+            return;
+        }
+        
+        console.log('📞 Initiating audio call...');
         isInitiatingCall = true;
-        audioCallBtn.classList.add('calling');
-        videoCallBtn?.classList.add('calling');
+        
+        // Add loading state
+        audioCallBtn.classList.add('call-btn-loading');
+        audioCallBtn.disabled = true;
+        if (videoCallBtn) {
+            videoCallBtn.classList.add('calling');
+            videoCallBtn.disabled = true;
+        }
         
         socketInstance?.emit('initiate_call', {
-          roomId: roomData.roomId,
-          callType: 'audio'
+            roomId: roomData.roomId,
+            callType: 'audio'
         });
+        
+        console.log('📤 Audio call initiation sent to server');
         toast('Calling...', 'success');
         
+        // Timeout after 30 seconds
         setTimeout(() => {
-          if (isInitiatingCall) {
-            isInitiatingCall = false;
-            audioCallBtn.classList.remove('calling');
-            videoCallBtn?.classList.remove('calling');
-          }
+            if (isInitiatingCall) {
+                console.log('⏰ Call initiation timeout (30s)');
+                isInitiatingCall = false;
+                audioCallBtn.classList.remove('call-btn-loading');
+                audioCallBtn.disabled = false;
+                if (videoCallBtn) {
+                    videoCallBtn.classList.remove('calling');
+                    videoCallBtn.disabled = false;
+                }
+                toast('Call timeout - no response', 'warning');
+            }
         }, 30000);
-      }, { passive: true });
-    }
+    }, { passive: true });
+}
+
+if (videoCallBtn) {
+    videoCallBtn.addEventListener('click', () => {
+        if (isInitiatingCall) {
+            console.log('⚠️ Call already being initiated, ignoring click');
+            return;
+        }
+        
+        console.log('📞 Initiating video call...');
+        isInitiatingCall = true;
+        
+        // Add loading state
+        videoCallBtn.classList.add('call-btn-loading');
+        videoCallBtn.disabled = true;
+        if (audioCallBtn) {
+            audioCallBtn.classList.add('calling');
+            audioCallBtn.disabled = true;
+        }
+        
+        socketInstance?.emit('initiate_call', {
+            roomId: roomData.roomId,
+            callType: 'video'
+        });
+        
+        console.log('📤 Video call initiation sent to server');
+        toast('Calling...', 'success');
+        
+        // Timeout after 30 seconds
+        setTimeout(() => {
+            if (isInitiatingCall) {
+                console.log('⏰ Call initiation timeout (30s)');
+                isInitiatingCall = false;
+                videoCallBtn.classList.remove('call-btn-loading');
+                videoCallBtn.disabled = false;
+                if (audioCallBtn) {
+                    audioCallBtn.classList.remove('calling');
+                    audioCallBtn.disabled = false;
+                }
+                toast('Call timeout - no response', 'warning');
+            }
+        }, 30000);
+    }, { passive: true });
+}
 
     if (videoCallBtn) {
       videoCallBtn.addEventListener('click', () => {
