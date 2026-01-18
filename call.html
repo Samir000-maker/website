@@ -1849,29 +1849,40 @@ async function toggleVideo() {
     }
     
     if (remaining === 0) {
-      console.log('⏰ Room expired during call - ending call');
-      if (durationInterval) clearInterval(durationInterval);
-      toast('Room has expired', 'warning');
-      leaveCall();
-    }
+  console.log('⏰ Room expired during call - ending call');
+  if (durationInterval) clearInterval(durationInterval);
+  
+  // ADD THIS: Clear activeCall from localStorage
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  
+  toast('Room has expired', 'warning');
+  leaveCall();
+}
   } catch (e) {
     console.error('❌ Timer sync error:', e);
   }
 }
 
       function leaveCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-        audioContexts.forEach(c => c.close());
-        audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
-        peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-        if (durationInterval) clearInterval(durationInterval);
-        localStorage.removeItem('activeCall');
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
-      }
+  if (isInitializing) return;
+  isInitializing = true;
+  audioContexts.forEach(c => c.close());
+  audioContexts.clear();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
+  if (durationInterval) clearInterval(durationInterval);
+  
+  // ADD THIS: Clear all call-related storage
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  
+  setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+}
       
       
       
