@@ -731,6 +731,83 @@ io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
   
   
+  
+  socket.on('validate_cached_call', async ({ callId, roomId }) => {
+    try {
+        const user = socketUsers.get(socket.id);
+        
+        if (!user) {
+            console.warn('⚠️ Unauthenticated socket tried to validate cached call');
+            socket.emit('cached_call_invalid', { callId });
+            return;
+        }
+        
+        console.log(`🔍 Validating cached call ${callId} for ${user.username}`);
+        
+        const call = activeCalls.get(callId);
+        
+        if (!call) {
+            console.log(`❌ Cached call ${callId} not found or expired`);
+            socket.emit('cached_call_invalid', { callId });
+            return;
+        }
+        
+        if (call.roomId !== roomId) {
+            console.log(`❌ Cached call ${callId} room mismatch`);
+            socket.emit('cached_call_invalid', { callId });
+            return;
+        }
+        
+        if (call.status === 'ended' || call.participants.length === 0) {
+            console.log(`❌ Cached call ${callId} already ended`);
+            socket.emit('cached_call_invalid', { callId });
+            return;
+        }
+        
+        // Call is still valid - send fresh call data
+        console.log(`✅ Cached call ${callId} is valid, sending to ${user.username}`);
+        
+        const room = matchmaking.getRoom(roomId);
+        const callerData = room?.users.find(u => u.userId === call.initiator);
+        
+        if (!callerData) {
+            console.error(`❌ Caller data not found for cached call ${callId}`);
+            socket.emit('cached_call_invalid', { callId });
+            return;
+        }
+        
+        socket.emit('cached_call_valid', {
+            callId: call.callId,
+            callType: call.callType,
+            callerUsername: callerData.username,
+            callerPfp: callerData.pfpUrl,
+            callerUserId: call.initiator,
+            roomId: call.roomId
+        });
+        
+        console.log(`📤 Sent cached_call_valid to ${user.username}`);
+        
+    } catch (error) {
+        console.error('❌ Validate cached call error:', error);
+        socket.emit('cached_call_invalid', { callId });
+    }
+});
+
+
+
+socketInstance.on('cached_call_valid', (data) => {
+    console.log('✅ Cached call validated by server:', data.callId);
+    console.log(`   Showing modal for call from ${data.callerUsername}`);
+    
+    showCachedCallModal(data);
+});
+
+socketInstance.on('cached_call_invalid', (data) => {
+    console.log('❌ Cached call invalid:', data.callId);
+    localStorage.removeItem(CACHED_CALL_KEY);
+    console.log('🗑️ Cleared invalid cached call');
+});
+
 
 socket.on('validate_room', ({ roomId }) => {
   try {
