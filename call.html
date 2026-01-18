@@ -300,17 +300,33 @@ let makingOffer = new Map();
   history.pushState({ page: 'call' }, 'Call', window.location.href);
   
   window.addEventListener('popstate', (event) => {
-    console.log('⬅️ Back button pressed - minimizing call to background');
+    console.log('⬅️ ========================================');
+    console.log('⬅️ BACK BUTTON PRESSED IN CALL');
+    console.log('⬅️ ========================================');
     
     // Prevent navigation
     event.preventDefault();
     history.pushState({ page: 'call' }, 'Call', window.location.href);
     
-    // Set flag that call is running in background
+    // CRITICAL: Verify that currentRoom exists before navigating
+    const roomStr = localStorage.getItem('currentRoom');
+    if (!roomStr) {
+      console.error('❌ No currentRoom - cannot minimize to background');
+      alert('Room data lost. Call will end.');
+      document.getElementById('leaveCallBtn')?.click();
+      return;
+    }
+    
+    console.log('✅ Room data verified - minimizing call to background');
+    
+    // Set flags that call is running in background
     sessionStorage.setItem('hasBackgroundCall', 'true');
     sessionStorage.setItem('returningFromCall', 'true');
     
-    console.log('✅ Background call flags set - navigating to chat');
+    console.log('✅ Background call flags set');
+    console.log(`   activeCall: ${!!localStorage.getItem('activeCall')}`);
+    console.log(`   currentRoom: ${!!localStorage.getItem('currentRoom')}`);
+    console.log('⬅️ ========================================\n');
     
     // Navigate to chat with call running in background
     window.location.href = '/chat.html';
