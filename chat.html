@@ -315,6 +315,14 @@
         
         
         
+@keyframes pulse-slow {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.animate-pulse-slow {
+    animation: pulse-slow 2s ease-in-out infinite;
+}
 
 
 @keyframes slideOutToRight {
@@ -962,12 +970,16 @@ function checkForBackgroundCall() {
       returnBtn.classList.remove('hidden');
       
       returnBtn.onclick = () => {
-        console.log('📞 Return to call clicked');
-        // Don't clear flags - call is still active
+        console.log('📞 Floating button clicked - returning to call');
+        
+        // CRITICAL: Don't clear hasBackgroundCall flag
+        // Just navigate back to call
         window.location.href = '/call.html';
       };
       
-      console.log('✅ Return to call button activated');
+      console.log('✅ Floating return button activated');
+    } else {
+      console.error('❌ floatingReturnToCall button not found in DOM!');
     }
   } else {
     console.log('ℹ️ No background call detected');
@@ -1443,11 +1455,14 @@ const updateTimer = () => {
     });
 
     socketInstance.on('authenticated', () => {
-      console.log('✅ Authenticated - joining room');
-      
-      // Join room immediately after authentication
-      socketInstance.emit('join_room', { roomId: roomData.roomId });
-    });
+  console.log('✅ Authenticated - joining room');
+  
+  // Request room sync data for timer
+  socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
+  
+  // Join room
+  socketInstance.emit('join_room', { roomId: roomData.roomId });
+});;
 
     socketInstance.on('room_joined', (data) => {
   console.log('✅ ========================================');
@@ -1526,9 +1541,28 @@ const updateTimer = () => {
   console.log('⏰ Starting timer updates with server time...');
   updateTimer();
   
-    if (data.expiresAt) {
+  if (data.expiresAt) {
     serverExpiresAt = data.expiresAt;
-    console.log('✅ Timer data received, starting updates');
+    
+    // Calculate server time offset if provided
+    if (data.serverTime) {
+      const clientNow = Date.now();
+      serverClockOffset = data.serverTime - clientNow;
+      
+      console.log(`⏰ Clock sync: offset = ${(serverClockOffset / 1000).toFixed(1)}s`);
+    }
+    
+    // Update localStorage
+    const roomStr = localStorage.getItem('currentRoom');
+    if (roomStr) {
+      try {
+        const roomData = JSON.parse(roomStr);
+        roomData.expiresAt = data.expiresAt;
+        localStorage.setItem('currentRoom', JSON.stringify(roomData));
+      } catch (e) {}
+    }
+    
+    console.log(`✅ Timer data received: expires at ${new Date(serverExpiresAt).toISOString()}`);
     updateTimer(); // Update immediately
   }
   
@@ -2009,6 +2043,7 @@ if (returningFromCall === 'true') {
 
   // Set initial call button state
   setInitialCallButtonState();
+  checkForBackgroundCall();
 
   // Render initial users
   if (usersList && Array.isArray(roomData.users)) {
