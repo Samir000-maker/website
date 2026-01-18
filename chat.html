@@ -606,6 +606,10 @@
   const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
   const ACTIVE_CALL_KEY = 'activeCall';
   
+  
+  const CACHED_CALL_KEY = 'cachedIncomingCall';
+const CALL_CACHE_TIMEOUT = 60000; // 60 seconds max cache time
+let cachedCallCheckInterval = null;
   // ============================================
   // STATE MANAGEMENT
   // ============================================
@@ -654,6 +658,108 @@ let isInBackgroundCall = false;
   // UTILITY FUNCTIONS
   // ============================================
   
+  
+  function checkForCachedCall() {
+    console.log('🔍 Checking for cached incoming call...');
+    
+    const cachedCallStr = localStorage.getItem(CACHED_CALL_KEY);
+    
+    if (!cachedCallStr) {
+        console.log('ℹ️ No cached call found');
+        return;
+    }
+    
+    try {
+        const cachedCall = JSON.parse(cachedCallStr);
+        const cacheAge = Date.now() - cachedCall.timestamp;
+        
+        console.log(`📞 Found cached call from ${cachedCall.callerUsername}`);
+        console.log(`   Age: ${(cacheAge / 1000).toFixed(1)}s`);
+        console.log(`   Call ID: ${cachedCall.callId}`);
+        
+        // Check if cache is expired
+        if (cacheAge > CALL_CACHE_TIMEOUT) {
+            console.log(`⏰ Cached call expired (${(cacheAge / 1000).toFixed(1)}s > ${CALL_CACHE_TIMEOUT / 1000}s)`);
+            localStorage.removeItem(CACHED_CALL_KEY);
+            return;
+        }
+        
+        // Check if call is still valid on server
+        if (socketInstance && socketInstance.connected) {
+            console.log(`📡 Validating cached call ${cachedCall.callId} with server...`);
+            
+            socketInstance.emit('validate_cached_call', {
+                callId: cachedCall.callId,
+                roomId: roomData.roomId
+            });
+        } else {
+            console.warn('⚠️ Socket not connected, will retry validation');
+        }
+        
+    } catch (e) {
+        console.error('❌ Failed to parse cached call:', e);
+        localStorage.removeItem(CACHED_CALL_KEY);
+    }
+}
+
+function showCachedCallModal(callData) {
+    console.log('📞 ========================================');
+    console.log('📞 SHOWING CACHED INCOMING CALL');
+    console.log('📞 ========================================');
+    console.log(`   Caller: ${callData.callerUsername}`);
+    console.log(`   Call ID: ${callData.callId}`);
+    console.log(`   Type: ${callData.callType}`);
+    
+    // Set pending call data
+    pendingCallData = {
+        callId: callData.callId,
+        callerUsername: callData.callerUsername,
+        callerPfp: callData.callerPfp,
+        callType: callData.callType,
+        fromCache: true
+    };
+    
+    // Update modal UI
+    const callerName = document.getElementById('callerName');
+    const callType = document.getElementById('callType');
+    const callerAvatar = document.getElementById('callerAvatar');
+    
+    if (callerName) callerName.textContent = `${callData.callerUsername} is calling`;
+    if (callType) callType.textContent = callData.callType === 'video' ? 'Video Call' : 'Audio Call';
+    if (callerAvatar) {
+        callerAvatar.innerHTML = '';
+        const pfp = createProfilePictureElement(callData.callerPfp, callData.callerUsername, 'w-full h-full');
+        callerAvatar.appendChild(pfp);
+    }
+    
+    // Show modal immediately (no delay for cached calls)
+    incomingCallModal?.classList.remove('hidden');
+    
+    console.log('✅ Cached call modal displayed');
+    console.log('📞 ========================================\n');
+}
+
+function startCachedCallMonitoring() {
+    console.log('🔄 Starting cached call monitoring...');
+    
+    // Check immediately on load
+    checkForCachedCall();
+    
+    // Check every 2 seconds for cached calls
+    cachedCallCheckInterval = setInterval(() => {
+        checkForCachedCall();
+    }, 2000);
+    
+    console.log('✅ Cached call monitoring started (checks every 2s)');
+}
+
+function stopCachedCallMonitoring() {
+    if (cachedCallCheckInterval) {
+        clearInterval(cachedCallCheckInterval);
+        cachedCallCheckInterval = null;
+        console.log('🛑 Cached call monitoring stopped');
+    }
+}
   
   
   // Function to cleanup parent call.html page
@@ -1119,11 +1225,7 @@ function checkForBackgroundCall() {
     };
   }
 
-  // ============================================
-  // CALL STATE MANAGEMENT
-  // ============================================
-  
- function setInitialCallButtonState() {
+function setInitialCallButtonState() {
     console.log('🔍 Checking for active call in localStorage...');
     
     // Show loading state initially
@@ -1134,9 +1236,11 @@ function checkForBackgroundCall() {
     }
     if (audioCallBtn) {
         audioCallBtn.classList.add('call-btn-loading');
+        audioCallBtn.disabled = true; // CRITICAL: Disable while loading
     }
     if (videoCallBtn) {
         videoCallBtn.classList.add('call-btn-loading');
+        videoCallBtn.disabled = true; // CRITICAL: Disable while loading
     }
     
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -1154,7 +1258,6 @@ function checkForBackgroundCall() {
                     callType: activeCallData.callType
                 };
                 
-                // Keep loading state - will be removed when socket confirms
                 console.log('✅ Initial call state set (waiting for socket confirmation)');
                 return true;
             } else {
@@ -1166,15 +1269,24 @@ function checkForBackgroundCall() {
         }
     }
     
-    // Keep loading state - will be removed when socket confirms no active call
     return false;
 }
   
-  function updateCallButtonState(isActive, callData = null) {
-    // Remove loading states
-    if (audioCallBtn) audioCallBtn.classList.remove('call-btn-loading');
-    if (videoCallBtn) videoCallBtn.classList.remove('call-btn-loading');
-    if (joinCallBtn) joinCallBtn.classList.remove('join-btn-loading');
+function updateCallButtonState(isActive, callData = null) {
+    console.log('🔄 Updating call button state:', { isActive, participantCount: callData?.participantCount });
+    
+    // Remove loading states and re-enable buttons
+    if (audioCallBtn) {
+        audioCallBtn.classList.remove('call-btn-loading');
+        audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.remove('call-btn-loading');
+        videoCallBtn.disabled = false;
+    }
+    if (joinCallBtn) {
+        joinCallBtn.classList.remove('join-btn-loading');
+    }
     
     if (isActive && callData) {
         activeCallInRoom = {
@@ -1186,20 +1298,34 @@ function checkForBackgroundCall() {
         if (joinCallBtn) {
             joinCallBtn.classList.remove('hidden');
             joinCallBtn.classList.add('flex');
+            joinCallBtn.disabled = false; // Enable join button
         }
-        if (audioCallBtn) audioCallBtn.classList.add('hidden');
-        if (videoCallBtn) videoCallBtn.classList.add('hidden');
+        if (audioCallBtn) {
+            audioCallBtn.classList.add('hidden');
+            audioCallBtn.disabled = true;
+        }
+        if (videoCallBtn) {
+            videoCallBtn.classList.add('hidden');
+            videoCallBtn.disabled = true;
+        }
         
-        console.log(`✅ Call buttons updated: JOIN visible`);
+        console.log(`✅ Call buttons updated: JOIN visible (${callData.participantCount} participants)`);
     } else {
         activeCallInRoom = null;
         
         if (joinCallBtn) {
             joinCallBtn.classList.remove('flex');
             joinCallBtn.classList.add('hidden');
+            joinCallBtn.disabled = true;
         }
-        if (audioCallBtn) audioCallBtn.classList.remove('hidden');
-        if (videoCallBtn) videoCallBtn.classList.remove('hidden');
+        if (audioCallBtn) {
+            audioCallBtn.classList.remove('hidden');
+            audioCallBtn.disabled = false;
+        }
+        if (videoCallBtn) {
+            videoCallBtn.classList.remove('hidden');
+            videoCallBtn.disabled = false;
+        }
         
         console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
     }
@@ -1571,6 +1697,7 @@ socketInstance.on('authenticated', () => {
     }
   }
   
+  startCachedCallMonitoring();
   // Join room immediately after authentication
   socketInstance.emit('join_room', { roomId: roomData.roomId });
 });
@@ -1886,31 +2013,58 @@ socketInstance.on('left_room', (data) => {
 });
 
     socketInstance.on('incoming_call', (data) => {
-  pendingCallData = data;
-  const callerName = document.getElementById('callerName');
-  const callType = document.getElementById('callType');
-  const callerAvatar = document.getElementById('callerAvatar');
-  
-  if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-  if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
-  if (callerAvatar) {
-    callerAvatar.innerHTML = '';
-    const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
-    callerAvatar.appendChild(pfp);
-  }
-  
-  // CRITICAL: Show modal after 2 second delay
-  setTimeout(() => {
-    // Only show if call is still pending (user hasn't left, call hasn't ended)
-    if (pendingCallData && pendingCallData.callId === data.callId) {
-      incomingCallModal?.classList.remove('hidden');
-      console.log(`📞 Showing incoming call modal after 2s delay`);
-    } else {
-      console.log(`📞 Call already handled, skipping modal display`);
+    console.log('📞 ========================================');
+    console.log('📞 INCOMING CALL EVENT RECEIVED');
+    console.log('📞 ========================================');
+    console.log(`   Caller: ${data.callerUsername}`);
+    console.log(`   Call ID: ${data.callId}`);
+    console.log(`   Type: ${data.callType}`);
+    
+    // CRITICAL: Cache the call immediately to localStorage
+    const cachedCall = {
+        callId: data.callId,
+        callerUsername: data.callerUsername,
+        callerPfp: data.callerPfp,
+        callType: data.callType,
+        roomId: data.roomId,
+        timestamp: Date.now()
+    };
+    
+    try {
+        localStorage.setItem(CACHED_CALL_KEY, JSON.stringify(cachedCall));
+        console.log('💾 Call cached to localStorage for reliability');
+    } catch (e) {
+        console.error('❌ Failed to cache call:', e);
     }
-  }, 2000);
-  
-  console.log(`📞 Incoming call from ${data.callerUsername} - modal will appear in 2s`);
+    
+    // Set pending call data
+    pendingCallData = data;
+    
+    // Update modal UI
+    const callerName = document.getElementById('callerName');
+    const callType = document.getElementById('callType');
+    const callerAvatar = document.getElementById('callerAvatar');
+    
+    if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+    if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+    if (callerAvatar) {
+        callerAvatar.innerHTML = '';
+        const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+        callerAvatar.appendChild(pfp);
+    }
+    
+    // CRITICAL: Show modal after 2 second delay
+    setTimeout(() => {
+        // Only show if call is still pending (user hasn't left, call hasn't ended)
+        if (pendingCallData && pendingCallData.callId === data.callId) {
+            incomingCallModal?.classList.remove('hidden');
+            console.log(`✅ Showing incoming call modal after 2s delay`);
+        } else {
+            console.log(`📞 Call already handled, skipping modal display`);
+        }
+    }, 2000);
+    
+    console.log('📞 ========================================\n');
 });
 
     socketInstance.on('call_accepted', (data) => {
@@ -2055,33 +2209,41 @@ socketInstance.on('left_room', (data) => {
 }
 
 if (acceptCallBtn) {
-  acceptCallBtn.addEventListener('click', () => {
-    if (pendingCallData) {
-      const callToAccept = pendingCallData;
-      pendingCallData = null; // Clear immediately to prevent modal re-show
-      
-      socketInstance?.emit('accept_call', {
-        callId: callToAccept.callId,
-        roomId: roomData.roomId
-      });
-      incomingCallModal?.classList.add('hidden');
-    }
-  }, { passive: true });
+    acceptCallBtn.addEventListener('click', () => {
+        if (pendingCallData) {
+            const callToAccept = pendingCallData;
+            pendingCallData = null;
+            
+            // CRITICAL: Clear cached call on accept
+            localStorage.removeItem(CACHED_CALL_KEY);
+            console.log('🗑️ Cleared cached call after accept');
+            
+            socketInstance?.emit('accept_call', {
+                callId: callToAccept.callId,
+                roomId: roomData.roomId
+            });
+            incomingCallModal?.classList.add('hidden');
+        }
+    }, { passive: true });
 }
 
     if (declineCallBtn) {
-  declineCallBtn.addEventListener('click', () => {
-    if (pendingCallData) {
-      const callToDecline = pendingCallData;
-      pendingCallData = null; // Clear immediately to prevent modal re-show
-      
-      socketInstance?.emit('decline_call', {
-        callId: callToDecline.callId,
-        roomId: roomData.roomId
-      });
-      incomingCallModal?.classList.add('hidden');
-    }
-  }, { passive: true });
+    declineCallBtn.addEventListener('click', () => {
+        if (pendingCallData) {
+            const callToDecline = pendingCallData;
+            pendingCallData = null;
+            
+            // CRITICAL: Clear cached call on decline
+            localStorage.removeItem(CACHED_CALL_KEY);
+            console.log('🗑️ Cleared cached call after decline');
+            
+            socketInstance?.emit('decline_call', {
+                callId: callToDecline.callId,
+                roomId: roomData.roomId
+            });
+            incomingCallModal?.classList.add('hidden');
+        }
+    }, { passive: true });
 }
 
     // Message form
@@ -2113,6 +2275,7 @@ if (acceptCallBtn) {
 
 leaveBtn?.addEventListener('click', async () => {
   console.log('🚪 Leave button clicked - starting cleanup sequence');
+  stopCachedCallMonitoring();
   
   // CRITICAL: Check if there's a background call running
   const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -2176,7 +2339,7 @@ leaveBtn?.addEventListener('click', async () => {
 
 window.addEventListener('beforeunload', (e) => {
   console.log('🚪 Chat page beforeunload event');
-  
+  stopCachedCallMonitoring();
   // CRITICAL: Check if in background call mode
   if (isInBackgroundCall) {
     console.log('🔒 Background call active - preserving floating socket');
