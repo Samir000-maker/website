@@ -751,7 +751,9 @@ function showFloatingCallPopup(callData, participants) {
 }
 
 function hideFloatingCallPopup() {
-  console.log('🎈 Hiding floating call popup');
+  console.log('🎈 ========================================');
+  console.log('🎈 HIDING AND DESTROYING FLOATING CALL POPUP');
+  console.log('🎈 ========================================');
   
   if (!floatingCallPopup || !floatingCallPopup.container) {
     console.warn('⚠️ Floating call popup not initialized');
@@ -769,7 +771,9 @@ function hideFloatingCallPopup() {
   }
   
   floatingCallPopup.container.classList.add('hidden');
-  console.log('✅ Floating call popup hidden');
+  
+  console.log('✅ Floating call popup hidden and destroyed');
+  console.log('🎈 ========================================\n');
 }
 
 function updateFloatingCallSpeaker(userId, username, speaking) {
@@ -1335,11 +1339,53 @@ function checkForBackgroundCall() {
       }
       
       if (btnLeave) {
-        btnLeave.addEventListener('click', () => {
-          overlay.style.display = 'none';
-          resolve(true);
-        }, { once: true });
+  btnLeave.addEventListener('click', async () => {
+    console.log('✅ User confirmed leaving via dialog');
+    overlay.style.display = 'none';
+    
+    // CRITICAL: Clean up background call before leaving
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    
+    if (activeCallStr) {
+      console.log('📞 Active call detected - cleaning up');
+      
+      // Hide floating popup
+      hideFloatingCallPopup();
+      
+      // Emit leave_call to server
+      if (socketInstance && socketInstance.connected) {
+        try {
+          const callData = JSON.parse(activeCallStr);
+          socketInstance.emit('leave_call', { callId: callData.callId });
+          console.log('✅ Emitted leave_call to server');
+          
+          // Wait a moment for server to process
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (e) {
+          console.error('❌ Failed to emit leave_call:', e);
+        }
       }
+      
+      // Clear all call-related storage
+      localStorage.removeItem(ACTIVE_CALL_KEY);
+      sessionStorage.removeItem('hasBackgroundCall');
+      sessionStorage.removeItem('returningFromCall');
+      sessionStorage.removeItem('backgroundCallMode');
+      sessionStorage.removeItem('returningToBackgroundCall');
+      
+      console.log('✅ Background call destroyed');
+    }
+    
+    // Now leave chat room
+    if (socketInstance?.connected) {
+      socketInstance.emit('leave_room');
+    }
+    
+    clearChatState();
+    
+    resolve(true);
+  }, { once: true });
+}
     });
   }
 
@@ -1809,11 +1855,37 @@ if (acceptCallBtn) {
       });
     }
 
-leaveBtn?.addEventListener('click', () => {
-  // CRITICAL: Clear active call immediately
-  localStorage.removeItem('activeCall');
-  sessionStorage.removeItem('hasBackgroundCall');
+leaveBtn?.addEventListener('click', async () => {
+  console.log('🚪 Leave button clicked');
   
+  // CRITICAL: Check if there's a background call running
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  
+  if (activeCallStr) {
+    console.log('📞 Active call detected - cleaning up before leaving');
+    
+    // Hide floating popup immediately
+    hideFloatingCallPopup();
+    
+    // Emit leave_call to server to disconnect from call
+    if (socketInstance && socketInstance.connected) {
+      socketInstance.emit('leave_call', { 
+        callId: JSON.parse(activeCallStr).callId 
+      });
+      console.log('✅ Emitted leave_call to server');
+    }
+    
+    // Clear all call-related storage
+    localStorage.removeItem(ACTIVE_CALL_KEY);
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    sessionStorage.removeItem('returningToBackgroundCall');
+    
+    console.log('✅ All call data cleared');
+  }
+  
+  // Now leave the chat room
   socketInstance?.emit('leave_room');
 }, { passive: true });
 
@@ -1827,7 +1899,6 @@ leaveBtn?.addEventListener('click', () => {
       }
     });
 
-// Before unload
 window.addEventListener('beforeunload', (e) => {
   console.log('🚪 Chat page beforeunload event');
   
@@ -1858,9 +1929,30 @@ window.addEventListener('beforeunload', (e) => {
   
   console.log('🗑️ Normal chat exit - full cleanup');
   
-  // Clean up floating call popup if exists
-  if (floatingCallPopup) {
+  // CRITICAL: Clean up background call if exists
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  if (activeCallStr && !navigatingToCall) {
+    console.log('📞 Cleaning up background call on exit');
+    
+    // Hide popup
     hideFloatingCallPopup();
+    
+    // Emit leave_call
+    if (socketInstance && socketInstance.connected) {
+      try {
+        const callData = JSON.parse(activeCallStr);
+        socketInstance.emit('leave_call', { callId: callData.callId });
+      } catch (e) {
+        console.error('❌ Failed to parse activeCall on exit:', e);
+      }
+    }
+    
+    // Clear storage
+    localStorage.removeItem(ACTIVE_CALL_KEY);
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    sessionStorage.removeItem('returningToBackgroundCall');
   }
   
   if (socketInstance) {
