@@ -1950,21 +1950,19 @@ window.addEventListener('beforeunload', (e) => {
   // INITIALIZATION
   // ============================================
   
-  try {
+try {
+  // CRITICAL: Check if we're returning from a call
+  const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
+  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
   
-  
-    const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
-  
-  if (!isBackgroundCall) {
-    clearAllChatData();
+  if (returningFromCall || hasBackgroundCall) {
+    console.log('🔄 Returning from call - preserving room state');
+    // DON'T clear anything when returning from call
   } else {
-    console.log('🎈 Background call mode detected - preserving call state');
-    // Clear only the background call flag
-    sessionStorage.removeItem('backgroundCallMode');
-  }
-  
-    // CRITICAL: Clear all chat state on entry
+    // Only clear on fresh entry to chat
+    console.log('🧹 Fresh entry - clearing old chat state');
     clearAllChatData();
+  }
     
     // Auth check
     await _Auth.requireAuth();
@@ -1986,14 +1984,24 @@ if (returningFromCall === 'true') {
   console.log('🔍 Active call check:', !!localStorage.getItem(ACTIVE_CALL_KEY));
 }
 
-  const roomDataStr = localStorage.getItem('currentRoom');
-  if (!roomDataStr) {
-    console.error('❌ No currentRoom in localStorage');
-    toast('No active room found', 'error');
-    setTimeout(() => window.location.href = '/mood.html', 1500);
-    return;
+const roomDataStr = localStorage.getItem('currentRoom');
+if (!roomDataStr) {
+  console.error('❌ No currentRoom in localStorage');
+  
+  // Check if we have background call - if so, something went wrong
+  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+  if (hasBackgroundCall) {
+    console.error('❌ CRITICAL: Had background call but no room data!');
+    // Clear the broken flags
+    localStorage.removeItem('activeCall');
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
   }
-
+  
+  toast('No active room found', 'error');
+  setTimeout(() => window.location.href = '/mood.html', 1500);
+  return;
+}
   try {
     roomData = JSON.parse(roomDataStr);
     console.log('📦 Loaded room data from localStorage:');
