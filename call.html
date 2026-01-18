@@ -2136,14 +2136,51 @@ socketInstance.on('room_expiring_soon', (data) => {
   toast(`Room expiring soon!`, 'warning');
 });
 
-socketInstance.on('authenticated', () => {
-  console.log('✅ Authenticated - joining room');
+socketInstance.on('authenticated', async () => {
+  console.log('✅ Authenticated');
   
-  // Request room sync data for timer
-  socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
+  // CRITICAL: Get room data from localStorage
+  const roomStr = localStorage.getItem('currentRoom');
+  let currentRoomData = null;
   
-  // Join room
-  socketInstance.emit('join_room', { roomId: roomData.roomId });
+  if (roomStr) {
+    try {
+      currentRoomData = JSON.parse(roomStr);
+      console.log('📦 Room data loaded for sync');
+      
+      // Request room sync data for timer
+      socketInstance.emit('request_room_sync', { roomId: currentRoomData.roomId });
+    } catch (e) {
+      console.error('❌ Failed to parse room data:', e);
+    }
+  } else {
+    console.warn('⚠️ No room data in localStorage');
+  }
+  
+  // CRITICAL FIX: Prevent duplicate join attempts
+  if (isJoiningCall) {
+    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
+    return;
+  }
+  
+  if (!hasJoinedCall) {
+    isJoiningCall = true;
+    hasJoinedCall = true;
+    
+    try {
+      console.log(`📞 Attempting to join call ${callData.callId}...`);
+      await attemptJoinCall(callData.callId);
+      console.log(`✅ Successfully joined call ${callData.callId}`);
+    } catch (error) {
+      console.error('❌ Failed to join call:', error);
+      toast('Failed to join call. Returning to chat...', 'error');
+      setTimeout(() => {
+        window.location.href = '/chat.html';
+      }, 2000);
+    } finally {
+      isJoiningCall = false;
+    }
+  }
 });
 
 
