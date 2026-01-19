@@ -1177,18 +1177,28 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     const user = socketUsers.get(socket.id);
     
     if (!user) {
+      console.error('❌ Unauthenticated socket tried to initiate call');
       socket.emit('error', { message: 'Not authenticated' });
       return;
     }
 
+    console.log('📞 ========================================');
+    console.log('📞 INITIATE_CALL REQUEST');
+    console.log('📞 ========================================');
+    console.log(`   User: ${user.username} (${user.userId})`);
+    console.log(`   Room: ${roomId}`);
+    console.log(`   Type: ${callType}`);
+
     const room = matchmaking.getRoom(roomId);
     
     if (!room) {
+      console.error(`❌ Room ${roomId} not found`);
       socket.emit('error', { message: 'Room not found' });
       return;
     }
 
     if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} not in room ${roomId}`);
       socket.emit('error', { message: 'You are not in this room' });
       return;
     }
@@ -1211,14 +1221,15 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
       return;
     }
 
+    // Create new call
     const callId = uuidv4();
     
     const call = {
       callId,
       roomId,
       callType,
-      participants: [user.userId],
-      status: 'pending',
+      participants: [user.userId], // Initiator is first participant
+      status: 'active', // ← CHANGED: Start as active immediately
       createdAt: Date.now(),
       lastActivity: Date.now(),
       initiator: user.userId,
@@ -1235,10 +1246,38 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     userCalls.set(user.userId, callId);
     webrtcMetrics.totalCalls++;
 
-    console.log(`📞 Call initiated: ${callId} by ${user.username} (${callType})`);
-    console.log(`📊 Initial state: participants=[${user.userId}], status=pending`);
+    // Mark room as having active call
+    room.setActiveCall(true);
 
-    // Notify all other users in room
+    console.log(`✅ Call created: ${callId}`);
+    console.log(`   Status: ${call.status}`);
+    console.log(`   Participants: [${user.userId}]`);
+
+    // Send call_created to initiator (they navigate immediately)
+    socket.emit('call_created', {
+      callId,
+      callType,
+      isInitiator: true,
+      participants: [{
+        userId: user.userId,
+        username: user.username,
+        pfpUrl: user.pfpUrl,
+        videoEnabled: callType === 'video',
+        audioEnabled: true
+      }]
+    });
+    console.log(`📤 Sent call_created to initiator ${user.username}`);
+
+    // Broadcast to ALL users in room (including initiator) that call is active
+    io.to(roomId).emit('call_state_update', {
+      callId: callId,
+      isActive: true,
+      participantCount: 1,
+      callType: callType
+    });
+    console.log(`📢 Broadcasted call_state_update to room ${roomId}: JOIN button now visible`);
+
+    // Send incoming_call notification to OTHER users in room
     room.users.forEach(roomUser => {
       if (roomUser.userId !== user.userId) {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -1251,10 +1290,13 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
             callerPfp: user.pfpUrl,
             roomId
           });
-          console.log(`📤 Sent incoming_call to ${roomUser.username}`);
+          console.log(`📤 Sent incoming_call notification to ${roomUser.username}`);
         }
       }
     });
+
+    console.log('✅ Call initiation complete - initiator navigating, others see JOIN button');
+    console.log('📞 ========================================\n');
 
   } catch (error) {
     console.error('❌ Initiate call error:', error);
