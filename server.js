@@ -55,52 +55,6 @@ function validateRoomAccess(roomId, userId) {
   return { valid: true, room };
 }
 
-// Then use in chat_message handler:
-socket.on('chat_message', ({ roomId, message, replyTo }) => {
-  try {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) {
-      console.error('❌ Unauthenticated socket tried to send message');
-      socket.emit('error', { message: 'Not authenticated' });
-      return;
-    }
-
-    // CRITICAL FIX: Validate room in one atomic check
-    const validation = validateRoomAccess(roomId, user.userId);
-    if (!validation.valid) {
-      console.error(`❌ ${validation.error} for user ${user.username}`);
-      socket.emit('error', { message: validation.error, code: validation.code });
-      return;
-    }
-    
-    const room = validation.room;
-
-    const timestamp = Date.now();
-    const messageData = {
-      messageId: `msg-${user.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
-      userId: user.userId,
-      username: user.username,
-      pfpUrl: user.pfpUrl,
-      message,
-      timestamp
-    };
-
-    if (replyTo) {
-      messageData.replyTo = replyTo;
-    }
-
-    room.addMessage(messageData);
-    io.to(roomId).emit('chat_message', messageData);
-    
-    console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
-    
-  } catch (error) {
-    console.error('Chat message error:', error);
-    socket.emit('error', { message: 'Failed to send message' });
-  }
-});
-
 
 function broadcastCallStateUpdate(callId) {
   const call = activeCalls.get(callId);
@@ -1294,54 +1248,51 @@ socket.on('join_room', ({ roomId }) => {
     }
   });
 
-  socket.on('chat_message', ({ roomId, message, replyTo }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) {
-        console.error('❌ Unauthenticated socket tried to send message');
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      const room = matchmaking.getRoom(roomId);
-      
-      if (!room) {
-        console.error(`❌ Room ${roomId} not found`);
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      if (!room.hasUser(user.userId)) {
-        console.error(`❌ User ${user.username} not in room ${roomId}`);
-        socket.emit('error', { message: 'You are not in this room' });
-        return;
-      }
-
-      const timestamp = Date.now();
-      const messageData = {
-        messageId: `msg-${user.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: user.userId,
-        username: user.username,
-        pfpUrl: user.pfpUrl,
-        message,
-        timestamp
-      };
-
-      if (replyTo) {
-        messageData.replyTo = replyTo;
-      }
-
-      room.addMessage(messageData);
-      io.to(roomId).emit('chat_message', messageData);
-      
-      console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
-      
-    } catch (error) {
-      console.error('Chat message error:', error);
-      socket.emit('error', { message: 'Failed to send message' });
+// Then use in chat_message handler:
+socket.on('chat_message', ({ roomId, message, replyTo }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.error('❌ Unauthenticated socket tried to send message');
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
+
+    // CRITICAL FIX: Validate room in one atomic check
+    const validation = validateRoomAccess(roomId, user.userId);
+    if (!validation.valid) {
+      console.error(`❌ ${validation.error} for user ${user.username}`);
+      socket.emit('error', { message: validation.error, code: validation.code });
+      return;
+    }
+    
+    const room = validation.room;
+
+    const timestamp = Date.now();
+    const messageData = {
+      messageId: `msg-${user.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: user.userId,
+      username: user.username,
+      pfpUrl: user.pfpUrl,
+      message,
+      timestamp
+    };
+
+    if (replyTo) {
+      messageData.replyTo = replyTo;
+    }
+
+    room.addMessage(messageData);
+    io.to(roomId).emit('chat_message', messageData);
+    
+    console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
+    
+  } catch (error) {
+    console.error('Chat message error:', error);
+    socket.emit('error', { message: 'Failed to send message' });
+  }
+});
 
 socket.on('initiate_call', async ({ roomId, callType }) => {
   try {
