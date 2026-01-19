@@ -297,6 +297,25 @@ let makingOffer = new Map();
   // Set initial state
   history.pushState({ view: 'call' }, 'Call', window.location.href);
   
+  
+  // Listen for messages from chat iframe
+window.addEventListener('message', (event) => {
+  console.log('📨 ========================================');
+  console.log('📨 MESSAGE RECEIVED FROM IFRAME');
+  console.log('📨 ========================================');
+  console.log(`   action: ${event.data?.action}`);
+  
+  if (event.data && event.data.action === 'hideChat') {
+    console.log('💬 Hiding chat overlay as requested by iframe');
+    hideChat();
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
+  }
+  
+  console.log('📨 ========================================\n');
+});
+
+console.log('✅ Message listener added for iframe communication');
+  
   window.addEventListener('popstate', (event) => {
     console.log('⬅️ ========================================');
     console.log('⬅️ BACK BUTTON PRESSED');
