@@ -1693,8 +1693,8 @@ socketInstance.on('cached_call_invalid', (data) => {
       });
     });
 
-socketInstance.on('authenticated', () => {
-  console.log('✅ Authenticated - joining room');
+socketInstance.on('authenticated', async () => {
+  console.log('✅ Authenticated');
   
   // CRITICAL: Request room data from server to get clock sync
   const roomStr = localStorage.getItem('currentRoom');
@@ -1703,7 +1703,6 @@ socketInstance.on('authenticated', () => {
       const localRoomData = JSON.parse(roomStr);
       console.log('📦 Requesting fresh room data for clock sync...');
       
-      // Request room sync data for accurate timer
       socketInstance.emit('request_room_sync', { roomId: localRoomData.roomId });
       
     } catch (e) {
@@ -1712,9 +1711,50 @@ socketInstance.on('authenticated', () => {
   }
   
   startCachedCallMonitoring();
-  // Join room immediately after authentication
   socketInstance.emit('join_room', { roomId: roomData.roomId });
 });
+
+
+socketInstance.on('call_created', (data) => {
+  console.log('📞 ========================================');
+  console.log('📞 CALL_CREATED EVENT RECEIVED');
+  console.log('📞 ========================================');
+  console.log(`   callId: ${data.callId}`);
+  console.log(`   callType: ${data.callType}`);
+  console.log(`   isInitiator: ${data.isInitiator}`);
+  
+  // Mark that we're navigating to call
+  navigatingToCall = true;
+  
+  // Clear loading states
+  if (audioCallBtn) {
+    audioCallBtn.classList.remove('call-btn-loading');
+    audioCallBtn.disabled = false;
+  }
+  if (videoCallBtn) {
+    videoCallBtn.classList.remove('call-btn-loading');
+    videoCallBtn.disabled = false;
+  }
+  
+  // Save chat state
+  saveChatState(roomData.roomId, messagesCache);
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  // Store call data
+  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+    callId: data.callId,
+    roomId: roomData.roomId,
+    callType: data.callType,
+    users: data.participants || []
+  }));
+  
+  console.log(`✅ Stored call data, navigating to call.html`);
+  console.log('📞 ========================================\n');
+  
+  // Navigate to call page
+  window.location.href = '/call.html';
+});
+
 
 socketInstance.on('room_joined', (data) => {
   console.log('✅ ========================================');
@@ -2027,58 +2067,57 @@ socketInstance.on('left_room', (data) => {
 });
 
     socketInstance.on('incoming_call', (data) => {
-    console.log('📞 ========================================');
-    console.log('📞 INCOMING CALL EVENT RECEIVED');
-    console.log('📞 ========================================');
-    console.log(`   Caller: ${data.callerUsername}`);
-    console.log(`   Call ID: ${data.callId}`);
-    console.log(`   Type: ${data.callType}`);
-    
-    // CRITICAL: Cache the call immediately to localStorage
-    const cachedCall = {
-        callId: data.callId,
-        callerUsername: data.callerUsername,
-        callerPfp: data.callerPfp,
-        callType: data.callType,
-        roomId: data.roomId,
-        timestamp: Date.now()
-    };
-    
-    try {
-        localStorage.setItem(CACHED_CALL_KEY, JSON.stringify(cachedCall));
-        console.log('💾 Call cached to localStorage for reliability');
-    } catch (e) {
-        console.error('❌ Failed to cache call:', e);
+  console.log('📞 ========================================');
+  console.log('📞 INCOMING_CALL EVENT RECEIVED');
+  console.log('📞 ========================================');
+  console.log(`   Caller: ${data.callerUsername}`);
+  console.log(`   Call ID: ${data.callId}`);
+  console.log(`   Type: ${data.callType}`);
+  
+  // CRITICAL: Cache the call immediately
+  const cachedCall = {
+    callId: data.callId,
+    callerUsername: data.callerUsername,
+    callerPfp: data.callerPfp,
+    callType: data.callType,
+    roomId: data.roomId,
+    timestamp: Date.now()
+  };
+  
+  try {
+    localStorage.setItem(CACHED_CALL_KEY, JSON.stringify(cachedCall));
+    console.log('💾 Call cached to localStorage');
+  } catch (e) {
+    console.error('❌ Failed to cache call:', e);
+  }
+  
+  // Set pending call data
+  pendingCallData = data;
+  
+  // Update modal UI
+  const callerName = document.getElementById('callerName');
+  const callType = document.getElementById('callType');
+  const callerAvatar = document.getElementById('callerAvatar');
+  
+  if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
+  if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
+  if (callerAvatar) {
+    callerAvatar.innerHTML = '';
+    const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
+    callerAvatar.appendChild(pfp);
+  }
+  
+  // Show modal after 2 second delay
+  setTimeout(() => {
+    if (pendingCallData && pendingCallData.callId === data.callId) {
+      incomingCallModal?.classList.remove('hidden');
+      console.log(`✅ Showing incoming call modal after 2s delay`);
+    } else {
+      console.log(`📞 Call already handled, skipping modal display`);
     }
-    
-    // Set pending call data
-    pendingCallData = data;
-    
-    // Update modal UI
-    const callerName = document.getElementById('callerName');
-    const callType = document.getElementById('callType');
-    const callerAvatar = document.getElementById('callerAvatar');
-    
-    if (callerName) callerName.textContent = `${data.callerUsername} is calling`;
-    if (callType) callType.textContent = data.callType === 'video' ? 'Video Call' : 'Audio Call';
-    if (callerAvatar) {
-        callerAvatar.innerHTML = '';
-        const pfp = createProfilePictureElement(data.callerPfp, data.callerUsername, 'w-full h-full');
-        callerAvatar.appendChild(pfp);
-    }
-    
-    // CRITICAL: Show modal after 2 second delay
-    setTimeout(() => {
-        // Only show if call is still pending (user hasn't left, call hasn't ended)
-        if (pendingCallData && pendingCallData.callId === data.callId) {
-            incomingCallModal?.classList.remove('hidden');
-            console.log(`✅ Showing incoming call modal after 2s delay`);
-        } else {
-            console.log(`📞 Call already handled, skipping modal display`);
-        }
-    }, 2000);
-    
-    console.log('📞 ========================================\n');
+  }, 2000);
+  
+  console.log('📞 ========================================\n');
 });
 
     socketInstance.on('call_accepted', (data) => {
@@ -2316,22 +2355,44 @@ if (videoCallBtn) {
 }
 
 if (acceptCallBtn) {
-    acceptCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-            const callToAccept = pendingCallData;
-            pendingCallData = null;
-            
-            // CRITICAL: Clear cached call on accept
-            localStorage.removeItem(CACHED_CALL_KEY);
-            console.log('🗑️ Cleared cached call after accept');
-            
-            socketInstance?.emit('accept_call', {
-                callId: callToAccept.callId,
-                roomId: roomData.roomId
-            });
-            incomingCallModal?.classList.add('hidden');
-        }
-    }, { passive: true });
+  acceptCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToAccept = pendingCallData;
+      pendingCallData = null;
+      
+      console.log('✅ ========================================');
+      console.log('✅ USER ACCEPTED INCOMING CALL');
+      console.log('✅ ========================================');
+      console.log(`   callId: ${callToAccept.callId}`);
+      
+      // Clear cached call
+      localStorage.removeItem(CACHED_CALL_KEY);
+      
+      // Hide modal
+      incomingCallModal?.classList.add('hidden');
+      
+      // Mark navigating
+      navigatingToCall = true;
+      
+      // Save chat state
+      saveChatState(roomData.roomId, messagesCache);
+      sessionStorage.setItem('returningFromCall', 'true');
+      
+      // Store call data
+      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+        callId: callToAccept.callId,
+        roomId: roomData.roomId,
+        callType: callToAccept.callType,
+        users: []
+      }));
+      
+      console.log('✅ Navigating to call page');
+      console.log('✅ ========================================\n');
+      
+      // Navigate to call
+      window.location.href = '/call.html';
+    }
+  }, { passive: true });
 }
 
     if (declineCallBtn) {
