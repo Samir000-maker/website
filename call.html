@@ -374,24 +374,6 @@ function showChat() {
     };
   }
   
-  // CRITICAL FIX: Update localStorage with current participants before navigating
-  if (callData && callData.participants && callData.participants.length > 0) {
-    const updatedCallData = {
-      callId: callData.callId,
-      roomId: callData.roomId || (roomData && roomData.roomId),
-      callType: callData.callType,
-      users: callData.participants.map(p => ({
-        userId: p.userId,
-        username: p.username,
-        pfpUrl: p.pfpUrl
-      }))
-    };
-    
-    localStorage.setItem('activeCall', JSON.stringify(updatedCallData));
-    sessionStorage.setItem('returningFromCall', 'true');
-    console.log(`✅ Updated activeCall with ${updatedCallData.users.length} participants before chat navigation`);
-  }
-  
   console.log('✅ Chat overlay shown - call remains active');
   console.log(`   PeerConnections: ${peerConnections.size}`);
   console.log(`   LocalStream: ${localStream?.getTracks().length} tracks`);
@@ -418,23 +400,6 @@ function hideChat() {
   if (header) header.style.display = '';
   if (main) main.style.display = '';
   if (footer) footer.style.display = '';
-  
-  // CRITICAL FIX: Update localStorage with current participants
-  if (callData && callData.participants && callData.participants.length > 0) {
-    const updatedCallData = {
-      callId: callData.callId,
-      roomId: callData.roomId || (roomData && roomData.roomId),
-      callType: callData.callType,
-      users: callData.participants.map(p => ({
-        userId: p.userId,
-        username: p.username,
-        pfpUrl: p.pfpUrl
-      }))
-    };
-    
-    localStorage.setItem('activeCall', JSON.stringify(updatedCallData));
-    console.log(`✅ Updated activeCall with ${updatedCallData.users.length} participants`);
-  }
   
   console.log('✅ Call UI restored - connections still active');
   console.log(`   PeerConnections: ${peerConnections.size}`);
@@ -2323,29 +2288,10 @@ socketInstance.on('call_joined', async (data) => {
   durationInterval = setInterval(updateDuration, 1000);
   updateDuration(); // Update immediately
   
-
   isInitializing = false;
   console.log('✅ ========================================');
   console.log('✅ INIT COMPLETE');
   console.log('✅ ========================================\n');
-  
-  // CRITICAL: Store participants for floating popup
-  callData.participants = data.participants;
-  
-  const updatedCallData = {
-    callId: data.callId,
-    roomId: callData.roomId,
-    callType: data.callType,
-    users: data.participants.map(p => ({
-      userId: p.userId,
-      username: p.username,
-      pfpUrl: p.pfpUrl
-    }))
-  };
-  
-  localStorage.setItem('activeCall', JSON.stringify(updatedCallData));
-  console.log(`✅ Updated activeCall with ${updatedCallData.users.length} participants after call_joined`);
-  
 });
           
 // Replace the entire user_joined_call handler
