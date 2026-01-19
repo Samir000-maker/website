@@ -1229,7 +1229,7 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
       roomId,
       callType,
       participants: [user.userId], // Initiator is first participant
-      status: 'active', // ← CHANGED: Start as active immediately
+      status: 'active', // ← CHANGED: Start as active immediately (Discord-like)
       createdAt: Date.now(),
       lastActivity: Date.now(),
       initiator: user.userId,
@@ -1250,14 +1250,15 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     room.setActiveCall(true);
 
     console.log(`✅ Call created: ${callId}`);
-    console.log(`   Status: ${call.status}`);
+    console.log(`   Status: ${call.status} (active immediately)`);
     console.log(`   Participants: [${user.userId}]`);
+    console.log(`   Room marked as having active call`);
 
     // Send call_created to initiator (they navigate immediately)
     socket.emit('call_created', {
       callId,
       callType,
-      isInitiator: true,
+      isInitiator: true, // ← Tells client they initiated it
       participants: [{
         userId: user.userId,
         username: user.username,
@@ -1266,18 +1267,19 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
         audioEnabled: true
       }]
     });
-    console.log(`📤 Sent call_created to initiator ${user.username}`);
+    console.log(`📤 Sent call_created to initiator ${user.username} - they will navigate`);
 
-    // Broadcast to ALL users in room (including initiator) that call is active
+    // Broadcast to ALL users in room that call is now active (JOIN button appears)
     io.to(roomId).emit('call_state_update', {
       callId: callId,
       isActive: true,
       participantCount: 1,
       callType: callType
     });
-    console.log(`📢 Broadcasted call_state_update to room ${roomId}: JOIN button now visible`);
+    console.log(`📢 Broadcasted call_state_update to room ${roomId}`);
+    console.log(`   JOIN button now visible to all users`);
 
-    // Send incoming_call notification to OTHER users in room
+    // Send incoming_call notification to OTHER users in room (modal pops up)
     room.users.forEach(roomUser => {
       if (roomUser.userId !== user.userId) {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -1291,12 +1293,20 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
             roomId
           });
           console.log(`📤 Sent incoming_call notification to ${roomUser.username}`);
+          console.log(`   They can Accept (navigate) or Decline (dismiss modal)`);
         }
       }
     });
 
-    console.log('✅ Call initiation complete - initiator navigating, others see JOIN button');
-    console.log('📞 ========================================\n');
+    console.log('✅ ========================================');
+    console.log('✅ CALL INITIATION COMPLETE');
+    console.log('✅ ========================================');
+    console.log(`   Initiator: Navigating to call page`);
+    console.log(`   Others: See incoming call modal + JOIN button`);
+    console.log(`   Accept → Navigate to call`);
+    console.log(`   Decline → Dismiss modal (call stays active)`);
+    console.log(`   JOIN button → Navigate to call anytime`);
+    console.log('✅ ========================================\n');
 
   } catch (error) {
     console.error('❌ Initiate call error:', error);
