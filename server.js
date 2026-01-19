@@ -27,8 +27,97 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const callMutexes = new Map();
+const socketUserCleanup = new Map();
+const roomJoinState = new Map();
+const userToSocketId = new Map()
+const socketUsers = new Map();
+// Add at top with other Maps
+const joinCallDebounce = new Map(); // userId -> timestamp
 
 
+
+// Add helper function at top
+function validateRoomAccess(roomId, userId) {
+  const room = matchmaking.getRoom(roomId);
+  
+  if (!room) {
+    return { valid: false, error: 'Room not found or expired', code: 'ROOM_NOT_FOUND' };
+  }
+  
+  if (room.isExpired) {
+    return { valid: false, error: 'Room has expired', code: 'ROOM_EXPIRED' };
+  }
+  
+  if (!room.hasUser(userId)) {
+    return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
+  }
+  
+  return { valid: true, room };
+}
+
+// Then use in chat_message handler:
+socket.on('chat_message', ({ roomId, message, replyTo }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.error('❌ Unauthenticated socket tried to send message');
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    // CRITICAL FIX: Validate room in one atomic check
+    const validation = validateRoomAccess(roomId, user.userId);
+    if (!validation.valid) {
+      console.error(`❌ ${validation.error} for user ${user.username}`);
+      socket.emit('error', { message: validation.error, code: validation.code });
+      return;
+    }
+    
+    const room = validation.room;
+
+    const timestamp = Date.now();
+    const messageData = {
+      messageId: `msg-${user.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`,
+      userId: user.userId,
+      username: user.username,
+      pfpUrl: user.pfpUrl,
+      message,
+      timestamp
+    };
+
+    if (replyTo) {
+      messageData.replyTo = replyTo;
+    }
+
+    room.addMessage(messageData);
+    io.to(roomId).emit('chat_message', messageData);
+    
+    console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
+    
+  } catch (error) {
+    console.error('Chat message error:', error);
+    socket.emit('error', { message: 'Failed to send message' });
+  }
+});
+
+
+function broadcastCallStateUpdate(callId) {
+  const call = activeCalls.get(callId);
+  if (!call) return;
+
+  const room = matchmaking.getRoom(call.roomId);
+  if (!room) return;
+
+  io.to(call.roomId).emit('call_state_update', {
+    callId: callId,
+    isActive: call.participants.length > 0,
+    participantCount: call.participants.length,
+    callType: call.callType
+  });
+  
+  console.log(`📢 Call state update: ${callId} - ${call.participants.length} participants`);
+}
 
 function getUserDataForParticipant(participantId, socketUsers, room) {
   console.log(`🔍 Resolving user data for ${participantId}`);
@@ -74,12 +163,18 @@ async function withCallMutex(callId, operation) {
     await callMutexes.get(callId);
   }
   
-  // Create new mutex
+  // Create new mutex with guaranteed cleanup
   const mutexPromise = (async () => {
     try {
       return await operation();
+    } catch (error) {
+      // CRITICAL FIX: Log error but still clean up mutex
+      console.error(`❌ Mutex operation failed for call ${callId}:`, error);
+      throw error; // Re-throw after logging
     } finally {
+      // CRITICAL: Always delete mutex, even on error
       callMutexes.delete(callId);
+      console.log(`🔓 Released mutex for call ${callId}`);
     }
   })();
   
@@ -312,6 +407,18 @@ function performRoomCleanup(roomId) {
   }
 
   console.log(`🗑️ Cleaning up room ${roomId} (${room.users.length} users)`);
+
+  // CRITICAL FIX: Cancel ANY pending room lifecycle timers in the room object itself
+  if (room.expiryTimer) {
+    clearTimeout(room.expiryTimer);
+    room.expiryTimer = null;
+    console.log(`⏰ Canceled room's internal expiry timer`);
+  }
+  if (room.warningTimer) {
+    clearTimeout(room.warningTimer);
+    room.warningTimer = null;
+    console.log(`⏰ Canceled room's internal warning timer`);
+  }
 
   // Notify all users in the room
   room.users.forEach(user => {
@@ -725,7 +832,7 @@ app.get('/api/moods', (req, res) => {
 // SOCKET.IO REAL-TIME COMMUNICATION
 // ============================================
 
-const socketUsers = new Map();
+
 
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
@@ -892,128 +999,176 @@ socket.on('request_room_sync', ({ roomId }) => {
   }
 });
 
-  socket.on('authenticate', async ({ token, userId }) => {
+socket.on('authenticate', async ({ token, userId }) => {
+  try {
+    console.log('🔐 Authenticating socket for userId:', userId);
+
+    let decodedToken;
     try {
-      console.log('🔐 Authenticating socket for userId:', userId);
+      decodedToken = await verifyToken(token);
+    } catch (error) {
+      console.error('❌ Token verification failed:', error);
+      socket.emit('auth_error', { message: 'Invalid or expired token' });
+      return;
+    }
 
-      let decodedToken;
-      try {
-        decodedToken = await verifyToken(token);
-      } catch (error) {
-        console.error('❌ Token verification failed:', error);
-        socket.emit('auth_error', { message: 'Invalid or expired token' });
-        return;
-      }
+    const db = getDB();
+    const user = await db.collection('users').findOne({ 
+      _id: new ObjectId(userId) 
+    });
 
-      const db = getDB();
-      const user = await db.collection('users').findOne({ 
-        _id: new ObjectId(userId) 
-      });
+    if (!user) {
+      socket.emit('auth_error', { message: 'User not found' });
+      return;
+    }
 
-      if (!user) {
-        socket.emit('auth_error', { message: 'User not found' });
-        return;
-      }
+    socketUsers.set(socket.id, {
+      userId: user._id.toString(),
+      username: user.username,
+      pfpUrl: user.pfpUrl,
+      email: user.email
+    });
 
-      socketUsers.set(socket.id, {
+    // CRITICAL FIX: Maintain reverse lookup index
+    userToSocketId.set(user._id.toString(), socket.id);
+
+    socket.emit('authenticated', { 
+      success: true, 
+      user: {
         userId: user._id.toString(),
         username: user.username,
-        pfpUrl: user.pfpUrl,
-        email: user.email
-      });
+        pfpUrl: user.pfpUrl
+      }
+    });
 
-      socket.emit('authenticated', { 
-        success: true, 
-        user: {
-          userId: user._id.toString(),
-          username: user.username,
-          pfpUrl: user.pfpUrl
-        }
-      });
+    console.log('✅ Socket authenticated:', user.username, socket.id);
+  } catch (error) {
+    console.error('Socket auth error:', error);
+    socket.emit('auth_error', { message: 'Authentication failed' });
+  }
+});
 
-      console.log('✅ Socket authenticated:', user.username, socket.id);
-    } catch (error) {
-      console.error('Socket auth error:', error);
-      socket.emit('auth_error', { message: 'Authentication failed' });
+
+// ================== DISCONNECT CLEANUP ==================
+socket.on('disconnect', () => {
+  const user = socketUsers.get(socket.id);
+
+  // Remove reverse lookup
+  if (user?.userId) {
+    userToSocketId.delete(user.userId);
+    console.log(`🗑️ Cleaned up userToSocketId for ${user.username}`);
+  }
+
+  // Remove socket mapping
+  socketUsers.delete(socket.id);
+
+  console.log('🔌 Socket disconnected:', socket.id);
+});
+
+socket.on('join_matchmaking', async ({ mood }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.error('❌ Unauthenticated socket tried to join matchmaking:', socket.id);
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
     }
-  });
 
-  socket.on('join_matchmaking', async ({ mood }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) {
-        console.error('❌ Unauthenticated socket tried to join matchmaking:', socket.id);
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
+    console.log(`🎮 User ${user.username} joining matchmaking for mood: ${mood}`);
+
+    const validMood = config.MOODS.find(m => m.id === mood);
+    if (!validMood) {
+      socket.emit('error', { message: 'Invalid mood' });
+      return;
+    }
+
+    // CRITICAL FIX: Atomic matchmaking with immediate retry
+    let room = matchmaking.addToQueue({
+      ...user,
+      mood,
+      socketId: socket.id
+    });
+
+    // CRITICAL: If we got queued but queue is now full, try matching again
+    if (!room) {
+      const queueStatus = matchmaking.getQueueStatus(mood);
+      if (queueStatus >= config.MAX_USERS_PER_ROOM) {
+        console.log(`🔄 Queue full detected (${queueStatus}/${config.MAX_USERS_PER_ROOM}), retrying match...`);
+        room = matchmaking.addToQueue({
+          ...user,
+          mood,
+          socketId: socket.id
+        });
       }
+    }
 
-      console.log(`🎮 User ${user.username} joining matchmaking for mood: ${mood}`);
+    if (room) {
+      console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
-      const validMood = config.MOODS.find(m => m.id === mood);
-      if (!validMood) {
-        socket.emit('error', { message: 'Invalid mood' });
-        return;
-      }
-
-      const room = matchmaking.addToQueue({
-        ...user,
-        mood,
-        socketId: socket.id
+      // CRITICAL FIX: Deduplicate users in room (prevent double-add race condition)
+      const uniqueUsers = new Map();
+      room.users.forEach(roomUser => {
+        uniqueUsers.set(roomUser.userId, roomUser);
       });
+      room.users = Array.from(uniqueUsers.values());
 
-      if (room) {
-        console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
-
-        room.users.forEach(roomUser => {
-          const userSocket = findActiveSocketForUser(roomUser.userId);
+      room.users.forEach(roomUser => {
+        const userSocket = findActiveSocketForUser(roomUser.userId);
+        
+        if (userSocket) {
+          console.log(`📤 Emitting match_found to ${roomUser.username} on socket ${userSocket.id}`);
           
-          if (userSocket) {
-            console.log(`📤 Emitting match_found to ${roomUser.username} on socket ${userSocket.id}`);
-            
-            userSocket.join(room.id);
-            console.log(`✅ User ${roomUser.username} joined Socket.IO room ${room.id}`);
-            
-            userSocket.emit('match_found', {
-              roomId: room.id,
-              mood: room.mood,
-              users: room.users.map(u => ({
-                userId: u.userId,
-                username: u.username,
-                pfpUrl: u.pfpUrl
-              })),
-              expiresAt: room.expiresAt
-            });
-          } else {
-            console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
-          }
-        });
-
-      } else {
-        const queuePosition = matchmaking.getQueueStatus(mood);
-        socket.emit('queued', { 
-          mood, 
-          position: queuePosition 
-        });
-        console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MAX_USERS_PER_ROOM})`);
-      }
-    } catch (error) {
-      console.error('Join matchmaking error:', error);
-      socket.emit('error', { message: 'Matchmaking failed' });
-    }
-  });
-
-  function findActiveSocketForUser(userId) {
-    for (const [socketId, userData] of socketUsers.entries()) {
-      if (userData.userId === userId) {
-        const socketInstance = io.sockets.sockets.get(socketId);
-        if (socketInstance && socketInstance.connected) {
-          return socketInstance;
+          userSocket.join(room.id);
+          console.log(`✅ User ${roomUser.username} joined Socket.IO room ${room.id}`);
+          
+          userSocket.emit('match_found', {
+            roomId: room.id,
+            mood: room.mood,
+            users: room.users.map(u => ({
+              userId: u.userId,
+              username: u.username,
+              pfpUrl: u.pfpUrl
+            })),
+            expiresAt: room.expiresAt
+          });
+        } else {
+          console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
+          // CRITICAL: Remove user from room if socket not found
+          matchmaking.leaveRoom(roomUser.userId);
         }
-      }
+      });
+
+    } else {
+      const queuePosition = matchmaking.getQueueStatus(mood);
+      socket.emit('queued', { 
+        mood, 
+        position: queuePosition 
+      });
+      console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MAX_USERS_PER_ROOM})`);
     }
+  } catch (error) {
+    console.error('Join matchmaking error:', error);
+    socket.emit('error', { message: 'Matchmaking failed' });
+  }
+});
+
+function findActiveSocketForUser(userId) {
+  // CRITICAL FIX: O(1) lookup instead of O(n)
+  const socketId = userToSocketId.get(userId);
+  if (!socketId) {
     return null;
   }
+  
+  const socketInstance = io.sockets.sockets.get(socketId);
+  if (socketInstance && socketInstance.connected) {
+    return socketInstance;
+  }
+  
+  // Socket disconnected but index not cleaned - remove stale entry
+  userToSocketId.delete(userId);
+  return null;
+}
 
 socket.on('join_room', ({ roomId }) => {
   try {
@@ -1022,6 +1177,15 @@ socket.on('join_room', ({ roomId }) => {
     if (!user) {
       console.error('❌ Unauthenticated socket tried to join room');
       socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+
+    const joinKey = `${user.userId}:${roomId}`;
+    
+    // CRITICAL FIX: Idempotency check
+    const existingJoin = roomJoinState.get(joinKey);
+    if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
+      console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
       return;
     }
 
@@ -1088,13 +1252,12 @@ socket.on('join_room', ({ roomId }) => {
       }
     });
 
-    // CRITICAL: Send the server's expiresAt timestamp
     const responseData = { 
       roomId,
       chatHistory: chatHistory,
-      expiresAt: room.expiresAt,  // ← CRITICAL: Absolute timestamp
-      timerStartedAt: room.timerStartedAt,  // For debugging
-      serverTime: Date.now()  // For clock sync verification
+      expiresAt: room.expiresAt,
+      timerStartedAt: room.timerStartedAt,
+      serverTime: Date.now()
     };
 
     if (activeCallState) {
@@ -1107,6 +1270,14 @@ socket.on('join_room', ({ roomId }) => {
     console.log(`   timeRemaining: ${(room.getTimeUntilExpiration() / 1000).toFixed(1)}s`);
 
     socket.emit('room_joined', responseData);
+    
+    // CRITICAL FIX: Mark this join as completed
+    roomJoinState.set(joinKey, { joined: true, timestamp: Date.now() });
+    
+    // Clean up old join states (older than 10 seconds)
+    setTimeout(() => {
+      roomJoinState.delete(joinKey);
+    }, 10000);
     
   } catch (error) {
     console.error('Join room error:', error);
@@ -1459,7 +1630,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         return;
       }
 
-      const emitPromises = callUsers.map(roomUser => {
+    const emitPromises = callUsers.map(roomUser => {
         return new Promise((resolve) => {
           const targetSocket = findActiveSocketForUser(roomUser.userId);
           if (targetSocket) {
@@ -1479,6 +1650,10 @@ socket.on('accept_call', async ({ callId, roomId }) => {
 
       await Promise.all(emitPromises);
 
+      // CRITICAL FIX: Single broadcast instead of duplicate
+      broadcastCallStateUpdate(callId);
+    });
+
       io.to(roomId).emit('call_state_update', {
         callId: callId,
         isActive: true,
@@ -1487,6 +1662,9 @@ socket.on('accept_call', async ({ callId, roomId }) => {
       });
       console.log(`📢 Broadcasted call_state_update: active=true, count=${call.participants.length}`);
     });
+    
+    
+    
 
   } catch (error) {
     console.error('❌ Accept call error:', error);
@@ -1532,8 +1710,7 @@ socket.on('accept_call', async ({ callId, roomId }) => {
     }
   });
 
-// Add at top with other Maps
-const joinCallDebounce = new Map(); // userId -> timestamp
+
 
 socket.on('join_call', async ({ callId }) => {
   try {
@@ -1709,20 +1886,20 @@ socket.on('leave_call', ({ callId }) => {
     
     if (!call) {
       console.warn(`⚠️ Call ${callId} not found when ${user.username} tried to leave`);
-      // Still let user leave the room socket
       socket.leave(`call-${callId}`);
       return;
     }
 
     // CRITICAL FIX: Check if user is actually in the call before removing
-    if (!call.participants.includes(user.userId)) {
+    const participantIndex = call.participants.indexOf(user.userId);
+    if (participantIndex === -1) {
       console.warn(`⚠️ User ${user.username} not in call ${callId} participants, ignoring leave`);
       socket.leave(`call-${callId}`);
       return;
     }
 
-    // Remove user from call
-    call.participants = call.participants.filter(p => p !== user.userId);
+    // CRITICAL FIX: Atomic removal - prevent race conditions with multiple leave events
+    call.participants.splice(participantIndex, 1);
     userCalls.delete(user.userId);
     call.userMediaStates.delete(user.userId);
 
@@ -1738,7 +1915,6 @@ socket.on('leave_call', ({ callId }) => {
     });
     console.log(`📢 Notified others in call-${callId} that ${user.username} left`);
 
-    // CRITICAL FIX: Get room and broadcast call state
     const room = matchmaking.getRoom(call.roomId);
     if (room) {
       io.to(call.roomId).emit('call_state_update', {
@@ -1751,29 +1927,34 @@ socket.on('leave_call', ({ callId }) => {
       console.warn(`⚠️ Room ${call.roomId} not found when broadcasting call state update`);
     }
 
-    // CRITICAL FIX: Only delete call after grace period if truly empty
     if (call.participants.length === 0) {
       console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
       
-      // CRITICAL: Mark room as no longer having active call
       if (room) {
         room.setActiveCall(false);
         console.log(`📞 Room ${call.roomId} marked as call-free`);
       }
       
-      setTimeout(() => {
+      // CRITICAL FIX: Clear any existing grace period before setting new one
+      if (callGracePeriod.has(callId)) {
+        clearTimeout(callGracePeriod.get(callId));
+        console.log(`⏰ Cleared existing grace period for call ${callId}`);
+      }
+      
+      const graceTimeout = setTimeout(() => {
         const currentCall = activeCalls.get(callId);
         
         if (!currentCall) {
           console.log(`ℹ️ Call ${callId} already cleaned up`);
+          callGracePeriod.delete(callId);
           return;
         }
         
         if (currentCall.participants.length === 0) {
           console.log(`🗑️ Call ${callId} still empty after grace period - cleaning up`);
           activeCalls.delete(callId);
+          callGracePeriod.delete(callId);
           
-          // Notify room that call has fully ended
           if (room) {
             io.to(currentCall.roomId).emit('call_ended_notification', {
               callId: callId
@@ -1782,19 +1963,20 @@ socket.on('leave_call', ({ callId }) => {
           }
         } else {
           console.log(`✅ Call ${callId} has ${currentCall.participants.length} participant(s) again - cleanup cancelled`);
+          callGracePeriod.delete(callId);
           
-          // CRITICAL: If call has participants again, mark room as having active call
           if (room) {
             room.setActiveCall(true);
             console.log(`📞 Room ${call.roomId} marked as having active call again`);
           }
         }
-      }, 5000); // 5 second grace period
+      }, 5000);
+      
+      callGracePeriod.set(callId, graceTimeout);
       
     } else {
       console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
       
-      // Make sure room knows call is still active
       if (room && !room.hasActiveCall) {
         room.setActiveCall(true);
         console.log(`📞 Room ${call.roomId} re-marked as having active call`);
@@ -1912,6 +2094,8 @@ socket.on('join_existing_call', ({ callId, roomId }) => {
 
     console.log(`✅ Sent join_existing_call_success to ${user.username}`);
     console.log(`   User will now navigate to call.html`);
+    
+     broadcastCallStateUpdate(callId);
     
     // Broadcast updated call state to room
     io.to(roomId).emit('call_state_update', {
@@ -2207,8 +2391,46 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
+  
+    if (user?.userId) {
+    joinCallDebounce.delete(user.userId);
+    console.log(`🗑️ Cleaned up joinCallDebounce for ${user.username}`);
+  }
+  
+    const offersToDelete = [];
+  for (const [key, _] of activeOffers.entries()) {
+    if (key.includes(user?.userId)) {
+      offersToDelete.push(key);
+    }
+  }
+  offersToDelete.forEach(key => {
+    activeOffers.delete(key);
+  });
+  if (offersToDelete.length > 0) {
+    console.log(`🗑️ Cleaned up ${offersToDelete.length} pending offers for ${user?.username || socket.id}`);
+  }
+  
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
+
+    // CRITICAL FIX: Schedule immediate socketUsers cleanup with grace period
+    const cleanupTimeout = setTimeout(() => {
+      // Check if user reconnected with different socket
+      const hasOtherSocket = Array.from(socketUsers.entries()).some(
+        ([sid, u]) => sid !== socket.id && u.userId === user.userId
+      );
+      
+      if (!hasOtherSocket) {
+        console.log(`🗑️ Cleaning up socketUsers entry for ${user.username} (${socket.id})`);
+        socketUsers.delete(socket.id);
+      } else {
+        console.log(`✅ User ${user.username} has active connection, keeping old socket entry`);
+      }
+      
+      socketUserCleanup.delete(socket.id);
+    }, 15000); // 15s grace period
+    
+    socketUserCleanup.set(socket.id, cleanupTimeout);
 
     const callId = userCalls.get(user.userId);
     if (callId) {
@@ -2320,9 +2542,10 @@ socket.on('disconnect', () => {
       }
     }
 
-    socketUsers.delete(socket.id);
   } else {
     console.log('🔌 Unauthenticated client disconnected:', socket.id);
+    // CRITICAL: Still need to clean up socketUsers entry
+    socketUsers.delete(socket.id);
   }
 });
 });
@@ -2331,18 +2554,130 @@ socket.on('disconnect', () => {
 // PERIODIC CLEANUP
 // ============================================
 
-// Run cleanup every minute to catch any missed expirations
+// Replace existing periodic cleanup with improved version
 setInterval(() => {
   const now = Date.now();
   const rooms = matchmaking.getActiveRooms();
   
+  console.log(`🧹 Periodic cleanup check: ${rooms.length} active rooms`);
+  
   rooms.forEach(room => {
     if (room.expiresAt <= now) {
-      console.log(`🕐 Periodic cleanup: Room ${room.id} has expired`);
+      console.log(`🕐 Periodic cleanup: Room ${room.id} has expired (${((now - room.expiresAt) / 1000).toFixed(1)}s ago)`);
       performRoomCleanup(room.id);
     }
   });
-}, 60000);
+  
+  // CRITICAL FIX: Clean up orphaned call grace periods
+  const orphanedGracePeriods = [];
+  callGracePeriod.forEach((timeout, callId) => {
+    if (!activeCalls.has(callId)) {
+      orphanedGracePeriods.push(callId);
+      clearTimeout(timeout);
+    }
+  });
+  if (orphanedGracePeriods.length > 0) {
+    orphanedGracePeriods.forEach(id => callGracePeriod.delete(id));
+    console.log(`🗑️ Cleaned up ${orphanedGracePeriods.length} orphaned call grace periods`);
+  }
+  
+  // CRITICAL FIX: Clean up orphaned room cleanup timers
+  const orphanedRoomTimers = [];
+  roomCleanupTimers.forEach((timeout, roomId) => {
+    if (!matchmaking.getRoom(roomId)) {
+      orphanedRoomTimers.push(roomId);
+      clearTimeout(timeout);
+    }
+  });
+  if (orphanedRoomTimers.length > 0) {
+    orphanedRoomTimers.forEach(id => roomCleanupTimers.delete(id));
+    console.log(`🗑️ Cleaned up ${orphanedRoomTimers.length} orphaned room timers`);
+  }
+  
+  // CRITICAL FIX: Clean up stale socketUserCleanup entries
+  const staleCleanups = [];
+  socketUserCleanup.forEach((timeout, socketId) => {
+    if (!socketUsers.has(socketId) && !io.sockets.sockets.has(socketId)) {
+      staleCleanups.push(socketId);
+      clearTimeout(timeout);
+    }
+  });
+  if (staleCleanups.length > 0) {
+    staleCleanups.forEach(id => socketUserCleanup.delete(id));
+    console.log(`🗑️ Cleaned up ${staleCleanups.length} stale socket cleanup entries`);
+  }
+  
+  // CRITICAL FIX: Clean up orphaned mutex entries (should never happen but safety net)
+  const orphanedMutexes = [];
+  callMutexes.forEach((promise, callId) => {
+    if (!activeCalls.has(callId)) {
+      orphanedMutexes.push(callId);
+    }
+  });
+  if (orphanedMutexes.length > 0) {
+    orphanedMutexes.forEach(id => callMutexes.delete(id));
+    console.log(`🗑️ Cleaned up ${orphanedMutexes.length} orphaned call mutexes`);
+  }
+  
+  // Log memory stats
+  console.log(`📊 Memory stats:
+    - Active sockets: ${socketUsers.size}
+    - Active calls: ${activeCalls.size}
+    - Call grace periods: ${callGracePeriod.size}
+    - Room cleanup timers: ${roomCleanupTimers.size}
+    - Active offers: ${activeOffers.size}
+    - Call mutexes: ${callMutexes.size}
+    - Join debounce: ${joinCallDebounce.size}
+    - Room join states: ${roomJoinState.size}
+    - User-to-socket index: ${userToSocketId.size}`);
+    
+}, 60000);;
+
+
+// CRITICAL: Add graceful shutdown handler
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, starting graceful shutdown...');
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('🛑 HTTP server closed');
+  });
+  
+  // Notify all connected users
+  io.emit('server_shutdown', { 
+    message: 'Server is shutting down for maintenance',
+    reconnectIn: 10000 
+  });
+  
+  // Give clients time to save state
+  setTimeout(() => {
+    // Clean up all timers
+    roomCleanupTimers.forEach(timer => clearTimeout(timer));
+    callGracePeriod.forEach(timer => clearTimeout(timer));
+    socketUserCleanup.forEach(timer => clearTimeout(timer));
+    
+    console.log('✅ All timers cleared');
+    
+    // Force disconnect all sockets
+    io.close(() => {
+      console.log('✅ Socket.IO server closed');
+      process.exit(0);
+    });
+  }, 3000);
+});
+
+// CRITICAL: Add uncaught exception handler
+process.on('uncaughtException', (error) => {
+  console.error('💥 UNCAUGHT EXCEPTION:', error);
+  console.error('Stack:', error.stack);
+  // Log to external monitoring service here
+  // DO NOT exit - let PM2/Docker handle restarts
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 UNHANDLED PROMISE REJECTION at:', promise, 'reason:', reason);
+  // Log to external monitoring service here
+});
 
 // ============================================
 // START SERVER
