@@ -417,47 +417,68 @@
 .animate-pulse-slow {
     animation: pulse-slow 2s ease-in-out infinite;
 }
-
-
-
-@keyframes pulse-slow {
-    0%, 100% { 
-        transform: scale(1);
-        box-shadow: 0 10px 40px rgba(34, 197, 94, 0.3);
+        
+        
+        
+        /* Floating Call Popup Animations */
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(100px);
     }
-    50% { 
-        transform: scale(1.02);
-        box-shadow: 0 15px 50px rgba(34, 197, 94, 0.4);
+    to {
+        opacity: 1;
+        transform: translateX(0);
     }
 }
 
-.animate-pulse-slow {
-    animation: pulse-slow 2s ease-in-out infinite;
+.animate-slide-in-right {
+    animation: slideInRight 0.3s ease-out;
 }
 
-@keyframes bounce-slow {
-    0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(-4px); }
-}
-
-.animate-bounce-slow {
-    animation: bounce-slow 1.5s ease-in-out infinite;
-}
-
-/* Pulsing border for active speaker */
-.speaking-border {
-    animation: pulseBorder 1.5s ease-in-out infinite;
-}
-
-@keyframes pulseBorder {
+@keyframes ping-slow {
     0%, 100% {
-        border-color: #22c55e;
-        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+        opacity: 0;
+        transform: scale(1);
     }
     50% {
-        border-color: #16a34a;
-        box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.2);
+        opacity: 0.3;
+        transform: scale(1.1);
     }
+}
+
+.animate-ping-slow {
+    animation: ping-slow 2s ease-in-out infinite;
+}
+
+/* Speaking border animation */
+.speaking-border {
+    position: relative;
+}
+
+.speaking-border::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid #33bfcc;
+    animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.1);
+    }
+}
+
+/* Show speaking ring when speaking */
+.speaking-border .speaking-ring {
+    opacity: 1 !important;
 }
         
     </style>
@@ -594,31 +615,34 @@
     
     
   
-<!-- Professional Floating Call Popup -->
-<div id="floatingCallPopup" class="hidden fixed bottom-20 right-4 z-[60] bg-white dark:bg-surface-dark rounded-2xl shadow-2xl p-4 cursor-pointer hover:scale-105 transition-all active:scale-95 animate-pulse-slow border-2 border-green-500">
+
+<!-- Floating Call Popup - Professional Design -->
+<div id="floatingCallPopup" class="hidden fixed top-20 right-4 z-[60] bg-white dark:bg-surface-dark rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-4 min-w-[280px] animate-slide-in-right">
     <div class="flex items-center gap-3">
-        <!-- Avatar with active call indicator -->
-        <div class="relative">
-            <div id="floatingCallAvatar" class="w-12 h-12 rounded-full overflow-hidden border-2 border-green-500"></div>
-            <!-- Pulsing indicator -->
-            <div class="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-surface-dark flex items-center justify-center">
-                <span class="material-symbols-outlined text-white text-xs">call</span>
+        <!-- Avatar with speaking indicator border -->
+        <div id="floatingCallAvatar" class="relative flex-shrink-0">
+            <div class="w-12 h-12 rounded-full overflow-hidden border-2 border-primary transition-all duration-300">
+                <!-- Avatar will be inserted here by JS -->
             </div>
+            <!-- Pulsing ring for speaking indicator -->
+            <div class="absolute inset-0 rounded-full border-2 border-primary opacity-0 animate-ping-slow speaking-ring"></div>
         </div>
         
-        <!-- Call info -->
-        <div class="flex flex-col min-w-0">
-            <div class="flex items-center gap-2">
-                <span id="floatingCallUsername" class="text-sm font-bold text-gray-900 dark:text-white truncate">Active Call</span>
-                <span class="material-symbols-outlined text-green-500 text-base animate-bounce-slow">arrow_back</span>
+        <!-- Call Info -->
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="material-symbols-outlined text-green-600 text-lg">call</span>
+                <span id="floatingCallUsername" class="font-semibold text-gray-900 dark:text-white text-sm truncate">User</span>
             </div>
-            <span id="floatingCallStatus" class="text-xs text-gray-500 dark:text-gray-400">Tap to return</span>
+            <p id="floatingCallStatus" class="text-xs text-gray-500 dark:text-gray-400">In call...</p>
         </div>
+        
+        <!-- Return to Call Button -->
+        <button id="returnToCallBtn" class="flex-shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors" title="Return to Call">
+            <span class="material-symbols-outlined text-primary text-xl">open_in_full</span>
+        </button>
     </div>
 </div>
-
-<!-- Legacy button (keep for compatibility but hidden) -->
-<div id="floatingReturnToCall" class="hidden"></div>
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -886,26 +910,21 @@ function hideCallPageFloatingButton() {
 }
   
   
-function initializeFloatingCallPopup() {
+  function initializeFloatingCallPopup() {
   console.log('🎈 Initializing floating call popup elements');
   
   floatingCallPopup = {
     container: document.getElementById('floatingCallPopup'),
     avatar: document.getElementById('floatingCallAvatar'),
     username: document.getElementById('floatingCallUsername'),
-    status: document.getElementById('floatingCallStatus')
+    status: document.getElementById('floatingCallStatus'),
+    returnBtn: document.getElementById('returnToCallBtn')
   };
   
   if (!floatingCallPopup.container) {
     console.error('❌ Floating call popup container not found in DOM');
     return false;
   }
-  
-  // Setup click handler
-  floatingCallPopup.container.onclick = () => {
-    console.log('🔙 Floating popup clicked - returning to call');
-    returnToActiveCall();
-  };
   
   console.log('✅ Floating call popup elements initialized');
   return true;
@@ -946,40 +965,43 @@ function showFloatingCallPopup(callData, participants) {
   
   console.log(`👤 Displaying participant: ${displayParticipant.username} (${displayParticipant.userId})`);
   
-  // Set avatar
+  // Set avatar - UPDATED to use the nested structure
   if (floatingCallPopup.avatar) {
-    floatingCallPopup.avatar.innerHTML = '';
-    const pfpElement = createProfilePictureElement(
-      displayParticipant.pfpUrl, 
-      displayParticipant.username, 
-      'w-full h-full'
-    );
-    floatingCallPopup.avatar.appendChild(pfpElement);
-    console.log('✅ Avatar set');
+    const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
+    if (avatarContainer) {
+      avatarContainer.innerHTML = '';
+      const pfpElement = createProfilePictureElement(
+        displayParticipant.pfpUrl, 
+        displayParticipant.username, 
+        'w-full h-full'
+      );
+      avatarContainer.appendChild(pfpElement);
+    }
   }
   
   // Set username
   if (floatingCallPopup.username) {
-    const displayName = displayParticipant.userId === currentUser.userId 
-      ? 'You' 
-      : displayParticipant.username;
-    floatingCallPopup.username.textContent = displayName;
-    console.log(`✅ Username set: ${displayName}`);
+    floatingCallPopup.username.textContent = displayParticipant.username;
   }
   
   // Set initial status
   if (floatingCallPopup.status) {
-    const participantCount = participants?.length || 1;
-    const statusText = participantCount > 1 
-      ? `${participantCount} in call` 
-      : 'In call';
-    floatingCallPopup.status.textContent = statusText;
-    console.log(`✅ Status set: ${statusText}`);
+    floatingCallPopup.status.textContent = 'In call...';
+    floatingCallPopup.status.classList.add('text-gray-500', 'dark:text-gray-400');
+    floatingCallPopup.status.classList.remove('text-primary', 'font-semibold');
   }
   
-  // Show the popup with animation
+  // Show the popup
   floatingCallPopup.container.classList.remove('hidden');
   console.log('✅ Floating call popup displayed');
+  
+  // Setup return button click handler
+  if (floatingCallPopup.returnBtn) {
+    floatingCallPopup.returnBtn.onclick = () => {
+      console.log('🔙 Return to call button clicked');
+      returnToActiveCall();
+    };
+  }
   
   // Initialize socket connection for call updates
   initializeFloatingCallSocket();
@@ -1023,15 +1045,19 @@ function updateFloatingCallSpeaker(userId, username, speaking) {
   if (speaking) {
     currentSpeaker = { userId, username };
     
-    // Update status to show who's speaking
+    // Update status
     if (floatingCallPopup.status) {
-      const displayName = userId === currentUser.userId ? 'You' : username;
-      floatingCallPopup.status.textContent = `${displayName} speaking...`;
+      floatingCallPopup.status.textContent = 'Speaking...';
+      floatingCallPopup.status.classList.add('text-primary', 'font-semibold');
+      floatingCallPopup.status.classList.remove('text-gray-500', 'dark:text-gray-400');
     }
     
-    // Add pulsing border effect to avatar
+    // Add speaking border animation to avatar
     if (floatingCallPopup.avatar) {
-      floatingCallPopup.avatar.classList.add('speaking-border');
+      const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
+      if (avatarContainer) {
+        avatarContainer.parentElement.classList.add('speaking-border');
+      }
     }
     
     console.log(`✅ ${username} marked as speaking in popup`);
@@ -1039,14 +1065,19 @@ function updateFloatingCallSpeaker(userId, username, speaking) {
     if (currentSpeaker?.userId === userId) {
       currentSpeaker = null;
       
-      // Revert to default status
+      // Reset status
       if (floatingCallPopup.status) {
-        floatingCallPopup.status.textContent = 'In call';
+        floatingCallPopup.status.textContent = 'In call...';
+        floatingCallPopup.status.classList.remove('text-primary', 'font-semibold');
+        floatingCallPopup.status.classList.add('text-gray-500', 'dark:text-gray-400');
       }
       
-      // Remove pulsing border effect
+      // Remove speaking border animation
       if (floatingCallPopup.avatar) {
-        floatingCallPopup.avatar.classList.remove('speaking-border');
+        const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
+        if (avatarContainer) {
+          avatarContainer.parentElement.classList.remove('speaking-border');
+        }
       }
       
       console.log(`✅ ${username} stopped speaking in popup`);
