@@ -418,69 +418,6 @@
     animation: pulse-slow 2s ease-in-out infinite;
 }
         
-        
-        
-        /* Floating Call Popup Animations */
-@keyframes slideInRight {
-    from {
-        opacity: 0;
-        transform: translateX(100px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(0);
-    }
-}
-
-.animate-slide-in-right {
-    animation: slideInRight 0.3s ease-out;
-}
-
-@keyframes ping-slow {
-    0%, 100% {
-        opacity: 0;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.3;
-        transform: scale(1.1);
-    }
-}
-
-.animate-ping-slow {
-    animation: ping-slow 2s ease-in-out infinite;
-}
-
-/* Speaking border animation */
-.speaking-border {
-    position: relative;
-}
-
-.speaking-border::before {
-    content: '';
-    position: absolute;
-    inset: -4px;
-    border-radius: 50%;
-    border: 2px solid #33bfcc;
-    animation: pulse-border 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-border {
-    0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.5;
-        transform: scale(1.1);
-    }
-}
-
-/* Show speaking ring when speaking */
-.speaking-border .speaking-ring {
-    opacity: 1 !important;
-}
-        
     </style>
 </head>
 <body class="bg-background-light main-container flex flex-col overflow-hidden">
@@ -616,31 +553,12 @@
     
   
 
-<!-- Floating Call Popup - Professional Design -->
-<div id="floatingCallPopup" class="hidden fixed top-20 right-4 z-[60] bg-white dark:bg-surface-dark rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-4 min-w-[280px] animate-slide-in-right">
-    <div class="flex items-center gap-3">
-        <!-- Avatar with speaking indicator border -->
-        <div id="floatingCallAvatar" class="relative flex-shrink-0">
-            <div class="w-12 h-12 rounded-full overflow-hidden border-2 border-primary transition-all duration-300">
-                <!-- Avatar will be inserted here by JS -->
-            </div>
-            <!-- Pulsing ring for speaking indicator -->
-            <div class="absolute inset-0 rounded-full border-2 border-primary opacity-0 animate-ping-slow speaking-ring"></div>
+<div id="floatingReturnToCall" class="hidden fixed bottom-20 right-4 z-[60] bg-green-600 rounded-full shadow-2xl p-4 cursor-pointer hover:scale-110 transition-all active:scale-95 animate-pulse-slow">
+    <div class="relative flex items-center justify-center">
+        <span class="material-symbols-outlined text-white text-3xl">call</span>
+        <div class="absolute -top-2 -right-2 w-5 h-5 bg-white rounded-full border-2 border-green-600 flex items-center justify-center">
+            <span class="material-symbols-outlined text-green-600 text-xs">arrow_back</span>
         </div>
-        
-        <!-- Call Info -->
-        <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-                <span class="material-symbols-outlined text-green-600 text-lg">call</span>
-                <span id="floatingCallUsername" class="font-semibold text-gray-900 dark:text-white text-sm truncate">User</span>
-            </div>
-            <p id="floatingCallStatus" class="text-xs text-gray-500 dark:text-gray-400">In call...</p>
-        </div>
-        
-        <!-- Return to Call Button -->
-        <button id="returnToCallBtn" class="flex-shrink-0 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors" title="Return to Call">
-            <span class="material-symbols-outlined text-primary text-xl">open_in_full</span>
-        </button>
     </div>
 </div>
 
@@ -965,18 +883,15 @@ function showFloatingCallPopup(callData, participants) {
   
   console.log(`👤 Displaying participant: ${displayParticipant.username} (${displayParticipant.userId})`);
   
-  // Set avatar - UPDATED to use the nested structure
+  // Set avatar
   if (floatingCallPopup.avatar) {
-    const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
-    if (avatarContainer) {
-      avatarContainer.innerHTML = '';
-      const pfpElement = createProfilePictureElement(
-        displayParticipant.pfpUrl, 
-        displayParticipant.username, 
-        'w-full h-full'
-      );
-      avatarContainer.appendChild(pfpElement);
-    }
+    floatingCallPopup.avatar.innerHTML = '';
+    const pfpElement = createProfilePictureElement(
+      displayParticipant.pfpUrl, 
+      displayParticipant.username, 
+      'w-full h-full'
+    );
+    floatingCallPopup.avatar.appendChild(pfpElement);
   }
   
   // Set username
@@ -987,8 +902,6 @@ function showFloatingCallPopup(callData, participants) {
   // Set initial status
   if (floatingCallPopup.status) {
     floatingCallPopup.status.textContent = 'In call...';
-    floatingCallPopup.status.classList.add('text-gray-500', 'dark:text-gray-400');
-    floatingCallPopup.status.classList.remove('text-primary', 'font-semibold');
   }
   
   // Show the popup
@@ -1048,16 +961,11 @@ function updateFloatingCallSpeaker(userId, username, speaking) {
     // Update status
     if (floatingCallPopup.status) {
       floatingCallPopup.status.textContent = 'Speaking...';
-      floatingCallPopup.status.classList.add('text-primary', 'font-semibold');
-      floatingCallPopup.status.classList.remove('text-gray-500', 'dark:text-gray-400');
     }
     
-    // Add speaking border animation to avatar
+    // Add pulsing border effect
     if (floatingCallPopup.avatar) {
-      const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
-      if (avatarContainer) {
-        avatarContainer.parentElement.classList.add('speaking-border');
-      }
+      floatingCallPopup.avatar.classList.add('speaking-border');
     }
     
     console.log(`✅ ${username} marked as speaking in popup`);
@@ -1065,19 +973,14 @@ function updateFloatingCallSpeaker(userId, username, speaking) {
     if (currentSpeaker?.userId === userId) {
       currentSpeaker = null;
       
-      // Reset status
+      // Update status
       if (floatingCallPopup.status) {
         floatingCallPopup.status.textContent = 'In call...';
-        floatingCallPopup.status.classList.remove('text-primary', 'font-semibold');
-        floatingCallPopup.status.classList.add('text-gray-500', 'dark:text-gray-400');
       }
       
-      // Remove speaking border animation
+      // Remove pulsing border effect
       if (floatingCallPopup.avatar) {
-        const avatarContainer = floatingCallPopup.avatar.querySelector('.w-12.h-12');
-        if (avatarContainer) {
-          avatarContainer.parentElement.classList.remove('speaking-border');
-        }
+        floatingCallPopup.avatar.classList.remove('speaking-border');
       }
       
       console.log(`✅ ${username} stopped speaking in popup`);
