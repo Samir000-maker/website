@@ -554,15 +554,6 @@
     
   
 
-<div id="floatingReturnToCall" class="hidden fixed bottom-20 right-4 z-[60] bg-green-600 rounded-full shadow-2xl p-4 cursor-pointer hover:scale-110 transition-all active:scale-95 animate-pulse-slow">
-    <div class="relative flex items-center justify-center">
-        <span class="material-symbols-outlined text-white text-3xl">call</span>
-        <div class="absolute -top-2 -right-2 w-5 h-5 bg-white rounded-full border-2 border-green-600 flex items-center justify-center">
-            <span class="material-symbols-outlined text-green-600 text-xs">arrow_back</span>
-        </div>
-    </div>
-</div>
-
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
@@ -828,250 +819,7 @@ function hideCallPageFloatingButton() {
   }
 }
   
-  
-  function initializeFloatingCallPopup() {
-  console.log('🎈 Initializing floating call popup elements');
-  
-  floatingCallPopup = {
-    container: document.getElementById('floatingCallPopup'),
-    avatar: document.getElementById('floatingCallAvatar'),
-    username: document.getElementById('floatingCallUsername'),
-    status: document.getElementById('floatingCallStatus'),
-    returnBtn: document.getElementById('returnToCallBtn')
-  };
-  
-  if (!floatingCallPopup.container) {
-    console.error('❌ Floating call popup container not found in DOM');
-    return false;
-  }
-  
-  console.log('✅ Floating call popup elements initialized');
-  return true;
-}
 
-function showFloatingCallPopup(callData, participants) {
-  console.log('🎈 ========================================');
-  console.log('🎈 SHOWING FLOATING CALL POPUP');
-  console.log('🎈 ========================================');
-  console.log(`   callId: ${callData?.callId}`);
-  console.log(`   participants: ${participants?.length || 0}`);
-  
-  if (!floatingCallPopup || !floatingCallPopup.container) {
-    console.error('❌ Floating call popup not initialized');
-    return;
-  }
-  
-  // Mark that we're in background call mode
-  isInBackgroundCall = true;
-  console.log('✅ Background call mode activated');
-  
-  // Find a participant to display (prefer someone other than current user)
-  let displayParticipant = participants?.find(p => p.userId !== currentUser.userId);
-  
-  if (!displayParticipant && participants?.length > 0) {
-    displayParticipant = participants[0];
-    console.log('ℹ️ Only current user in call, showing self');
-  }
-  
-  if (!displayParticipant) {
-    console.warn('⚠️ No participants to display in popup');
-    displayParticipant = {
-      userId: currentUser.userId,
-      username: currentUser.username,
-      pfpUrl: currentUser.pfpUrl
-    };
-  }
-  
-  console.log(`👤 Displaying participant: ${displayParticipant.username} (${displayParticipant.userId})`);
-  
-  // Set avatar
-  if (floatingCallPopup.avatar) {
-    floatingCallPopup.avatar.innerHTML = '';
-    const pfpElement = createProfilePictureElement(
-      displayParticipant.pfpUrl, 
-      displayParticipant.username, 
-      'w-full h-full'
-    );
-    floatingCallPopup.avatar.appendChild(pfpElement);
-  }
-  
-  // Set username
-  if (floatingCallPopup.username) {
-    floatingCallPopup.username.textContent = displayParticipant.username;
-  }
-  
-  // Set initial status
-  if (floatingCallPopup.status) {
-    floatingCallPopup.status.textContent = 'In call...';
-  }
-  
-  // Show the popup
-  floatingCallPopup.container.classList.remove('hidden');
-  console.log('✅ Floating call popup displayed');
-  
-  // Setup return button click handler
-  if (floatingCallPopup.returnBtn) {
-    floatingCallPopup.returnBtn.onclick = () => {
-      console.log('🔙 Return to call button clicked');
-      returnToActiveCall();
-    };
-  }
-  
-  // Initialize socket connection for call updates
-  initializeFloatingCallSocket();
-  
-  console.log('🎈 ========================================\n');
-}
-
-function hideFloatingCallPopup() {
-  console.log('🎈 ========================================');
-  console.log('🎈 HIDING AND DESTROYING FLOATING CALL POPUP');
-  console.log('🎈 ========================================');
-  
-  if (!floatingCallPopup || !floatingCallPopup.container) {
-    console.warn('⚠️ Floating call popup not initialized');
-    return;
-  }
-  
-  isInBackgroundCall = false;
-  currentSpeaker = null;
-  
-  // Disconnect floating socket if exists
-  if (floatingCallSocket) {
-    console.log('🔌 Disconnecting floating call socket');
-    floatingCallSocket.disconnect();
-    floatingCallSocket = null;
-  }
-  
-  floatingCallPopup.container.classList.add('hidden');
-  
-  console.log('✅ Floating call popup hidden and destroyed');
-  console.log('🎈 ========================================\n');
-}
-
-function updateFloatingCallSpeaker(userId, username, speaking) {
-  console.log(`🎤 Speaker update: ${username} (${userId}) - speaking: ${speaking}`);
-  
-  if (!floatingCallPopup || !isInBackgroundCall) {
-    return;
-  }
-  
-  if (speaking) {
-    currentSpeaker = { userId, username };
-    
-    // Update status
-    if (floatingCallPopup.status) {
-      floatingCallPopup.status.textContent = 'Speaking...';
-    }
-    
-    // Add pulsing border effect
-    if (floatingCallPopup.avatar) {
-      floatingCallPopup.avatar.classList.add('speaking-border');
-    }
-    
-    console.log(`✅ ${username} marked as speaking in popup`);
-  } else {
-    if (currentSpeaker?.userId === userId) {
-      currentSpeaker = null;
-      
-      // Update status
-      if (floatingCallPopup.status) {
-        floatingCallPopup.status.textContent = 'In call...';
-      }
-      
-      // Remove pulsing border effect
-      if (floatingCallPopup.avatar) {
-        floatingCallPopup.avatar.classList.remove('speaking-border');
-      }
-      
-      console.log(`✅ ${username} stopped speaking in popup`);
-    }
-  }
-}
-
-function initializeFloatingCallSocket() {
-  console.log('🔌 Initializing floating call socket connection');
-  
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  if (!activeCallStr) {
-    console.error('❌ No active call data in localStorage');
-    return;
-  }
-  
-  let activeCallData;
-  try {
-    activeCallData = JSON.parse(activeCallStr);
-  } catch (e) {
-    console.error('❌ Failed to parse active call data:', e);
-    return;
-  }
-  
-  if (floatingCallSocket) {
-    console.log('ℹ️ Floating call socket already exists, reusing');
-    return;
-  }
-  
-  firebase.auth().currentUser?.getIdToken().then(idToken => {
-    const socketUrl = window.location.origin;
-    
-    floatingCallSocket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 500,
-      reconnectionAttempts: 10,
-      auth: { token: idToken },
-      timeout: 10000
-    });
-    
-    console.log('✅ Floating call socket created');
-    
-    // Setup socket handlers
-    floatingCallSocket.on('connect', () => {
-      console.log('🔌 Floating socket connected:', floatingCallSocket.id);
-      
-      floatingCallSocket.emit('authenticate', {
-        token: idToken,
-        userId: currentUser.userId
-      });
-    });
-    
-    floatingCallSocket.on('authenticated', () => {
-      console.log('✅ Floating socket authenticated');
-    });
-    
-    floatingCallSocket.on('speaking_state', (data) => {
-      console.log(`🎤 [FLOATING] Speaking state: ${data.userId} - ${data.speaking}`);
-      
-      // Find username from room data
-      const participant = roomData?.users?.find(u => u.userId === data.userId);
-      const username = participant?.username || 'User';
-      
-      updateFloatingCallSpeaker(data.userId, username, data.speaking);
-    });
-    
-    floatingCallSocket.on('user_left_call', (data) => {
-      console.log(`👋 [FLOATING] User left call: ${data.userId}`);
-      
-      // If the displayed user leaves, might need to update popup
-      if (floatingCallPopup?.username?.textContent === data.username) {
-        console.log('⚠️ Displayed user left call - might need to update popup');
-      }
-    });
-    
-    floatingCallSocket.on('call_ended', () => {
-      console.log('📞 [FLOATING] Call ended - hiding popup');
-      hideFloatingCallPopup();
-      localStorage.removeItem(ACTIVE_CALL_KEY);
-    });
-    
-    floatingCallSocket.on('disconnect', () => {
-      console.log('🔌 Floating socket disconnected');
-    });
-    
-  }).catch(err => {
-    console.error('❌ Failed to get token for floating socket:', err);
-  });
-}
 
 function returnToActiveCall() {
   console.log('🔙 ========================================');
@@ -1082,7 +830,6 @@ function returnToActiveCall() {
   if (!activeCallStr) {
     console.error('❌ No active call data found');
     toast('No active call found', 'error');
-    hideFloatingCallPopup();
     return;
   }
   
@@ -1914,42 +1661,9 @@ socketInstance.on('room_joined', (data) => {
     saveChatState(roomData.roomId, messagesCache);
   }
   
-  // CRITICAL: Check for background call AFTER room data is loaded
-  const returningFromCall = sessionStorage.getItem('returningFromCall');
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  
-  if (returningFromCall === 'true' && activeCallStr) {
-    console.log('🎈 User returned from call - showing floating popup');
-    
-    try {
-      const activeCallData = JSON.parse(activeCallStr);
-      
-      if (activeCallData.roomId === roomData.roomId) {
-        // Initialize popup elements if not already done
-        if (!floatingCallPopup) {
-          initializeFloatingCallPopup();
-        }
-        
-        // Get participants for popup display
-        const participants = activeCallData.users || roomData.users || [];
-        
-        // Show the floating popup
-        showFloatingCallPopup(activeCallData, participants);
-        
-        // Clear the flag so it doesn't show again on refresh
-        sessionStorage.removeItem('returningFromCall');
-        
-        console.log('✅ Floating call popup displayed');
-      }
-    } catch (e) {
-      console.error('❌ Failed to show floating popup:', e);
-      sessionStorage.removeItem('returningFromCall');
-    }
-  }
-  
   // Handle active call state (for call buttons)
   if (data.activeCall) {
-    console.log('📞 Active call confirmed:', data.activeCall);
+    console.log('📞 Active call in room detected');
     updateCallButtonState(true, data.activeCall);
   } else {
     console.log('📞 No active call in room');
@@ -2445,24 +2159,25 @@ if (joinCallBtn) {
         const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
         
         if (userInCall) {
-            // User is already in call - navigate back to call page
+            // User is already in call - show call UI in iframe/overlay
             console.log('📞 ========================================');
             console.log('📞 BACK TO CALL CLICKED');
             console.log('📞 ========================================');
             
             const activeCallData = JSON.parse(activeCallStr);
             console.log(`   callId: ${activeCallData.callId}`);
-            console.log(`   Navigating back to active call...`);
+            console.log(`   Call is running in background - will hide chat overlay`);
             
-            // Save chat state before navigating
-            saveChatState(roomData.roomId, messagesCache);
-            
-            // Clear the "returning from call" flag so call page shows full UI
-            sessionStorage.removeItem('returningFromCall');
-            sessionStorage.removeItem('backgroundCallMode');
-            
-            // Navigate to call page
-            window.location.href = '/call.html';
+            // CRITICAL: Don't navigate - just trigger back button to hide chat overlay
+            // The call page is already loaded in the parent window
+            if (window.parent && window.parent !== window) {
+                console.log('📱 We are in iframe - posting message to parent');
+                window.parent.postMessage({ action: 'hideChat' }, '*');
+            } else {
+                console.log('⚠️ Not in iframe - this should not happen');
+                // Fallback: navigate if somehow not in iframe
+                window.location.href = '/call.html';
+            }
             
             console.log('📞 ========================================\n');
         } else {
@@ -2729,7 +2444,6 @@ window.addEventListener('beforeunload', (e) => {
   
 // CRITICAL: Initialize floating call popup elements early
 console.log('🎈 Pre-initializing floating call popup');
-initializeFloatingCallPopup();
 
 // Check if returning from call
 const returningFromCall = sessionStorage.getItem('returningFromCall');
