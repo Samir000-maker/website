@@ -2200,23 +2200,42 @@ socketInstance.on('call_declined', (data) => {
       updateCallButtonState(false);
     });
 
-    socketInstance.on('join_existing_call_success', (data) => {
-      console.log('✅ Joining existing call:', data);
-      navigatingToCall = true;
-      
-      saveChatState(roomData.roomId, messagesCache);
-      sessionStorage.setItem('returningFromCall', 'true');
-      
-      localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-        callId: data.callId,
-        roomId: data.roomId,
-        callType: data.callType,
-        users: []
-      }));
-      
-      console.log('🚀 Navigating to call');
-      window.location.href = '/call.html';
-    });
+socketInstance.on('join_existing_call_success', (data) => {
+  console.log('✅ ========================================');
+  console.log('✅ JOIN_EXISTING_CALL_SUCCESS');
+  console.log('✅ ========================================');
+  console.log(`   callId: ${data.callId}`);
+  console.log(`   callType: ${data.callType}`);
+  
+  // Remove loading states
+  if (joinCallBtn) {
+    joinCallBtn.classList.remove('join-btn-loading');
+  }
+  if (acceptCallBtn) {
+    acceptCallBtn.classList.remove('join-btn-loading');
+  }
+  
+  // Mark navigating
+  navigatingToCall = true;
+  
+  // Save chat state (if not already saved)
+  saveChatState(roomData.roomId, messagesCache);
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  // Ensure call data is stored
+  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+    callId: data.callId,
+    roomId: data.roomId,
+    callType: data.callType,
+    users: []
+  }));
+  
+  console.log('🚀 Navigating to call page');
+  console.log('✅ ========================================\n');
+  
+  // Navigate to call
+  window.location.href = '/call.html';
+});
   }
 
   // ============================================
@@ -2382,11 +2401,14 @@ if (acceptCallBtn) {
       // Mark navigating
       navigatingToCall = true;
       
+      // Add loading state
+      acceptCallBtn.classList.add('join-btn-loading');
+      
       // Save chat state
       saveChatState(roomData.roomId, messagesCache);
       sessionStorage.setItem('returningFromCall', 'true');
       
-      // Store call data
+      // Store call data (same as JOIN button)
       localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
         callId: callToAccept.callId,
         roomId: roomData.roomId,
@@ -2394,11 +2416,20 @@ if (acceptCallBtn) {
         users: []
       }));
       
-      console.log('✅ Navigating to call page to join active call');
+      console.log('📤 Emitting join_existing_call (same as JOIN button)');
+      
+      // CRITICAL: Use join_existing_call instead of navigating directly
+      // This ensures server adds us to participants list first
+      socketInstance?.emit('join_existing_call', {
+        callId: callToAccept.callId,
+        roomId: roomData.roomId
+      });
+      
+      console.log('✅ Join request sent - will navigate on success');
       console.log('✅ ========================================\n');
       
-      // Navigate to call
-      window.location.href = '/call.html';
+      // Don't navigate here - wait for join_existing_call_success event
+      // which is already handled above
     }
   }, { passive: true });
 }
