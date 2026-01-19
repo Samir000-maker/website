@@ -1723,36 +1723,44 @@ socketInstance.on('call_created', (data) => {
   console.log(`   callType: ${data.callType}`);
   console.log(`   isInitiator: ${data.isInitiator}`);
   
-  // Mark that we're navigating to call
-  navigatingToCall = true;
-  
-  // Clear loading states
-  if (audioCallBtn) {
-    audioCallBtn.classList.remove('call-btn-loading');
-    audioCallBtn.disabled = false;
+  // Only navigate if we're the initiator
+  if (data.isInitiator) {
+    console.log('✅ We initiated this call - navigating to call page');
+    
+    // Mark that we're navigating to call
+    navigatingToCall = true;
+    
+    // Clear loading states
+    if (audioCallBtn) {
+      audioCallBtn.classList.remove('call-btn-loading');
+      audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+      videoCallBtn.classList.remove('call-btn-loading');
+      videoCallBtn.disabled = false;
+    }
+    
+    // Save chat state
+    saveChatState(roomData.roomId, messagesCache);
+    sessionStorage.setItem('returningFromCall', 'true');
+    
+    // Store call data
+    localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+      callId: data.callId,
+      roomId: roomData.roomId,
+      callType: data.callType,
+      users: data.participants || []
+    }));
+    
+    console.log(`✅ Stored call data, navigating to call.html`);
+    console.log('📞 ========================================\n');
+    
+    // Navigate to call page
+    window.location.href = '/call.html';
+  } else {
+    console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
+    console.log('📞 ========================================\n');
   }
-  if (videoCallBtn) {
-    videoCallBtn.classList.remove('call-btn-loading');
-    videoCallBtn.disabled = false;
-  }
-  
-  // Save chat state
-  saveChatState(roomData.roomId, messagesCache);
-  sessionStorage.setItem('returningFromCall', 'true');
-  
-  // Store call data
-  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-    callId: data.callId,
-    roomId: roomData.roomId,
-    callType: data.callType,
-    users: data.participants || []
-  }));
-  
-  console.log(`✅ Stored call data, navigating to call.html`);
-  console.log('📞 ========================================\n');
-  
-  // Navigate to call page
-  window.location.href = '/call.html';
 });
 
 
@@ -2066,7 +2074,7 @@ socketInstance.on('left_room', (data) => {
   console.log('✅ Socket disconnected after leaving room');
 });
 
-    socketInstance.on('incoming_call', (data) => {
+socketInstance.on('incoming_call', (data) => {
   console.log('📞 ========================================');
   console.log('📞 INCOMING_CALL EVENT RECEIVED');
   console.log('📞 ========================================');
@@ -2386,7 +2394,7 @@ if (acceptCallBtn) {
         users: []
       }));
       
-      console.log('✅ Navigating to call page');
+      console.log('✅ Navigating to call page to join active call');
       console.log('✅ ========================================\n');
       
       // Navigate to call
@@ -2395,23 +2403,29 @@ if (acceptCallBtn) {
   }, { passive: true });
 }
 
-    if (declineCallBtn) {
-    declineCallBtn.addEventListener('click', () => {
-        if (pendingCallData) {
-            const callToDecline = pendingCallData;
-            pendingCallData = null;
-            
-            // CRITICAL: Clear cached call on decline
-            localStorage.removeItem(CACHED_CALL_KEY);
-            console.log('🗑️ Cleared cached call after decline');
-            
-            socketInstance?.emit('decline_call', {
-                callId: callToDecline.callId,
-                roomId: roomData.roomId
-            });
-            incomingCallModal?.classList.add('hidden');
-        }
-    }, { passive: true });
+if (declineCallBtn) {
+  declineCallBtn.addEventListener('click', () => {
+    if (pendingCallData) {
+      const callToDecline = pendingCallData;
+      pendingCallData = null;
+      
+      console.log('❌ ========================================');
+      console.log('❌ USER DECLINED INCOMING CALL');
+      console.log('❌ ========================================');
+      console.log(`   callId: ${callToDecline.callId}`);
+      console.log(`   Call remains active - user can still join via JOIN button`);
+      
+      // Clear cached call
+      localStorage.removeItem(CACHED_CALL_KEY);
+      console.log('🗑️ Cleared cached call after decline');
+      
+      // Hide modal
+      incomingCallModal?.classList.add('hidden');
+      
+      console.log('✅ Modal dismissed - call still active in room');
+      console.log('❌ ========================================\n');
+    }
+  }, { passive: true });
 }
 
     // Message form
