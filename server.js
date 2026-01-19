@@ -1813,33 +1813,77 @@ socket.on('join_existing_call', ({ callId, roomId }) => {
     const user = socketUsers.get(socket.id);
     
     if (!user) {
+      console.error('❌ Unauthenticated socket tried to join call');
       socket.emit('error', { message: 'Not authenticated' });
       return;
     }
 
+    console.log('🔗 ========================================');
+    console.log('🔗 JOIN_EXISTING_CALL REQUEST');
+    console.log('🔗 ========================================');
+    console.log(`   User: ${user.username} (${user.userId})`);
+    console.log(`   CallID: ${callId}`);
+    console.log(`   RoomID: ${roomId}`);
+
     const call = activeCalls.get(callId);
     
     if (!call) {
-      console.error(`❌ Call ${callId} not found for join request from ${user.username}`);
-      socket.emit('error', { message: 'Call not found or has ended' });
+      console.error(`❌ Call ${callId} not found`);
+      socket.emit('error', { 
+        message: 'Call not found or has ended',
+        code: 'CALL_NOT_FOUND'
+      });
+      return;
+    }
+
+    if (call.roomId !== roomId) {
+      console.error(`❌ Call ${callId} is in different room (${call.roomId} vs ${roomId})`);
+      socket.emit('error', { 
+        message: 'Call is in a different room',
+        code: 'WRONG_ROOM'
+      });
       return;
     }
 
     if (call.participants.length === 0) {
       console.error(`❌ Call ${callId} has no active participants`);
-      socket.emit('error', { message: 'Call has no active participants' });
+      socket.emit('error', { 
+        message: 'Call has no active participants',
+        code: 'CALL_EMPTY'
+      });
       return;
     }
 
-    console.log(`🔄 User ${user.username} joining existing call ${callId} with ${call.participants.length} participants`);
+    // Check if user is in the room
+    const room = matchmaking.getRoom(roomId);
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found`);
+      socket.emit('error', { 
+        message: 'Room not found',
+        code: 'ROOM_NOT_FOUND'
+      });
+      return;
+    }
 
-    // Add user to participants if not already in
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} not in room ${roomId}`);
+      socket.emit('error', { 
+        message: 'You are not in this room',
+        code: 'NOT_IN_ROOM'
+      });
+      return;
+    }
+
+    console.log(`✅ User ${user.username} authorized to join call ${callId}`);
+
+    // CRITICAL: Add user to participants if not already in
     if (!call.participants.includes(user.userId)) {
       call.participants.push(user.userId);
       userCalls.set(user.userId, callId);
-      console.log(`➕ Added ${user.username} to call ${callId}`);
+      console.log(`➕ Added ${user.username} to call participants`);
+      console.log(`📊 Call now has ${call.participants.length} participant(s): [${call.participants.join(', ')}]`);
     } else {
-      console.log(`ℹ️ User ${user.username} already in call ${callId}`);
+      console.log(`ℹ️ User ${user.username} already in call participants (re-joining)`);
     }
 
     call.lastActivity = Date.now();
@@ -1859,18 +1903,38 @@ socket.on('join_existing_call', ({ callId, roomId }) => {
       console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=true`);
     }
 
-    // Navigate user to call page
+    // Send success response with call data
     socket.emit('join_existing_call_success', {
       callId,
       callType: call.callType,
       roomId: call.roomId
     });
 
-    console.log(`✅ User ${user.username} successfully joining call ${callId}`);
+    console.log(`✅ Sent join_existing_call_success to ${user.username}`);
+    console.log(`   User will now navigate to call.html`);
+    
+    // Broadcast updated call state to room
+    io.to(roomId).emit('call_state_update', {
+      callId: callId,
+      isActive: true,
+      participantCount: call.participants.length,
+      callType: call.callType
+    });
+    console.log(`📢 Broadcasted call_state_update to room: ${call.participants.length} participant(s)`);
+
+    console.log('🔗 ========================================');
+    console.log('🔗 JOIN REQUEST COMPLETE');
+    console.log('🔗 ========================================');
+    console.log(`   ${user.username} added to participants`);
+    console.log(`   Will join call room on call.html via join_call event`);
+    console.log('🔗 ========================================\n');
 
   } catch (error) {
-    console.error('Join existing call error:', error);
-    socket.emit('error', { message: 'Failed to join call' });
+    console.error('❌ Join existing call error:', error);
+    socket.emit('error', { 
+      message: 'Failed to join call',
+      code: 'JOIN_FAILED'
+    });
   }
 });
 
