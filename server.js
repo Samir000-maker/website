@@ -1661,7 +1661,6 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         callType: call.callType
       });
       console.log(`📢 Broadcasted call_state_update: active=true, count=${call.participants.length}`);
-    });
     
     
     
