@@ -411,6 +411,19 @@ function hideChat() {
   if (chatOverlay) chatOverlay.classList.add('hidden');
   if (miniIndicator) miniIndicator.classList.add('hidden');
   
+  // CRITICAL: Also hide the floating button that might be in the parent window
+  try {
+    if (window.parent && window.parent !== window) {
+      const parentFloatingBtn = window.parent.document.getElementById('floatingReturnToCall');
+      if (parentFloatingBtn) {
+        parentFloatingBtn.classList.add('hidden');
+        console.log('✅ Parent floating button hidden');
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not access parent window:', e);
+  }
+  
   // Show call UI elements
   const header = document.querySelector('header');
   const main = document.querySelector('main');
