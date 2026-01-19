@@ -346,6 +346,7 @@
 /* Responsive adjustments */
 @media (max-width: 640px) {
     #floatingCallPopup {
+    display: none !important;
         right: 0.75rem;
         top: 4.5rem;
     }
@@ -1228,21 +1229,6 @@ function checkForBackgroundCall() {
 function setInitialCallButtonState() {
     console.log('🔍 Checking for active call in localStorage...');
     
-    // Show loading state initially
-    if (joinCallBtn) {
-        joinCallBtn.classList.add('join-btn-loading');
-        joinCallBtn.classList.add('flex');
-        joinCallBtn.classList.remove('hidden');
-    }
-    if (audioCallBtn) {
-        audioCallBtn.classList.add('call-btn-loading');
-        audioCallBtn.disabled = true; // CRITICAL: Disable while loading
-    }
-    if (videoCallBtn) {
-        videoCallBtn.classList.add('call-btn-loading');
-        videoCallBtn.disabled = true; // CRITICAL: Disable while loading
-    }
-    
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     
     if (activeCallStr) {
@@ -1251,14 +1237,38 @@ function setInitialCallButtonState() {
             
             if (activeCallData.roomId === roomData?.roomId) {
                 console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
+                console.log(`✅ User is IN the call - will show "Back to Call" button`);
                 
-                activeCallInRoom = {
-                    callId: activeCallData.callId,
-                    participantCount: 1,
-                    callType: activeCallData.callType
-                };
+                // Hide audio/video buttons
+                if (audioCallBtn) {
+                    audioCallBtn.classList.add('hidden');
+                }
+                if (videoCallBtn) {
+                    videoCallBtn.classList.add('hidden');
+                }
                 
-                console.log('✅ Initial call state set (waiting for socket confirmation)');
+                // Show join button as "Back to Call" button
+                if (joinCallBtn) {
+                    joinCallBtn.classList.remove('hidden');
+                    joinCallBtn.classList.add('flex');
+                    joinCallBtn.disabled = false;
+                    
+                    // Update button text and icon
+                    const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+                    const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+                    const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+                    
+                    if (btnIcon) btnIcon.textContent = 'call';
+                    if (btnTextLong) btnTextLong.textContent = 'Back to Call';
+                    if (btnTextShort) btnTextShort.textContent = 'Back';
+                    
+                    // Change color to green
+                    joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                    joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
+                    
+                    console.log('✅ "Back to Call" button configured');
+                }
+                
                 return true;
             } else {
                 console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
@@ -1267,6 +1277,21 @@ function setInitialCallButtonState() {
             console.error('❌ Failed to parse activeCall:', e);
             localStorage.removeItem(ACTIVE_CALL_KEY);
         }
+    }
+    
+    // No active call - show normal buttons
+    console.log('ℹ️ No active call - showing audio/video buttons');
+    if (audioCallBtn) {
+        audioCallBtn.classList.remove('hidden');
+        audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+        videoCallBtn.classList.remove('hidden');
+        videoCallBtn.disabled = false;
+    }
+    if (joinCallBtn) {
+        joinCallBtn.classList.add('hidden');
+        joinCallBtn.classList.remove('flex');
     }
     
     return false;
@@ -1288,18 +1313,14 @@ function updateCallButtonState(isActive, callData = null) {
         joinCallBtn.classList.remove('join-btn-loading');
     }
     
-    if (isActive && callData) {
-        activeCallInRoom = {
-            callId: callData.callId,
-            participantCount: callData.participantCount || 1,
-            callType: callData.callType || 'video'
-        };
+    // Check if user is already in the call
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
+    
+    if (userInCall) {
+        console.log('📞 User is IN call - showing "Back to Call" button');
         
-        if (joinCallBtn) {
-            joinCallBtn.classList.remove('hidden');
-            joinCallBtn.classList.add('flex');
-            joinCallBtn.disabled = false; // Enable join button
-        }
+        // Hide audio/video buttons
         if (audioCallBtn) {
             audioCallBtn.classList.add('hidden');
             audioCallBtn.disabled = true;
@@ -1309,15 +1330,65 @@ function updateCallButtonState(isActive, callData = null) {
             videoCallBtn.disabled = true;
         }
         
-        console.log(`✅ Call buttons updated: JOIN visible (${callData.participantCount} participants)`);
-    } else {
-        activeCallInRoom = null;
-        
+        // Show "Back to Call" button
         if (joinCallBtn) {
-            joinCallBtn.classList.remove('flex');
-            joinCallBtn.classList.add('hidden');
-            joinCallBtn.disabled = true;
+            joinCallBtn.classList.remove('hidden');
+            joinCallBtn.classList.add('flex');
+            joinCallBtn.disabled = false;
+            
+            // Update button text and icon
+            const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+            const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+            const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+            
+            if (btnIcon) btnIcon.textContent = 'call';
+            if (btnTextLong) btnTextLong.textContent = 'Back to Call';
+            if (btnTextShort) btnTextShort.textContent = 'Back';
+            
+            // Change to primary color (teal)
+            joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+            joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
+            
+            console.log('✅ "Back to Call" button displayed');
         }
+    } else if (isActive && callData) {
+        console.log('📞 Active call in room but user NOT in it - showing "Join Call" button');
+        
+        // Hide audio/video buttons
+        if (audioCallBtn) {
+            audioCallBtn.classList.add('hidden');
+            audioCallBtn.disabled = true;
+        }
+        if (videoCallBtn) {
+            videoCallBtn.classList.add('hidden');
+            videoCallBtn.disabled = true;
+        }
+        
+        // Show "Join Call" button
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('hidden');
+            joinCallBtn.classList.add('flex');
+            joinCallBtn.disabled = false;
+            
+            // Update button text and icon for join
+            const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+            const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+            const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+            
+            if (btnIcon) btnIcon.textContent = 'login';
+            if (btnTextLong) btnTextLong.textContent = 'Join Call';
+            if (btnTextShort) btnTextShort.textContent = 'Join';
+            
+            // Green color for join
+            joinCallBtn.classList.remove('bg-primary', 'hover:bg-primary/90');
+            joinCallBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+            
+            console.log(`✅ "Join Call" button displayed (${callData.participantCount} participants)`);
+        }
+    } else {
+        console.log('📞 No active call - showing audio/video buttons');
+        
+        // Show audio/video buttons
         if (audioCallBtn) {
             audioCallBtn.classList.remove('hidden');
             audioCallBtn.disabled = false;
@@ -1327,7 +1398,14 @@ function updateCallButtonState(isActive, callData = null) {
             videoCallBtn.disabled = false;
         }
         
-        console.log(`✅ Call buttons updated: AUDIO/VIDEO visible`);
+        // Hide join button
+        if (joinCallBtn) {
+            joinCallBtn.classList.remove('flex');
+            joinCallBtn.classList.add('hidden');
+            joinCallBtn.disabled = true;
+        }
+        
+        console.log('✅ Audio/Video buttons displayed');
     }
 }
 
@@ -2360,24 +2438,56 @@ if (videoCallBtn) {
       }, { passive: true });
     }
 
-    if (joinCallBtn) {
+if (joinCallBtn) {
     joinCallBtn.addEventListener('click', () => {
-        if (!activeCallInRoom) {
-            toast('No active call to join', 'warning');
-            return;
+        // Check if this is "Back to Call" or "Join Call"
+        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
+        
+        if (userInCall) {
+            // User is already in call - navigate back to call page
+            console.log('📞 ========================================');
+            console.log('📞 BACK TO CALL CLICKED');
+            console.log('📞 ========================================');
+            
+            const activeCallData = JSON.parse(activeCallStr);
+            console.log(`   callId: ${activeCallData.callId}`);
+            console.log(`   Navigating back to active call...`);
+            
+            // Save chat state before navigating
+            saveChatState(roomData.roomId, messagesCache);
+            
+            // Clear the "returning from call" flag so call page shows full UI
+            sessionStorage.removeItem('returningFromCall');
+            sessionStorage.removeItem('backgroundCallMode');
+            
+            // Navigate to call page
+            window.location.href = '/call.html';
+            
+            console.log('📞 ========================================\n');
+        } else {
+            // No active call - join existing call
+            if (!activeCallInRoom) {
+                toast('No active call to join', 'warning');
+                return;
+            }
+            
+            console.log('📞 ========================================');
+            console.log('📞 JOIN CALL CLICKED');
+            console.log('📞 ========================================');
+            console.log(`   Joining call ${activeCallInRoom.callId}`);
+            
+            // Add loading state
+            joinCallBtn.classList.add('join-btn-loading');
+            
+            socketInstance?.emit('join_existing_call', {
+                callId: activeCallInRoom.callId,
+                roomId: roomData.roomId
+            });
+            
+            toast('Joining call...', 'success');
+            console.log('📞 ========================================\n');
         }
-        
-        // Add loading state
-        joinCallBtn.classList.add('join-btn-loading');
-        
-        console.log(`📞 Joining call ${activeCallInRoom.callId}`);
-        
-        socketInstance?.emit('join_existing_call', {
-            callId: activeCallInRoom.callId,
-            roomId: roomData.roomId
-        });
-        
-        toast('Joining call...', 'success');
     }, { passive: true });
 }
 
