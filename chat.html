@@ -585,10 +585,16 @@
   const _Toast = MoodApp.Toast;
   const _Utils = MoodApp.Utils;
 
-  const toast = (m, t='success') => { 
-    if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
-    console[t==='error'?'error':'log'](m); 
-  };
+const toast = (m, t='success') => { 
+  if (_Toast) {
+    // Handle 'info' type by mapping to 'success' if no info function exists
+    const toastType = (t === 'info' && typeof _Toast.info !== 'function') ? 'success' : t;
+    if (typeof _Toast[toastType] === 'function') {
+      return _Toast[toastType](m);
+    }
+  }
+  console[t==='error'?'error':'log'](m); 
+};
 
   // ============================================
   // STORAGE KEYS
@@ -1801,6 +1807,57 @@ socketInstance.on('room_expired', (data) => {
 
     socketInstance.on('error', (data) => {
   console.error('❌ Socket error:', data);
+  if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
+    toast('Room no longer available', 'error');
+    
+    // Clear all storage
+    clearChatState();
+    localStorage.removeItem(ACTIVE_CALL_KEY);
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    
+    // Navigate and cleanup parent if in iframe
+    setTimeout(() => {
+      cleanupParentCallPage();
+    }, 2000);
+  } else {
+    toast(data.message || 'An error occurred', 'error');
+  }
+});
+
+socketInstance.on('error', (data) => {
+  console.error('❌ Socket error:', data);
+  
+  // CRITICAL FIX: Handle CALL_ALREADY_ACTIVE error - auto-join instead
+  if (data.code === 'CALL_ALREADY_ACTIVE') {
+    console.log('🔄 Call already active - switching to JOIN mode');
+    
+    // Clear loading states from call initiation
+    if (audioCallBtn) {
+      audioCallBtn.classList.remove('call-btn-loading');
+      audioCallBtn.disabled = false;
+    }
+    if (videoCallBtn) {
+      videoCallBtn.classList.remove('call-btn-loading');
+      videoCallBtn.disabled = false;
+    }
+    isInitiatingCall = false;
+    
+    // Store the active call info
+    activeCallInRoom = {
+      callId: data.callId,
+      callType: data.callType || 'audio',
+      participantCount: data.participantCount || 1
+    };
+    
+    // Update UI to show join button
+    updateCallButtonState(true, activeCallInRoom);
+    
+    // Show friendly message
+    toast('A call is already active. Click "Join Call" to join.', 'info');
+    return;
+  }
+  
   if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
     toast('Room no longer available', 'error');
     
