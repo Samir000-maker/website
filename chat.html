@@ -2207,6 +2207,17 @@ if (joinCallBtn) {
             
             // Add loading state
             joinCallBtn.classList.add('join-btn-loading');
+            joinCallBtn.disabled = true;
+            
+            // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
+            // This ensures the client knows about the call even before server confirms
+            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+                callId: activeCallInRoom.callId,
+                roomId: roomData.roomId,
+                callType: activeCallInRoom.callType,
+                users: []
+            }));
+            console.log('💾 Stored call data to localStorage (pre-join)');
             
             socketInstance?.emit('join_existing_call', {
                 callId: activeCallInRoom.callId,
