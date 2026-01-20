@@ -314,6 +314,20 @@
         }
         
         
+        
+        
+        #audioCallBtn,
+#videoCallBtn,
+#joinCallBtn {
+    display: none !important;
+}
+
+/* Show them once JS has loaded */
+.call-buttons-ready #audioCallBtn,
+.call-buttons-ready #videoCallBtn,
+.call-buttons-ready #joinCallBtn {
+    display: flex !important;
+}
       
 
 @keyframes slideOutToRight {
@@ -2768,6 +2782,7 @@ if (returningFromCall === 'true') {
     return;
   }
 
+// CRITICAL: Set initial call button state from CACHE first (before socket connects)
   const cachedState = loadChatState();
   
   if (cachedState && cachedState.roomId === roomData.roomId) {
@@ -2799,17 +2814,60 @@ if (returningFromCall === 'true') {
     
     // Set button state immediately from cache
     if (cachedState.callButtonState === 'back') {
-      updateCallButtonState(true, activeCallInRoom || { participantCount: 1 });
+      // Show "Back to Call" button
+      if (audioCallBtn) audioCallBtn.style.display = 'none';
+      if (videoCallBtn) videoCallBtn.style.display = 'none';
+      if (joinCallBtn) {
+        joinCallBtn.style.display = 'flex';
+        joinCallBtn.classList.remove('hidden');
+        joinCallBtn.classList.add('flex', 'bg-primary', 'hover:bg-primary/90');
+        joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+        
+        const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+        const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+        const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+        
+        if (btnIcon) btnIcon.textContent = 'call';
+        if (btnTextLong) btnTextLong.textContent = 'Back to Call';
+        if (btnTextShort) btnTextShort.textContent = 'Back';
+      }
       console.log('✅ "Back to Call" button shown immediately from cache');
+      
     } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
-      updateCallButtonState(true, activeCallInRoom);
+      // Show "Join Call" button
+      if (audioCallBtn) audioCallBtn.style.display = 'none';
+      if (videoCallBtn) videoCallBtn.style.display = 'none';
+      if (joinCallBtn) {
+        joinCallBtn.style.display = 'flex';
+        joinCallBtn.classList.remove('hidden');
+        joinCallBtn.classList.add('flex', 'bg-green-600', 'hover:bg-green-700');
+        joinCallBtn.classList.remove('bg-primary', 'hover:bg-primary/90');
+        
+        const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+        const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+        const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+        
+        if (btnIcon) btnIcon.textContent = 'login';
+        if (btnTextLong) btnTextLong.textContent = 'Join Call';
+        if (btnTextShort) btnTextShort.textContent = 'Join';
+      }
       console.log('✅ "Join Call" button shown immediately from cache');
+      
     } else {
-      setInitialCallButtonState();
+      // Show audio/video buttons
+      if (audioCallBtn) audioCallBtn.style.display = 'flex';
+      if (videoCallBtn) videoCallBtn.style.display = 'flex';
+      if (joinCallBtn) joinCallBtn.style.display = 'none';
+      console.log('✅ Audio/Video buttons shown from cache');
     }
+    
+    // Mark buttons as ready
+    document.querySelector('.call-buttons-container')?.classList.add('call-buttons-ready');
+    
   } else {
     // No cache - use normal initial state
     setInitialCallButtonState();
+    document.querySelector('.call-buttons-container')?.classList.add('call-buttons-ready');
   }
   // Render initial users
   if (usersList && Array.isArray(roomData.users)) {
