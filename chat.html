@@ -1978,14 +1978,27 @@ socketInstance.on('call_declined', (data) => {
     });
     
     socketInstance.on('call_state_update', (data) => {
-      console.log('📞 Call state update:', data);
-      
-      if (data.isActive && data.participantCount > 0) {
-        updateCallButtonState(true, data);
-      } else {
-        updateCallButtonState(false);
-      }
-    });
+  console.log('📞 Call state update:', data);
+  
+  if (data.isActive && data.participantCount > 0) {
+    // CRITICAL FIX: Store call data so JOIN button can access it
+    activeCallInRoom = {
+      callId: data.callId,
+      callType: data.callType,
+      participantCount: data.participantCount
+    };
+    console.log(`📞 Stored active call: ${data.callId} with ${data.participantCount} participants`);
+    
+    updateCallButtonState(true, data);
+  } else {
+    // CRITICAL FIX: Clear call data when call ends
+    activeCallInRoom = null;
+    console.log('📞 Cleared active call - no participants');
+    
+    updateCallButtonState(false);
+  }
+});
+
 
     socketInstance.on('call_ended_notification', (data) => {
       console.log('📞 Call ended:', data.callId);
