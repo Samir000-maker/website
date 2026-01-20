@@ -920,17 +920,26 @@ function saveChatState(roomId, messages) {
             callButtonState = 'join';
         }
         
+        // CRITICAL FIX: Always preserve activeCallInRoom if it exists
+        const callInRoomToSave = activeCallInRoom || null;
+        
         const state = {
             roomId,
             messages: messages || [],
             timestamp: Date.now(),
             callButtonState,
-            activeCallInRoom: activeCallInRoom // Save this too
+            activeCallInRoom: callInRoomToSave
         };
         
         localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
         localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-        console.log('✅ Chat state saved:', messages.length, 'messages, button state:', callButtonState);
+        
+        console.log('✅ Chat state saved:', {
+            messages: messages?.length || 0,
+            buttonState: callButtonState,
+            hasActiveCallInRoom: !!callInRoomToSave,
+            activeCallInRoom: callInRoomToSave
+        });
     } catch (e) {
         console.warn('⚠️ Failed to save chat state:', e);
     }
@@ -1730,27 +1739,46 @@ socketInstance.on('room_joined', (data) => {
     saveChatState(roomData.roomId, messagesCache);
   }
   
-  // Restore call button state from cache
-  if (shouldRestoreCache && cachedState) {
+// Restore call button state from cache
+if (shouldRestoreCache && cachedState) {
     console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
+    console.log('   Cached activeCallInRoom:', cachedState.activeCallInRoom);
     
-    // Restore activeCallInRoom if it was cached
+    // CRITICAL FIX: Restore activeCallInRoom if it was cached OR if we can derive it
     if (cachedState.activeCallInRoom) {
-      activeCallInRoom = cachedState.activeCallInRoom;
-      console.log('💾 Restored activeCallInRoom:', activeCallInRoom);
+        activeCallInRoom = cachedState.activeCallInRoom;
+        console.log('💾 Restored activeCallInRoom from cache:', activeCallInRoom);
+    } else if (cachedState.callButtonState === 'back') {
+        // User was in call - reconstruct activeCallInRoom from activeCall storage
+        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+        if (activeCallStr) {
+            try {
+                const activeCallData = JSON.parse(activeCallStr);
+                activeCallInRoom = {
+                    callId: activeCallData.callId,
+                    callType: activeCallData.callType,
+                    participantCount: 2 // Default assumption
+                };
+                console.log('💾 Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
+            } catch (e) {
+                console.error('Failed to reconstruct activeCallInRoom:', e);
+            }
+        }
+    } else if (cachedState.callButtonState === 'join' && !activeCallInRoom) {
+        console.warn('⚠️ Cache says "join" but no activeCallInRoom - will wait for server update');
     }
     
     // Update button state immediately based on cache
     if (cachedState.callButtonState === 'back') {
-      updateCallButtonState(true, { participantCount: 1 }); // Will show "Back to Call"
+        updateCallButtonState(true, activeCallInRoom || { participantCount: 1 }); // Will show "Back to Call"
     } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
-      updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
+        updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
     } else {
-      updateCallButtonState(false); // Will show audio/video buttons
+        updateCallButtonState(false); // Will show audio/video buttons
     }
     
     console.log('✅ Call button state restored instantly');
-  }
+}
   
   // Handle active call state (for call buttons) - this is the server update
   if (data.activeCall) {
