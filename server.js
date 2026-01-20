@@ -1327,22 +1327,30 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
 
     // Check for existing active calls in this room
     let existingCallId = null;
+    let existingCall = null;
     activeCalls.forEach((call, callId) => {
       if (call.roomId === roomId && call.participants.length > 0) {
         existingCallId = callId;
+        existingCall = call;
       }
     });
 
     if (existingCallId) {
       console.log(`📞 Call already active in room ${roomId}: ${existingCallId}`);
+      console.log(`   Participants: ${existingCall.participants.length}`);
+      console.log(`   Suggesting user join instead of creating new call`);
+      
       socket.emit('error', { 
         message: 'A call is already in progress',
         code: 'CALL_ALREADY_ACTIVE',
-        callId: existingCallId
+        callId: existingCallId,
+        callType: existingCall.callType,
+        participantCount: existingCall.participants.length
       });
       return;
     }
 
+    // ... rest of initiate_call handler remains the same
     // Create new call
     const callId = uuidv4();
     
@@ -1350,15 +1358,14 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
       callId,
       roomId,
       callType,
-      participants: [user.userId], // Initiator is first participant
-      status: 'active', // ← CHANGED: Start as active immediately (Discord-like)
+      participants: [user.userId],
+      status: 'active',
       createdAt: Date.now(),
       lastActivity: Date.now(),
       initiator: user.userId,
       userMediaStates: new Map()
     };
 
-    // Initialize media state for initiator
     call.userMediaStates.set(user.userId, {
       videoEnabled: callType === 'video',
       audioEnabled: true
@@ -1368,7 +1375,6 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     userCalls.set(user.userId, callId);
     webrtcMetrics.totalCalls++;
 
-    // Mark room as having active call
     room.setActiveCall(true);
 
     console.log(`✅ Call created: ${callId}`);
@@ -1376,11 +1382,10 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     console.log(`   Participants: [${user.userId}]`);
     console.log(`   Room marked as having active call`);
 
-    // Send call_created to initiator (they navigate immediately)
     socket.emit('call_created', {
       callId,
       callType,
-      isInitiator: true, // ← Tells client they initiated it
+      isInitiator: true,
       participants: [{
         userId: user.userId,
         username: user.username,
@@ -1391,7 +1396,6 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
     });
     console.log(`📤 Sent call_created to initiator ${user.username} - they will navigate`);
 
-    // Broadcast to ALL users in room that call is now active (JOIN button appears)
     io.to(roomId).emit('call_state_update', {
       callId: callId,
       isActive: true,
@@ -1399,9 +1403,7 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
       callType: callType
     });
     console.log(`📢 Broadcasted call_state_update to room ${roomId}`);
-    console.log(`   JOIN button now visible to all users`);
 
-    // Send incoming_call notification to OTHER users in room (modal pops up)
     room.users.forEach(roomUser => {
       if (roomUser.userId !== user.userId) {
         const targetSocket = findActiveSocketForUser(roomUser.userId);
@@ -1415,19 +1417,12 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
             roomId
           });
           console.log(`📤 Sent incoming_call notification to ${roomUser.username}`);
-          console.log(`   They can Accept (navigate) or Decline (dismiss modal)`);
         }
       }
     });
 
     console.log('✅ ========================================');
     console.log('✅ CALL INITIATION COMPLETE');
-    console.log('✅ ========================================');
-    console.log(`   Initiator: Navigating to call page`);
-    console.log(`   Others: See incoming call modal + JOIN button`);
-    console.log(`   Accept → Navigate to call`);
-    console.log(`   Decline → Dismiss modal (call stays active)`);
-    console.log(`   JOIN button → Navigate to call anytime`);
     console.log('✅ ========================================\n');
 
   } catch (error) {
