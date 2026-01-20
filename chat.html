@@ -1805,32 +1805,19 @@ socketInstance.on('room_expired', (data) => {
   setTimeout(() => window.location.href = '/mood.html', 2000);
 });
 
-    socketInstance.on('error', (data) => {
-  console.error('❌ Socket error:', data);
-  if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
-    toast('Room no longer available', 'error');
-    
-    // Clear all storage
-    clearChatState();
-    localStorage.removeItem(ACTIVE_CALL_KEY);
-    sessionStorage.removeItem('hasBackgroundCall');
-    sessionStorage.removeItem('returningFromCall');
-    
-    // Navigate and cleanup parent if in iframe
-    setTimeout(() => {
-      cleanupParentCallPage();
-    }, 2000);
-  } else {
-    toast(data.message || 'An error occurred', 'error');
-  }
-});
-
 socketInstance.on('error', (data) => {
   console.error('❌ Socket error:', data);
+  console.error('   Error code:', data.code);
+  console.error('   Error message:', data.message);
   
   // CRITICAL FIX: Handle CALL_ALREADY_ACTIVE error - auto-join instead
   if (data.code === 'CALL_ALREADY_ACTIVE') {
-    console.log('🔄 Call already active - switching to JOIN mode');
+    console.log('🔄 ========================================');
+    console.log('🔄 CALL_ALREADY_ACTIVE ERROR HANDLING');
+    console.log('🔄 ========================================');
+    console.log(`   Existing callId: ${data.callId}`);
+    console.log(`   callType: ${data.callType}`);
+    console.log(`   participantCount: ${data.participantCount}`);
     
     // Clear loading states from call initiation
     if (audioCallBtn) {
@@ -1849,12 +1836,14 @@ socketInstance.on('error', (data) => {
       callType: data.callType || 'audio',
       participantCount: data.participantCount || 1
     };
+    console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
     
     // Update UI to show join button
     updateCallButtonState(true, activeCallInRoom);
     
     // Show friendly message
-    toast('A call is already active. Click "Join Call" to join.', 'info');
+    toast('A call is already active. Click "Join Call" to join.', 'success');
+    console.log('🔄 ========================================\n');
     return;
   }
   
@@ -2068,13 +2057,16 @@ socketInstance.on('join_existing_call_success', (data) => {
   console.log('✅ ========================================');
   console.log(`   callId: ${data.callId}`);
   console.log(`   callType: ${data.callType}`);
+  console.log(`   roomId: ${data.roomId}`);
   
   // Remove loading states
   if (joinCallBtn) {
     joinCallBtn.classList.remove('join-btn-loading');
+    joinCallBtn.disabled = false;
   }
   if (acceptCallBtn) {
     acceptCallBtn.classList.remove('join-btn-loading');
+    acceptCallBtn.disabled = false;
   }
   
   // Mark navigating
@@ -2084,19 +2076,27 @@ socketInstance.on('join_existing_call_success', (data) => {
   saveChatState(roomData.roomId, messagesCache);
   sessionStorage.setItem('returningFromCall', 'true');
   
-  // Ensure call data is stored
-  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
-    callId: data.callId,
-    roomId: data.roomId,
-    callType: data.callType,
-    users: []
-  }));
+  // Ensure call data is stored (should already be, but verify)
+  const storedCall = localStorage.getItem(ACTIVE_CALL_KEY);
+  console.log(`   Stored call data exists: ${!!storedCall}`);
   
-  console.log('🚀 Navigating to call page');
+  if (!storedCall) {
+    console.warn('⚠️ No stored call data - storing now');
+    localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+      callId: data.callId,
+      roomId: data.roomId,
+      callType: data.callType,
+      users: []
+    }));
+  }
+  
+  console.log('🚀 Navigating to call page in 500ms...');
   console.log('✅ ========================================\n');
   
-  // Navigate to call
-  window.location.href = '/call.html';
+  // Navigate to call with small delay to ensure storage is written
+  setTimeout(() => {
+    window.location.href = '/call.html';
+  }, 500);
 });
   }
 
@@ -2224,65 +2224,91 @@ if (videoCallBtn) {
 
 if (joinCallBtn) {
     joinCallBtn.addEventListener('click', () => {
+        console.log('🔘 ========================================');
+        console.log('🔘 JOIN CALL BUTTON CLICKED');
+        console.log('🔘 ========================================');
+        
         // Check if this is "Back to Call" or "Join Call"
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
         const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
         
+        console.log(`   activeCallStr exists: ${!!activeCallStr}`);
+        console.log(`   userInCall: ${userInCall}`);
+        console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
+        
         if (userInCall) {
             // User is already in call - show call UI in iframe/overlay
-            console.log('📞 ========================================');
-            console.log('📞 BACK TO CALL CLICKED');
-            console.log('📞 ========================================');
+            console.log('📞 BACK TO CALL MODE');
             
             const activeCallData = JSON.parse(activeCallStr);
             console.log(`   callId: ${activeCallData.callId}`);
             console.log(`   Call is running in background - will hide chat overlay`);
             
-            // CRITICAL: Don't navigate - just trigger back button to hide chat overlay
-            // The call page is already loaded in the parent window
             if (window.parent && window.parent !== window) {
                 console.log('📱 We are in iframe - posting message to parent');
                 window.parent.postMessage({ action: 'hideChat' }, '*');
             } else {
-                console.log('⚠️ Not in iframe - this should not happen');
-                // Fallback: navigate if somehow not in iframe
+                console.log('⚠️ Not in iframe - navigating directly');
                 window.location.href = '/call.html';
             }
             
-            console.log('📞 ========================================\n');
+            console.log('🔘 ========================================\n');
         } else {
             // No active call - join existing call
+            console.log('📞 JOIN EXISTING CALL MODE');
+            
             if (!activeCallInRoom) {
+                console.error('❌ activeCallInRoom is null/undefined!');
+                console.log('   This should not happen - UI should not show Join button');
                 toast('No active call to join', 'warning');
+                console.log('🔘 ========================================\n');
                 return;
             }
             
-            console.log('📞 ========================================');
-            console.log('📞 JOIN CALL CLICKED');
-            console.log('📞 ========================================');
-            console.log(`   Joining call ${activeCallInRoom.callId}`);
+            console.log(`   activeCallInRoom.callId: ${activeCallInRoom.callId}`);
+            console.log(`   activeCallInRoom.callType: ${activeCallInRoom.callType}`);
+            console.log(`   activeCallInRoom.participantCount: ${activeCallInRoom.participantCount}`);
+            console.log(`   roomData.roomId: ${roomData.roomId}`);
             
             // Add loading state
             joinCallBtn.classList.add('join-btn-loading');
             joinCallBtn.disabled = true;
+            console.log('⏳ Join button set to loading state');
             
             // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
-            // This ensures the client knows about the call even before server confirms
-            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
+            const callDataToStore = {
                 callId: activeCallInRoom.callId,
                 roomId: roomData.roomId,
                 callType: activeCallInRoom.callType,
                 users: []
-            }));
-            console.log('💾 Stored call data to localStorage (pre-join)');
+            };
             
-            socketInstance?.emit('join_existing_call', {
+            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(callDataToStore));
+            console.log('💾 Stored call data to localStorage (pre-join):');
+            console.log('   ', JSON.stringify(callDataToStore, null, 2));
+            
+            const eventData = {
                 callId: activeCallInRoom.callId,
                 roomId: roomData.roomId
-            });
+            };
+            
+            console.log('📤 Emitting join_existing_call with data:');
+            console.log('   ', JSON.stringify(eventData, null, 2));
+            
+            if (!socketInstance || !socketInstance.connected) {
+                console.error('❌ Socket not connected!');
+                toast('Connection lost. Please refresh the page.', 'error');
+                joinCallBtn.classList.remove('join-btn-loading');
+                joinCallBtn.disabled = false;
+                console.log('🔘 ========================================\n');
+                return;
+            }
+            
+            socketInstance.emit('join_existing_call', eventData);
             
             toast('Joining call...', 'success');
-            console.log('📞 ========================================\n');
+            console.log('✅ Event emitted successfully');
+            console.log('🔘 ========================================\n');
         }
     }, { passive: true });
 }
