@@ -1957,7 +1957,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     console.log(`   CallID: ${callId}`);
     console.log(`   RoomID: ${roomId}`);
 
-    // CRITICAL FIX: Use mutex to prevent race conditions and ensure atomic state changes
+    // CRITICAL FIX: Use mutex to prevent race conditions
     await withCallMutex(callId, async () => {
       const call = activeCalls.get(callId);
       
@@ -1970,7 +1970,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         return;
       }
 
-      // CRITICAL FIX: Validate call state
+      // Validate call state
       const validation = validateCallState(call, 'join_existing_call');
       if (!validation.valid) {
         socket.emit('error', { message: validation.error });
@@ -1986,12 +1986,13 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         return;
       }
 
-      // CRITICAL FIX: Check if call has ANY participants (not just this user)
-      if (call.participants.length === 0) {
-        console.error(`❌ Call ${callId} has no active participants`);
+      // CRITICAL FIX: Don't check participant count - allow joining even if empty
+      // This handles the case where all users left but call is still "active"
+      if (call.status === 'ended') {
+        console.error(`❌ Call ${callId} has ended`);
         socket.emit('error', { 
-          message: 'Call has no active participants',
-          code: 'CALL_EMPTY'
+          message: 'Call has ended',
+          code: 'CALL_ENDED'
         });
         return;
       }
@@ -2019,8 +2020,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
       console.log(`✅ User ${user.username} authorized to join call ${callId}`);
       console.log(`📊 Current participants BEFORE add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
 
-      // CRITICAL FIX: Add user to participants if not already present
-      // This is the key fix - we ADD them here atomically within the mutex
+      // CRITICAL FIX: Add user to participants atomically within mutex
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
@@ -2028,6 +2028,12 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         console.log(`📊 Current participants AFTER add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
       } else {
         console.log(`ℹ️ User ${user.username} already in call participants (re-joining)`);
+      }
+
+      // Mark call as active if it was in pending state
+      if (call.status === 'pending') {
+        call.status = 'active';
+        console.log(`📊 Call status changed: pending → active`);
       }
 
       call.lastActivity = Date.now();
@@ -2042,11 +2048,17 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=true`);
       }
 
-      // Clear any grace period on this call since we have a new participant
+      // Clear any grace period on this call
       if (callGracePeriod.has(callId)) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
         console.log(`⏱️ Cleared grace period for call ${callId} (new participant joined)`);
+      }
+
+      // Mark room as having active call
+      if (room && !room.hasActiveCall) {
+        room.setActiveCall(true);
+        console.log(`🛡️ Room ${roomId} marked as having active call`);
       }
 
       console.log('🔗 ========================================');
@@ -2060,10 +2072,9 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     }); // CRITICAL: Mutex releases HERE - state is now consistent
 
     // CRITICAL FIX: Emit success and broadcast AFTER mutex completes
-    // This ensures all subsequent operations see the updated participants list
     const call = activeCalls.get(callId);
     if (call && call.participants.includes(user.userId)) {
-      // Send success response with call data
+      // Send success response
       socket.emit('join_existing_call_success', {
         callId,
         callType: call.callType,
@@ -2071,8 +2082,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
       });
 
       console.log(`✅ Sent join_existing_call_success to ${user.username} (after mutex release)`);
-      console.log(`   User will now navigate to call page and emit join_call`);
-      console.log(`   join_call will now see ${user.username} in participants list`);
+      console.log(`   User will now navigate to call page`);
       
       // Broadcast updated call state to room
       io.to(roomId).emit('call_state_update', {
@@ -2083,7 +2093,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
       });
       console.log(`📢 Broadcasted call_state_update to room: ${call.participants.length} participant(s)`);
     } else {
-      console.error(`❌ CRITICAL: User ${user.username} not in participants after mutex - this should never happen!`);
+      console.error(`❌ CRITICAL: User ${user.username} not in participants after mutex!`);
       socket.emit('error', { 
         message: 'Failed to add you to the call',
         code: 'JOIN_FAILED'
