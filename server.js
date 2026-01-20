@@ -1712,17 +1712,21 @@ socket.on('join_call', async ({ callId }) => {
         return;
       }
 
-      // CRITICAL FIX: Check if user is in participants list
+      // ============================================
+      // CRITICAL FIX FOR JOIN BUTTON ISSUE
+      // ============================================
+      // Add user to participants if not already there
+      // This allows the "Join" button to work even if user dismissed the incoming call popup
       if (!call.participants.includes(user.userId)) {
-        console.error(`❌ User ${user.username} not authorized for call ${callId}`);
-        console.error(`   Participants: [${call.participants.join(', ')}]`);
-        socket.emit('error', { 
-          message: 'You are not in this call',
-          code: 'NOT_IN_CALL'
-        });
-        joinCallDebounce.delete(user.userId);
-        return;
+        console.log(`➕ [JOIN_BUTTON_FIX] Adding ${user.username} to call ${callId} participants`);
+        console.log(`   Participants before: [${call.participants.join(', ')}]`);
+        call.participants.push(user.userId);
+        userCalls.set(user.userId, callId);
+        console.log(`   Participants after: [${call.participants.join(', ')}]`);
+      } else {
+        console.log(`ℹ️ User ${user.username} already in call ${callId} participants (re-joining)`);
       }
+      // ============================================
 
       call.lastActivity = Date.now();
       
@@ -1745,7 +1749,7 @@ socket.on('join_call', async ({ callId }) => {
       socket.join(`call-${callId}`);
       console.log(`📞 User ${user.username} joined call room: call-${callId}`);
 
-      // CRITICAL FIX: Build participant data from ROOM (not socketUsers)
+      // Build participant data from ROOM (not socketUsers)
       const participantsWithMediaStates = call.participants.map(participantId => {
         const roomUser = room.users.find(u => u.userId === participantId);
         
@@ -1768,12 +1772,10 @@ socket.on('join_call', async ({ callId }) => {
         };
       }).filter(p => p !== null);
 
-      // CRITICAL: Validate all participants were resolved
+      // Validate all participants were resolved
       if (participantsWithMediaStates.length !== call.participants.length) {
         console.error(`❌ CRITICAL: Failed to resolve all participants!`);
         console.error(`   Expected: ${call.participants.length}, Got: ${participantsWithMediaStates.length}`);
-        console.error(`   Room users: ${room.users.map(u => `${u.username}(${u.userId})`).join(', ')}`);
-        console.error(`   Call participants: ${call.participants.join(', ')}`);
         socket.emit('error', { 
           message: 'Unable to load all participants. Please refresh and try again.',
           code: 'PARTICIPANT_RESOLUTION_FAILED'
@@ -1783,9 +1785,6 @@ socket.on('join_call', async ({ callId }) => {
       }
 
       console.log(`📊 Sending ${participantsWithMediaStates.length} VALIDATED participants to ${user.username}`);
-      participantsWithMediaStates.forEach((p, idx) => {
-        console.log(`   [${idx}] ${p.username} (${p.userId}): video=${p.videoEnabled}, audio=${p.audioEnabled}`);
-      });
 
       // Send complete state to joining user
       socket.emit('call_joined', {
@@ -1822,6 +1821,7 @@ socket.on('join_call', async ({ callId }) => {
     joinCallDebounce.delete(user.userId);
   }
 });
+
 
 socket.on('leave_call', ({ callId }) => {
   try {
