@@ -1666,77 +1666,93 @@ socketInstance.on('room_joined', (data) => {
     console.error('❌ No expiresAt in room_joined data!');
   }
   
-// Try to restore cached state first
-const cachedState = loadChatState();
-const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
+  // Try to restore cached state first
+  const cachedState = loadChatState();
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  const isInIframe = window.parent && window.parent !== window;
 
-if (returningFromCall && cachedState && cachedState.roomId === roomData.roomId) {
+  // Determine if we should restore from cache
+  let shouldRestoreCache = false;
+
+  if (activeCallStr && isInIframe) {
+    try {
+      const activeCall = JSON.parse(activeCallStr);
+      if (activeCall.roomId === roomData.roomId && cachedState && cachedState.roomId === roomData.roomId) {
+        shouldRestoreCache = true;
+        console.log('🔄 Active call in iframe detected - will restore cache');
+      }
+    } catch (e) {
+      console.warn('Failed to check active call:', e);
+    }
+  }
+
+  if (shouldRestoreCache) {
     console.log(`📦 Restoring cached chat state: ${cachedState.messages.length} messages`);
     
     // Restore messages from cache
     messagesCache = cachedState.messages || [];
     
     messagesCache.forEach(msg => {
-        const isCurrentUser = msg.userId === currentUser.userId;
-        const msgEl = createMessageElement(msg, isCurrentUser);
-        messagesList?.appendChild(msgEl);
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      messagesList?.appendChild(msgEl);
     });
     
     if (messagesList) {
-        messagesList.scrollTop = messagesList.scrollHeight;
+      messagesList.scrollTop = messagesList.scrollHeight;
     }
     
     console.log('✅ Chat state restored from cache');
     
-    // Clear the flag after restoring
-    sessionStorage.removeItem('returningFromCall');
+    // DON'T clear the flag - we might navigate back again
+    // Only clear when explicitly leaving the room or call ends
     
-} else if (data.chatHistory?.length > 0) {
+  } else if (data.chatHistory?.length > 0) {
     // No cache or fresh join - load from server
     console.log(`📜 Loading ${data.chatHistory.length} messages from server`);
     
     const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
     
     data.chatHistory.forEach(msg => {
-        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-        if (existingIds.has(msgId)) return;
-        
-        const isCurrentUser = msg.userId === currentUser.userId;
-        const msgEl = createMessageElement(msg, isCurrentUser);
-        messagesList?.appendChild(msgEl);
-        messagesCache.push(msg);
+      const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+      if (existingIds.has(msgId)) return;
+      
+      const isCurrentUser = msg.userId === currentUser.userId;
+      const msgEl = createMessageElement(msg, isCurrentUser);
+      messagesList?.appendChild(msgEl);
+      messagesCache.push(msg);
     });
     
     if (messagesList) {
-        messagesList.scrollTop = messagesList.scrollHeight;
+      messagesList.scrollTop = messagesList.scrollHeight;
     }
     
     saveChatState(roomData.roomId, messagesCache);
-}
-
-
-if (returningFromCall && cachedState) {
+  }
+  
+  // Restore call button state from cache
+  if (shouldRestoreCache && cachedState) {
     console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
     
     // Restore activeCallInRoom if it was cached
     if (cachedState.activeCallInRoom) {
-        activeCallInRoom = cachedState.activeCallInRoom;
-        console.log('💾 Restored activeCallInRoom:', activeCallInRoom);
+      activeCallInRoom = cachedState.activeCallInRoom;
+      console.log('💾 Restored activeCallInRoom:', activeCallInRoom);
     }
     
     // Update button state immediately based on cache
     if (cachedState.callButtonState === 'back') {
-        updateCallButtonState(true, { participantCount: 1 }); // Will show "Back to Call"
+      updateCallButtonState(true, { participantCount: 1 }); // Will show "Back to Call"
     } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
-        updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
+      updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
     } else {
-        updateCallButtonState(false); // Will show audio/video buttons
+      updateCallButtonState(false); // Will show audio/video buttons
     }
     
     console.log('✅ Call button state restored instantly');
-}
+  }
   
-  // Handle active call state (for call buttons)
+  // Handle active call state (for call buttons) - this is the server update
   if (data.activeCall) {
     console.log('📞 Active call in room detected');
     
@@ -1748,8 +1764,12 @@ if (returningFromCall && cachedState) {
     };
     console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
     
-    updateCallButtonState(true, data.activeCall);
-  } else {
+    // Only update button state if we didn't already restore from cache
+    if (!shouldRestoreCache) {
+      updateCallButtonState(true, data.activeCall);
+    }
+  } else if (!shouldRestoreCache) {
+    // Only update if not restoring from cache
     console.log('📞 No active call in room');
     activeCallInRoom = null;
     updateCallButtonState(false);
@@ -2604,13 +2624,40 @@ window.addEventListener('beforeunload', (e) => {
   // ============================================
   
 try {
-    // Check if we're returning from a call
+    // Check if we're returning from a call OR if we're in an iframe (chat overlay)
     const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
     const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    const isInIframe = window.parent && window.parent !== window;
     
-    console.log('🔍 Page load context:', { returningFromCall, isBackgroundCall });
+    // CRITICAL: If there's an active call in this room, we're likely returning from it
+    let shouldPreserveState = returningFromCall || isBackgroundCall;
     
-    if (!returningFromCall && !isBackgroundCall) {
+    if (!shouldPreserveState && activeCallStr && isInIframe) {
+        try {
+            const activeCall = JSON.parse(activeCallStr);
+            const roomStr = localStorage.getItem('currentRoom');
+            if (roomStr) {
+                const room = JSON.parse(roomStr);
+                if (activeCall.roomId === room.roomId) {
+                    console.log('🔍 Active call detected in iframe - treating as return from call');
+                    shouldPreserveState = true;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to parse call/room data:', e);
+        }
+    }
+    
+    console.log('🔍 Page load context:', { 
+        returningFromCall, 
+        isBackgroundCall, 
+        isInIframe,
+        shouldPreserveState,
+        hasActiveCall: !!activeCallStr
+    });
+    
+    if (!shouldPreserveState) {
         // Only clear if this is a fresh entry to chat (not returning from call)
         console.log('🧹 Fresh chat entry - clearing old state');
         clearAllChatData();
