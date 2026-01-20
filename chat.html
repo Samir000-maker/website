@@ -2768,9 +2768,49 @@ if (returningFromCall === 'true') {
     return;
   }
 
-  // Set initial call button state
-  setInitialCallButtonState();
-
+  const cachedState = loadChatState();
+  
+  if (cachedState && cachedState.roomId === roomData.roomId) {
+    console.log('🎨 Restoring UI from cache IMMEDIATELY on page load');
+    console.log(`   Cached button state: ${cachedState.callButtonState}`);
+    console.log(`   Cached activeCallInRoom:`, cachedState.activeCallInRoom);
+    
+    // Restore activeCallInRoom immediately
+    if (cachedState.activeCallInRoom) {
+      activeCallInRoom = cachedState.activeCallInRoom;
+      console.log('💾 Pre-loaded activeCallInRoom from cache');
+    } else if (cachedState.callButtonState === 'back') {
+      // Reconstruct from ACTIVE_CALL_KEY
+      const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+      if (activeCallStr) {
+        try {
+          const activeCallData = JSON.parse(activeCallStr);
+          activeCallInRoom = {
+            callId: activeCallData.callId,
+            callType: activeCallData.callType,
+            participantCount: 2
+          };
+          console.log('💾 Pre-loaded activeCallInRoom from ACTIVE_CALL_KEY');
+        } catch (e) {
+          console.error('Failed to reconstruct activeCallInRoom:', e);
+        }
+      }
+    }
+    
+    // Set button state immediately from cache
+    if (cachedState.callButtonState === 'back') {
+      updateCallButtonState(true, activeCallInRoom || { participantCount: 1 });
+      console.log('✅ "Back to Call" button shown immediately from cache');
+    } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
+      updateCallButtonState(true, activeCallInRoom);
+      console.log('✅ "Join Call" button shown immediately from cache');
+    } else {
+      setInitialCallButtonState();
+    }
+  } else {
+    // No cache - use normal initial state
+    setInitialCallButtonState();
+  }
   // Render initial users
   if (usersList && Array.isArray(roomData.users)) {
     roomData.users.forEach(user => {
