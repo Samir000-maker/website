@@ -906,20 +906,35 @@ function checkForBackgroundCall() {
   
   
   
-  function saveChatState(roomId, messages) {
+function saveChatState(roomId, messages) {
     try {
-      const state = {
-        roomId,
-        messages: messages || [],
-        timestamp: Date.now()
-      };
-      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
-      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-      console.log('✅ Chat state saved:', messages.length, 'messages');
+        // Determine current call button state
+        let callButtonState = 'none'; // 'none', 'join', 'back'
+        
+        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
+        
+        if (userInCall) {
+            callButtonState = 'back';
+        } else if (activeCallInRoom) {
+            callButtonState = 'join';
+        }
+        
+        const state = {
+            roomId,
+            messages: messages || [],
+            timestamp: Date.now(),
+            callButtonState,
+            activeCallInRoom: activeCallInRoom // Save this too
+        };
+        
+        localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+        localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+        console.log('✅ Chat state saved:', messages.length, 'messages, button state:', callButtonState);
     } catch (e) {
-      console.warn('⚠️ Failed to save chat state:', e);
+        console.warn('⚠️ Failed to save chat state:', e);
     }
-  }
+}
   
   function loadChatState() {
     try {
@@ -935,12 +950,20 @@ function checkForBackgroundCall() {
     }
   }
   
-  function clearChatState() {
+function clearChatState(force = false) {
+    // Only clear if room is actually expiring/ended, or if forced
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    
+    if (!force && activeCallStr) {
+        console.log('⚠️ Active call exists - preserving chat state');
+        return;
+    }
+    
     localStorage.removeItem(CHAT_STATE_KEY);
     localStorage.removeItem(CHAT_MESSAGES_KEY);
     localStorage.removeItem(CHAT_TIMESTAMP_KEY);
     console.log('🗑️ Chat state cleared');
-  }
+}
 
   function clearAllChatData() {
     // CRITICAL: Clear ALL chat-related data on entry
@@ -1408,8 +1431,7 @@ function updateCallButtonState(isActive, callData = null) {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
     
-    // 4. Clear chat state
-    clearChatState();
+    clearChatState(true);
     
     resolve(true);
     
@@ -1447,7 +1469,7 @@ function updateCallButtonState(isActive, callData = null) {
           socketInstance.emit('leave_room');
         }
         
-        clearChatState();
+        clearChatState(true);
         window.location.href = '/mood.html';
       } else {
         console.log('❌ User staying in chat');
@@ -1485,7 +1507,7 @@ function updateCallButtonState(isActive, callData = null) {
       console.error('❌ Room expired - redirecting');
       if (timerInterval) clearInterval(timerInterval);
       toast('Room has expired', 'warning');
-      clearChatState();
+      clearChatState(true);
       setTimeout(() => window.location.href = '/mood.html', 2000);
     }
   };
@@ -1644,28 +1666,75 @@ socketInstance.on('room_joined', (data) => {
     console.error('❌ No expiresAt in room_joined data!');
   }
   
-  // Handle chat history
-  if (data.chatHistory?.length > 0) {
-    console.log(`📜 Loading ${data.chatHistory.length} messages`);
+// Try to restore cached state first
+const cachedState = loadChatState();
+const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
+
+if (returningFromCall && cachedState && cachedState.roomId === roomData.roomId) {
+    console.log(`📦 Restoring cached chat state: ${cachedState.messages.length} messages`);
+    
+    // Restore messages from cache
+    messagesCache = cachedState.messages || [];
+    
+    messagesCache.forEach(msg => {
+        const isCurrentUser = msg.userId === currentUser.userId;
+        const msgEl = createMessageElement(msg, isCurrentUser);
+        messagesList?.appendChild(msgEl);
+    });
+    
+    if (messagesList) {
+        messagesList.scrollTop = messagesList.scrollHeight;
+    }
+    
+    console.log('✅ Chat state restored from cache');
+    
+    // Clear the flag after restoring
+    sessionStorage.removeItem('returningFromCall');
+    
+} else if (data.chatHistory?.length > 0) {
+    // No cache or fresh join - load from server
+    console.log(`📜 Loading ${data.chatHistory.length} messages from server`);
     
     const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
     
     data.chatHistory.forEach(msg => {
-      const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-      if (existingIds.has(msgId)) return;
-      
-      const isCurrentUser = msg.userId === currentUser.userId;
-      const msgEl = createMessageElement(msg, isCurrentUser);
-      messagesList?.appendChild(msgEl);
-      messagesCache.push(msg);
+        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+        if (existingIds.has(msgId)) return;
+        
+        const isCurrentUser = msg.userId === currentUser.userId;
+        const msgEl = createMessageElement(msg, isCurrentUser);
+        messagesList?.appendChild(msgEl);
+        messagesCache.push(msg);
     });
     
     if (messagesList) {
-      messagesList.scrollTop = messagesList.scrollHeight;
+        messagesList.scrollTop = messagesList.scrollHeight;
     }
     
     saveChatState(roomData.roomId, messagesCache);
-  }
+}
+
+
+if (returningFromCall && cachedState) {
+    console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
+    
+    // Restore activeCallInRoom if it was cached
+    if (cachedState.activeCallInRoom) {
+        activeCallInRoom = cachedState.activeCallInRoom;
+        console.log('💾 Restored activeCallInRoom:', activeCallInRoom);
+    }
+    
+    // Update button state immediately based on cache
+    if (cachedState.callButtonState === 'back') {
+        updateCallButtonState(true, { participantCount: 1 }); // Will show "Back to Call"
+    } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
+        updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
+    } else {
+        updateCallButtonState(false); // Will show audio/video buttons
+    }
+    
+    console.log('✅ Call button state restored instantly');
+}
   
   // Handle active call state (for call buttons)
   if (data.activeCall) {
@@ -1772,7 +1841,7 @@ socketInstance.on('room_expired', (data) => {
   toast(data.message || 'Room has expired', 'warning');
   
   // Clear all storage
-  clearChatState();
+  clearChatState(true);
   localStorage.removeItem(ACTIVE_CALL_KEY);
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
@@ -1811,7 +1880,7 @@ socketInstance.on('room_expired', (data) => {
   sessionStorage.removeItem('hasBackgroundCall');
   
   toast('Room has expired', 'warning');
-  clearChatState();
+  clearChatState(true);
   setTimeout(() => window.location.href = '/mood.html', 2000);
 });
 
@@ -1861,7 +1930,7 @@ socketInstance.on('error', (data) => {
     toast('Room no longer available', 'error');
     
     // Clear all storage
-    clearChatState();
+    clearChatState(true);
     localStorage.removeItem(ACTIVE_CALL_KEY);
     sessionStorage.removeItem('hasBackgroundCall');
     sessionStorage.removeItem('returningFromCall');
@@ -1904,7 +1973,7 @@ socketInstance.on('error', (data) => {
 
       if (data.remainingUsers <= 1) {
         toast('Room closing...', 'warning');
-        clearChatState();
+        clearChatState(true);
         setTimeout(() => window.location.href = '/mood.html', 2000);
       }
     });
@@ -2475,7 +2544,7 @@ leaveBtn?.addEventListener('click', async () => {
   }
   
   // 4. Clear chat state
-  clearChatState();
+  clearChatState(true);
   
   // 5. Navigate - this will handle both iframe and standalone cases
   console.log('✅ Cleanup complete - initiating navigation');
@@ -2534,21 +2603,21 @@ window.addEventListener('beforeunload', (e) => {
   // INITIALIZATION
   // ============================================
   
-  try {
-  
-  
+try {
+    // Check if we're returning from a call
+    const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
     const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
-  
-  if (!isBackgroundCall) {
-    clearAllChatData();
-  } else {
-    console.log('🎈 Background call mode detected - preserving call state');
-    // Clear only the background call flag
-    sessionStorage.removeItem('backgroundCallMode');
-  }
-  
-    // CRITICAL: Clear all chat state on entry
-    clearAllChatData();
+    
+    console.log('🔍 Page load context:', { returningFromCall, isBackgroundCall });
+    
+    if (!returningFromCall && !isBackgroundCall) {
+        // Only clear if this is a fresh entry to chat (not returning from call)
+        console.log('🧹 Fresh chat entry - clearing old state');
+        clearAllChatData();
+    } else {
+        console.log('🔄 Returning from call - preserving chat state');
+        // Don't clear - we want to restore the previous state
+    }
     
     // Auth check
     await _Auth.requireAuth();
@@ -2597,7 +2666,7 @@ if (returningFromCall === 'true') {
   } catch (err) {
     console.error('❌ Invalid room data:', err);
     toast('Invalid room data', 'error');
-    clearChatState();
+    clearChatState(true);
     setTimeout(() => window.location.href = '/mood.html', 1500);
     return;
   }
