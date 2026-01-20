@@ -1670,9 +1670,19 @@ socketInstance.on('room_joined', (data) => {
   // Handle active call state (for call buttons)
   if (data.activeCall) {
     console.log('📞 Active call in room detected');
+    
+    // CRITICAL FIX: Store activeCallInRoom so Join button has data
+    activeCallInRoom = {
+      callId: data.activeCall.callId,
+      callType: data.activeCall.callType,
+      participantCount: data.activeCall.participantCount
+    };
+    console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
+    
     updateCallButtonState(true, data.activeCall);
   } else {
     console.log('📞 No active call in room');
+    activeCallInRoom = null;
     updateCallButtonState(false);
   }
   
