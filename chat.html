@@ -2252,23 +2252,24 @@ if (acceptCallBtn) {
       
       // Add loading state
       acceptCallBtn.classList.add('join-btn-loading');
+      acceptCallBtn.disabled = true;
       
       // Save chat state
       saveChatState(roomData.roomId, messagesCache);
       sessionStorage.setItem('returningFromCall', 'true');
       
-      // Store call data (same as JOIN button)
+      // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
       localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
         callId: callToAccept.callId,
         roomId: roomData.roomId,
         callType: callToAccept.callType,
         users: []
       }));
+      console.log('💾 Stored call data to localStorage (pre-join)');
       
-      console.log('📤 Emitting join_existing_call (same as JOIN button)');
+      console.log('📤 Emitting join_existing_call to server');
       
-      // CRITICAL: Use join_existing_call instead of navigating directly
-      // This ensures server adds us to participants list first
+      // Use join_existing_call to ensure server adds us to participants list first
       socketInstance?.emit('join_existing_call', {
         callId: callToAccept.callId,
         roomId: roomData.roomId
@@ -2278,7 +2279,6 @@ if (acceptCallBtn) {
       console.log('✅ ========================================\n');
       
       // Don't navigate here - wait for join_existing_call_success event
-      // which is already handled above
     }
   }, { passive: true });
 }
