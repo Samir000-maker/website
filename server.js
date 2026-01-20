@@ -1957,7 +1957,7 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     console.log(`   CallID: ${callId}`);
     console.log(`   RoomID: ${roomId}`);
 
-    // CRITICAL FIX: Use mutex to prevent race conditions
+    // CRITICAL FIX: Use mutex to prevent race conditions and ensure atomic state changes
     await withCallMutex(callId, async () => {
       const call = activeCalls.get(callId);
       
@@ -2017,14 +2017,15 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
       }
 
       console.log(`✅ User ${user.username} authorized to join call ${callId}`);
+      console.log(`📊 Current participants BEFORE add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
 
       // CRITICAL FIX: Add user to participants if not already present
-      // This is the key fix - we ADD them here, not require them to already be there
+      // This is the key fix - we ADD them here atomically within the mutex
       if (!call.participants.includes(user.userId)) {
         call.participants.push(user.userId);
         userCalls.set(user.userId, callId);
-        console.log(`➕ Added ${user.username} to call participants`);
-        console.log(`📊 Call now has ${call.participants.length} participant(s): [${call.participants.join(', ')}]`);
+        console.log(`➕ Added ${user.username} to call participants (within mutex)`);
+        console.log(`📊 Current participants AFTER add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
       } else {
         console.log(`ℹ️ User ${user.username} already in call participants (re-joining)`);
       }
@@ -2048,6 +2049,20 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         console.log(`⏱️ Cleared grace period for call ${callId} (new participant joined)`);
       }
 
+      console.log('🔗 ========================================');
+      console.log('🔗 JOIN REQUEST COMPLETE (within mutex)');
+      console.log('🔗 ========================================');
+      console.log(`   ${user.username} is NOW in participants list`);
+      console.log(`   Total participants: ${call.participants.length}`);
+      console.log(`   Participants: [${call.participants.join(', ')}]`);
+      console.log(`   User will receive success event and navigate to call page`);
+      console.log('🔗 ========================================\n');
+    }); // CRITICAL: Mutex releases HERE - state is now consistent
+
+    // CRITICAL FIX: Emit success and broadcast AFTER mutex completes
+    // This ensures all subsequent operations see the updated participants list
+    const call = activeCalls.get(callId);
+    if (call && call.participants.includes(user.userId)) {
       // Send success response with call data
       socket.emit('join_existing_call_success', {
         callId,
@@ -2055,8 +2070,9 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         roomId: call.roomId
       });
 
-      console.log(`✅ Sent join_existing_call_success to ${user.username}`);
-      console.log(`   User will now navigate to call.html`);
+      console.log(`✅ Sent join_existing_call_success to ${user.username} (after mutex release)`);
+      console.log(`   User will now navigate to call page and emit join_call`);
+      console.log(`   join_call will now see ${user.username} in participants list`);
       
       // Broadcast updated call state to room
       io.to(roomId).emit('call_state_update', {
@@ -2066,15 +2082,13 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         callType: call.callType
       });
       console.log(`📢 Broadcasted call_state_update to room: ${call.participants.length} participant(s)`);
-
-      console.log('🔗 ========================================');
-      console.log('🔗 JOIN REQUEST COMPLETE');
-      console.log('🔗 ========================================');
-      console.log(`   ${user.username} added to participants list`);
-      console.log(`   Total participants: ${call.participants.length}`);
-      console.log(`   User will join call room on call.html via join_call event`);
-      console.log('🔗 ========================================\n');
-    });
+    } else {
+      console.error(`❌ CRITICAL: User ${user.username} not in participants after mutex - this should never happen!`);
+      socket.emit('error', { 
+        message: 'Failed to add you to the call',
+        code: 'JOIN_FAILED'
+      });
+    }
 
   } catch (error) {
     console.error('❌ Join existing call error:', error);
