@@ -2681,23 +2681,28 @@ socketInstance.on('user_left_call', (data) => {
 });
 
 socketInstance.on('video_state_changed', (data) => {
-  console.log(`📹 [SOCKET] Received video_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
+  console.log(`📹 ========================================`);
+  console.log(`📹 RECEIVED: video_state_changed`);
+  console.log(`📹 ========================================`);
+  console.log(`   From userId: ${data.userId}`);
+  console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
+  console.log(`   My userId: ${currentUser.userId}`);
   
-  // CRITICAL FIX: Update visibility for BOTH self and remote users
+  // ✅ FIX: Sanity check - should NEVER receive own state back (server excludes sender)
   if (data.userId === currentUser.userId) {
-    console.log(`📹 Confirming our own video state from server: ${data.enabled}`);
-    // Server confirms our state - update UI if out of sync
-    if (isVideoEnabled !== data.enabled) {
-      console.warn(`⚠️ Local state (${isVideoEnabled}) out of sync with server (${data.enabled}), correcting...`);
-      isVideoEnabled = data.enabled;
-      updateVideoButton();
-    }
-    updateVideoVisibility(currentUser.userId, data.enabled, true);
-  } else {
-    // For remote users, update visibility
-    console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
-    updateVideoVisibility(data.userId, data.enabled, true);
+    console.error(`❌ CRITICAL: Received own video state from server!`);
+    console.error(`   This should not happen - server should exclude sender`);
+    console.error(`   Ignoring to prevent state desync`);
+    console.log(`📹 ========================================\n`);
+    return;
   }
+  
+  // Update remote user's video visibility
+  console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
+  updateVideoVisibility(data.userId, data.enabled, true);
+  
+  console.log(`✅ Remote video state updated successfully`);
+  console.log(`📹 ========================================\n`);
 });
           
           socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
