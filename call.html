@@ -1302,126 +1302,238 @@ function createPC(userId) {
   let lastCandidateEmit = 0;
   const CANDIDATE_EMIT_THROTTLE = 50; // 50ms between emits
   
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      const stats = connectionStats.get(userId);
-      if (stats) {
-        stats.candidatesSent++;
-        stats.lastIceCandidateTime = Date.now();
-      }
-      
-      const candidateType = e.candidate.type || 'unknown';
-      const candidateProtocol = e.candidate.protocol || 'unknown';
-      
-      console.log(`🧊 [ICE] Generated ${candidateType} candidate for ${userId} (protocol: ${candidateProtocol})`);
-      
-      // Throttle candidate emissions
-      const now = Date.now();
-      if (now - lastCandidateEmit < CANDIDATE_EMIT_THROTTLE) {
-        setTimeout(() => {
-          socketInstance.emit('ice_candidate', { 
-            callId: callData.callId, 
-            targetUserId: userId, 
-            candidate: e.candidate 
-          });
-          console.log(`📤 [ICE] Sent throttled candidate #${stats.candidatesSent} to ${userId}`);
-        }, CANDIDATE_EMIT_THROTTLE);
-      } else {
-        socketInstance.emit('ice_candidate', { 
-          callId: callData.callId, 
-          targetUserId: userId, 
-          candidate: e.candidate 
-        });
-        console.log(`📤 [ICE] Sent candidate #${stats.candidatesSent} to ${userId}`);
-      }
-      lastCandidateEmit = now;
-      
-    } else {
-      console.log(`🧊 [ICE] End of candidates for ${userId}`);
+  let hostCandidatesSent = 0;
+let srflxCandidatesSent = 0;
+const relayCandidateQueue = [];
+
+pc.onicecandidate = (e) => {
+  if (e.candidate) {
+    const stats = connectionStats.get(userId);
+    if (stats) {
+      stats.candidatesSent++;
+      stats.lastIceCandidateTime = Date.now();
+    }
+    
+    const candidateType = e.candidate.type || 'unknown';
+    const candidateProtocol = e.candidate.protocol || 'unknown';
+    
+    console.log(`🧊 [ICE] Generated ${candidateType} candidate for ${userId} (protocol: ${candidateProtocol})`);
+    
+    // ✅ PRIORITY LOGIC: Send host/srflx immediately, queue relay
+    if (candidateType === 'host') {
+      hostCandidatesSent++;
+      console.log(`📤 [ICE] Sending host candidate immediately (#${hostCandidatesSent})`);
       socketInstance.emit('ice_candidate', { 
         callId: callData.callId, 
         targetUserId: userId, 
-        candidate: null 
+        candidate: e.candidate 
+      });
+    } else if (candidateType === 'srflx') {
+      srflxCandidatesSent++;
+      console.log(`📤 [ICE] Sending STUN srflx candidate immediately (#${srflxCandidatesSent})`);
+      socketInstance.emit('ice_candidate', { 
+        callId: callData.callId, 
+        targetUserId: userId, 
+        candidate: e.candidate 
+      });
+    } else if (candidateType === 'relay') {
+      console.log(`⏸️ [ICE] Queueing TURN relay candidate (will send after 2s delay)`);
+      relayCandidateQueue.push(e.candidate);
+      
+      // ✅ Delay relay candidates by 2 seconds to allow STUN to succeed first
+      setTimeout(() => {
+        const queuedCandidate = relayCandidateQueue.shift();
+        if (queuedCandidate) {
+          const currentState = pc.iceConnectionState;
+          
+          // Only send relay if NOT already connected via STUN
+          if (currentState !== 'connected' && currentState !== 'completed') {
+            console.log(`📤 [ICE] Sending delayed TURN relay candidate (state: ${currentState})`);
+            socketInstance.emit('ice_candidate', { 
+              callId: callData.callId, 
+              targetUserId: userId, 
+              candidate: queuedCandidate 
+            });
+          } else {
+            console.log(`✅ [ICE] Skipping relay candidate - already connected via ${currentState}`);
+          }
+        }
+      }, 2000);
+    } else {
+      // Unknown type - send anyway but log
+      console.warn(`⚠️ [ICE] Unknown candidate type: ${candidateType}, sending anyway`);
+      socketInstance.emit('ice_candidate', { 
+        callId: callData.callId, 
+        targetUserId: userId, 
+        candidate: e.candidate 
       });
     }
-  };
+    
+  } else {
+    console.log(`🧊 [ICE] End of candidates for ${userId}`);
+    console.log(`📊 [ICE] Final tally - host: ${hostCandidatesSent}, srflx: ${srflxCandidatesSent}, relay queued: ${relayCandidateQueue.length}`);
+    socketInstance.emit('ice_candidate', { 
+      callId: callData.callId, 
+      targetUserId: userId, 
+      candidate: null 
+    });
+  }
+};
   
-  // ICE connection state monitoring
-  pc.oniceconnectionstatechange = () => {
-    const state = pc.iceConnectionState;
-    const stats = connectionStats.get(userId);
-    if (stats) stats.iceState = state;
+pc.oniceconnectionstatechange = () => {
+  const state = pc.iceConnectionState;
+  const stats = connectionStats.get(userId);
+  if (stats) stats.iceState = state;
+  
+  console.log(`🧊 [ICE] Connection state for ${userId}: ${state}`);
+  
+  if (state === 'connected' || state === 'completed') {
+    console.log(`✅ [ICE] Connected to ${userId}`);
     
-    console.log(`🧊 [ICE] Connection state for ${userId}: ${state}`);
-    
-    if (state === 'connected' || state === 'completed') {
-      console.log(`✅ [ICE] Connected to ${userId}`);
+    // ✅ IMMEDIATE candidate pair analysis
+    pc.getStats().then(statsReport => {
+      let selectedPairType = 'unknown';
+      let selectedLocal = null;
+      let selectedRemote = null;
       
-      // Get selected candidate pair for debugging
-      pc.getStats().then(stats => {
-        stats.forEach(report => {
-          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-            console.log(`   Selected pair: ${report.id}`);
-            const local = stats.get(report.localCandidateId);
-            const remote = stats.get(report.remoteCandidateId);
-            if (local && remote) {
-              console.log(`   Local: ${local.candidateType} ${local.protocol} ${local.address}:${local.port}`);
-              console.log(`   Remote: ${remote.candidateType} ${remote.protocol} ${remote.address}:${remote.port}`);
+      statsReport.forEach(report => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          const localCandidate = statsReport.get(report.localCandidateId);
+          const remoteCandidate = statsReport.get(report.remoteCandidateId);
+          
+          if (localCandidate && remoteCandidate) {
+            selectedLocal = localCandidate;
+            selectedRemote = remoteCandidate;
+            
+            // Determine connection type based on candidates
+            if (localCandidate.candidateType === 'relay' || remoteCandidate.candidateType === 'relay') {
+              selectedPairType = 'TURN_RELAY';
+              console.warn(`⚠️ [ICE] Connection using TURN RELAY (bandwidth cost incurred)`);
+            } else if (localCandidate.candidateType === 'srflx' || remoteCandidate.candidateType === 'srflx') {
+              selectedPairType = 'STUN_REFLEXIVE';
+              console.log(`✅ [ICE] Connection using STUN (server-reflexive) - optimal`);
+            } else if (localCandidate.candidateType === 'host') {
+              selectedPairType = 'DIRECT_HOST';
+              console.log(`✅ [ICE] Connection using direct HOST (LAN/same network)`);
             }
+            
+            console.log(`📊 [ICE] Selected pair details:`);
+            console.log(`   Local:  ${localCandidate.candidateType} ${localCandidate.protocol} ${localCandidate.address}:${localCandidate.port}`);
+            console.log(`   Remote: ${remoteCandidate.candidateType} ${remoteCandidate.protocol} ${remoteCandidate.address}:${remoteCandidate.port}`);
+            console.log(`   Priority: local=${localCandidate.priority}, remote=${remoteCandidate.priority}`);
+            
+            // ✅ Store for metrics
+            if (stats) {
+              stats.connectionType = selectedPairType;
+              stats.localCandidateType = localCandidate.candidateType;
+              stats.remoteCandidateType = remoteCandidate.candidateType;
+            }
+            
+            // ✅ Report to server for analytics
+            socketInstance.emit('connection_established', {
+              callId: callData.callId,
+              connectionType: selectedPairType,
+              localType: localCandidate.candidateType,
+              remoteType: remoteCandidate.candidateType,
+              protocol: localCandidate.protocol
+            });
           }
-        });
+        }
       });
       
-    } else if (state === 'failed') {
-      console.error(`❌ [ICE] Connection failed for ${userId}`);
-      
-      // Attempt ICE restart
-      if (stats && stats.iceRestartCount < 2) {
-        stats.iceRestartCount++;
-        console.log(`🔄 Attempting ICE restart for ${userId} (attempt ${stats.iceRestartCount})`);
-        
-        setTimeout(() => {
-          if (pc.connectionState !== 'closed') {
-            createOffer(userId);
-          }
-        }, 1000);
+      if (selectedPairType === 'TURN_RELAY') {
+        console.error(`❌ [DIAGNOSTIC] TURN used when STUN may have worked - investigate:`);
+        console.error(`   1. Check if STUN servers are reachable`);
+        console.error(`   2. Verify NAT type (symmetric NAT requires TURN)`);
+        console.error(`   3. Check if relay candidates sent too early`);
       }
-    } else if (state === 'disconnected') {
-      console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
-    } else if (state === 'closed') {
-      console.log(`🔒 [ICE] Connection closed for ${userId}`);
+    });
+    
+  } else if (state === 'failed') {
+    console.error(`❌ [ICE] Connection failed for ${userId}`);
+    
+    // Attempt ICE restart
+    if (stats && stats.iceRestartCount < 2) {
+      stats.iceRestartCount++;
+      console.log(`🔄 Attempting ICE restart for ${userId} (attempt ${stats.iceRestartCount})`);
+      
+      setTimeout(() => {
+        if (pc.connectionState !== 'closed') {
+          createOffer(userId);
+        }
+      }, 1000);
     }
-  };
+  } else if (state === 'checking') {
+    console.log(`🔍 [ICE] Checking connectivity for ${userId}...`);
+    
+    // ✅ Log which candidates are being checked
+    pc.getStats().then(statsReport => {
+      const checkingPairs = [];
+      statsReport.forEach(report => {
+        if (report.type === 'candidate-pair' && report.state === 'in-progress') {
+          const localCand = statsReport.get(report.localCandidateId);
+          if (localCand) {
+            checkingPairs.push(`${localCand.candidateType}/${localCand.protocol}`);
+          }
+        }
+      });
+      if (checkingPairs.length > 0) {
+        console.log(`   Checking pairs: ${checkingPairs.join(', ')}`);
+      }
+    });
+  }
+};
   
-  // Connection state monitoring
-  pc.onconnectionstatechange = () => {
-    const state = pc.connectionState;
-    const stats = connectionStats.get(userId);
-    if (stats) stats.connectionState = state;
+pc.onconnectionstatechange = () => {
+  const state = pc.connectionState;
+  const stats = connectionStats.get(userId);
+  if (stats) stats.connectionState = state;
+  
+  console.log(`🔌 [PC] Connection state for ${userId}: ${state}`);
+  
+  if (state === 'connected') {
+    console.log(`✅ [PC] Peer connection established with ${userId}`);
     
-    console.log(`🔌 [PC] Connection state for ${userId}: ${state}`);
+    socketInstance.emit('connection_state_update', {
+      callId: callData.callId,
+      state: 'connected',
+      userId: userId
+    });
     
-    if (state === 'connected') {
-      console.log(`✅ [PC] Peer connection established with ${userId}`);
+  } else if (state === 'failed') {
+    console.error(`❌ [PC] Connection failed with ${userId}`);
+    
+    // ✅ Detailed failure diagnostics
+    pc.getStats().then(statsReport => {
+      console.error(`📊 [DIAGNOSTIC] Connection failure stats:`);
       
-      // Emit connection state update
-      socketInstance.emit('connection_state_update', {
-        callId: callData.callId,
-        state: 'connected'
+      let hadRelayCandidates = false;
+      let hadSrflxCandidates = false;
+      
+      statsReport.forEach(report => {
+        if (report.type === 'local-candidate') {
+          if (report.candidateType === 'relay') hadRelayCandidates = true;
+          if (report.candidateType === 'srflx') hadSrflxCandidates = true;
+        }
       });
       
-    } else if (state === 'failed') {
-      console.error(`❌ [PC] Connection failed with ${userId}`);
+      console.error(`   STUN candidates generated: ${hadSrflxCandidates ? 'YES' : 'NO'}`);
+      console.error(`   TURN candidates generated: ${hadRelayCandidates ? 'YES' : 'NO'}`);
       
-      socketInstance.emit('connection_state_update', {
-        callId: callData.callId,
-        state: 'failed'
-      });
-      
-    } else if (state === 'disconnected') {
-      console.warn(`⚠️ [PC] Disconnected from ${userId}`);
-    }
-  };
+      if (!hadSrflxCandidates && !hadRelayCandidates) {
+        console.error(`   ❌ NO reflexive or relay candidates - ICE servers unreachable`);
+      } else if (!hadSrflxCandidates && hadRelayCandidates) {
+        console.error(`   ❌ STUN failed but TURN available - likely symmetric NAT`);
+      }
+    });
+    
+    socketInstance.emit('connection_state_update', {
+      callId: callData.callId,
+      state: 'failed',
+      userId: userId
+    });
+  }
+};
   
   monitorConnectionQuality(userId, pc);
   
