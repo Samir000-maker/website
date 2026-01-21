@@ -1,311 +1,376 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="dark" lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Sign Up - Mood Tracker</title>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - MoodEmoji</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
-    <link rel="stylesheet" href="global.css">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#2dd4bf", // Teal 400
+                        secondary: "#0f766e", // Teal 700
+                        dark: {
+                            900: "#020617", // Slate 950
+                            800: "#0f172a", // Slate 900
+                            700: "#1e293b", // Slate 800
+                        }
+                    },
+                    fontFamily: {
+                        display: ["Manrope", "sans-serif"]
+                    },
+                    boxShadow: {
+                        'glow': '0 0 40px -10px rgba(45, 212, 191, 0.3)',
+                        'glass': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        'input-focus': '0 0 0 4px rgba(45, 212, 191, 0.1)',
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'shimmer': 'shimmer 1s infinite',
+                    },
+                    keyframes: {
+                        shimmer: {
+                            '0%': { transform: 'translateX(-100%)' },
+                            '100%': { transform: 'translateX(100%)' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .glass-card {
+                @apply bg-slate-900/40 backdrop-blur-2xl border border-white/10;
+            }
+            .glass-input {
+                @apply bg-slate-950/50 border border-white/10 focus:border-primary/50 placeholder-slate-500 text-slate-100;
+            }
+            .text-glow {
+                text-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
+            }
+        }
+    </style>
 </head>
-<body class="bg-background-light min-h-screen flex flex-col">
-    <header class="w-full px-6 py-5 md:px-12 flex justify-between items-center">
-        <a href="/" class="flex items-center gap-2 group">
-            <span class="text-xl font-bold tracking-tight text-gray-900">🌱 Mood Tracker</span>
-        </a>
-        <a href="/login.html" class="text-sm font-medium text-gray-600 hover:text-primary transition-colors">
-            Login
-        </a>
+<body class="bg-dark-900 font-display min-h-screen flex flex-col text-slate-200 selection:bg-teal-500/30 overflow-x-hidden relative">
+    <!-- Animated Background -->
+    <div class="fixed inset-0 pointer-events-none -z-10">
+        <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#050b1a] to-black"></div>
+        <div class="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] bg-teal-500/10 rounded-full blur-[120px] mix-blend-screen animate-pulse-slow"></div>
+        <div class="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px] mix-blend-screen"></div>
+        <div class="absolute top-[40%] left-[20%] w-[300px] h-[300px] bg-purple-500/5 rounded-full blur-[80px] mix-blend-screen"></div>
+    </div>
+
+    <!-- Header -->
+    <header class="w-full border-b border-white/5 bg-[#020617]/70 backdrop-blur-md sticky top-0 z-50 transition-all duration-300">
+        <div class="max-w-[1200px] mx-auto px-6 h-20 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-3 hover:opacity-90 transition-opacity group">
+                <div class="size-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 text-primary shadow-lg shadow-teal-900/20 group-hover:shadow-teal-500/20 transition-all duration-300">
+                    <span class="material-symbols-outlined text-[26px]">mood</span>
+                </div>
+                <h2 class="text-xl font-bold tracking-tight text-white group-hover:text-primary transition-colors">MoodEmoji</h2>
+            </a>
+            <nav class="hidden md:flex items-center gap-8">
+                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">Home</a>
+                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">About</a>
+                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">Features</a>
+            </nav>
+            <div class="flex items-center gap-4">
+                <a href="/login.html" class="text-sm font-semibold text-slate-300 hover:text-white transition-colors hidden sm:block">Login</a>
+                <button class="sm:hidden text-white"><span class="material-symbols-outlined">menu</span></button>
+            </div>
+        </div>
     </header>
 
-    <main class="flex-grow flex items-center justify-center p-4">
-        <div class="w-full max-w-[440px] bg-white rounded-xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.06)] p-8 md:p-10 animate-fade-in-up">
-            <div class="text-center mb-8">
-                <div class="inline-flex items-center justify-center text-4xl mb-4">🌱</div>
-                <h1 class="text-2xl font-bold text-gray-900 mb-2">Create your account</h1>
-                <p class="text-gray-500 text-sm">Join us to start tracking your emotional well-being</p>
+    <!-- Main Content -->
+    <main class="flex-grow flex items-center justify-center p-6 relative w-full">
+        <div class="w-full max-w-[440px]">
+            <!-- Signup Card -->
+            <div class="glass-card rounded-2xl p-8 md:p-10 relative overflow-hidden shadow-glass group hover:border-white/20 transition-all duration-500">
+                <!-- Card Glow Effect -->
+                <div class="absolute -top-20 -right-20 w-64 h-64 bg-teal-500/10 rounded-full blur-[60px] pointer-events-none group-hover:bg-teal-400/20 transition-colors duration-700"></div>
+                
+                <!-- Header -->
+                <div class="mb-10 text-center relative z-10">
+                    <div class="inline-flex items-center justify-center size-14 rounded-full bg-gradient-to-b from-white/5 to-transparent border border-white/10 text-primary mb-6 shadow-[0_0_15px_rgba(45,212,191,0.15)] group-hover:scale-110 transition-transform duration-300">
+                        <span class="material-symbols-outlined text-[26px]">person_add</span>
+                    </div>
+                    <h1 class="text-3xl font-bold text-white mb-2 tracking-tight">Create Account</h1>
+                    <p class="text-slate-400 text-sm font-medium">Join us to start tracking your emotional well-being</p>
+                </div>
+
+                <!-- Form -->
+                <form id="signupForm" class="flex flex-col gap-5 relative z-10">
+                    <!-- Email Field -->
+                    <div class="space-y-1.5">
+                        <label for="email" class="text-xs font-bold text-slate-300 uppercase tracking-wider ml-1">Email</label>
+                        <div class="relative group/input">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within/input:text-primary transition-colors duration-300">
+                                <span class="material-symbols-outlined text-[20px]">mail</span>
+                            </div>
+                            <input 
+                                type="email" 
+                                id="email" 
+                                required
+                                class="w-full h-12 pl-11 pr-4 rounded-xl glass-input focus:bg-slate-900/80 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm"
+                                placeholder="you@example.com"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Password Field -->
+                    <div class="space-y-1.5">
+                        <label for="password" class="text-xs font-bold text-slate-300 uppercase tracking-wider ml-1">Password</label>
+                        <div class="relative group/input">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within/input:text-primary transition-colors duration-300">
+                                <span class="material-symbols-outlined text-[20px]">lock</span>
+                            </div>
+                            <input 
+                                type="password" 
+                                id="password" 
+                                required
+                                class="w-full h-12 pl-11 pr-4 rounded-xl glass-input focus:bg-slate-900/80 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm"
+                                placeholder="Min. 8 characters"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Confirm Password Field -->
+                    <div class="space-y-1.5">
+                        <label for="confirmPassword" class="text-xs font-bold text-slate-300 uppercase tracking-wider ml-1">Confirm Password</label>
+                        <div class="relative group/input">
+                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within/input:text-primary transition-colors duration-300">
+                                <span class="material-symbols-outlined text-[20px]">lock</span>
+                            </div>
+                            <input 
+                                type="password" 
+                                id="confirmPassword" 
+                                required
+                                class="w-full h-12 pl-11 pr-4 rounded-xl glass-input focus:bg-slate-900/80 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm"
+                                placeholder="Re-enter your password"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Terms Checkbox -->
+                    <div class="flex items-start gap-3">
+                        <input 
+                            type="checkbox" 
+                            id="terms" 
+                            required
+                            class="h-4 w-4 rounded border-white/20 bg-slate-950/50 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-2 mt-1"
+                        >
+                        <label for="terms" class="text-xs text-slate-400 leading-relaxed">
+                            I agree to the <a href="#" class="text-primary hover:text-teal-300 transition-colors">Terms of Service</a> and 
+                            <a href="#" class="text-primary hover:text-teal-300 transition-colors">Privacy Policy</a>
+                        </label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" class="mt-4 w-full h-12 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-teal-900/40 hover:shadow-teal-500/25 transform hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2 group/btn relative overflow-hidden">
+                        <div class="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover/btn:animate-shimmer pointer-events-none"></div>
+                        <span>Create Account</span>
+                        <span class="material-symbols-outlined text-[18px] group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
+                    </button>
+
+                    <!-- Divider -->
+                    <div class="relative flex py-2 items-center">
+                        <div class="flex-grow border-t border-white/10"></div>
+                        <span class="flex-shrink-0 mx-4 text-xs font-medium text-slate-500">Or continue with</span>
+                        <div class="flex-grow border-t border-white/10"></div>
+                    </div>
+
+                    <!-- Social Buttons -->
+                    <div class="grid grid-cols-2 gap-3">
+                        <button type="button" id="googleSignIn" class="h-11 flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200">
+                            <img alt="Google" class="size-5" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M23.766 12.2764C23.766 11.4607 23.6999 10.6406 23.5588 9.83807H12.24V14.4591H18.7217C18.4528 15.9494 17.5885 17.2678 16.323 18.1056V21.1039H20.19C22.4608 19.0139 23.766 15.9274 23.766 12.2764Z'/%3E%3Cpath fill='%2334A853' d='M12.24 24.0008C15.4765 24.0008 18.2059 22.9382 20.1945 21.1039L16.3275 18.1055C15.2517 18.8375 13.8627 19.252 12.2445 19.252C9.11388 19.252 6.45946 17.1399 5.50705 14.3003H1.5166V17.3912C3.55371 21.4434 7.7029 24.0008 12.24 24.0008Z'/%3E%3Cpath fill='%23FBBC05' d='M5.50253 14.3003C5.00236 12.8099 5.00236 11.1961 5.50253 9.70575V6.61481H1.5166C-0.18551 10.0056 -0.18551 14.0004 1.5166 17.3912L5.50253 14.3003Z'/%3E%3Cpath fill='%23EA4335' d='M12.24 4.74966C13.9509 4.7232 15.6044 5.36697 16.8434 6.54867L20.2695 3.12262C18.1001 1.0855 15.2208 -0.034466 12.24 0.000808666C7.7029 0.000808666 3.55371 2.55822 1.5166 6.61481L5.50253 9.70575C6.45064 6.86173 9.10947 4.74966 12.24 4.74966Z'/%3E%3C/svg%3E">
+                            <span class="text-sm font-semibold text-slate-200">Google</span>
+                        </button>
+                        <button type="button" class="h-11 flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200">
+                            <span class="material-symbols-outlined text-white text-[22px]">ios</span>
+                            <span class="text-sm font-semibold text-slate-200">Apple</span>
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Login Link -->
+                <div class="mt-8 text-center relative z-10">
+                    <p class="text-sm text-slate-400">
+                        Already have an account? 
+                        <a href="/login.html" class="font-bold text-white hover:text-primary transition-colors ml-1 inline-flex items-center gap-0.5 group/link">
+                            Log In
+                            <span class="material-symbols-outlined text-[16px] transition-transform group-hover/link:translate-x-0.5 text-primary">chevron_right</span>
+                        </a>
+                    </p>
+                </div>
             </div>
 
-            <form id="signupForm" class="space-y-5">
-                <div>
-                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Email</label>
-                    <input type="email" id="email" required
-                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
-                        placeholder="you@example.com">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Password</label>
-                    <input type="password" id="password" required
-                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
-                        placeholder="Min. 8 characters">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-semibold text-gray-700 mb-1.5">Confirm Password</label>
-                    <input type="password" id="confirmPassword" required
-                        class="form-input w-full h-12 px-4 rounded-lg border-gray-200 bg-gray-50 text-gray-900 focus:border-primary focus:ring-primary transition-colors"
-                        placeholder="Re-enter your password">
-                </div>
-
-                <div class="flex items-start gap-3">
-                    <input type="checkbox" id="terms" required
-                        class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary mt-1">
-                    <label for="terms" class="text-xs text-gray-500">
-                        I agree to the <a href="#" class="text-primary hover:underline">Terms of Service</a> and 
-                        <a href="#" class="text-primary hover:underline">Privacy Policy</a>
-                    </label>
-                </div>
-
-                <button type="submit" class="btn btn-primary w-full h-12 mt-6">
-                    Create Account
-                </button>
-            </form>
-
-            <div class="relative flex py-6 items-center">
-                <div class="flex-grow border-t border-gray-200"></div>
-                <span class="mx-4 text-xs font-medium text-gray-400 uppercase">Or continue with</span>
-                <div class="flex-grow border-t border-gray-200"></div>
-            </div>
-
-            <button id="googleSignIn" class="btn btn-secondary w-full h-12">
-                <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M23.766 12.2764C23.766 11.4607 23.6999 10.6406 23.5588 9.83807H12.24V14.4591H18.7217C18.4528 15.9494 17.5885 17.2678 16.323 18.1056V21.1039H20.19C22.4608 19.0139 23.766 15.9274 23.766 12.2764Z" fill="#4285F4"/>
-                    <path d="M12.24 24.0008C15.4765 24.0008 18.2059 22.9382 20.1945 21.1039L16.3275 18.1055C15.2517 18.8375 13.8627 19.252 12.2445 19.252C9.11388 19.252 6.45946 17.1399 5.50705 14.3003H1.5166V17.3912C3.55371 21.4434 7.7029 24.0008 12.24 24.0008Z" fill="#34A853"/>
-                    <path d="M5.50253 14.3003C5.00236 12.8099 5.00236 11.1961 5.50253 9.70575V6.61481H1.5166C-0.18551 10.0056 -0.18551 14.0004 1.5166 17.3912L5.50253 14.3003Z" fill="#FBBC05"/>
-                    <path d="M12.24 4.74966C13.9509 4.7232 15.6044 5.36697 16.8434 6.54867L20.2695 3.12262C18.1001 1.0855 15.2208 -0.034466 12.24 0.000808666C7.7029 0.000808666 3.55371 2.55822 1.5166 6.61481L5.50253 9.70575C6.45064 6.86173 9.10947 4.74966 12.24 4.74966Z" fill="#EA4335"/>
-                </svg>
-                Sign up with Google
-            </button>
-
-            <div class="mt-8 text-center text-sm text-gray-500">
-                Already have an account?
-                <a href="/login.html" class="font-bold text-primary hover:text-primary-dark transition-colors ml-1">Log In</a>
+            <!-- Footer Links -->
+            <div class="mt-8 flex justify-center gap-8 opacity-40 hover:opacity-100 transition-opacity duration-300">
+                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Privacy Policy</a>
+                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Terms of Service</a>
+                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Help Center</a>
             </div>
         </div>
     </main>
 
     <script src="app.js"></script>
 
-<script>
-    (function() {
-        const MoodApp = window.MoodApp || {};
-        const _Auth = MoodApp.Auth;
-        const _API = MoodApp.API;
-        const _Toast = MoodApp.Toast;
-        const _Loading = MoodApp.Loading;
-        const _PageTransition = MoodApp.PageTransition;
-        const _Validator = MoodApp.Validator;
+    <script>
+        (function() {
+            const MoodApp = window.MoodApp || {};
+            const _Auth = MoodApp.Auth;
+            const _API = MoodApp.API;
+            const _Toast = MoodApp.Toast;
+            const _Loading = MoodApp.Loading;
+            const _PageTransition = MoodApp.PageTransition;
+            const _Validator = MoodApp.Validator;
 
-        if (!MoodApp || Object.keys(MoodApp).length === 0) {
-            console.warn('Warning: window.MoodApp is not defined. Make sure app.js creates window.MoodApp before this script runs.');
-        }
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
-            authDomain: "projectt3-8c55e.firebaseapp.com",
-            projectId: "projectt3-8c55e",
-            storageBucket: "projectt3-8c55e.firebasestorage.app",
-            messagingSenderId: "64611387728",
-            appId: "1:64611387728:web:2e53a18151ab3de1b60455",
-            measurementId: "G-0Z91D0Q6EE"
-        };
-
-        try {
-            if (!firebase.apps?.length) {
-                firebase.initializeApp(firebaseConfig);
-            } else {
-                console.info('Firebase already initialized.');
+            if (!MoodApp || Object.keys(MoodApp).length === 0) {
+                console.warn('Warning: window.MoodApp is not defined. Make sure app.js creates window.MoodApp before this script runs.');
             }
-        } catch (error) {
-            console.error('Firebase init error:', error);
-        }
 
-        // Flag to prevent auto-redirect during Google sign-in flow
-        let isGoogleSignInInProgress = false;
+            const firebaseConfig = {
+                apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
+                authDomain: "projectt3-8c55e.firebaseapp.com",
+                projectId: "projectt3-8c55e",
+                storageBucket: "projectt3-8c55e.firebasestorage.app",
+                messagingSenderId: "64611387728",
+                appId: "1:64611387728:web:2e53a18151ab3de1b60455",
+                measurementId: "G-0Z91D0Q6EE"
+            };
 
-        // Check if user is already logged in
-        firebase.auth().onAuthStateChanged(async (user) => {
-            // Don't auto-redirect if Google sign-in is in progress
-            if (user && !isGoogleSignInInProgress) {
-                console.log('User already signed in, checking profile...');
-                
-                try {
-                    const idToken = await user.getIdToken();
-                    const apiBaseUrl = getApiBaseUrl();
-                    
-                    const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${idToken}`
-                        }
-                    });
-
-                    const checkData = await checkResponse.json();
-                    
-                    // Only redirect if user has completed profile
-                    if (checkData.exists && checkData.hasUsername) {
-                        console.log('User has profile, redirecting to mood...');
-                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                            _PageTransition.navigateTo('/mood.html');
-                        } else {
-                            window.location.href = '/mood.html';
-                        }
-                    } else {
-                        console.log('User profile incomplete, redirecting to username...');
-                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                            _PageTransition.navigateTo('/username.html');
-                        } else {
-                            window.location.href = '/username.html';
-                        }
-                    }
-                } catch (error) {
-                    console.error('Error checking profile:', error);
-                }
-            }
-        });
-
-        const toastError = (msg) => {
-            if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
-            else console.error('Toast.error:', msg);
-        };
-        const toastSuccess = (msg) => {
-            if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
-            else console.log('Toast.success:', msg);
-        };
-        const loadingShow = (msg) => {
-            if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
-        };
-        const loadingHide = () => {
-            if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
-        };
-
-        // Use API helper to get base URL
-        const getApiBaseUrl = () => {
-            if (_API && typeof _API.BASE_URL !== 'undefined') {
-                return _API.BASE_URL;
-            }
             try {
-                const { hostname, port } = window.location;
-                if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
-                    return 'http://localhost:3000';
+                if (!firebase.apps?.length) {
+                    firebase.initializeApp(firebaseConfig);
+                } else {
+                    console.info('Firebase already initialized.');
                 }
-            } catch {}
-            return window.location.origin;
-        };
+            } catch (error) {
+                console.error('Firebase init error:', error);
+            }
 
-        const signupForm = document.getElementById('signupForm');
-        const googleBtn = document.getElementById('googleSignIn');
+            let isGoogleSignInInProgress = false;
 
-        if (signupForm) {
-            signupForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-
-                const emailEl = document.getElementById('email');
-                const passwordEl = document.getElementById('password');
-                const confirmEl = document.getElementById('confirmPassword');
-
-                const email = emailEl ? emailEl.value.trim() : '';
-                const password = passwordEl ? passwordEl.value : '';
-                const confirmPassword = confirmEl ? confirmEl.value : '';
-
-                if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
-                    toastError('Validation helper unavailable. Cannot validate input.');
-                    return;
-                }
-                if (!_Validator.isValidEmail(email)) {
-                    toastError('Please enter a valid email address');
-                    return;
-                }
-                if (!_Validator.isValidPassword || !_Validator.isValidPassword(password)) {
-                    toastError('Password must be at least 8 characters');
-                    return;
-                }
-                if (password !== confirmPassword) {
-                    toastError('Passwords do not match');
-                    return;
-                }
-
-                loadingShow('Creating your account...');
-
-                try {
-                    const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-                    const idToken = await userCredential.user.getIdToken();
-
-                    if (_Auth && typeof _Auth.setAuth === 'function') {
-                        _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
-                    }
-
-                    loadingHide();
-                    toastSuccess('Account created successfully!');
-
-                    setTimeout(() => {
-                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                            _PageTransition.navigateTo('/username.html');
-                        } else {
-                            window.location.href = '/username.html';
-                        }
-                    }, 1000);
-                } catch (error) {
-                    loadingHide();
-                    console.error('Signup error:', error);
-                    toastError(error?.message || 'Failed to create account');
-                }
-            });
-        }
-
-        if (googleBtn) {
-            googleBtn.addEventListener('click', async () => {
-                isGoogleSignInInProgress = true; // Set flag to prevent auto-redirect
-                loadingShow('Signing in with Google...');
-
-                try {
-                    const provider = new firebase.auth.GoogleAuthProvider();
-                    const result = await firebase.auth().signInWithPopup(provider);
-                    const idToken = await result.user.getIdToken();
-
-                    // Check if user profile exists in backend
-                    const apiBaseUrl = getApiBaseUrl();
-                    const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${idToken}`
-                        }
-                    });
-
-                    const checkData = await checkResponse.json();
+            firebase.auth().onAuthStateChanged(async (user) => {
+                if (user && !isGoogleSignInInProgress) {
+                    console.log('User already signed in, checking profile...');
                     
-                    if (_Auth && typeof _Auth.setAuth === 'function') {
-                        _Auth.setAuth(idToken, {
-                            email: result.user.email,
-                            uid: result.user.uid,
-                            displayName: result.user.displayName,
-                            photoURL: result.user.photoURL
+                    try {
+                        const idToken = await user.getIdToken();
+                        const apiBaseUrl = getApiBaseUrl();
+                        
+                        const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${idToken}`
+                            }
                         });
-                    }
 
-                    loadingHide();
-                    isGoogleSignInInProgress = false; // Reset flag
-
-                    // If user profile exists (existing user), go to mood.html
-                    if (checkData.exists && checkData.hasUsername) {
-                        toastSuccess('Welcome back!');
-                        setTimeout(() => {
+                        const checkData = await checkResponse.json();
+                        
+                        if (checkData.exists && checkData.hasUsername) {
+                            console.log('User has profile, redirecting to mood...');
                             if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
                                 _PageTransition.navigateTo('/mood.html');
                             } else {
                                 window.location.href = '/mood.html';
                             }
-                        }, 1000);
-                    } 
-                    // New user - redirect to username page
-                    else {
-                        toastSuccess('Account created! Please set up your profile');
+                        } else {
+                            console.log('User profile incomplete, redirecting to username...');
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/username.html');
+                            } else {
+                                window.location.href = '/username.html';
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error checking profile:', error);
+                    }
+                }
+            });
+
+            const toastError = (msg) => {
+                if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
+                else console.error('Toast.error:', msg);
+            };
+            const toastSuccess = (msg) => {
+                if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
+                else console.log('Toast.success:', msg);
+            };
+            const loadingShow = (msg) => {
+                if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+            };
+            const loadingHide = () => {
+                if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+            };
+
+            const getApiBaseUrl = () => {
+                if (_API && typeof _API.BASE_URL !== 'undefined') {
+                    return _API.BASE_URL;
+                }
+                try {
+                    const { hostname, port } = window.location;
+                    if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
+                        return 'http://localhost:3000';
+                    }
+                } catch {}
+                return window.location.origin;
+            };
+
+            const signupForm = document.getElementById('signupForm');
+            const googleBtn = document.getElementById('googleSignIn');
+
+            if (signupForm) {
+                signupForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+
+                    const emailEl = document.getElementById('email');
+                    const passwordEl = document.getElementById('password');
+                    const confirmEl = document.getElementById('confirmPassword');
+
+                    const email = emailEl ? emailEl.value.trim() : '';
+                    const password = passwordEl ? passwordEl.value : '';
+                    const confirmPassword = confirmEl ? confirmEl.value : '';
+
+                    if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
+                        toastError('Validation helper unavailable. Cannot validate input.');
+                        return;
+                    }
+                    if (!_Validator.isValidEmail(email)) {
+                        toastError('Please enter a valid email address');
+                        return;
+                    }
+                    if (!_Validator.isValidPassword || !_Validator.isValidPassword(password)) {
+                        toastError('Password must be at least 8 characters');
+                        return;
+                    }
+                    if (password !== confirmPassword) {
+                        toastError('Passwords do not match');
+                        return;
+                    }
+
+                    loadingShow('Creating your account...');
+
+                    try {
+                        const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+                        const idToken = await userCredential.user.getIdToken();
+
+                        if (_Auth && typeof _Auth.setAuth === 'function') {
+                            _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
+                        }
+
+                        loadingHide();
+                        toastSuccess('Account created successfully!');
+
                         setTimeout(() => {
                             if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
                                 _PageTransition.navigateTo('/username.html');
@@ -313,16 +378,75 @@
                                 window.location.href = '/username.html';
                             }
                         }, 1000);
+                    } catch (error) {
+                        loadingHide();
+                        console.error('Signup error:', error);
+                        toastError(error?.message || 'Failed to create account');
                     }
-                } catch (error) {
-                    loadingHide();
-                    isGoogleSignInInProgress = false; // Reset flag on error
-                    console.error('Google sign in error:', error);
-                    toastError(error?.message || 'Failed to sign in with Google');
-                }
-            });
-        }
-    })();
-</script>
+                });
+            }
+
+            if (googleBtn) {
+                googleBtn.addEventListener('click', async () => {
+                    isGoogleSignInInProgress = true;
+                    loadingShow('Signing in with Google...');
+
+                    try {
+                        const provider = new firebase.auth.GoogleAuthProvider();
+                        const result = await firebase.auth().signInWithPopup(provider);
+                        const idToken = await result.user.getIdToken();
+
+                        const apiBaseUrl = getApiBaseUrl();
+                        const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${idToken}`
+                            }
+                        });
+
+                        const checkData = await checkResponse.json();
+                        
+                        if (_Auth && typeof _Auth.setAuth === 'function') {
+                            _Auth.setAuth(idToken, {
+                                email: result.user.email,
+                                uid: result.user.uid,
+                                displayName: result.user.displayName,
+                                photoURL: result.user.photoURL
+                            });
+                        }
+
+                        loadingHide();
+                        isGoogleSignInInProgress = false;
+
+                        if (checkData.exists && checkData.hasUsername) {
+                            toastSuccess('Welcome back!');
+                            setTimeout(() => {
+                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                    _PageTransition.navigateTo('/mood.html');
+                                } else {
+                                    window.location.href = '/mood.html';
+                                }
+                            }, 1000);
+                        } else {
+                            toastSuccess('Account created! Please set up your profile');
+                            setTimeout(() => {
+                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                    _PageTransition.navigateTo('/username.html');
+                                } else {
+                                    window.location.href = '/username.html';
+                                }
+                            }, 1000);
+                        }
+                    } catch (error) {
+                        loadingHide();
+                        isGoogleSignInInProgress = false;
+                        console.error('Google sign in error:', error);
+                        toastError(error?.message || 'Failed to sign in with Google');
+                    }
+                });
+            }
+        })();
+    </script>
 </body>
 </html>
