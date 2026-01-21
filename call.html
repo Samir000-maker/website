@@ -246,12 +246,20 @@ let isJoiningCall = false;
 let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
 let makingOffer = new Map();
         
-      let ICE_SERVERS = null;
-      async function fetchIceServers() {
+let ICE_SERVERS = null;
+let useTurnFallback = false; // Global flag for TURN fallback
+
+async function fetchIceServers() {
   try {
-    const response = await _API.get('/api/ice-servers');
+    // ✅ Request STUN-only by default, TURN only if fallback enabled
+    const endpoint = useTurnFallback 
+      ? '/api/ice-servers?includeTurn=true' 
+      : '/api/ice-servers';
     
-    // CRITICAL: Ensure STUN servers come FIRST for proper prioritization
+    console.log(`📡 Fetching ICE servers: ${useTurnFallback ? 'TURN fallback mode' : 'STUN-only mode'}`);
+    
+    const response = await _API.get(endpoint);
+    
     const stunServers = response.iceServers.filter(server => 
       server.urls.some(url => url.startsWith('stun:'))
     );
@@ -260,12 +268,18 @@ let makingOffer = new Map();
       server.urls.some(url => url.startsWith('turn:') || url.startsWith('turns:'))
     );
     
-    // Put STUN first, TURN second - ICE will prioritize in this order
-    ICE_SERVERS = [...stunServers, ...turnServers];
+    ICE_SERVERS = response.iceServers;
     
-    console.log(`✅ ICE servers loaded in priority order:`);
+    console.log(`✅ ICE servers loaded:`);
     console.log(`   - ${stunServers.length} STUN server group(s)`);
     console.log(`   - ${turnServers.length} TURN server group(s)`);
+    
+    if (turnServers.length === 0) {
+      console.log(`   💰 Zero TURN usage - pure peer-to-peer mode`);
+      console.log(`   📊 Cloudflare analytics should show 0 KB`);
+    } else {
+      console.warn(`   ⚠️ TURN enabled (fallback mode after connection failure)`);
+    }
     
     return ICE_SERVERS;
   } catch (error) {
@@ -274,6 +288,7 @@ let makingOffer = new Map();
     return ICE_SERVERS;
   }
 }
+
 
       const PEER_CONNECTION_CONFIG = { 
   iceCandidatePoolSize: 10,
@@ -1319,59 +1334,26 @@ pc.onicecandidate = (e) => {
     
     console.log(`🧊 [ICE] Generated ${candidateType} candidate for ${userId} (protocol: ${candidateProtocol})`);
     
-    // ✅ PRIORITY LOGIC: Send host/srflx immediately, queue relay
-    if (candidateType === 'host') {
-      hostCandidatesSent++;
-      console.log(`📤 [ICE] Sending host candidate immediately (#${hostCandidatesSent})`);
-      socketInstance.emit('ice_candidate', { 
-        callId: callData.callId, 
-        targetUserId: userId, 
-        candidate: e.candidate 
-      });
-    } else if (candidateType === 'srflx') {
-      srflxCandidatesSent++;
-      console.log(`📤 [ICE] Sending STUN srflx candidate immediately (#${srflxCandidatesSent})`);
-      socketInstance.emit('ice_candidate', { 
-        callId: callData.callId, 
-        targetUserId: userId, 
-        candidate: e.candidate 
-      });
-    } else if (candidateType === 'relay') {
-      console.log(`⏸️ [ICE] Queueing TURN relay candidate (will send after 2s delay)`);
-      relayCandidateQueue.push(e.candidate);
-      
-      // ✅ Delay relay candidates by 2 seconds to allow STUN to succeed first
-      setTimeout(() => {
-        const queuedCandidate = relayCandidateQueue.shift();
-        if (queuedCandidate) {
-          const currentState = pc.iceConnectionState;
-          
-          // Only send relay if NOT already connected via STUN
-          if (currentState !== 'connected' && currentState !== 'completed') {
-            console.log(`📤 [ICE] Sending delayed TURN relay candidate (state: ${currentState})`);
-            socketInstance.emit('ice_candidate', { 
-              callId: callData.callId, 
-              targetUserId: userId, 
-              candidate: queuedCandidate 
-            });
-          } else {
-            console.log(`✅ [ICE] Skipping relay candidate - already connected via ${currentState}`);
-          }
-        }
-      }, 2000);
-    } else {
-      // Unknown type - send anyway but log
-      console.warn(`⚠️ [ICE] Unknown candidate type: ${candidateType}, sending anyway`);
-      socketInstance.emit('ice_candidate', { 
-        callId: callData.callId, 
-        targetUserId: userId, 
-        candidate: e.candidate 
-      });
+    // ✅ VERIFICATION: Should NEVER see relay in STUN-only mode
+    if (candidateType === 'relay' && !useTurnFallback) {
+      console.error(`❌ UNEXPECTED: Relay candidate generated in STUN-only mode!`);
+      console.error(`   This should not happen - check ICE server config`);
+      return; // Don't send relay candidates in STUN-only mode
     }
+    
+    // Send all candidates immediately (no delay needed - no relay to worry about)
+    socketInstance.emit('ice_candidate', { 
+      callId: callData.callId, 
+      targetUserId: userId, 
+      candidate: e.candidate 
+    });
+    
+    console.log(`📤 [ICE] Sent ${candidateType} candidate to ${userId}`);
     
   } else {
     console.log(`🧊 [ICE] End of candidates for ${userId}`);
-    console.log(`📊 [ICE] Final tally - host: ${hostCandidatesSent}, srflx: ${srflxCandidatesSent}, relay queued: ${relayCandidateQueue.length}`);
+    console.log(`📊 [ICE] Total candidates sent: ${connectionStats.get(userId)?.candidatesSent || 0}`);
+    
     socketInstance.emit('ice_candidate', { 
       callId: callData.callId, 
       targetUserId: userId, 
@@ -1390,7 +1372,9 @@ pc.oniceconnectionstatechange = () => {
   if (state === 'connected' || state === 'completed') {
     console.log(`✅ [ICE] Connected to ${userId}`);
     
-    // ✅ IMMEDIATE candidate pair analysis
+    // Reset failure counter on success
+    if (stats) stats.iceRestartCount = 0;
+    
     pc.getStats().then(statsReport => {
       let selectedPairType = 'unknown';
       let selectedLocal = null;
@@ -1405,7 +1389,6 @@ pc.oniceconnectionstatechange = () => {
             selectedLocal = localCandidate;
             selectedRemote = remoteCandidate;
             
-            // Determine connection type based on candidates
             if (localCandidate.candidateType === 'relay' || remoteCandidate.candidateType === 'relay') {
               selectedPairType = 'TURN_RELAY';
               console.warn(`⚠️ [ICE] Connection using TURN RELAY (bandwidth cost incurred)`);
@@ -1420,16 +1403,19 @@ pc.oniceconnectionstatechange = () => {
             console.log(`📊 [ICE] Selected pair details:`);
             console.log(`   Local:  ${localCandidate.candidateType} ${localCandidate.protocol} ${localCandidate.address}:${localCandidate.port}`);
             console.log(`   Remote: ${remoteCandidate.candidateType} ${remoteCandidate.protocol} ${remoteCandidate.address}:${remoteCandidate.port}`);
-            console.log(`   Priority: local=${localCandidate.priority}, remote=${remoteCandidate.priority}`);
             
-            // ✅ Store for metrics
+            // ✅ Confirm zero TURN usage
+            if (selectedPairType !== 'TURN_RELAY') {
+              console.log(`💰 [COST] Zero TURN bandwidth used - pure peer-to-peer`);
+              console.log(`   Cloudflare analytics should show 0 KB for this call`);
+            }
+            
             if (stats) {
               stats.connectionType = selectedPairType;
               stats.localCandidateType = localCandidate.candidateType;
               stats.remoteCandidateType = remoteCandidate.candidateType;
             }
             
-            // ✅ Report to server for analytics
             socketInstance.emit('connection_established', {
               callId: callData.callId,
               connectionType: selectedPairType,
@@ -1441,44 +1427,86 @@ pc.oniceconnectionstatechange = () => {
         }
       });
       
-      if (selectedPairType === 'TURN_RELAY') {
-        console.error(`❌ [DIAGNOSTIC] TURN used when STUN may have worked - investigate:`);
-        console.error(`   1. Check if STUN servers are reachable`);
-        console.error(`   2. Verify NAT type (symmetric NAT requires TURN)`);
-        console.error(`   3. Check if relay candidates sent too early`);
-      }
     });
     
   } else if (state === 'failed') {
     console.error(`❌ [ICE] Connection failed for ${userId}`);
     
-    // Attempt ICE restart
-    if (stats && stats.iceRestartCount < 2) {
+    // ✅ TURN FALLBACK LOGIC
+    if (stats && stats.iceRestartCount < 1 && !useTurnFallback) {
       stats.iceRestartCount++;
-      console.log(`🔄 Attempting ICE restart for ${userId} (attempt ${stats.iceRestartCount})`);
+      
+      console.warn(`🔄 [FALLBACK] Connection failed with STUN-only mode`);
+      console.warn(`   Attempt ${stats.iceRestartCount}: Retrying with STUN only...`);
       
       setTimeout(() => {
         if (pc.connectionState !== 'closed') {
           createOffer(userId);
         }
       }, 1000);
+      
+    } else if (stats && stats.iceRestartCount >= 1 && !useTurnFallback) {
+      // Second failure - enable TURN fallback
+      console.error(`❌ [FALLBACK] STUN-only failed after 2 attempts`);
+      console.warn(`🔄 Enabling TURN fallback for this call...`);
+      console.warn(`   This indicates symmetric NAT or restrictive firewall`);
+      
+      useTurnFallback = true;
+      
+      // Notify user
+      toast('Connection issues detected. Trying alternative route...', 'warning');
+      
+      // Refetch ICE servers with TURN included
+      fetchIceServers().then(() => {
+        console.log(`✅ TURN servers loaded for fallback`);
+        console.log(`   Attempting ICE restart with TURN...`);
+        
+        // Close old peer connection
+        pc.close();
+        peerConnections.delete(userId);
+        
+        // Recreate with TURN-enabled config
+        setTimeout(() => {
+          createOffer(userId);
+        }, 1500);
+      });
+      
+    } else if (useTurnFallback && stats && stats.iceRestartCount >= 2) {
+      // Even TURN failed
+      console.error(`❌ [CRITICAL] Connection failed even with TURN fallback`);
+      toast('Unable to establish connection. Please check your network.', 'error');
     }
+    
+  } else if (state === 'disconnected') {
+    console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
+    
+    // Don't immediately enable TURN on disconnect - might reconnect
+    
+  } else if (state === 'closed') {
+    console.log(`🔒 [ICE] Connection closed for ${userId}`);
   } else if (state === 'checking') {
     console.log(`🔍 [ICE] Checking connectivity for ${userId}...`);
     
-    // ✅ Log which candidates are being checked
     pc.getStats().then(statsReport => {
       const checkingPairs = [];
+      let hasRelayCandidates = false;
+      
       statsReport.forEach(report => {
         if (report.type === 'candidate-pair' && report.state === 'in-progress') {
           const localCand = statsReport.get(report.localCandidateId);
           if (localCand) {
             checkingPairs.push(`${localCand.candidateType}/${localCand.protocol}`);
+            if (localCand.candidateType === 'relay') hasRelayCandidates = true;
           }
         }
       });
+      
       if (checkingPairs.length > 0) {
         console.log(`   Checking pairs: ${checkingPairs.join(', ')}`);
+        
+        if (!hasRelayCandidates && !useTurnFallback) {
+          console.log(`   ✅ STUN-only mode: No relay candidates in use`);
+        }
       }
     });
   }
