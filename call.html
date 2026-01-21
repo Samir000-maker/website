@@ -730,7 +730,7 @@ function setupCallCleanup() {
       }
       
       
-      function updateVideoVisibility(userId, enabled, trackReady = true) {
+function updateVideoVisibility(userId, enabled, trackReady = true) {
   const vid = document.getElementById(`video-${userId}`);
   const pfp = document.getElementById(`pfp-${userId}`);
   
@@ -739,17 +739,41 @@ function setupCallCleanup() {
     return;
   }
   
-  const shouldShowVideo = enabled && trackReady && vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
+  // ✅ Enhanced check: verify video track exists in stream
+  const hasVideoTrack = vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
+  const videoTrackEnabled = hasVideoTrack ? vid.srcObject.getVideoTracks()[0].enabled : false;
   
-  console.log(`📹 updateVideoVisibility(${userId}): enabled=${enabled}, trackReady=${trackReady}, shouldShow=${shouldShowVideo}`);
+  const shouldShowVideo = enabled && trackReady && hasVideoTrack && videoTrackEnabled;
+  
+  console.log(`📹 ========================================`);
+  console.log(`📹 updateVideoVisibility(${userId})`);
+  console.log(`📹 ========================================`);
+  console.log(`   enabled: ${enabled}`);
+  console.log(`   trackReady: ${trackReady}`);
+  console.log(`   hasVideoTrack: ${hasVideoTrack}`);
+  console.log(`   videoTrackEnabled: ${videoTrackEnabled}`);
+  console.log(`   shouldShowVideo: ${shouldShowVideo}`);
+  
+  if (vid.srcObject) {
+    console.log(`   srcObject video tracks: ${vid.srcObject.getVideoTracks().length}`);
+    const tracks = vid.srcObject.getVideoTracks();
+    tracks.forEach((track, i) => {
+      console.log(`      [${i}] ${track.kind} - enabled:${track.enabled}, readyState:${track.readyState}, id:${track.id.substring(0, 8)}...`);
+    });
+  } else {
+    console.log(`   srcObject: null`);
+  }
   
   if (shouldShowVideo) {
     vid.classList.remove('hidden');
     pfp.classList.add('hidden');
+    console.log(`   ✅ Video SHOWN, profile picture HIDDEN`);
   } else {
     vid.classList.add('hidden');
     pfp.classList.remove('hidden');
+    console.log(`   ✅ Video HIDDEN, profile picture SHOWN`);
   }
+  console.log(`📹 ========================================\n`);
 }
       
 
@@ -1261,82 +1285,105 @@ function createPC(userId) {
     console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   });
   
-  // CRITICAL: Add ontrack handler to receive remote media
-  pc.ontrack = (event) => {
-    console.log(`🎵 [TRACK] Received ${event.track.kind} track from ${userId}`);
-    console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
-    console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
-    console.log(`   Streams: ${event.streams.length}`);
+// CRITICAL: Add ontrack handler to receive remote media
+pc.ontrack = (event) => {
+  console.log(`🎵 ========================================`);
+  console.log(`🎵 [TRACK] Received ${event.track.kind} track`);
+  console.log(`🎵 ========================================`);
+  console.log(`   From: ${userId}`);
+  console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
+  console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
+  console.log(`   Streams: ${event.streams.length}`);
+  
+  if (event.streams && event.streams.length > 0) {
+    const remoteStream = event.streams[0];
+    console.log(`   Remote stream: ${remoteStream.id.substring(0, 8)}... with ${remoteStream.getTracks().length} tracks`);
     
-    if (event.streams && event.streams.length > 0) {
-      const remoteStream = event.streams[0];
-      console.log(`   Remote stream: ${remoteStream.id.substring(0, 8)}... with ${remoteStream.getTracks().length} tracks`);
+    const remoteVideo = document.getElementById(`video-${userId}`);
+    
+    if (remoteVideo) {
+      // ✅ CRITICAL: Always update srcObject when new tracks arrive
+      const needsUpdate = !remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id;
       
-      const remoteVideo = document.getElementById(`video-${userId}`);
-      
-      if (remoteVideo) {
-        // CRITICAL: Set srcObject if not already set or different
-        if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
-          console.log(`📺 Setting srcObject for ${userId}`);
-          remoteVideo.srcObject = remoteStream;
-          remoteVideo.muted = false; // Ensure NOT muted for remote
-          remoteVideo.volume = 1.0;
-          
-          // Wait for metadata and play
-          remoteVideo.onloadedmetadata = async () => {
-            console.log(`📺 Metadata loaded for ${userId}: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
-            try {
-              await remoteVideo.play();
-              console.log(`▶️ Remote video playing for ${userId}`);
-              
-              // Update visibility based on track type
-              if (event.track.kind === 'video' && event.track.enabled) {
-                console.log(`📹 Remote video track enabled for ${userId}`);
-                updateVideoVisibility(userId, true, true);
-              }
-            } catch (playError) {
-              console.error(`❌ Failed to play remote video for ${userId}:`, playError);
+      if (needsUpdate) {
+        console.log(`📺 Setting/updating srcObject for ${userId}`);
+        remoteVideo.srcObject = remoteStream;
+        remoteVideo.muted = false;
+        remoteVideo.volume = 1.0;
+        
+        // Wait for metadata and play
+        remoteVideo.onloadedmetadata = async () => {
+          console.log(`📺 Metadata loaded for ${userId}: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
+          try {
+            await remoteVideo.play();
+            console.log(`▶️ Remote video playing for ${userId}`);
+            
+            // ✅ Update visibility if this is a video track
+            if (event.track.kind === 'video' && event.track.enabled) {
+              console.log(`📹 Remote video track enabled for ${userId}, updating visibility`);
+              updateVideoVisibility(userId, true, true);
             }
-          };
-          
-          // If metadata already loaded, play immediately
-          if (remoteVideo.readyState >= 2) {
-            console.log(`📺 Metadata already loaded for ${userId}, playing now`);
-            remoteVideo.play().catch(e => {
-              console.error(`❌ Play failed for ${userId}:`, e);
-            });
+          } catch (playError) {
+            console.error(`❌ Failed to play remote video for ${userId}:`, playError);
           }
-        } else {
-          console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
-        }
+        };
         
-        // Setup audio detection for remote streams
-        if (event.track.kind === 'audio') {
-          console.log(`🎤 Setting up audio detection for remote user ${userId}`);
-          setupAudioDetection(userId, remoteStream);
+        // If metadata already loaded, play immediately
+        if (remoteVideo.readyState >= 2) {
+          console.log(`📺 Metadata already loaded for ${userId}, playing now`);
+          remoteVideo.play().catch(e => {
+            console.error(`❌ Play failed for ${userId}:`, e);
+          });
+          
+          if (event.track.kind === 'video' && event.track.enabled) {
+            updateVideoVisibility(userId, true, true);
+          }
         }
-        
       } else {
-        console.error(`❌ Video element not found for ${userId}`);
+        console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
+        
+        // ✅ Still update visibility for new video tracks
+        if (event.track.kind === 'video' && event.track.enabled) {
+          console.log(`📹 New video track added to existing stream, updating visibility`);
+          updateVideoVisibility(userId, true, true);
+        }
       }
+      
+      // Setup audio detection for remote streams
+      if (event.track.kind === 'audio') {
+        console.log(`🎤 Setting up audio detection for remote user ${userId}`);
+        setupAudioDetection(userId, remoteStream);
+      }
+      
     } else {
-      console.warn(`⚠️ No streams in track event for ${userId}`);
+      console.error(`❌ Video element not found for ${userId}`);
     }
-    
-    // Track ended handler
-    event.track.onended = () => {
-      console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
-    };
-    
-    // Track mute/unmute handlers
-    event.track.onmute = () => {
-      console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
-    };
-    
-    event.track.onunmute = () => {
-      console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
-    };
+  } else {
+    console.warn(`⚠️ No streams in track event for ${userId}`);
+  }
+  
+  // Track ended handler
+  event.track.onended = () => {
+    console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
   };
+  
+  // Track mute/unmute handlers
+  event.track.onmute = () => {
+    console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
+  };
+  
+  event.track.onunmute = () => {
+    console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
+    
+    // ✅ Handle video unmute event (dynamic video addition)
+    if (event.track.kind === 'video') {
+      console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
+      updateVideoVisibility(userId, true, true);
+    }
+  };
+  
+  console.log(`🎵 ========================================\n`);
+};
   
   // CRITICAL: ICE candidate handler with rate limiting
   let lastCandidateEmit = 0;
@@ -1958,6 +2005,7 @@ async function toggleVideo() {
   console.log(`   Call type: ${callData.callType}`);
   console.log(`   Current isVideoEnabled: ${isVideoEnabled}`);
   console.log(`   Video tracks before: ${localStream.getVideoTracks().length}`);
+  console.log(`   Active peer connections: ${peerConnections.size}`);
   
   if (!localStream) {
     console.error('❌ No localStream available');
@@ -1966,6 +2014,7 @@ async function toggleVideo() {
   }
   
   let track = localStream.getVideoTracks()[0];
+  let wasTrackAdded = false;
   
   // ✅ FIX: Handle missing video track (audio call or failed camera)
   if (!track) {
@@ -1993,23 +2042,82 @@ async function toggleVideo() {
       localStream.addTrack(track);
       console.log(`✅ Video track added to localStream (id: ${track.id.substring(0, 8)}...)`);
       
-      // Add track to all existing peer connections
+      // ✅ CRITICAL: Add track to ALL existing peer connections
+      const renegotiationPromises = [];
+      
       peerConnections.forEach((pc, userId) => {
         try {
+          console.log(`📤 Adding video track to peer connection with ${userId}`);
+          
+          // Add the track to the peer connection
           const sender = pc.addTrack(track, localStream);
-          console.log(`✅ Video track added to peer connection with ${userId}`);
+          console.log(`✅ Video track added to PC for ${userId}`);
+          
+          // ✅ CRITICAL: Create new offer to renegotiate (same as video call initiation)
+          const renegotiationPromise = (async () => {
+            try {
+              console.log(`🔄 Creating renegotiation offer for ${userId}...`);
+              
+              const offer = await pc.createOffer({ 
+                offerToReceiveAudio: true, 
+                offerToReceiveVideo: true 
+              });
+              
+              await pc.setLocalDescription(offer);
+              console.log(`✅ Renegotiation offer created for ${userId}`);
+              
+              socketInstance.emit('webrtc_offer', { 
+                callId: callData.callId, 
+                targetUserId: userId, 
+                offer 
+              });
+              
+              console.log(`📤 Renegotiation offer sent to ${userId}`);
+            } catch (e) {
+              console.error(`❌ Renegotiation failed for ${userId}:`, e);
+            }
+          })();
+          
+          renegotiationPromises.push(renegotiationPromise);
+          
         } catch (e) {
           console.error(`❌ Failed to add track to PC ${userId}:`, e);
         }
       });
       
+      // Wait for all renegotiations to complete
+      await Promise.all(renegotiationPromises);
+      console.log(`✅ All peer connections renegotiated with video track`);
+      
       // Attach to local video element
       const localVid = document.getElementById(`video-${currentUser.userId}`);
-      if (localVid && !localVid.srcObject) {
-        localVid.srcObject = localStream;
-        console.log(`✅ Local stream attached to video element`);
+      if (localVid) {
+        if (!localVid.srcObject) {
+          localVid.srcObject = localStream;
+          console.log(`✅ Local stream attached to video element`);
+        } else {
+          // srcObject already set, just ensure video track is there
+          console.log(`ℹ️ Video element already has srcObject, track added to stream`);
+        }
+        
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+          if (localVid.readyState >= 2) {
+            resolve();
+          } else {
+            localVid.addEventListener('loadedmetadata', resolve, { once: true });
+          }
+        });
+        
+        try {
+          await localVid.play();
+          console.log(`▶️ Local video playback started`);
+        } catch (playError) {
+          console.warn(`⚠️ Local video play warning:`, playError);
+        }
       }
       
+      wasTrackAdded = true;
       toast('Camera enabled', 'success');
       
     } catch (e) {
@@ -2046,11 +2154,11 @@ async function toggleVideo() {
     updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
   }
   
-  // Update button BEFORE emitting to server
+  // Update button state
   updateVideoButton();
   console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
   
-  // Emit to server (server will broadcast to OTHERS only)
+  // ✅ Emit to server (will broadcast to others)
   socketInstance.emit('video_state_changed', { 
     callId: callData.callId, 
     enabled: isVideoEnabled 
@@ -2061,7 +2169,8 @@ async function toggleVideo() {
   console.log(`📹 VIDEO TOGGLE COMPLETE`);
   console.log(`📹 ========================================`);
   console.log(`   Final isVideoEnabled: ${isVideoEnabled}`);
-  console.log(`   Video tracks after: ${localStream.getVideoTracks().length}`);
+  console.log(`   Video tracks in localStream: ${localStream.getVideoTracks().length}`);
+  console.log(`   Was new track added: ${wasTrackAdded}`);
   console.log(`   Icon text: ${document.getElementById('videoBtn')?.querySelector('.material-symbols-outlined')?.textContent}`);
   console.log(`📹 ========================================\n`);
   
@@ -2694,7 +2803,7 @@ socketInstance.on('video_state_changed', (data) => {
   console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
   console.log(`   My userId: ${currentUser.userId}`);
   
-  // ✅ FIX: Sanity check - should NEVER receive own state back (server excludes sender)
+  // Sanity check - should NEVER receive own state back
   if (data.userId === currentUser.userId) {
     console.error(`❌ CRITICAL: Received own video state from server!`);
     console.error(`   This should not happen - server should exclude sender`);
@@ -2703,8 +2812,24 @@ socketInstance.on('video_state_changed', (data) => {
     return;
   }
   
-  // Update remote user's video visibility
+  // ✅ Update remote user's video visibility
   console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
+  
+  // ✅ CRITICAL: Check if video element has video tracks
+  const remoteVideo = document.getElementById(`video-${data.userId}`);
+  if (remoteVideo && remoteVideo.srcObject) {
+    const videoTracks = remoteVideo.srcObject.getVideoTracks();
+    console.log(`   Remote video element has ${videoTracks.length} video track(s)`);
+    
+    if (videoTracks.length === 0 && data.enabled) {
+      console.warn(`⚠️ Remote wants to show video but no video tracks in stream yet`);
+      console.warn(`   Waiting for ontrack event to deliver video track...`);
+      // Don't update visibility yet - wait for track to arrive
+      console.log(`📹 ========================================\n`);
+      return;
+    }
+  }
+  
   updateVideoVisibility(data.userId, data.enabled, true);
   
   console.log(`✅ Remote video state updated successfully`);
