@@ -345,7 +345,7 @@
     .context-footer {
       display: flex;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: space-between;
       margin-top: 12px;
       gap: 8px;
     }
@@ -356,6 +356,35 @@
       gap: 6px;
       font-size: 11px;
       color: var(--text-muted);
+    }
+
+    .secondary-btn {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--accent-purple-light);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .secondary-btn:hover:not(:disabled) {
+      background: rgba(139, 92, 246, 0.25);
+      border-color: rgba(139, 92, 246, 0.5);
+    }
+
+    .secondary-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .secondary-btn .material-symbols-outlined {
+      font-size: 18px;
     }
 
     .sessions-section {
@@ -607,6 +636,10 @@
           <span>🔒</span>
           <span>Private</span>
         </span>
+        <button id="logMoodBtn" disabled class="secondary-btn">
+          <span class="material-symbols-outlined">edit</span>
+          <span>Log Mood</span>
+        </button>
       </div>
     </div>
 
