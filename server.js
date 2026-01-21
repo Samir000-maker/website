@@ -2418,16 +2418,22 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
         videoEnabled: enabled
       });
       
-      console.log(`📹 ${user.username} video: ${enabled ? 'ON' : 'OFF'} (call ${callId})`);
-      console.log(`📹 Server state updated: userId=${user.userId}, videoEnabled=${enabled}`);
+      console.log(`📹 ========================================`);
+      console.log(`📹 SERVER: VIDEO STATE CHANGE`);
+      console.log(`📹 ========================================`);
+      console.log(`   User: ${user.username} (${user.userId})`);
+      console.log(`   Call: ${callId}`);
+      console.log(`   New state: ${enabled ? 'ON' : 'OFF'}`);
+      console.log(`   Server state updated`);
 
-      // Broadcast to ALL users in call room
-      io.to(`call-${callId}`).emit('video_state_changed', {
+      // ✅ FIX: Broadcast to OTHER users only (exclude sender)
+      socket.to(`call-${callId}`).emit('video_state_changed', {
         userId: user.userId,
         enabled: enabled
       });
       
-      console.log(`📤 Broadcasted video_state_changed to all participants in call-${callId}`);
+      console.log(`📤 Broadcasted to OTHER participants (sender excluded)`);
+      console.log(`📹 ========================================\n`);
     });
 
   } catch (error) {
