@@ -1,94 +1,178 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="dark" lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Select Username - MoodLog</title>
-
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
-    <link rel="stylesheet" href="global.css">
-    
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2dd4bf",
+                        "primary-hover": "#14b8a6",
+                        "accent": "#6366f1",
+                        "dark-bg": "#050505",
+                        "dark-surface": "#0f1115",
+                        "glass-border": "rgba(255, 255, 255, 0.06)",
+                        "glass-surface": "rgba(20, 22, 27, 0.7)",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    backgroundImage: {
+                        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+                        'metallic': 'linear-gradient(145deg, #1a1d23, #0f1115)',
+                    },
+                    boxShadow: {
+                        'glow': '0 0 25px -5px rgba(45, 212, 191, 0.15)',
+                        'card': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        'inner-light': 'inset 0 1px 0 0 rgba(255, 255, 255, 0.05)',
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #050505;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
-<body class="bg-background-light min-h-screen flex flex-col">
-    <div class="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-        <div class="absolute -top-[10%] -left-[5%] w-[40vw] h-[40vw] bg-primary/5 rounded-full blur-[100px]"></div>
-        <div class="absolute top-[20%] right-[10%] w-[20vw] h-[20vw] bg-blue-400/5 rounded-full blur-[80px]"></div>
+<body class="relative flex min-h-screen w-full flex-col bg-dark-bg text-white font-display overflow-x-hidden selection:bg-primary/20 selection:text-primary">
+    <!-- Animated Background -->
+    <div class="fixed inset-0 z-0 pointer-events-none">
+        <div class="absolute inset-0 bg-gradient-to-br from-[#121418] via-[#050505] to-[#08090b]"></div>
+        <div class="absolute -top-[20%] left-[10%] w-[50vw] h-[50vw] bg-primary/5 rounded-full blur-[120px] opacity-40"></div>
+        <div class="absolute top-[40%] -right-[10%] w-[40vw] h-[40vw] bg-accent/5 rounded-full blur-[100px] opacity-30"></div>
+        <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDI1Ii8+Cjwvc3ZnPg==')] opacity-20"></div>
     </div>
 
-    <header class="relative z-10 flex items-center justify-between px-6 py-5 md:px-10 lg:px-40">
+    <!-- Header -->
+    <header class="relative z-10 flex items-center justify-between px-6 py-6 md:px-12 lg:px-40 border-b border-white/5 bg-dark-bg/50 backdrop-blur-sm">
         <div class="flex items-center gap-3">
-            <div class="size-8 text-primary">🎯</div>
-            <h2 class="text-xl font-bold tracking-tight">MoodLog</h2>
+            <div class="size-8 text-primary flex items-center justify-center drop-shadow-[0_0_8px_rgba(45,212,191,0.5)]">
+                <svg class="w-full h-full" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                    <path clip-rule="evenodd" d="M24 4H6V17.3333V30.6667H24V44H42V30.6667V17.3333H24V4Z" fill="currentColor" fill-rule="evenodd"></path>
+                </svg>
+            </div>
+            <h2 class="text-xl font-bold tracking-tight text-white/90">MoodLog</h2>
         </div>
-        <div class="hidden md:flex items-center gap-2 text-sm font-medium text-gray-500">
-            <span>Account</span>
-            <span class="material-symbols-outlined text-[16px]">chevron_right</span>
-            <span class="text-primary">Profile</span>
+        <div class="hidden md:flex items-center gap-3 text-sm font-medium text-gray-500">
+            <span class="hover:text-gray-300 transition-colors cursor-pointer">Account</span>
+            <span class="material-symbols-outlined text-[16px] text-gray-600">chevron_right</span>
+            <span class="text-primary drop-shadow-[0_0_8px_rgba(45,212,191,0.3)]">Profile</span>
         </div>
     </header>
 
-    <main class="relative z-10 flex flex-1 flex-col justify-center items-center px-4 py-8">
-        <div class="w-full max-w-[520px] animate-fade-in-up">
-            <div class="mb-8 text-center">
-                <div class="inline-flex items-center justify-center size-14 rounded-2xl bg-primary/10 text-primary mb-5 shadow-sm ring-1 ring-primary/20">
-                    <span class="material-symbols-outlined text-[32px]">alternate_email</span>
+    <!-- Main Content -->
+    <main class="relative z-10 flex flex-1 flex-col justify-center items-center px-4 py-12 md:py-16">
+        <div class="w-full max-w-[560px]">
+            <!-- Header Text -->
+            <div class="mb-10 text-center md:text-left">
+                <div class="inline-flex items-center justify-center size-14 rounded-2xl bg-gradient-to-br from-primary/10 to-transparent text-primary mb-6 shadow-glow ring-1 ring-primary/20 backdrop-blur-md">
+                    <span class="material-symbols-outlined text-[28px]">alternate_email</span>
                 </div>
-                <h1 class="text-3xl md:text-4xl font-black leading-tight tracking-[-0.02em] text-gray-900 mb-3">
+                <h1 class="text-3xl md:text-4xl font-bold leading-tight tracking-tight text-white mb-3 drop-shadow-lg">
                     Claim your unique handle
                 </h1>
-                <p class="text-gray-500 text-lg leading-relaxed">
+                <p class="text-gray-400 text-lg leading-relaxed font-light tracking-wide max-w-md">
                     Pick a username to connect with friends and start your mood logging journey
                 </p>
             </div>
 
-            <div class="bg-surface-light rounded-xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] ring-1 ring-black/5 p-6 md:p-8">
-                <form id="usernameForm" class="flex flex-col gap-6">
-                    <div class="relative group">
-                        <label for="username" class="block text-sm font-bold text-gray-700 mb-2 ml-1">Username</label>
+            <!-- Card -->
+            <div class="relative bg-glass-surface backdrop-blur-xl rounded-2xl border border-glass-border shadow-card p-8 md:p-12 overflow-hidden group/card">
+                <div class="absolute inset-0 bg-gradient-to-tr from-white/5 via-transparent to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
+                
+                <!-- Form -->
+                <form id="usernameForm" class="relative z-10 flex flex-col gap-6">
+                    <!-- Username Input -->
+                    <div class="relative group/input">
+                        <label for="username" class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">Username</label>
                         <div class="relative flex items-center">
-                            <span class="absolute left-4 text-gray-400 font-medium text-xl select-none">@</span>
-                            <input type="text" id="username" 
-                                class="form-input block w-full rounded-xl border-gray-200 bg-gray-50 text-gray-900 h-16 pl-10 pr-12 text-lg font-medium focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                            <span class="absolute left-4 text-gray-500 font-semibold text-lg select-none">@</span>
+                            <input 
+                                type="text" 
+                                id="username" 
+                                class="block w-full rounded-xl border border-white/10 bg-[#0a0c0f] text-white h-14 pl-10 pr-12 text-base font-medium focus:border-primary/50 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all placeholder-gray-600"
                                 placeholder="your_username"
-                                maxlength="20" autocomplete="off">
+                                maxlength="20" 
+                                autocomplete="off"
+                            >
                             <div id="statusIcon" class="absolute right-4 hidden"></div>
                         </div>
                         <div id="feedback" class="mt-3"></div>
                     </div>
 
-                    <div class="bg-background-light rounded-lg p-4 border border-gray-200">
-                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Guidelines</h4>
-                        <ul class="space-y-2">
-                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                    <!-- Guidelines Box -->
+                    <div class="bg-[#0a0c0f] rounded-xl p-5 border border-white/5">
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Guidelines</h4>
+                        <ul class="space-y-2.5">
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
                                 <span class="size-1.5 rounded-full bg-primary/60"></span>
                                 3-20 characters in length
                             </li>
-                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
                                 <span class="size-1.5 rounded-full bg-primary/60"></span>
                                 Letters, numbers, underscores, and hyphens only
                             </li>
-                            <li class="flex items-center gap-2 text-sm text-gray-600">
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
                                 <span class="size-1.5 rounded-full bg-primary/60"></span>
                                 Must be unique across the platform
                             </li>
                         </ul>
                     </div>
 
+                    <!-- Submit Button -->
                     <div class="pt-2">
-                        <button type="submit" id="submitBtn" disabled
-                            class="btn btn-primary w-full h-14 disabled:opacity-50 disabled:cursor-not-allowed">
-                            <span class="font-bold text-base tracking-wide">Confirm Username</span>
-                            <span class="material-symbols-outlined ml-2">arrow_forward</span>
+                        <button 
+                            type="submit" 
+                            id="submitBtn" 
+                            disabled
+                            class="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-primary via-teal-300 to-primary text-slate-900 shadow-[0_0_25px_-5px_rgba(45,212,191,0.25)] hover:shadow-[0_0_35px_-5px_rgba(45,212,191,0.4)] transition-all duration-300 h-14 flex items-center justify-center gap-2 group/btn disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="font-bold text-base tracking-wide z-10">Confirm Username</span>
+                            <span class="material-symbols-outlined transition-transform duration-300 group-hover/btn:translate-x-1 z-10">arrow_forward</span>
+                            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/btn:translate-x-full transition-transform duration-700 ease-in-out"></div>
                         </button>
-                        <p class="mt-4 text-center text-sm text-gray-400">
+                        <p class="mt-4 text-center text-sm text-gray-500">
                             You can change this later in settings
                         </p>
                     </div>
                 </form>
+            </div>
+
+            <!-- Footer Links -->
+            <div class="mt-8 flex justify-center gap-8">
+                <a href="#" class="text-xs font-medium text-gray-600 hover:text-primary transition-colors flex items-center gap-1.5 uppercase tracking-wider">
+                    <span class="material-symbols-outlined text-[14px]">help</span>
+                    Help Center
+                </a>
+                <a href="#" class="text-xs font-medium text-gray-600 hover:text-primary transition-colors flex items-center gap-1.5 uppercase tracking-wider">
+                    <span class="material-symbols-outlined text-[14px]">security</span>
+                    Privacy Policy
+                </a>
             </div>
         </div>
     </main>
@@ -104,7 +188,6 @@
             const _Loading = MoodApp.Loading;
             const _PageTransition = MoodApp.PageTransition;
 
-            // Firebase config
             const firebaseConfig = {
                 apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
                 authDomain: "projectt3-8c55e.firebaseapp.com",
@@ -123,7 +206,6 @@
                 console.error('Firebase init error:', error);
             }
 
-            // Safe wrapper helpers
             const toastError = (msg) => {
                 if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
                 else console.error('Toast.error:', msg);
@@ -139,7 +221,6 @@
                 if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
             };
 
-            // Simple debounce
             const debounce = (fn, wait = 300) => {
                 let timer = null;
                 return function (...args) {
@@ -148,21 +229,18 @@
                 };
             };
 
-            // Validator
             const isValidUsername = (u) => {
                 if (!u || typeof u !== 'string') return false;
                 const trimmed = u.trim();
                 return /^[a-zA-Z0-9_-]{3,20}$/.test(trimmed);
             };
 
-            // DOM references
             const usernameInput = document.getElementById('username');
             const submitBtn = document.getElementById('submitBtn');
             const statusIcon = document.getElementById('statusIcon');
             const feedback = document.getElementById('feedback');
             const usernameForm = document.getElementById('usernameForm');
 
-            // Auth check
             try {
                 if (_Auth && typeof _Auth.requireAuth === 'function') {
                     _Auth.requireAuth();
@@ -171,15 +249,14 @@
                 console.error('Error calling Auth.requireAuth():', err);
             }
 
-            // Show feedback
             function showFeedback(type, message) {
                 if (!feedback) return;
                 const color = type === 'success' ? 'emerald' : 'red';
                 const icon = type === 'success' ? '✓' : '✗';
                 feedback.innerHTML = `
                     <div class="flex items-start gap-2 px-1">
-                        <span class="text-${color}-600 text-[18px] shrink-0">${icon}</span>
-                        <p class="text-sm font-medium text-${color}-600 leading-normal">${message}</p>
+                        <span class="text-${color}-400 text-[18px] shrink-0">${icon}</span>
+                        <p class="text-sm font-medium text-${color}-400 leading-normal">${message}</p>
                     </div>
                 `;
             }
@@ -199,7 +276,6 @@
             let isAvailable = false;
             let lastCheckedUsername = '';
 
-            // Get API base URL
             const getApiBaseUrl = () => {
                 try {
                     const { hostname, port } = window.location;
@@ -212,7 +288,6 @@
 
             const API_BASE_URL = getApiBaseUrl();
 
-            // Check username with timeout - ALWAYS use direct fetch (no auth required)
             const checkUsername = debounce(async (username) => {
                 if (!isValidUsername(username)) {
                     showFeedback('error', 'Username must be 3-20 characters: letters, numbers, underscores, hyphens');
@@ -222,7 +297,6 @@
                     return;
                 }
 
-                // Prevent duplicate checks
                 if (lastCheckedUsername === username && isAvailable) {
                     return;
                 }
@@ -231,14 +305,12 @@
                 showSpinner();
                 if (feedback) feedback.innerHTML = '';
 
-                // Set timeout for API call
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000);
 
                 try {
                     console.log('Checking username availability:', username);
                     
-                    // ALWAYS use direct fetch for username check (no auth required)
                     const response = await fetch(`${API_BASE_URL}/api/check-username`, {
                         method: 'POST',
                         headers: {
@@ -260,13 +332,13 @@
                     if (result && result.available) {
                         isAvailable = true;
                         if (submitBtn) submitBtn.disabled = false;
-                        statusIcon.innerHTML = '<span class="text-emerald-600 text-2xl">✓</span>';
+                        statusIcon.innerHTML = '<span class="text-emerald-400 text-2xl">✓</span>';
                         statusIcon.classList.remove('hidden');
                         showFeedback('success', `Excellent! <strong>@${username}</strong> is available`);
                     } else {
                         isAvailable = false;
                         if (submitBtn) submitBtn.disabled = true;
-                        statusIcon.innerHTML = '<span class="text-red-600 text-2xl">✗</span>';
+                        statusIcon.innerHTML = '<span class="text-red-400 text-2xl">✗</span>';
                         statusIcon.classList.remove('hidden');
 
                         let suggestionsHtml = '';
@@ -281,7 +353,6 @@
                     
                     hideStatusIcon();
                     
-                    // If it's a timeout or network error, show error
                     if (error.name === 'AbortError') {
                         showFeedback('error', 'Request timeout. Please try again.');
                     } else {
@@ -293,7 +364,6 @@
                 }
             }, 500);
 
-            // Input event
             if (usernameInput) {
                 usernameInput.addEventListener('input', (e) => {
                     const username = (e.target.value || '').trim().toLowerCase();
@@ -319,7 +389,6 @@
                 });
             }
 
-            // Form submit
             if (usernameForm) {
                 usernameForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
@@ -342,11 +411,9 @@
                     try {
                         let result;
                         
-                        // Use API helper for authenticated request
                         if (_API && typeof _API.post === 'function') {
                             result = await _API.post('/api/users/profile', { username });
                         } else {
-                            // Fallback: get token manually
                             const user = firebase.auth().currentUser;
                             if (!user) {
                                 throw new Error('Not authenticated');
@@ -372,7 +439,6 @@
 
                         console.log('Profile save result:', result);
 
-                        // Save username locally
                         try {
                             localStorage.setItem('moodapp_username', username);
                         } catch (err) {
@@ -396,16 +462,6 @@
                     }
                 });
             }
-
-            // Add CSS for spinner animation
-            const style = document.createElement('style');
-            style.textContent = `
-                @keyframes spin {
-                    from { transform: rotate(0deg); }
-                    to { transform: rotate(360deg); }
-                }
-            `;
-            document.head.appendChild(style);
         })();
     </script>
 </body>
