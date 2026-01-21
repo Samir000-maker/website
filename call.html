@@ -753,7 +753,7 @@ function setupCallCleanup() {
 }
       
 
-      function createParticipantTile(user, isSelf = false) {
+function createParticipantTile(user, isSelf = false) {
   console.log(`🎨 Creating tile for ${user.username} (userId: ${user.userId}, isSelf: ${isSelf})`);
   
   // CRITICAL: Check if tile already exists in DOM
@@ -785,14 +785,19 @@ function setupCallCleanup() {
   video.setAttribute('playsinline', '');
   video.setAttribute('webkit-playsinline', '');
   
+  // ✅ FIX: Apply mirror effect based on view type
   if (isSelf) {
+    video.style.transform = 'scaleX(-1)';  // Mirror self view (standard UX)
     video.muted = true;
     video.volume = 0;
-    console.log(`🔇 Self video will be muted (userId: ${user.userId})`);
+    console.log(`🪞 Self video MIRRORED for natural feel (userId: ${user.userId})`);
+    console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
   } else {
+    video.style.transform = 'scaleX(1)';  // Normal orientation for remote
     video.muted = false;
     video.volume = 1.0;
-    console.log(`🔊 Remote video will NOT be muted (userId: ${user.userId})`);
+    console.log(`📹 Remote video NOT mirrored (true orientation) (userId: ${user.userId})`);
+    console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
   }
   
   videoContainer.appendChild(video);
@@ -833,6 +838,7 @@ function setupCallCleanup() {
   
   renderedParticipants.add(user.userId);
   console.log(`✅ Tile created for ${user.username} (${user.userId})`);
+  console.log(`   Mirror effect: ${isSelf ? 'YES (self view)' : 'NO (remote view)'}`);
   console.log(`📊 Rendered participants now:`, Array.from(renderedParticipants));
   return tile;
 }
@@ -1112,7 +1118,7 @@ async function setupLocalVideo() {
     localVid.srcObject = localStream;
     localVid.muted = true;
     localVid.volume = 0;
-    localVid.style.transform = 'scaleX(1)';
+    console.log(`ℹ️ Video transform already set: ${localVid.style.transform}`);
     console.log(`✅ Local stream attached to video element`);
     
     // ✅ FIX: Gate UI updates on actual media readiness
