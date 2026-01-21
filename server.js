@@ -443,13 +443,45 @@ app.get('/health', (req, res) => {
 
 app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
   try {
-    console.log('📡 ICE servers requested by client');
-    const iceServers = await getIceServers();
+    const includeTurn = req.query.includeTurn === 'true'; // Query param for TURN
+    
+    console.log(`📡 ICE servers requested by client (includeTurn: ${includeTurn})`);
+    
+    // ✅ STUN-only by default
+    const stunServers = [
+      {
+        urls: [
+          'stun:stun.cloudflare.com:3478',
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302'
+        ]
+      }
+    ];
+    
+    let iceServers = stunServers;
+    
+    // ✅ Only generate TURN credentials if explicitly requested
+    if (includeTurn) {
+      console.log('🔄 Generating Cloudflare TURN credentials (fallback mode)...');
+      const turnServers = await generateCloudTurnCredentials();
+      
+      if (turnServers && Array.isArray(turnServers) && turnServers.length > 0) {
+        iceServers = [...stunServers, ...turnServers];
+        console.log(`✅ TURN servers added (fallback enabled)`);
+      } else {
+        console.warn('⚠️ TURN credential generation failed in fallback mode');
+      }
+    } else {
+      console.log(`✅ STUN-only mode - no TURN credentials generated`);
+      console.log(`   Zero Cloudflare bandwidth will be consumed`);
+    }
     
     res.json({ 
       iceServers,
       timestamp: Date.now(),
-      ttl: 86400
+      ttl: 86400,
+      mode: includeTurn ? 'stun+turn' : 'stun-only'
     });
   } catch (error) {
     console.error('❌ Error getting ICE servers:', error);
@@ -2176,12 +2208,31 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
   }
 });
 
+const answerDebounce = new Map(); // userId:targetUserId -> timestamp
+const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
+
+// Replace existing webrtc_answer handler
 socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
 
+    // ✅ DEDUPLICATION: Prevent duplicate answers
+    const answerKey = `${user.userId}:${targetUserId}`;
+    const now = Date.now();
+    
+    if (answerDebounce.has(answerKey)) {
+      const lastAnswerTime = answerDebounce.get(answerKey);
+      if (now - lastAnswerTime < ANSWER_DEDUPE_WINDOW) {
+        console.warn(`⚠️ Duplicate answer from ${user.username} to ${targetUserId} within ${now - lastAnswerTime}ms, ignoring`);
+        return;
+      }
+    }
+    
+    // Track this answer
+    answerDebounce.set(answerKey, now);
+    
     console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
     console.log(`   Answer SDP length: ${answer.sdp?.length || 0} bytes`);
 
@@ -2196,9 +2247,32 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
     } else {
       console.warn(`⚠️ Target user ${targetUserId} not found for answer`);
     }
+    
+    // Clean up after window expires
+    setTimeout(() => {
+      answerDebounce.delete(answerKey);
+    }, ANSWER_DEDUPE_WINDOW);
 
   } catch (error) {
     console.error('❌ WebRTC answer error:', error);
+  }
+});
+
+
+// server.js - add after line 1647
+socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
+  const user = socketUsers.get(socket.id);
+  if (!user) return;
+
+  console.log(`📊 [METRICS] Connection established for ${user.username}`);
+  console.log(`   Type: ${connectionType}`);
+  
+  // Track in database or external analytics
+  if (connectionType === 'TURN_RELAY') {
+    // Send alert - unexpected TURN usage
+    console.error(`🚨 ALERT: TURN relay used when direct connection should work`);
+  } else {
+    console.log(`✅ Optimal connection: ${connectionType}`);
   }
 });
 
