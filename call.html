@@ -961,7 +961,6 @@ function monitorConnectionQuality(userId, pc) {
   }
 }
 
-      // Replace initLocalMedia function
 async function initLocalMedia() {
   const MAX_RETRIES = 3;
   let attempt = 0;
@@ -992,11 +991,10 @@ async function initLocalMedia() {
         hasVideo = localStream.getVideoTracks().length > 0;
         hasAudio = localStream.getAudioTracks().length > 0;
         console.log(`✅ [Attempt ${attempt}] SUCCESS: video=${hasVideo}, audio=${hasAudio}`);
-        break; // Success, exit retry loop
+        break;
       } catch (videoError) {
         console.warn(`⚠️ [Attempt ${attempt}] Video failed: ${videoError.name}`);
         
-        // Try audio-only
         try {
           const audioOnlyConstraints = {
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -1009,7 +1007,7 @@ async function initLocalMedia() {
           if (attempt === 1) {
             toast('Camera not available, using audio only', 'warning');
           }
-          break; // Success, exit retry loop
+          break;
         } catch (audioError) {
           console.error(`❌ [Attempt ${attempt}] Both failed: ${audioError.name}`);
           
@@ -1017,20 +1015,27 @@ async function initLocalMedia() {
             localStream = new MediaStream();
             toast('No media devices available. You can still join the call.', 'error');
           } else {
-            await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 500));
             continue;
           }
         }
       }
       
-      // Set states based on actual media acquired
+      // ✅ FIX: Set states AFTER actual media acquisition
       isVideoEnabled = hasVideo;
       isAudioEnabled = hasAudio;
       
-      console.log(`📊 Final media state: video=${isVideoEnabled}, audio=${isAudioEnabled}`);
-      console.log(`📊 LocalStream tracks: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
+      console.log(`📊 ========================================`);
+      console.log(`📊 MEDIA STATE SYNCHRONIZED`);
+      console.log(`📊 ========================================`);
+      console.log(`   Expected video: ${callData.callType === 'video'}`);
+      console.log(`   Actual video tracks: ${localStream.getVideoTracks().length}`);
+      console.log(`   isVideoEnabled: ${isVideoEnabled}`);
+      console.log(`   Expected audio: true`);
+      console.log(`   Actual audio tracks: ${localStream.getAudioTracks().length}`);
+      console.log(`   isAudioEnabled: ${isAudioEnabled}`);
+      console.log(`📊 ========================================\n`);
       
-      // Setup audio detection if we have audio
       if (hasAudio) {
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
@@ -1039,7 +1044,6 @@ async function initLocalMedia() {
         }
       }
       
-      // Update call icon
       const callIcon = document.getElementById('callIcon');
       if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
       
@@ -1063,7 +1067,6 @@ async function initLocalMedia() {
 }
 
 
-// Replace setupLocalVideo function
 async function setupLocalVideo() {
   const waitForElement = (id, maxWait = 5000) => {
     return new Promise((resolve, reject) => {
@@ -1083,21 +1086,23 @@ async function setupLocalVideo() {
   };
 
   try {
-    console.log(`🔧 Waiting for local video elements for ${currentUser.username}...`);
+    console.log(`🔧 ========================================`);
+    console.log(`🔧 SETUP LOCAL VIDEO`);
+    console.log(`🔧 ========================================`);
+    console.log(`   User: ${currentUser.username}`);
+    console.log(`   isVideoEnabled: ${isVideoEnabled}`);
+    console.log(`   Video tracks: ${localStream.getVideoTracks().length}`);
     
-    // CRITICAL FIX: Check if tile exists first
     const localTile = document.getElementById(`participant-${currentUser.userId}`);
     if (!localTile) {
       console.warn(`⚠️ No tile for ${currentUser.username} yet - will be created when user_joined_call fires`);
-      return; // Exit gracefully - will be called again when tile is created
+      return;
     }
     
     const localVid = await waitForElement(`video-${currentUser.userId}`);
     const localPfp = await waitForElement(`pfp-${currentUser.userId}`);
     
     console.log(`✅ Found video elements for ${currentUser.username}`);
-    console.log(`   Video element: ${!!localVid}, PFP element: ${!!localPfp}`);
-    console.log(`   LocalStream: ${!!localStream}, Video tracks: ${localStream.getVideoTracks().length}`);
     
     if (!localStream) {
       console.error(`❌ No localStream available`);
@@ -1110,6 +1115,7 @@ async function setupLocalVideo() {
     localVid.style.transform = 'scaleX(1)';
     console.log(`✅ Local stream attached to video element`);
     
+    // ✅ FIX: Gate UI updates on actual media readiness
     if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
       console.log(`📹 Waiting for local video to be ready...`);
       
@@ -1132,19 +1138,32 @@ async function setupLocalVideo() {
         await localVid.play();
         console.log(`▶️ Local video playback started`);
         updateVideoVisibility(currentUser.userId, true, true);
+        updateVideoButton(); // ✅ FIX: Update icon AFTER video confirmed playing
+        console.log(`✅ Video icon synchronized: ON`);
       } catch (e) {
         console.error('❌ Local video play failed:', e);
+        isVideoEnabled = false; // ✅ FIX: Rollback state on failure
         updateVideoVisibility(currentUser.userId, false, false);
+        updateVideoButton();
+        console.log(`✅ Video icon synchronized: OFF (playback failed)`);
       }
     } else {
       console.log(`📹 Video disabled or no video track for ${currentUser.username}`);
       updateVideoVisibility(currentUser.userId, false, false);
+      updateVideoButton(); // ✅ FIX: Update icon AFTER visibility set
+      console.log(`✅ Video icon synchronized: OFF`);
     }
     
-    updateVideoButton();
     updateMicButton();
     
-    console.log(`✅ setupLocalVideo() complete for ${currentUser.username}`);
+    console.log(`🔧 ========================================`);
+    console.log(`🔧 SETUP COMPLETE`);
+    console.log(`🔧 ========================================`);
+    console.log(`   Video element ready: ${localVid.readyState >= 2}`);
+    console.log(`   Video playing: ${!localVid.paused}`);
+    console.log(`   isVideoEnabled: ${isVideoEnabled}`);
+    console.log(`   Icon state: ${document.getElementById('videoBtn')?.querySelector('.material-symbols-outlined')?.textContent}`);
+    console.log(`🔧 ========================================\n`);
     
   } catch (error) {
     console.error(`❌ setupLocalVideo() failed:`, error);
@@ -1920,11 +1939,6 @@ function toggleMic() {
 }
 
 async function toggleVideo() {
-  if (callData.callType === 'audio') { 
-    toast('Video not available in audio call', 'warning'); 
-    return; 
-  }
-  
   if (isTogglingVideo) {
     console.log('⚠️ Video toggle already in progress, ignoring');
     return;
@@ -1932,45 +1946,119 @@ async function toggleVideo() {
   
   isTogglingVideo = true;
   
+  console.log(`📹 ========================================`);
+  console.log(`📹 VIDEO TOGGLE REQUESTED`);
+  console.log(`📹 ========================================`);
+  console.log(`   Call type: ${callData.callType}`);
+  console.log(`   Current isVideoEnabled: ${isVideoEnabled}`);
+  console.log(`   Video tracks before: ${localStream.getVideoTracks().length}`);
+  
   if (!localStream) {
     console.error('❌ No localStream available');
     isTogglingVideo = false;
     return;
   }
   
-  const track = localStream.getVideoTracks()[0];
+  let track = localStream.getVideoTracks()[0];
+  
+  // ✅ FIX: Handle missing video track (audio call or failed camera)
   if (!track) {
-    console.error('❌ No video track available');
-    isTogglingVideo = false;
-    return;
+    console.log(`📹 No video track exists - requesting camera access...`);
+    
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          width: {ideal:640}, 
+          height: {ideal:480},
+          facingMode: 'user'
+        }
+      });
+      
+      track = videoStream.getVideoTracks()[0];
+      
+      if (!track) {
+        console.error('❌ Camera permission granted but no track received');
+        toast('Failed to access camera', 'error');
+        isTogglingVideo = false;
+        return;
+      }
+      
+      // Add track to local stream
+      localStream.addTrack(track);
+      console.log(`✅ Video track added to localStream (id: ${track.id.substring(0, 8)}...)`);
+      
+      // Add track to all existing peer connections
+      peerConnections.forEach((pc, userId) => {
+        try {
+          const sender = pc.addTrack(track, localStream);
+          console.log(`✅ Video track added to peer connection with ${userId}`);
+        } catch (e) {
+          console.error(`❌ Failed to add track to PC ${userId}:`, e);
+        }
+      });
+      
+      // Attach to local video element
+      const localVid = document.getElementById(`video-${currentUser.userId}`);
+      if (localVid && !localVid.srcObject) {
+        localVid.srcObject = localStream;
+        console.log(`✅ Local stream attached to video element`);
+      }
+      
+      toast('Camera enabled', 'success');
+      
+    } catch (e) {
+      console.error('❌ Failed to get video track:', e);
+      
+      if (e.name === 'NotAllowedError') {
+        toast('Camera permission denied', 'error');
+      } else if (e.name === 'NotFoundError') {
+        toast('No camera found', 'error');
+      } else {
+        toast('Failed to access camera', 'error');
+      }
+      
+      isTogglingVideo = false;
+      return;
+    }
   }
   
-  // Toggle the track enabled state
+  // ✅ Now we have a track - toggle it
   const newState = !track.enabled;
   track.enabled = newState;
   isVideoEnabled = newState;
   
-  console.log(`📹 Video toggled locally: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-  console.log(`📹 Track state after toggle: enabled=${track.enabled}, readyState=${track.readyState}, muted=${track.muted}`);
+  console.log(`📹 Video track toggled: ${isVideoEnabled ? 'ON' : 'OFF'}`);
+  console.log(`   Track ID: ${track.id.substring(0, 8)}...`);
+  console.log(`   Track enabled: ${track.enabled}`);
+  console.log(`   Track readyState: ${track.readyState}`);
+  console.log(`   Track muted: ${track.muted}`);
   
-  // CRITICAL FIX: Update local video visibility immediately
+  // Update local video element visibility
   const localVid = document.getElementById(`video-${currentUser.userId}`);
   if (localVid && localVid.srcObject) {
     console.log(`📹 Updating local video element visibility`);
     updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
   }
   
-  // Update button state
+  // Update button BEFORE emitting to server
   updateVideoButton();
+  console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
   
-  // Emit to server (server will broadcast to ALL including us for confirmation)
+  // Emit to server (server will broadcast to OTHERS only)
   socketInstance.emit('video_state_changed', { 
     callId: callData.callId, 
     enabled: isVideoEnabled 
   });
   console.log(`📤 Emitted video_state_changed to server: ${isVideoEnabled}`);
   
-  // Clear toggle lock after a delay
+  console.log(`📹 ========================================`);
+  console.log(`📹 VIDEO TOGGLE COMPLETE`);
+  console.log(`📹 ========================================`);
+  console.log(`   Final isVideoEnabled: ${isVideoEnabled}`);
+  console.log(`   Video tracks after: ${localStream.getVideoTracks().length}`);
+  console.log(`   Icon text: ${document.getElementById('videoBtn')?.querySelector('.material-symbols-outlined')?.textContent}`);
+  console.log(`📹 ========================================\n`);
+  
   setTimeout(() => {
     isTogglingVideo = false;
     console.log(`🔓 Video toggle unlocked`);
