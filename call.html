@@ -809,20 +809,19 @@ function createParticipantTile(user, isSelf = false) {
   video.setAttribute('playsinline', '');
   video.setAttribute('webkit-playsinline', '');
   
-  // ✅ FIX: Apply mirror effect based on view type
-  if (isSelf) {
-    video.style.transform = 'scaleX(-1)';  // Mirror self view (standard UX)
-    video.muted = true;
-    video.volume = 0;
-    console.log(`🪞 Self video MIRRORED for natural feel (userId: ${user.userId})`);
-    console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
-  } else {
-    video.style.transform = 'scaleX(1)';  // Normal orientation for remote
-    video.muted = false;
-    video.volume = 1.0;
-    console.log(`📹 Remote video NOT mirrored (true orientation) (userId: ${user.userId})`);
-    console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
-  }
+video.style.transform = 'scaleX(1)';  // Normal orientation for everyone
+
+if (isSelf) {
+  video.muted = true;
+  video.volume = 0;
+  console.log(`📹 Self video: NO MIRROR (true orientation) (userId: ${user.userId})`);
+  console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
+} else {
+  video.muted = false;
+  video.volume = 1.0;
+  console.log(`📹 Remote video: NO MIRROR (true orientation) (userId: ${user.userId})`);
+  console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
+}
   
   videoContainer.appendChild(video);
   
