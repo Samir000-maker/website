@@ -1656,6 +1656,30 @@ socket.on('accept_call', async ({ callId, roomId }) => {
   });
 
 
+socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
+  const user = socketUsers.get(socket.id);
+  if (!user) return;
+
+  console.log(`📊 [METRICS] Connection established for ${user.username}`);
+  console.log(`   Type: ${connectionType}`);
+  console.log(`   Local: ${localType}, Remote: ${remoteType}`);
+  console.log(`   Protocol: ${protocol}`);
+
+  // Track metrics
+  if (connectionType === 'TURN_RELAY') {
+    webrtcMetrics.turnUsage++;
+    console.warn(`⚠️ [METRICS] TURN usage: ${webrtcMetrics.turnUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.turnUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+  } else if (connectionType === 'STUN_REFLEXIVE') {
+    webrtcMetrics.stunUsage++;
+    console.log(`✅ [METRICS] STUN usage: ${webrtcMetrics.stunUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.stunUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+  } else if (connectionType === 'DIRECT_HOST') {
+    webrtcMetrics.directConnections++;
+    console.log(`✅ [METRICS] Direct: ${webrtcMetrics.directConnections} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.directConnections / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+  }
+
+  webrtcMetrics.successfulConnections++;
+});
+
 
 socket.on('join_call', async ({ callId }) => {
   try {
