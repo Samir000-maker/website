@@ -63,6 +63,20 @@
         height: 100vh;
         height: 100dvh;
     }
+    
+    .call-buttons-container {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+}
+
+@media (max-width: 640px) {
+    .call-buttons-container {
+        gap: 6px;
+    }
+}
 
     .chat-main {
         max-height: calc(100vh - 64px);
@@ -217,14 +231,19 @@
                 <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-400">
                     <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
                     <span id="onlineCount" class="truncate">Loading...</span>
-                    <span class="hidden sm:inline">•</span>
-                    <span id="timeRemaining" class="hidden sm:inline truncate">--:-- remaining</span>
                 </div>
             </div>
         </div>
         
-        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-            <div class="call-buttons-container">
+        <div class="flex items-center gap-3 flex-shrink-0">
+            <!-- Timer Display -->
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#2a2d33] rounded-lg border border-gray-700">
+                <span class="material-symbols-outlined text-gray-400 text-base">schedule</span>
+                <span id="timeRemaining" class="text-xs text-gray-300 font-medium">--:--</span>
+            </div>
+            
+            <!-- Call Buttons -->
+            <div class="call-buttons-container flex-row">
                 <button id="audioCallBtn" 
                     class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-[#33bfcc] text-white hover:bg-[#2aa5b0] transition-all"
                     title="Start Audio Call">
