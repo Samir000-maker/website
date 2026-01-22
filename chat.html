@@ -314,6 +314,42 @@
         }
         
         
+        .quoted-message {
+    border-left: 3px solid #33bfcc;
+    padding-left: 8px;
+    margin-bottom: 6px;
+    background-color: rgba(51, 191, 204, 0.1);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 0.813rem;
+}
+
+.user-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-overlay.active {
+    background: rgba(0, 0, 0, 0.7);
+}
+        
+        
+        
+        :root {
+    --primary: #33bfcc;
+    --primary-dark: #2aa5b0;
+    --background-dark: #1a1d21;
+    --card-dark: #22252a;
+    --border-dark: #2d3139;
+    --text-primary: #e5e7eb;
+    --text-secondary: #9ca3af;
+}
+
+body {
+    font-family: 'Manrope', sans-serif;
+    background-color: var(--background-dark);
+    color: var(--text-primary);
+}
       
 
 @keyframes slideOutToRight {
@@ -422,103 +458,133 @@
     </style>
 </head>
 <body class="bg-background-light main-container flex flex-col overflow-hidden">
-    <header class="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur header-safe">
-        <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
-            <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-100 rounded-lg md:hidden flex-shrink-0">
-                    <span class="material-symbols-outlined text-gray-700">menu</span>
-                </button>
-                
-                <div class="min-w-0 flex-1">
-                    <h2 class="text-base sm:text-lg font-bold truncate">Mindful Space</h2>
-                    <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-500">
-                        <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
-                        <span id="onlineCount" class="truncate">Loading...</span>
-                        <span class="hidden sm:inline">•</span>
-                        <span id="timeRemaining" class="hidden sm:inline truncate">--:-- remaining</span>
-                    </div>
-                </div>
-            </div>
+    <header class="sticky top-0 z-50 w-full border-b border-gray-700 bg-[#22252a] backdrop-blur header-safe">
+    <div class="mx-auto flex h-14 sm:h-16 max-w-full items-center justify-between px-3 sm:px-6">
+        <div class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+            <button id="sidebarToggle" class="sidebar-toggle p-2 hover:bg-gray-700 rounded-lg md:hidden flex-shrink-0">
+                <span class="material-symbols-outlined text-gray-300">menu</span>
+            </button>
             
-            <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                <div class="call-buttons-container">
-                    <button id="audioCallBtn" 
-                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
-                        title="Start Audio Call">
-                        <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
-                    </button>
-                    <button id="videoCallBtn" 
-                        class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 transition-all"
-                        title="Start Video Call">
-                        <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
-                    </button>
-                    <button id="joinCallBtn" 
-                        class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
-                        title="Join Active Call">
-                        <span class="material-symbols-outlined text-base sm:text-lg">login</span>
-                        <span class="hidden sm:inline">Join Call</span>
-                        <span class="sm:hidden">Join</span>
-                    </button>
+            <div class="min-w-0 flex-1">
+                <h2 class="text-base sm:text-lg font-bold text-white truncate">Mindful Space</h2>
+                <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-400">
+                    <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
+                    <span id="onlineCount" class="truncate">12 Online</span>
+                    <span class="hidden sm:inline">•</span>
+                    <span class="hidden sm:inline truncate">Online Now</span>
                 </div>
-                
-                <button id="leaveBtn" class="text-xs sm:text-sm font-medium text-red-600 hover:text-red-700 px-2 sm:px-3 py-1.5 sm:py-2 whitespace-nowrap">
-                    <span class="hidden sm:inline">Leave Room</span>
-                    <span class="sm:hidden material-symbols-outlined text-xl">logout</span>
-                </button>
             </div>
         </div>
-    </header>
+        
+        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <!-- Timer Badge -->
+            <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/30">
+                <span class="material-symbols-outlined text-red-400 text-sm">schedule</span>
+                <span id="timeRemaining" class="text-red-400 text-xs font-semibold">10:00</span>
+            </div>
+            
+            <button id="leaveBtn" class="px-3 py-1.5 text-xs sm:text-sm font-medium text-gray-300 hover:text-white border border-gray-600 hover:border-gray-500 rounded-lg transition-all">
+                LEAVE
+            </button>
+            
+            <div class="call-buttons-container">
+                <button id="audioCallBtn" 
+                    class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all"
+                    title="Start Audio Call">
+                    <span class="material-symbols-outlined text-lg sm:text-xl">call</span>
+                </button>
+                <button id="videoCallBtn" 
+                    class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all"
+                    title="Start Video Call">
+                    <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
+                </button>
+                <button id="joinCallBtn" 
+                    class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
+                    title="Join Active Call">
+                    <span class="material-symbols-outlined text-base sm:text-lg">login</span>
+                    <span class="hidden sm:inline">Join Call</span>
+                    <span class="sm:hidden">Join</span>
+                </button>
+            </div>
+            
+            <button class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all">
+                <span class="material-symbols-outlined text-lg sm:text-xl">search</span>
+            </button>
+            
+            <button class="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-full bg-gray-700 text-white hover:bg-gray-600 transition-all">
+                <span class="material-symbols-outlined text-lg sm:text-xl">more_vert</span>
+            </button>
+        </div>
+    </div>
+</header>
 
     <div class="flex flex-1 overflow-hidden relative chat-main">
         <div id="sidebarOverlay" class="sidebar-overlay"></div>
         
-        <aside id="sidebar" class="sidebar border-r border-gray-200 bg-white overflow-y-auto">
-            <div class="p-3 sm:p-4">
-                <div class="flex items-center justify-between mb-3 sm:mb-4">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase">Active Users</h3>
-                    <button id="sidebarClose" class="md:hidden p-1 hover:bg-gray-100 rounded">
-                        <span class="material-symbols-outlined text-gray-500 text-xl">close</span>
-                    </button>
-                </div>
-                <div id="usersList" class="space-y-2 sm:space-y-3"></div>
-            </div>
-        </aside>
+        <aside id="sidebar" class="sidebar border-r border-gray-700 bg-[#22252a] overflow-y-auto">
+    <div class="p-3 sm:p-4">
+        <div class="flex items-center justify-between mb-3 sm:mb-4">
+            <h3 class="text-xs font-bold text-gray-400 uppercase flex items-center gap-2">
+                Active Users
+                <span class="flex h-2 w-2 rounded-full bg-green-500"></span>
+            </h3>
+            <button id="sidebarClose" class="md:hidden p-1 hover:bg-gray-700 rounded">
+                <span class="material-symbols-outlined text-gray-400 text-xl">close</span>
+            </button>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">12 members online</p>
+        <div id="usersList" class="space-y-2 sm:space-y-3"></div>
+    </div>
+</aside>
 
-        <main class="flex-1 flex flex-col min-h-0 bg-white">
-            <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
-                <div class="text-center text-xs sm:text-sm text-gray-400 mb-4">
-                    Welcome to the safe space. Be kind and supportive.
-                </div>
+        <main class="flex-1 flex flex-col min-h-0 bg-[#1a1d21]">
+    <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
+        <div class="text-center text-xs sm:text-sm text-gray-500 mb-4">
+            <div class="inline-block px-3 py-1 rounded-full bg-gray-800 border border-gray-700">
+                TODAY, 10:23 AM
             </div>
+        </div>
+    </div>
 
-            <div class="border-t border-gray-200 bg-white flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
-                <div id="replyPreview" class="reply-preview hidden border-b border-gray-200 px-3 py-2 bg-gray-50">
-                    <div class="flex items-start justify-between gap-2">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-1.5 mb-1">
-                                <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
-                                <span class="text-xs font-medium text-primary" id="replyToUsername">Replying to User</span>
-                            </div>
-                            <p class="text-xs text-gray-600 truncate" id="replyToMessage">Original message text</p>
-                        </div>
-                        <button id="cancelReply" class="text-gray-400 hover:text-gray-600 p-1">
-                            <span class="material-symbols-outlined text-lg">close</span>
-                        </button>
+    <div class="border-t border-gray-700 bg-[#22252a] flex-shrink-0 sticky bottom-0 left-0 right-0 z-10" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+        <div id="replyPreview" class="reply-preview hidden border-b border-gray-700 px-3 py-2 bg-[#1a1d21]">
+            <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-1.5 mb-1">
+                        <span class="material-symbols-outlined text-primary text-sm">subdirectory_arrow_left</span>
+                        <span class="text-xs font-medium text-primary" id="replyToUsername">REPLYING TO SARAH M.</span>
                     </div>
+                    <p class="text-xs text-gray-400 truncate" id="replyToMessage">Original message text</p>
                 </div>
-                
-                <div class="p-3 pb-4">
-                    <form id="messageForm" class="flex gap-2 items-center">
-                        <input type="text" id="messageInput" required maxlength="500"
-                            class="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-xl focus:border-primary focus:outline-none bg-white"
-                            placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
-                        <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-xl hover:bg-primary/90 active:scale-95 transition-transform">
-                            <span class="material-symbols-outlined">send</span>
-                        </button>
-                    </form>
-                </div>
+                <button id="cancelReply" class="text-gray-500 hover:text-gray-300 p-1">
+                    <span class="material-symbols-outlined text-lg">close</span>
+                </button>
             </div>
-        </main>
+        </div>
+        
+        <div class="p-3 pb-4">
+            <form id="messageForm" class="flex gap-2 items-center">
+                <!-- Emoji Button -->
+                <button type="button" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-lg transition-all">
+                    <span class="material-symbols-outlined text-xl">sentiment_satisfied</span>
+                </button>
+                
+                <!-- Attachment Button -->
+                <button type="button" class="w-10 h-10 flex-shrink-0 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-lg transition-all">
+                    <span class="material-symbols-outlined text-xl">attach_file</span>
+                </button>
+                
+                <input type="text" id="messageInput" required maxlength="500"
+                    class="flex-1 px-4 py-3 text-sm border border-gray-700 rounded-lg focus:border-primary focus:outline-none bg-[#2d3139] text-white placeholder-gray-500"
+                    placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
+                    
+                <button type="submit" class="w-12 h-12 flex-shrink-0 flex items-center justify-center bg-primary text-white rounded-lg hover:bg-primary-dark active:scale-95 transition-transform">
+                    <span class="material-symbols-outlined">send</span>
+                </button>
+            </form>
+        </div>
+    </div>
+</main>
     </div>
 
     <div id="incomingCallModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -1297,7 +1363,7 @@ function updateCallButtonState(isActive, callData = null) {
     bubbleWrapper.className = `flex items-center gap-1`;
 
     const messageBubble = document.createElement('div');
-    messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900'} break-words text-sm sm:text-base max-w-full`;
+    messageBubble.className = `px-3 sm:px-4 py-2 rounded-2xl ${isCurrentUser ? 'bg-[#3b7f8a] text-white' : 'bg-[#2d3139] text-gray-200'} break-words text-sm sm:text-base max-w-full`;
 
     if (data.replyTo) {
       const quotedDiv = document.createElement('div');
@@ -2815,7 +2881,7 @@ if (returningFromCall === 'true') {
   if (usersList && Array.isArray(roomData.users)) {
     roomData.users.forEach(user => {
       const userCard = document.createElement('div');
-      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-800 transition-all cursor-pointer';
       
       const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
       
@@ -2828,7 +2894,7 @@ if (returningFromCall === 'true') {
       
       const statusSpan = document.createElement('div');
       statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
+      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> <span class="text-gray-400">Feeling Happy 😊</span>';
       
       userInfo.appendChild(nameSpan);
       userInfo.appendChild(statusSpan);
