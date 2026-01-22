@@ -1315,7 +1315,7 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     }
 
     // ============================================
-    // CRITICAL FIX: Forward attachment data
+    // CRITICAL FIX: Validate and forward attachment WITH data
     // ============================================
     if (attachment) {
       console.log('📎 ========================================');
@@ -1327,29 +1327,67 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
       console.log(`   FileID: ${attachment.fileId}`);
       
+      // Validate file data is present
+      if (!attachment.data) {
+        console.error('❌ Attachment missing file data!');
+        socket.emit('error', { 
+          message: 'Attachment data missing',
+          code: 'INVALID_ATTACHMENT' 
+        });
+        return;
+      }
+      
+      console.log(`   Base64 data length: ${(attachment.data.length / 1024).toFixed(2)} KB`);
+      
+      // Validate file size (10MB limit for images/videos)
+      const maxSize = attachment.type.startsWith('image/') ? 10 * 1024 * 1024 : 
+                      attachment.type.startsWith('video/') ? 50 * 1024 * 1024 : 
+                      20 * 1024 * 1024;
+      
+      if (attachment.size > maxSize) {
+        console.error(`❌ File too large: ${(attachment.size / 1024 / 1024).toFixed(2)} MB`);
+        socket.emit('error', { 
+          message: 'File too large for transmission',
+          code: 'FILE_TOO_LARGE'
+        });
+        return;
+      }
+      
+      // Include complete attachment data for broadcast
       messageData.attachment = {
         fileId: attachment.fileId,
         name: attachment.name,
         type: attachment.type,
-        size: attachment.size
+        size: attachment.size,
+        data: attachment.data // CRITICAL: Forward the actual file data
       };
       
-      console.log('✅ Attachment data added to message broadcast');
+      console.log('✅ Attachment data validated and ready for broadcast');
       console.log('📎 ========================================\n');
     }
     // ============================================
 
-    room.addMessage(messageData);
+    // Store message in room (without file data to save memory)
+    const storedMessage = { ...messageData };
+    if (storedMessage.attachment) {
+      // Don't store base64 data in room history (too much memory)
+      delete storedMessage.attachment.data;
+      console.log('ℹ️ Removed base64 data from stored message (memory optimization)');
+    }
+    room.addMessage(storedMessage);
+    
+    // Broadcast to room WITH file data
     io.to(roomId).emit('chat_message', messageData);
     
     const msgPreview = message ? message.substring(0, 30) : '[attachment]';
     console.log(`💬 Message from ${user.username} in room ${roomId}: "${msgPreview}..."`);
     if (attachment) {
-      console.log(`   📎 With attachment: ${attachment.name}`);
+      console.log(`   📎 Broadcasted with attachment: ${attachment.name}`);
     }
     
   } catch (error) {
-    console.error('Chat message error:', error);
+    console.error('❌ Chat message error:', error);
+    console.error('   Stack:', error.stack);
     socket.emit('error', { message: 'Failed to send message' });
   }
 });
