@@ -2370,13 +2370,15 @@ async function loadImageAttachment(fileId, imgElement) {
     imgElement.src = blobUrl;
     imgElement.alt = fileData.name;
     
-    // Revoke after image loads to prevent memory leak
+    // ============================================
+    // CRITICAL FIX: Don't revoke blob URL on load
+    // Store it for later cleanup and allow multiple views
+    // ============================================
+    imgElement.dataset.blobUrl = blobUrl; // Store for cleanup on page unload
+    
     imgElement.onload = () => {
       console.log(`✅ Image loaded successfully: ${fileData.name}`);
-      setTimeout(() => {
-        URL.revokeObjectURL(blobUrl);
-        console.log(`🧹 Blob URL revoked for ${fileData.name}`);
-      }, 1000);
+      // DON'T revoke here - keep URL alive for re-clicks
     };
     
     imgElement.onerror = () => {
@@ -2385,20 +2387,51 @@ async function loadImageAttachment(fileId, imgElement) {
       imgElement.alt = 'Failed to load image';
     };
     
-    // Make clickable to view full size
+    // ============================================
+    // CRITICAL FIX: Create fresh blob URL on EACH click
+    // ============================================
     imgElement.style.cursor = 'pointer';
-    imgElement.addEventListener('click', () => {
+    
+    // Remove any existing click listeners
+    const newImg = imgElement.cloneNode(true);
+    imgElement.parentNode?.replaceChild(newImg, imgElement);
+    
+    newImg.addEventListener('click', async () => {
       console.log(`🔍 Opening full-size image: ${fileData.name}`);
-      const fullSizeUrl = URL.createObjectURL(fileData.blob);
-      const newWindow = window.open(fullSizeUrl, '_blank');
       
-      // Clean up after window opens
-      if (newWindow) {
-        newWindow.onload = () => {
-          setTimeout(() => URL.revokeObjectURL(fullSizeUrl), 1000);
-        };
+      try {
+        // Create FRESH blob URL for new window (don't reuse old one)
+        const freshBlob = await getFileFromIndexedDB(fileId);
+        if (!freshBlob || !freshBlob.blob) {
+          toast('Failed to open image', 'error');
+          return;
+        }
+        
+        const freshBlobUrl = URL.createObjectURL(freshBlob.blob);
+        const newWindow = window.open(freshBlobUrl, '_blank');
+        
+        console.log(`✅ Opened image in new window`);
+        
+        // Clean up after window opens
+        if (newWindow) {
+          newWindow.addEventListener('load', () => {
+            setTimeout(() => {
+              URL.revokeObjectURL(freshBlobUrl);
+              console.log('🧹 Revoked blob URL from new window');
+            }, 1000);
+          });
+        } else {
+          // Popup blocked - clean up immediately
+          URL.revokeObjectURL(freshBlobUrl);
+          toast('Please allow popups to view full image', 'warning');
+        }
+        
+      } catch (error) {
+        console.error('❌ Failed to open full-size image:', error);
+        toast('Failed to open image', 'error');
       }
-    }, { once: true, passive: true });
+    }, { passive: true });
+    // ============================================
     
   } catch (error) {
     console.error('❌ Error loading image attachment:', error);
@@ -3474,22 +3507,85 @@ socketInstance.on('error', (data) => {
   console.error('❌ ========================================\n');
 });
 
-    socketInstance.on('chat_message', (data) => {
-      if (!data.messageId) {
-        data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+   socketInstance.on('chat_message', async (data) => {
+  console.log('💬 ========================================');
+  console.log('💬 INCOMING CHAT MESSAGE');
+  console.log('💬 ========================================');
+  console.log(`   From: ${data.username}`);
+  console.log(`   Message: ${data.message ? data.message.substring(0, 30) + '...' : '[no text]'}`);
+  
+  // ============================================
+  // CRITICAL FIX: Store received attachment to IndexedDB
+  // ============================================
+  if (data.attachment) {
+    console.log('📎 Message contains attachment:');
+    console.log(`   File: ${data.attachment.name}`);
+    console.log(`   Type: ${data.attachment.type}`);
+    console.log(`   Size: ${(data.attachment.size / 1024).toFixed(2)} KB`);
+    console.log(`   Has data: ${!!data.attachment.data}`);
+    
+    // Only store if we don't already have this file (not our own message)
+    if (data.userId !== currentUser.userId && data.attachment.data) {
+      try {
+        console.log('💾 Storing received attachment to local IndexedDB...');
+        
+        // Convert base64 back to blob
+        const byteCharacters = atob(data.attachment.data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.attachment.type });
+        
+        console.log(`✅ Converted base64 to blob: ${(blob.size / 1024).toFixed(2)} KB`);
+        
+        // Create File object from blob
+        const file = new File([blob], data.attachment.name, { type: data.attachment.type });
+        
+        // Store to IndexedDB with the SAME fileId as sender
+        const storedFileId = await storeFileToIndexedDB(file, roomData.roomId, data.messageId);
+        
+        console.log(`✅ Attachment stored to IndexedDB: ${storedFileId}`);
+        console.log(`   Recipient can now view this file`);
+        
+        // CRITICAL: Update the attachment fileId to match what we stored
+        data.attachment.fileId = storedFileId;
+        
+        // Remove base64 data from memory (already stored in IndexedDB)
+        delete data.attachment.data;
+        console.log('🧹 Removed base64 data from memory');
+        
+      } catch (error) {
+        console.error('❌ Failed to store received attachment:', error);
+        console.error('   Stack:', error.stack);
+        // Continue anyway - message will show but file might not load
       }
-      
-      const isCurrentUser = data.userId === currentUser.userId;
-      const msgEl = createMessageElement(data, isCurrentUser);
-      
-      if (messagesList) {
-        messagesList.appendChild(msgEl);
-        messagesList.scrollTop = messagesList.scrollHeight;
-      }
-      
-      messagesCache.push(data);
-      saveChatState(roomData.roomId, messagesCache);
-    });
+    } else {
+      console.log('ℹ️ Own message or no data - skipping storage');
+      // Remove data from our own messages to free memory
+      delete data.attachment.data;
+    }
+  }
+  // ============================================
+  
+  if (!data.messageId) {
+    data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
+  }
+  
+  const isCurrentUser = data.userId === currentUser.userId;
+  const msgEl = createMessageElement(data, isCurrentUser);
+  
+  if (messagesList) {
+    messagesList.appendChild(msgEl);
+    messagesList.scrollTop = messagesList.scrollHeight;
+  }
+  
+  messagesCache.push(data);
+  saveChatState(roomData.roomId, messagesCache);
+  
+  console.log('💬 ========================================\n');
+});
 
     socketInstance.on('user_left', (data) => {
       const msgEl = document.createElement('div');
@@ -4215,18 +4311,63 @@ if (messageForm) {
       hideReplyPreview();
     }
 
-    // Add attachment data if present
+    // ============================================
+    // CRITICAL FIX: Send actual file data, not just metadata
+    // ============================================
     if (pendingAttachment) {
-      console.log('📎 Including attachment in message:', pendingAttachment.name);
-      messageData.attachment = {
-        fileId: pendingAttachment.fileId,
-        name: pendingAttachment.name,
-        type: pendingAttachment.type,
-        size: pendingAttachment.size
-      };
+      console.log('📎 ========================================');
+      console.log('📎 PREPARING ATTACHMENT FOR TRANSMISSION');
+      console.log('📎 ========================================');
+      console.log(`   File: ${pendingAttachment.name}`);
+      console.log(`   Size: ${(pendingAttachment.size / 1024).toFixed(2)} KB`);
+      
+      try {
+        // Get file data from IndexedDB
+        const fileData = await getFileFromIndexedDB(pendingAttachment.fileId);
+        
+        if (!fileData || !fileData.blob) {
+          console.error('❌ Failed to retrieve file from IndexedDB');
+          toast('Failed to attach file', 'error');
+          return;
+        }
+        
+        console.log('✅ File retrieved from IndexedDB');
+        
+        // Convert blob to base64 for socket transmission
+        const base64Data = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(',')[1]; // Remove data:image/png;base64, prefix
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(fileData.blob);
+        });
+        
+        console.log(`✅ File converted to base64: ${(base64Data.length / 1024).toFixed(2)} KB`);
+        
+        // Add attachment with actual file data
+        messageData.attachment = {
+          fileId: pendingAttachment.fileId,
+          name: pendingAttachment.name,
+          type: pendingAttachment.type,
+          size: pendingAttachment.size,
+          data: base64Data // CRITICAL: Include actual file data
+        };
+        
+        console.log('✅ Attachment data prepared for transmission');
+        console.log('📎 ========================================\n');
+        
+      } catch (error) {
+        console.error('❌ Failed to prepare attachment:', error);
+        toast('Failed to attach file', 'error');
+        return;
+      }
     }
+    // ============================================
 
     // Emit message
+    console.log('📤 Emitting chat_message to server...');
     socketInstance?.emit('chat_message', messageData);
     
     // Clear input
@@ -4306,6 +4447,18 @@ leaveBtn?.addEventListener('click', async () => {
 window.addEventListener('beforeunload', (e) => {
   console.log('🚪 Chat page beforeunload event');
   stopCachedCallMonitoring();
+  
+  
+    console.log('🧹 Cleaning up blob URLs...');
+  const images = document.querySelectorAll('img[data-blob-url]');
+  images.forEach(img => {
+    const blobUrl = img.dataset.blobUrl;
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+    }
+  });
+  console.log(`✅ Revoked ${images.length} blob URL(s)`);
+  
   // CRITICAL: Check if in background call mode
   if (isInBackgroundCall) {
     console.log('🔒 Background call active - preserving floating socket');
