@@ -1526,7 +1526,7 @@ function createMessageElement(data, isCurrentUser) {
   // CONFIRMATION DIALOG
   // ============================================
   
-  function showConfirmationDialog() {
+function showConfirmationDialog() {
     return new Promise((resolve) => {
       const overlay = document.getElementById('confirmationOverlay');
       if (!overlay) return resolve(false);
@@ -1557,7 +1557,7 @@ function createMessageElement(data, isCurrentUser) {
       const btnStay = document.getElementById('btnStay');
       const btnLeave = document.getElementById('btnLeave');
       
-      // Add hover effects
+      // Add hover effects for Stay button
       if (btnStay) {
         btnStay.addEventListener('mouseenter', () => {
           btnStay.style.backgroundColor = '#21262d';
@@ -1573,6 +1573,7 @@ function createMessageElement(data, isCurrentUser) {
         }, { once: true });
       }
       
+      // Add hover effects and complete click handler for Leave button
       if (btnLeave) {
         btnLeave.addEventListener('mouseenter', () => {
           btnLeave.style.background = 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)';
@@ -1583,7 +1584,61 @@ function createMessageElement(data, isCurrentUser) {
           btnLeave.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.3)';
         });
         btnLeave.addEventListener('click', async () => {
-          // ... rest of your existing leave logic
+          console.log('✅ User confirmed leaving via dialog - starting cleanup');
+          overlay.style.display = 'none';
+          
+          // CRITICAL: Clean up background call FIRST
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          
+          if (activeCallStr) {
+            console.log('📞 Active call detected - cleaning up');
+            
+            try {
+              const callData = JSON.parse(activeCallStr);
+              
+              // 1. Emit leave_call to server
+              if (socketInstance && socketInstance.connected) {
+                console.log('📤 Emitting leave_call to server...');
+                socketInstance.emit('leave_call', { callId: callData.callId });
+                
+                // Wait for server to process
+                await new Promise(resolve => setTimeout(resolve, 500));
+                console.log('✅ Leave_call emitted and processed');
+              }
+              
+              // 2. Clear all call-related storage
+              localStorage.removeItem(ACTIVE_CALL_KEY);
+              sessionStorage.removeItem('hasBackgroundCall');
+              sessionStorage.removeItem('returningFromCall');
+              sessionStorage.removeItem('backgroundCallMode');
+              sessionStorage.removeItem('returningToBackgroundCall');
+              
+              console.log('✅ Background call destroyed');
+              
+            } catch (e) {
+              console.error('❌ Failed during call cleanup:', e);
+            }
+          }
+          
+          // 3. Leave chat room
+          if (socketInstance && socketInstance.connected) {
+            console.log('📤 Emitting leave_room...');
+            socketInstance.emit('leave_room');
+            
+            // Wait for server to process
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+          
+          clearChatState(true);
+          
+          resolve(true);
+          
+          // 5. Navigate - this will handle both iframe and standalone cases
+          setTimeout(() => {
+            console.log('✅ Cleanup complete - initiating navigation');
+            cleanupParentCallPage();
+          }, 100);
+          
         }, { once: true });
       }
     });
