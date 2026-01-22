@@ -2201,52 +2201,113 @@ function createMessageElement(data, isCurrentUser) {
         messageBubble.appendChild(messageText);
     }
 
-    // Add attachment if present
-    if (data.attachment) {
-        const attachmentDiv = document.createElement('div');
-        attachmentDiv.className = 'message-attachment';
-        
-        const fileCategory = getFileTypeCategory(data.attachment.type);
-        
-        if (fileCategory === 'image') {
-            // Show image preview (will be loaded from IndexedDB)
-            attachmentDiv.innerHTML = `
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='200'%3E%3Crect width='300' height='200' fill='%23161b22'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%238b949e' font-family='sans-serif' font-size='14'%3ELoading image...%3C/text%3E%3C/svg%3E" 
-                     alt="${escapeHtml(data.attachment.name)}" 
-                     data-file-id="${data.attachment.fileId}"
-                     loading="lazy">
-            `;
-            
-            // Load actual image from IndexedDB
-            loadImageAttachment(data.attachment.fileId, attachmentDiv.querySelector('img'));
-        } else {
-            // Show file icon for PDFs, videos, etc.
-            const iconName = fileCategory === 'pdf' ? 'picture_as_pdf' : 
-                           fileCategory === 'video' ? 'videocam' : 'description';
-            
-            attachmentDiv.innerHTML = `
-                <div class="message-attachment-file ${fileCategory}" data-file-id="${data.attachment.fileId}">
-                    <span class="material-symbols-outlined">${iconName}</span>
-                    <div class="message-attachment-info">
-                        <div class="message-attachment-name">${escapeHtml(data.attachment.name)}</div>
-                        <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
-                    </div>
-                    <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">download</span>
-                </div>
-            `;
-            
-            // Add click handler for download
-            const fileElement = attachmentDiv.querySelector('.message-attachment-file');
-            if (fileElement) {
-                fileElement.style.cursor = 'pointer';
-                fileElement.addEventListener('click', () => {
-                    downloadAttachment(data.attachment.fileId, data.attachment.name);
-                }, { passive: true });
-            }
-        }
-        
-        messageBubble.appendChild(attachmentDiv);
+// Add attachment if present
+if (data.attachment) {
+  console.log(`📎 Rendering attachment in message: ${data.attachment.name} (${data.attachment.type})`);
+  
+  const attachmentDiv = document.createElement('div');
+  attachmentDiv.className = 'message-attachment';
+  
+  const fileCategory = getFileTypeCategory(data.attachment.type);
+  console.log(`   Category: ${fileCategory}`);
+  
+  if (fileCategory === 'image') {
+    // Show image preview (will be loaded from IndexedDB)
+    console.log(`   Creating image preview element`);
+    attachmentDiv.innerHTML = `
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='200'%3E%3Crect width='300' height='200' fill='%23161b22'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%238b949e' font-family='sans-serif' font-size='14'%3ELoading image...%3C/text%3E%3C/svg%3E" 
+           alt="${escapeHtml(data.attachment.name)}" 
+           data-file-id="${data.attachment.fileId}"
+           loading="lazy"
+           style="max-width: 100%; border-radius: 8px;">
+    `;
+    
+    // Load actual image from IndexedDB
+    const imgElement = attachmentDiv.querySelector('img');
+    loadImageAttachment(data.attachment.fileId, imgElement);
+    
+  } else if (fileCategory === 'video') {
+    // Show video preview with play button
+    console.log(`   Creating video file element (download on click)`);
+    attachmentDiv.innerHTML = `
+      <div class="message-attachment-file video" 
+           data-file-id="${data.attachment.fileId}"
+           style="cursor: pointer;">
+        <span class="material-symbols-outlined" style="font-size: 28px; color: #a855f7;">play_circle</span>
+        <div class="message-attachment-info">
+          <div class="message-attachment-name">${escapeHtml(data.attachment.name)}</div>
+          <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
+          <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 2px;">Click to open in video player</div>
+        </div>
+        <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">download</span>
+      </div>
+    `;
+    
+    // Add click handler for download
+    const fileElement = attachmentDiv.querySelector('.message-attachment-file');
+    if (fileElement) {
+      fileElement.addEventListener('click', () => {
+        console.log(`🎬 Opening video: ${data.attachment.name}`);
+        downloadAttachment(data.attachment.fileId, data.attachment.name);
+      }, { passive: true });
     }
+    
+  } else if (fileCategory === 'pdf') {
+    // Show PDF icon with viewer option
+    console.log(`   Creating PDF file element`);
+    attachmentDiv.innerHTML = `
+      <div class="message-attachment-file pdf" 
+           data-file-id="${data.attachment.fileId}"
+           style="cursor: pointer;">
+        <span class="material-symbols-outlined" style="font-size: 28px; color: #ef4444;">picture_as_pdf</span>
+        <div class="message-attachment-info">
+          <div class="message-attachment-name">${escapeHtml(data.attachment.name)}</div>
+          <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
+          <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 2px;">Click to open in PDF reader</div>
+        </div>
+        <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">download</span>
+      </div>
+    `;
+    
+    // Add click handler for download
+    const fileElement = attachmentDiv.querySelector('.message-attachment-file');
+    if (fileElement) {
+      fileElement.addEventListener('click', () => {
+        console.log(`📄 Opening PDF: ${data.attachment.name}`);
+        downloadAttachment(data.attachment.fileId, data.attachment.name);
+      }, { passive: true });
+    }
+    
+  } else {
+    // Generic document
+    console.log(`   Creating generic document element`);
+    attachmentDiv.innerHTML = `
+      <div class="message-attachment-file document" 
+           data-file-id="${data.attachment.fileId}"
+           style="cursor: pointer;">
+        <span class="material-symbols-outlined" style="font-size: 28px;">description</span>
+        <div class="message-attachment-info">
+          <div class="message-attachment-name">${escapeHtml(data.attachment.name)}</div>
+          <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
+          <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 2px;">Click to download</div>
+        </div>
+        <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">download</span>
+      </div>
+    `;
+    
+    // Add click handler for download
+    const fileElement = attachmentDiv.querySelector('.message-attachment-file');
+    if (fileElement) {
+      fileElement.addEventListener('click', () => {
+        console.log(`📁 Downloading document: ${data.attachment.name}`);
+        downloadAttachment(data.attachment.fileId, data.attachment.name);
+      }, { passive: true });
+    }
+  }
+  
+  messageBubble.appendChild(attachmentDiv);
+  console.log(`✅ Attachment element added to message bubble`);
+}
 
     const replyBtn = document.createElement('button');
     replyBtn.className = 'reply-btn p-1 sm:p-1.5 hover:bg-gray-800 rounded-full transition-colors flex-shrink-0';
@@ -2282,28 +2343,67 @@ function createMessageElement(data, isCurrentUser) {
  * Load image attachment from IndexedDB and display
  */
 async function loadImageAttachment(fileId, imgElement) {
-  if (!imgElement) return;
+  if (!imgElement) {
+    console.error('❌ Image element not provided for fileId:', fileId);
+    return;
+  }
+  
+  console.log(`🖼️ Loading image attachment: ${fileId}`);
   
   try {
     const fileData = await getFileFromIndexedDB(fileId);
-    if (fileData && fileData.blob) {
-      const blobUrl = URL.createObjectURL(fileData.blob);
-      imgElement.src = blobUrl;
-      
-      // Revoke after image loads to prevent memory leak
-      imgElement.onload = () => {
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-      };
-      
-      // Make clickable to view full size
-      imgElement.style.cursor = 'pointer';
-      imgElement.addEventListener('click', () => {
-        window.open(blobUrl, '_blank');
-      }, { once: true, passive: true });
+    
+    if (!fileData || !fileData.blob) {
+      console.error(`❌ File data not found for ${fileId}`);
+      imgElement.alt = 'Image not found';
+      imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EImage not found%3C/text%3E%3C/svg%3E';
+      return;
     }
+    
+    console.log(`✅ File data retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+    
+    // Create blob URL
+    const blobUrl = URL.createObjectURL(fileData.blob);
+    console.log(`🔗 Created blob URL for display`);
+    
+    // Set image source
+    imgElement.src = blobUrl;
+    imgElement.alt = fileData.name;
+    
+    // Revoke after image loads to prevent memory leak
+    imgElement.onload = () => {
+      console.log(`✅ Image loaded successfully: ${fileData.name}`);
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+        console.log(`🧹 Blob URL revoked for ${fileData.name}`);
+      }, 1000);
+    };
+    
+    imgElement.onerror = () => {
+      console.error(`❌ Failed to load image: ${fileData.name}`);
+      URL.revokeObjectURL(blobUrl);
+      imgElement.alt = 'Failed to load image';
+    };
+    
+    // Make clickable to view full size
+    imgElement.style.cursor = 'pointer';
+    imgElement.addEventListener('click', () => {
+      console.log(`🔍 Opening full-size image: ${fileData.name}`);
+      const fullSizeUrl = URL.createObjectURL(fileData.blob);
+      const newWindow = window.open(fullSizeUrl, '_blank');
+      
+      // Clean up after window opens
+      if (newWindow) {
+        newWindow.onload = () => {
+          setTimeout(() => URL.revokeObjectURL(fullSizeUrl), 1000);
+        };
+      }
+    }, { once: true, passive: true });
+    
   } catch (error) {
-    console.error('Failed to load image attachment:', error);
+    console.error('❌ Error loading image attachment:', error);
     imgElement.alt = 'Failed to load image';
+    imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EError loading image%3C/text%3E%3C/svg%3E';
   }
 }
 
@@ -2311,31 +2411,53 @@ async function loadImageAttachment(fileId, imgElement) {
  * Download attachment file
  */
 async function downloadAttachment(fileId, fileName) {
-  console.log(`📥 Downloading attachment: ${fileName}`);
+  console.log('📥 ========================================');
+  console.log('📥 DOWNLOAD ATTACHMENT REQUESTED');
+  console.log('📥 ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   Filename: ${fileName}`);
   
   try {
     const fileData = await getFileFromIndexedDB(fileId);
+    
     if (!fileData || !fileData.blob) {
+      console.error('❌ File not found in IndexedDB');
       toast('File not found', 'error');
+      console.log('📥 ========================================\n');
       return;
     }
+    
+    console.log(`✅ File retrieved from IndexedDB`);
+    console.log(`   Size: ${(fileData.size / 1024).toFixed(2)} KB`);
+    console.log(`   Type: ${fileData.type}`);
     
     // Create download link
     const blobUrl = URL.createObjectURL(fileData.blob);
     const a = document.createElement('a');
     a.href = blobUrl;
     a.download = fileName;
+    a.style.display = 'none';
     document.body.appendChild(a);
+    
+    console.log('🔽 Triggering download...');
     a.click();
-    document.body.removeChild(a);
     
     // Cleanup
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    document.body.removeChild(a);
+    setTimeout(() => {
+      URL.revokeObjectURL(blobUrl);
+      console.log('🧹 Download blob URL revoked');
+    }, 1000);
     
-    console.log(`✅ Download initiated: ${fileName}`);
+    toast(`Downloading ${fileName}`, 'success');
+    console.log(`✅ Download initiated successfully`);
+    console.log('📥 ========================================\n');
+    
   } catch (error) {
-    console.error('Failed to download attachment:', error);
+    console.error('❌ Download error:', error);
+    console.error('   Stack:', error.stack);
     toast('Download failed', 'error');
+    console.log('📥 ========================================\n');
   }
 }
 
