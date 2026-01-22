@@ -581,8 +581,8 @@
                     <span class="material-symbols-outlined text-xl">sentiment_satisfied</span>
                 </button>
                 <button type="button" class="attachment-btn flex-shrink-0" title="Attach file">
-                    <span class="material-symbols-outlined text-xl">attach_file</span>
-                </button>
+    <span class="material-symbols-outlined text-xl">attach_file</span>
+</button>
                 <input type="text" id="messageInput" required maxlength="500"
                     class="flex-1 px-4 py-3 text-sm border border-gray-700 rounded-xl focus:border-[#33bfcc] focus:outline-none bg-[#2a2d33] text-gray-200"
                     placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
@@ -756,6 +756,357 @@ function setAuthenticationState(authenticated) {
   
   console.log(`🔐 ========================================\n`);
 }
+
+
+
+// ============================================
+// INDEXEDDB SETUP FOR FILE ATTACHMENTS
+// ============================================
+const DB_NAME = 'MoodLogChatFiles';
+const DB_VERSION = 1;
+const FILE_STORE_NAME = 'attachments';
+const CHUNK_SIZE = 1024 * 1024; // 1MB chunks for large file processing
+
+let dbInstance = null;
+
+/**
+ * Initialize IndexedDB for file storage
+ * Returns promise that resolves to DB instance
+ */
+function initFileDB() {
+  return new Promise((resolve, reject) => {
+    if (dbInstance) {
+      resolve(dbInstance);
+      return;
+    }
+    
+    console.log('📂 Initializing IndexedDB for file attachments...');
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    
+    request.onerror = () => {
+      console.error('❌ IndexedDB open failed:', request.error);
+      reject(request.error);
+    };
+    
+    request.onsuccess = () => {
+      dbInstance = request.result;
+      console.log('✅ IndexedDB initialized successfully');
+      resolve(dbInstance);
+    };
+    
+    request.onupgradeneeded = (event) => {
+      console.log('🔧 IndexedDB upgrade needed - creating object stores');
+      const db = event.target.result;
+      
+      // Create object store for file attachments
+      if (!db.objectStoreNames.contains(FILE_STORE_NAME)) {
+        const store = db.createObjectStore(FILE_STORE_NAME, { keyPath: 'id' });
+        store.createIndex('roomId', 'roomId', { unique: false });
+        store.createIndex('messageId', 'messageId', { unique: false });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
+        console.log('✅ Object store created:', FILE_STORE_NAME);
+      }
+    };
+  });
+}
+
+/**
+ * Store file in IndexedDB without keeping in RAM
+ * Uses chunked reading for large files
+ */
+async function storeFileToIndexedDB(file, roomId, messageId = null) {
+  console.log('💾 ========================================');
+  console.log('💾 STORING FILE TO INDEXEDDB');
+  console.log('💾 ========================================');
+  console.log(`   File: ${file.name}`);
+  console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+  console.log(`   Type: ${file.type}`);
+  console.log(`   Room: ${roomId}`);
+  
+  try {
+    const db = await initFileDB();
+    
+    // Generate unique ID
+    const fileId = `file_${roomId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Read file in chunks to avoid memory issues
+    const chunks = [];
+    let offset = 0;
+    
+    while (offset < file.size) {
+      const chunk = file.slice(offset, offset + CHUNK_SIZE);
+      const arrayBuffer = await readChunkAsArrayBuffer(chunk);
+      chunks.push(arrayBuffer);
+      offset += CHUNK_SIZE;
+      
+      // Log progress for large files
+      if (file.size > 5 * 1024 * 1024) {
+        const progress = ((offset / file.size) * 100).toFixed(1);
+        console.log(`   Progress: ${progress}%`);
+      }
+    }
+    
+    // Combine chunks into single Blob (IndexedDB can store Blobs efficiently)
+    const blob = new Blob(chunks, { type: file.type });
+    
+    // Clear chunks array to free memory
+    chunks.length = 0;
+    
+    // Store file metadata and blob
+    const fileRecord = {
+      id: fileId,
+      roomId: roomId,
+      messageId: messageId,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      blob: blob, // IndexedDB stores this on disk, not in RAM
+      timestamp: Date.now()
+    };
+    
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      const request = store.add(fileRecord);
+      
+      request.onsuccess = () => {
+        console.log(`✅ File stored to IndexedDB: ${fileId}`);
+        console.log(`   Disk-backed storage (not in RAM)`);
+        resolve(fileId);
+      };
+      
+      request.onerror = () => {
+        console.error('❌ Failed to store file:', request.error);
+        reject(request.error);
+      };
+    });
+    
+    console.log('💾 ========================================\n');
+    return fileId;
+    
+  } catch (error) {
+    console.error('❌ Error storing file to IndexedDB:', error);
+    console.log('💾 ========================================\n');
+    throw error;
+  }
+}
+
+/**
+ * Read file chunk as ArrayBuffer without blocking main thread
+ */
+function readChunkAsArrayBuffer(chunk) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(chunk);
+  });
+}
+
+/**
+ * Retrieve file from IndexedDB
+ */
+async function getFileFromIndexedDB(fileId) {
+  console.log(`📂 Retrieving file: ${fileId}`);
+  
+  try {
+    const db = await initFileDB();
+    
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      const request = store.get(fileId);
+      
+      request.onsuccess = () => {
+        if (request.result) {
+          console.log(`✅ File retrieved: ${request.result.name}`);
+          resolve(request.result);
+        } else {
+          console.warn(`⚠️ File not found: ${fileId}`);
+          resolve(null);
+        }
+      };
+      
+      request.onerror = () => {
+        console.error('❌ Failed to retrieve file:', request.error);
+        reject(request.error);
+      };
+    });
+    
+  } catch (error) {
+    console.error('❌ Error retrieving file:', error);
+    throw error;
+  }
+}
+
+/**
+ * CRITICAL: Delete ALL files associated with a room
+ * Called when room is destroyed, expired, or left
+ */
+async function deleteRoomFiles(roomId) {
+  console.log('🗑️ ========================================');
+  console.log('🗑️ DELETING ALL FILES FOR ROOM');
+  console.log('🗑️ ========================================');
+  console.log(`   Room ID: ${roomId}`);
+  
+  try {
+    const db = await initFileDB();
+    
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      const index = store.index('roomId');
+      const request = index.openCursor(IDBKeyRange.only(roomId));
+      
+      let deletedCount = 0;
+      
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          console.log(`   🗑️ Deleting file: ${cursor.value.name} (${cursor.value.id})`);
+          cursor.delete();
+          deletedCount++;
+          cursor.continue();
+        } else {
+          console.log(`✅ Deleted ${deletedCount} file(s) for room ${roomId}`);
+          console.log('🗑️ ========================================\n');
+          resolve(deletedCount);
+        }
+      };
+      
+      request.onerror = () => {
+        console.error('❌ Failed to delete room files:', request.error);
+        console.log('🗑️ ========================================\n');
+        reject(request.error);
+      };
+    });
+    
+  } catch (error) {
+    console.error('❌ Error deleting room files:', error);
+    console.log('🗑️ ========================================\n');
+    throw error;
+  }
+}
+
+/**
+ * Delete specific file by ID
+ */
+async function deleteFileFromIndexedDB(fileId) {
+  console.log(`🗑️ Deleting file: ${fileId}`);
+  
+  try {
+    const db = await initFileDB();
+    
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      const request = store.delete(fileId);
+      
+      request.onsuccess = () => {
+        console.log(`✅ File deleted: ${fileId}`);
+        resolve();
+      };
+      
+      request.onerror = () => {
+        console.error('❌ Failed to delete file:', request.error);
+        reject(request.error);
+      };
+    });
+    
+  } catch (error) {
+    console.error('❌ Error deleting file:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get count of files for a room (for debugging/monitoring)
+ */
+async function getRoomFileCount(roomId) {
+  try {
+    const db = await initFileDB();
+    
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      const index = store.index('roomId');
+      const request = index.count(IDBKeyRange.only(roomId));
+      
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    
+  } catch (error) {
+    console.error('❌ Error counting room files:', error);
+    return 0;
+  }
+}
+
+
+// ============================================
+// FILE VALIDATION
+// ============================================
+const SUPPORTED_FILE_TYPES = {
+  // Images
+  'image/jpeg': { ext: ['.jpg', '.jpeg'], maxSize: 10 * 1024 * 1024 }, // 10MB
+  'image/png': { ext: ['.png'], maxSize: 10 * 1024 * 1024 },
+  'image/gif': { ext: ['.gif'], maxSize: 10 * 1024 * 1024 },
+  'image/webp': { ext: ['.webp'], maxSize: 10 * 1024 * 1024 },
+  
+  // Videos
+  'video/mp4': { ext: ['.mp4'], maxSize: 50 * 1024 * 1024 }, // 50MB
+  'video/webm': { ext: ['.webm'], maxSize: 50 * 1024 * 1024 },
+  'video/quicktime': { ext: ['.mov'], maxSize: 50 * 1024 * 1024 },
+  
+  // Documents
+  'application/pdf': { ext: ['.pdf'], maxSize: 20 * 1024 * 1024 }, // 20MB
+};
+
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB total per room
+
+/**
+ * Validate file before processing
+ * Returns { valid: boolean, error: string|null }
+ */
+function validateFile(file) {
+  console.log('🔍 Validating file:', file.name);
+  
+  // Check file type
+  const typeConfig = SUPPORTED_FILE_TYPES[file.type];
+  if (!typeConfig) {
+    console.error(`❌ Unsupported file type: ${file.type}`);
+    return {
+      valid: false,
+      error: `Unsupported file type. Supported: images, videos (MP4/WebM), and PDFs.`
+    };
+  }
+  
+  // Check file extension matches MIME type
+  const fileName = file.name.toLowerCase();
+  const hasValidExtension = typeConfig.ext.some(ext => fileName.endsWith(ext));
+  if (!hasValidExtension) {
+    console.error(`❌ File extension doesn't match type: ${file.name}`);
+    return {
+      valid: false,
+      error: `File extension doesn't match its type.`
+    };
+  }
+  
+  // Check file size
+  if (file.size > typeConfig.maxSize) {
+    console.error(`❌ File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+    const maxMB = (typeConfig.maxSize / 1024 / 1024).toFixed(0);
+    return {
+      valid: false,
+      error: `File too large. Maximum size for ${file.type}: ${maxMB}MB`
+    };
+  }
+  
+  console.log('✅ File validation passed');
+  return { valid: true, error: null };
+}
+
+
 
 function waitForAuthentication() {
   if (isSocketAuthenticated) {
@@ -1132,19 +1483,41 @@ function saveChatState(roomId, messages) {
     }
   }
   
-function clearChatState(force = false) {
+// Replace the existing clearChatState function with this version:
+async function clearChatState(force = false) {
+    console.log('🧹 ========================================');
+    console.log('🧹 CLEARING CHAT STATE');
+    console.log('🧹 ========================================');
+    console.log(`   Force: ${force}`);
+    
     // Only clear if room is actually expiring/ended, or if forced
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     
     if (!force && activeCallStr) {
         console.log('⚠️ Active call exists - preserving chat state');
+        console.log('🧹 ========================================\n');
         return;
     }
     
+    // CRITICAL: Delete all files for this room from IndexedDB
+    if (roomData?.roomId) {
+        try {
+            console.log(`🗑️ Deleting all files for room: ${roomData.roomId}`);
+            const deletedCount = await deleteRoomFiles(roomData.roomId);
+            console.log(`✅ Deleted ${deletedCount} file(s) from IndexedDB`);
+        } catch (error) {
+            console.error('❌ Failed to delete room files:', error);
+            // Continue with other cleanup even if file deletion fails
+        }
+    }
+    
+    // Clear localStorage
     localStorage.removeItem(CHAT_STATE_KEY);
     localStorage.removeItem(CHAT_MESSAGES_KEY);
     localStorage.removeItem(CHAT_TIMESTAMP_KEY);
-    console.log('🗑️ Chat state cleared');
+    
+    console.log('✅ Chat state cleared');
+    console.log('🧹 ========================================\n');
 }
 
   function clearAllChatData() {
@@ -2091,7 +2464,7 @@ socketInstance.on('room_sync_data', (data) => {
   updateTimer();
 });
 
-socketInstance.on('room_expired', (data) => {
+socketInstance.on('room_expired', async (data) => {
   console.error('💥 ========================================');
   console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
   console.error('💥 ========================================');
@@ -2108,19 +2481,60 @@ socketInstance.on('room_expired', (data) => {
     console.error(`   Server time now (adjusted): ${serverNow}`);
   }
   
-  console.error('💥 ========================================\n');
+  // Stop timer
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    console.error('⏰ Timer stopped');
+  }
   
-  if (timerInterval) clearInterval(timerInterval);
+  // CRITICAL: Delete all room files from IndexedDB FIRST
+  if (roomData?.roomId) {
+    try {
+      console.error('🗑️ ========================================');
+      console.error('🗑️ DELETING ROOM FILES ON EXPIRY');
+      console.error('🗑️ ========================================');
+      console.error(`   Room ID: ${roomData.roomId}`);
+      
+      const deletedCount = await deleteRoomFiles(roomData.roomId);
+      
+      console.error(`✅ Successfully deleted ${deletedCount} file(s) from IndexedDB`);
+      console.error('   All room attachments permanently removed from disk storage');
+      console.error('🗑️ ========================================');
+      
+    } catch (error) {
+      console.error('❌ ========================================');
+      console.error('❌ FILE CLEANUP FAILED ON ROOM EXPIRY');
+      console.error('❌ ========================================');
+      console.error('   Error:', error);
+      console.error('   This may leave orphaned files in IndexedDB');
+      console.error('❌ ========================================');
+      // Continue with other cleanup even if file deletion fails
+    }
+  } else {
+    console.error('⚠️ No roomData.roomId available for file cleanup');
+  }
+  
+  // Show user notification
   toast(data.message || 'Room has expired', 'warning');
   
   // Clear all storage
-  clearChatState(true);
+  console.error('🧹 Clearing all chat and call state...');
+  await clearChatState(true); // This also calls deleteRoomFiles, but safe to call twice
   localStorage.removeItem(ACTIVE_CALL_KEY);
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  
+  console.error('✅ All storage cleared');
+  console.error('💥 ========================================');
+  console.error('💥 ROOM EXPIRY CLEANUP COMPLETE');
+  console.error('💥 ========================================\n');
   
   // Navigate and cleanup parent if in iframe
   setTimeout(() => {
+    console.error('🔄 Navigating to mood.html after room expiry');
     cleanupParentCallPage();
   }, 2000);
 });
@@ -2142,19 +2556,6 @@ socketInstance.on('room_expiring_soon', (data) => {
   console.warn('⚠️ ========================================\n');
   
   toast('Room expiring soon!', 'warning');
-});
-
-socketInstance.on('room_expired', (data) => {
-  console.error('💥 Room expired event from server');
-  if (timerInterval) clearInterval(timerInterval);
-  
-  // CRITICAL: Clear active call to remove floating button
-  localStorage.removeItem('activeCall');
-  sessionStorage.removeItem('hasBackgroundCall');
-  
-  toast('Room has expired', 'warning');
-  clearChatState(true);
-  setTimeout(() => window.location.href = '/mood.html', 2000);
 });
 
 socketInstance.on('error', (data) => {
@@ -2578,7 +2979,7 @@ socketInstance.on('incoming_call', (data) => {
   } catch (e) {
     console.error('❌ Failed to cache call:', e);
   }
-  
+
   // Set pending call data
   pendingCallData = data;
   
@@ -2754,6 +3155,93 @@ socketInstance.on('join_existing_call_success', (data) => {
     
     // Reply
     cancelReplyBtn?.addEventListener('click', hideReplyPreview, { passive: true });
+    
+    
+    
+    
+    const attachmentBtn = document.querySelector('.attachment-btn');
+if (attachmentBtn) {
+  attachmentBtn.addEventListener('click', async () => {
+    console.log('📎 ========================================');
+    console.log('📎 ATTACHMENT BUTTON CLICKED');
+    console.log('📎 ========================================');
+    
+    // Create file input dynamically (ensures fresh state)
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = Object.keys(SUPPORTED_FILE_TYPES).join(',') + ',' + 
+                       Object.values(SUPPORTED_FILE_TYPES).flatMap(t => t.ext).join(',');
+    fileInput.style.display = 'none';
+    
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) {
+        console.log('ℹ️ No file selected');
+        console.log('📎 ========================================\n');
+        return;
+      }
+      
+      console.log(`📄 File selected: ${file.name}`);
+      console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`   Type: ${file.type}`);
+      
+      // Validate file
+      const validation = validateFile(file);
+      if (!validation.valid) {
+        toast(validation.error, 'error');
+        console.log('📎 ========================================\n');
+        return;
+      }
+      
+      // Check total storage for room
+      try {
+        const fileCount = await getRoomFileCount(roomData.roomId);
+        console.log(`   Current files in room: ${fileCount}`);
+        
+        // Show loading indicator
+        attachmentBtn.disabled = true;
+        attachmentBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        const originalIcon = attachmentBtn.innerHTML;
+        attachmentBtn.innerHTML = '<span class="material-symbols-outlined text-xl animate-spin">progress_activity</span>';
+        
+        // Store file to IndexedDB (disk-backed, not RAM)
+        const fileId = await storeFileToIndexedDB(file, roomData.roomId, null);
+        
+        console.log(`✅ File stored successfully: ${fileId}`);
+        toast(`File "${file.name}" attached successfully`, 'success');
+        
+        // TODO: Emit to server or update UI to show attached file
+        // For now, just log success
+        console.log('📌 File ready to send with next message');
+        
+        // Restore button state
+        attachmentBtn.disabled = false;
+        attachmentBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        attachmentBtn.innerHTML = originalIcon;
+        
+      } catch (error) {
+        console.error('❌ Failed to store file:', error);
+        toast('Failed to attach file. Please try again.', 'error');
+        
+        // Restore button state
+        attachmentBtn.disabled = false;
+        attachmentBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        attachmentBtn.innerHTML = originalIcon;
+      }
+      
+      console.log('📎 ========================================\n');
+      
+      // Clean up file input
+      document.body.removeChild(fileInput);
+    }, { once: true });
+    
+    // Trigger file picker
+    document.body.appendChild(fileInput);
+    fileInput.click();
+    
+  }, { passive: true });
+}
+    
     
 if (audioCallBtn) {
   audioCallBtn.addEventListener('click', async () => {
@@ -3237,6 +3725,30 @@ window.addEventListener('beforeunload', (e) => {
   // INITIALIZATION
   // ============================================
   
+  
+  try {
+  await initFileDB();
+  console.log('✅ File storage initialized');
+  
+  // Clean up any orphaned files from previous sessions
+  if (roomData?.roomId) {
+    const fileCount = await getRoomFileCount(roomData.roomId);
+    if (fileCount > 0) {
+      console.log(`ℹ️ Found ${fileCount} existing file(s) for this room`);
+    }
+  }
+} catch (error) {
+  console.error('⚠️ File storage initialization failed:', error);
+  console.error('   File attachments will be disabled');
+  // Disable attachment button if IndexedDB fails
+  const attachBtn = document.querySelector('.attachment-btn');
+  if (attachBtn) {
+    attachBtn.disabled = true;
+    attachBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    attachBtn.title = 'File attachments unavailable';
+  }
+}
+  
 try {
     // Check if we're returning from a call OR if we're in an iframe (chat overlay)
     const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
@@ -3262,6 +3774,7 @@ try {
             console.warn('Failed to parse call/room data:', e);
         }
     }
+
     
     console.log('🔍 Page load context:', { 
         returningFromCall, 
