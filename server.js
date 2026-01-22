@@ -1280,8 +1280,7 @@ socket.on('join_room', ({ roomId }) => {
     }
   });
 
-// Then use in chat_message handler:
-socket.on('chat_message', ({ roomId, message, replyTo }) => {
+socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
   try {
     const user = socketUsers.get(socket.id);
     
@@ -1315,10 +1314,39 @@ socket.on('chat_message', ({ roomId, message, replyTo }) => {
       messageData.replyTo = replyTo;
     }
 
+    // ============================================
+    // CRITICAL FIX: Forward attachment data
+    // ============================================
+    if (attachment) {
+      console.log('📎 ========================================');
+      console.log('📎 MESSAGE WITH ATTACHMENT RECEIVED');
+      console.log('📎 ========================================');
+      console.log(`   From: ${user.username}`);
+      console.log(`   File: ${attachment.name}`);
+      console.log(`   Type: ${attachment.type}`);
+      console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
+      console.log(`   FileID: ${attachment.fileId}`);
+      
+      messageData.attachment = {
+        fileId: attachment.fileId,
+        name: attachment.name,
+        type: attachment.type,
+        size: attachment.size
+      };
+      
+      console.log('✅ Attachment data added to message broadcast');
+      console.log('📎 ========================================\n');
+    }
+    // ============================================
+
     room.addMessage(messageData);
     io.to(roomId).emit('chat_message', messageData);
     
-    console.log(`💬 Message from ${user.username} in room ${roomId}: "${message.substring(0, 30)}..."`);
+    const msgPreview = message ? message.substring(0, 30) : '[attachment]';
+    console.log(`💬 Message from ${user.username} in room ${roomId}: "${msgPreview}..."`);
+    if (attachment) {
+      console.log(`   📎 With attachment: ${attachment.name}`);
+    }
     
   } catch (error) {
     console.error('Chat message error:', error);
