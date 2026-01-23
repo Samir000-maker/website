@@ -18,7 +18,7 @@ export const config = {
   
   // App-level variables
   ROOM_DURATION_MINUTES: 10,
-  MAX_USERS_PER_ROOM: 2, // Changed from 4 to 2 for easier testing
+  MAX_USERS_PER_ROOM: 4, // Changed from 4 to 2 for easier testing
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
   
