@@ -2432,42 +2432,100 @@ function checkForBackgroundCall() {
   
   
 function saveChatState(roomId, messages) {
-    try {
-        // Determine current call button state
-        let callButtonState = 'none'; // 'none', 'join', 'back'
-        
-        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
-        
-        if (userInCall) {
-            callButtonState = 'back';
-        } else if (activeCallInRoom) {
-            callButtonState = 'join';
-        }
-        
-        // CRITICAL FIX: Always preserve activeCallInRoom if it exists
-        const callInRoomToSave = activeCallInRoom || null;
-        
-        const state = {
-            roomId,
-            messages: messages || [],
-            timestamp: Date.now(),
-            callButtonState,
-            activeCallInRoom: callInRoomToSave
-        };
-        
-        localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
-        localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-        
-        console.log('✅ Chat state saved:', {
-            messages: messages?.length || 0,
-            buttonState: callButtonState,
-            hasActiveCallInRoom: !!callInRoomToSave,
-            activeCallInRoom: callInRoomToSave
-        });
-    } catch (e) {
-        console.warn('⚠️ Failed to save chat state:', e);
+  try {
+    console.log('💾 ========================================');
+    console.log('💾 SAVING CHAT STATE');
+    console.log('💾 ========================================');
+    console.log(`   Room: ${roomId}`);
+    console.log(`   Messages: ${messages?.length || 0}`);
+    
+    // CRITICAL FIX: Validate input data
+    if (!roomId) {
+      console.error('❌ Cannot save state: roomId missing');
+      return;
     }
+    
+    if (!Array.isArray(messages)) {
+      console.error('❌ Cannot save state: messages not an array');
+      return;
+    }
+    
+    // Validate messages have required fields
+    const validMessages = messages.filter(msg => {
+      const isValid = msg.userId && msg.timestamp && (msg.message || msg.attachment);
+      if (!isValid) {
+        console.warn(`⚠️ Skipping invalid message in cache save:`, msg);
+      }
+      return isValid;
+    });
+    
+    if (validMessages.length < messages.length) {
+      console.warn(`⚠️ Filtered out ${messages.length - validMessages.length} invalid messages`);
+    }
+    
+    // Determine call button state
+    let callButtonState = 'none';
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
+    
+    if (userInCall) {
+      callButtonState = 'back';
+    } else if (activeCallInRoom) {
+      callButtonState = 'join';
+    }
+    
+    const callInRoomToSave = activeCallInRoom || null;
+    
+    const state = {
+      roomId,
+      messages: validMessages, // Use validated messages
+      timestamp: Date.now(),
+      callButtonState,
+      activeCallInRoom: callInRoomToSave,
+      version: 2 // Add version for future migrations
+    };
+    
+    // CRITICAL FIX: Use try-catch for localStorage quota errors
+    try {
+      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+      
+      console.log('✅ Chat state saved successfully:');
+      console.log(`   Valid messages: ${validMessages.length}`);
+      console.log(`   Button state: ${callButtonState}`);
+      console.log(`   Has active call: ${!!callInRoomToSave}`);
+      console.log('💾 ========================================\n');
+      
+    } catch (storageError) {
+      if (storageError.name === 'QuotaExceededError') {
+        console.error('❌ LocalStorage quota exceeded - attempting cleanup');
+        
+        // Emergency cleanup: keep only last 50 messages
+        const trimmedMessages = validMessages.slice(-50);
+        const trimmedState = { ...state, messages: trimmedMessages };
+        
+        try {
+          localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(trimmedState));
+          console.warn(`⚠️ Saved trimmed state (${trimmedMessages.length} messages)`);
+        } catch (retryError) {
+          console.error('❌ Failed to save even trimmed state:', retryError);
+          // Clear old state to free space
+          localStorage.removeItem(CHAT_STATE_KEY);
+          localStorage.removeItem(CHAT_MESSAGES_KEY);
+        }
+      } else {
+        throw storageError; // Re-throw non-quota errors
+      }
+    }
+    
+  } catch (e) {
+    console.error('❌ ========================================');
+    console.error('❌ FAILED TO SAVE CHAT STATE');
+    console.error('❌ ========================================');
+    console.error('   Error:', e.message);
+    console.error('   Stack:', e.stack);
+    console.error('❌ ========================================\n');
+  }
 }
   
   function loadChatState() {
@@ -3545,69 +3603,90 @@ socketInstance.on('room_joined', (data) => {
     console.error('❌ No expiresAt in room_joined data!');
   }
   
-  // Try to restore cached state first
-  const cachedState = loadChatState();
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  const isInIframe = window.parent && window.parent !== window;
+const cachedState = loadChatState();
+const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+const isInIframe = window.parent && window.parent !== window;
 
-  // Determine if we should restore from cache
-  let shouldRestoreCache = false;
+// Determine if we should use cached state as STARTING POINT
+let shouldUseCache = false;
 
-  if (activeCallStr && isInIframe) {
-    try {
-      const activeCall = JSON.parse(activeCallStr);
-      if (activeCall.roomId === roomData.roomId && cachedState && cachedState.roomId === roomData.roomId) {
-        shouldRestoreCache = true;
-        console.log('🔄 Active call in iframe detected - will restore cache');
+if (activeCallStr && isInIframe) {
+  try {
+    const activeCall = JSON.parse(activeCallStr);
+    const roomStr = localStorage.getItem('currentRoom');
+    if (roomStr) {
+      const room = JSON.parse(roomStr);
+      if (activeCall.roomId === room.roomId && cachedState && cachedState.roomId === roomData.roomId) {
+        shouldUseCache = true;
+        console.log('🔄 Active call in iframe detected - will MERGE cache with server');
       }
-    } catch (e) {
-      console.warn('Failed to check active call:', e);
     }
+  } catch (e) {
+    console.warn('Failed to check active call:', e);
   }
+}
 
-  if (shouldRestoreCache) {
-    console.log(`📦 Restoring cached chat state: ${cachedState.messages.length} messages`);
+
+// CRITICAL FIX: Always start with server data as source of truth
+let mergedMessages = [];
+
+if (data.chatHistory?.length > 0) {
+  console.log(`📜 Server provided ${data.chatHistory.length} messages`);
+  
+  // Start with server messages (authoritative source)
+  mergedMessages = [...data.chatHistory];
+  
+  // If we have cache, merge any messages NOT in server history
+  if (shouldUseCache && cachedState?.messages?.length > 0) {
+    console.log(`📦 Merging ${cachedState.messages.length} cached messages with server data`);
     
-    // Restore messages from cache
-    messagesCache = cachedState.messages || [];
+    // Build Set of server message IDs for O(1) lookup
+    const serverMessageIds = new Set(
+      data.chatHistory.map(msg => msg.messageId || `${msg.userId}-${msg.timestamp}`)
+    );
     
-    messagesCache.forEach(msg => {
-      const isCurrentUser = msg.userId === currentUser.userId;
-      const msgEl = createMessageElement(msg, isCurrentUser);
-      messagesList?.appendChild(msgEl);
-    });
-    
-    if (messagesList) {
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
-    
-    console.log('✅ Chat state restored from cache');
-    
-    // DON'T clear the flag - we might navigate back again
-    // Only clear when explicitly leaving the room or call ends
-    
-  } else if (data.chatHistory?.length > 0) {
-    // No cache or fresh join - load from server
-    console.log(`📜 Loading ${data.chatHistory.length} messages from server`);
-    
-    const existingIds = new Set(messagesCache.map(m => m.messageId || `${m.userId}-${m.timestamp}`));
-    
-    data.chatHistory.forEach(msg => {
+    // Add cached messages that aren't in server history
+    const uniqueCachedMessages = cachedState.messages.filter(msg => {
       const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-      if (existingIds.has(msgId)) return;
-      
-      const isCurrentUser = msg.userId === currentUser.userId;
-      const msgEl = createMessageElement(msg, isCurrentUser);
-      messagesList?.appendChild(msgEl);
-      messagesCache.push(msg);
+      return !serverMessageIds.has(msgId);
     });
     
-    if (messagesList) {
-      messagesList.scrollTop = messagesList.scrollHeight;
+    if (uniqueCachedMessages.length > 0) {
+      console.log(`➕ Adding ${uniqueCachedMessages.length} unique cached messages`);
+      mergedMessages = [...mergedMessages, ...uniqueCachedMessages];
+      
+      // Sort by timestamp to maintain order
+      mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     }
-    
-    saveChatState(roomData.roomId, messagesCache);
   }
+  
+} else if (shouldUseCache && cachedState?.messages?.length > 0) {
+  // No server history but we have cache (edge case: all messages cleared server-side)
+  console.log(`📦 No server history, using ${cachedState.messages.length} cached messages`);
+  mergedMessages = [...cachedState.messages];
+} else {
+  console.log('ℹ️ No server history and no cache - starting fresh');
+}
+
+// Update cache with merged data
+messagesCache = mergedMessages;
+
+// Render all merged messages
+console.log(`🎨 Rendering ${messagesCache.length} total messages`);
+messagesCache.forEach(msg => {
+  const isCurrentUser = msg.userId === currentUser.userId;
+  const msgEl = createMessageElement(msg, isCurrentUser);
+  messagesList?.appendChild(msgEl);
+});
+
+if (messagesList && messagesCache.length > 0) {
+  messagesList.scrollTop = messagesList.scrollHeight;
+  console.log('✅ Scrolled to latest message');
+}
+
+// CRITICAL: Save merged state immediately
+saveChatState(roomData.roomId, messagesCache);
+console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
   
 // Restore call button state from cache
 if (shouldRestoreCache && cachedState) {
@@ -4180,15 +4259,54 @@ socketInstance.on('error', (data) => {
   console.error('❌ ========================================\n');
 });
 
-   socketInstance.on('chat_message', async (data) => {
+   socket.on('chat_message', async (data) => {
   console.log('💬 ========================================');
   console.log('💬 INCOMING CHAT MESSAGE');
   console.log('💬 ========================================');
   console.log(`   From: ${data.username}`);
+  console.log(`   MessageID: ${data.messageId}`);
+  console.log(`   Timestamp: ${data.timestamp}`);
   console.log(`   Message: ${data.message ? data.message.substring(0, 30) + '...' : '[no text]'}`);
   
+  // CRITICAL FIX: Validate messageId exists (should always be set by server)
+  if (!data.messageId) {
+    console.error('❌ CRITICAL: Message missing messageId, generating fallback');
+    data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+  
   // ============================================
-  // CRITICAL FIX: Enhanced logging and validation
+  // FIX #2: ROBUST DEDUPLICATION WITH LOGGING
+  // ============================================
+  const isDuplicate = messagesCache.some(cached => {
+    // Primary check: messageId match
+    if (cached.messageId && data.messageId && cached.messageId === data.messageId) {
+      return true;
+    }
+    
+    // Fallback check: userId + timestamp match (within 100ms tolerance for clock skew)
+    if (cached.userId === data.userId && 
+        Math.abs((cached.timestamp || 0) - (data.timestamp || 0)) < 100) {
+      return true;
+    }
+    
+    return false;
+  });
+  
+  if (isDuplicate) {
+    console.warn(`⚠️ DUPLICATE MESSAGE DETECTED - SKIPPING`);
+    console.warn(`   MessageID: ${data.messageId}`);
+    console.warn(`   From: ${data.username} (${data.userId})`);
+    console.warn(`   Timestamp: ${new Date(data.timestamp).toISOString()}`);
+    console.warn(`   Current cache size: ${messagesCache.length}`);
+    console.log('💬 ========================================\n');
+    return; // Skip rendering
+  }
+  
+  console.log(`✅ New message validated (not duplicate)`);
+  console.log(`   Current cache size: ${messagesCache.length}`);
+  
+  // ============================================
+  // ATTACHMENT HANDLING (existing code)
   // ============================================
   if (data.attachment) {
     console.log('📎 Message contains attachment:');
@@ -4202,21 +4320,14 @@ socketInstance.on('error', (data) => {
       console.log(`   Base64 data length: ${(data.attachment.data.length / 1024).toFixed(2)} KB`);
     } else {
       console.error('❌ CRITICAL: Attachment has NO data field!');
-      console.error('   This means the file will NOT be stored to IndexedDB');
-      console.error('   User will see "File not found" error when trying to view');
     }
     
-    // Only store if we don't already have this file (not our own message) AND data is present
+    // Store attachment if not our own message AND data present
     if (data.userId !== currentUser.userId && data.attachment.data) {
       try {
-        console.log('💾 ========================================');
-        console.log('💾 STORING RECEIVED ATTACHMENT TO INDEXEDDB');
-        console.log('💾 ========================================');
-        console.log(`   Sender: ${data.username}`);
-        console.log(`   File: ${data.attachment.name}`);
-        console.log(`   Will store to local IndexedDB for viewing`);
+        console.log('💾 Storing received attachment to IndexedDB...');
         
-        // Convert base64 back to blob
+        // Convert base64 to blob
         const byteCharacters = atob(data.attachment.data);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -4227,54 +4338,31 @@ socketInstance.on('error', (data) => {
         
         console.log(`✅ Converted base64 to blob: ${(blob.size / 1024).toFixed(2)} KB`);
         
-        // Create File object from blob
+        // Create File object
         const file = new File([blob], data.attachment.name, { type: data.attachment.type });
         
-        // Store to IndexedDB with the SAME fileId as sender
+        // Store with SAME fileId
         const storedFileId = await storeFileToIndexedDB(file, roomData.roomId, data.messageId);
         
-        console.log(`✅ Attachment stored to IndexedDB: ${storedFileId}`);
-        console.log(`   Recipient can now view this file`);
-        console.log('💾 ========================================\n');
+        console.log(`✅ Attachment stored: ${storedFileId}`);
         
-        // CRITICAL: Update the attachment fileId to match what we stored
+        // Update attachment reference
         data.attachment.fileId = storedFileId;
-        
-        // Remove base64 data from memory (already stored in IndexedDB)
-        delete data.attachment.data;
+        delete data.attachment.data; // Free memory
         console.log('🧹 Removed base64 data from memory');
         
       } catch (error) {
-        console.error('❌ ========================================');
-        console.error('❌ FAILED TO STORE RECEIVED ATTACHMENT');
-        console.error('❌ ========================================');
-        console.error('   Error:', error);
-        console.error('   Stack:', error.stack);
-        console.error('   File:', data.attachment.name);
-        console.error('   User will see "File not found" when trying to view');
-        console.error('❌ ========================================\n');
-        // Continue anyway - message will show but file might not load
+        console.error('❌ Failed to store received attachment:', error);
       }
     } else if (data.userId === currentUser.userId) {
-      console.log('ℹ️ Own message - file already in our IndexedDB, skipping storage');
-      // Remove data from our own messages to free memory
+      console.log('ℹ️ Own message - file already in IndexedDB');
       delete data.attachment.data;
-    } else if (!data.attachment.data) {
-      console.error('❌ ========================================');
-      console.error('❌ CANNOT STORE ATTACHMENT - NO DATA');
-      console.error('❌ ========================================');
-      console.error('   This is a BUG - server should send attachment.data');
-      console.error('   File:', data.attachment.name);
-      console.error('   User will see "File not found" error');
-      console.error('❌ ========================================\n');
     }
   }
+  
   // ============================================
-  
-  if (!data.messageId) {
-    data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}`;
-  }
-  
+  // RENDER MESSAGE
+  // ============================================
   const isCurrentUser = data.userId === currentUser.userId;
   const msgEl = createMessageElement(data, isCurrentUser);
   
@@ -4283,8 +4371,15 @@ socketInstance.on('error', (data) => {
     messagesList.scrollTop = messagesList.scrollHeight;
   }
   
+  // ============================================
+  // FIX #2B: UPDATE CACHE AND SAVE ATOMICALLY
+  // ============================================
   messagesCache.push(data);
+  console.log(`➕ Added to cache (new size: ${messagesCache.length})`);
+  
+  // CRITICAL: Save immediately after updating cache
   saveChatState(roomData.roomId, messagesCache);
+  console.log(`💾 Chat state saved (${messagesCache.length} messages persisted)`);
   
   console.log('💬 ========================================\n');
 });
