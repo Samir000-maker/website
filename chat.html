@@ -4251,27 +4251,27 @@ socketInstance.on('error', (data) => {
   console.error('❌ ========================================\n');
 });
 
-   socket.on('chat_message', async (data) => {
+   socketInstance.on('chat_message', async (data) => {
   console.log('💬 ========================================');
   console.log('💬 INCOMING CHAT MESSAGE FROM SERVER');
   console.log('💬 ========================================');
-  console.log(`   From: ${data.username}`);
+  console.log(`   From: ${data.username} (${data.userId})`);
   console.log(`   MessageID: ${data.messageId}`);
   console.log(`   Timestamp: ${data.timestamp}`);
+  console.log(`   Current user ID: ${currentUser.userId}`);
   
   // ============================================
-  // CRITICAL FIX: HANDLE OWN MESSAGE ECHO
+  // CRITICAL FIX: SIMPLIFIED DEDUPLICATION
   // ============================================
   const isOwnMessage = data.userId === currentUser.userId;
+  console.log(`   Is own message: ${isOwnMessage}`);
   
+  // Only check for optimistic duplicates from self
   if (isOwnMessage) {
-    console.log('ℹ️ This is our own message echoed from server');
-    
-    // Find and remove optimistic message if it exists
     const optimisticIndex = messagesCache.findIndex(m => 
       m._localOnly && 
       m.userId === data.userId && 
-      Math.abs((m.timestamp || 0) - (data.timestamp || 0)) < 1000 // Within 1s
+      Math.abs((m.timestamp || 0) - (data.timestamp || 0)) < 2000 // Within 2s
     );
     
     if (optimisticIndex !== -1) {
@@ -4295,15 +4295,7 @@ socketInstance.on('error', (data) => {
   }
   
   // ============================================
-  // VALIDATE MESSAGE ID
-  // ============================================
-  if (!data.messageId) {
-    console.error('❌ CRITICAL: Message missing messageId, generating fallback');
-    data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-  
-  // ============================================
-  // ROBUST DEDUPLICATION
+  // ROBUST DEDUPLICATION - Check server messages only
   // ============================================
   const isDuplicate = messagesCache.some(cached => {
     // Skip optimistic messages in deduplication
@@ -4330,7 +4322,7 @@ socketInstance.on('error', (data) => {
     return;
   }
   
-  console.log(`✅ New message validated (not duplicate)`);
+  console.log(`✅ New message validated (not duplicate) - will render`);
   
   // ============================================
   // ATTACHMENT HANDLING
@@ -4367,24 +4359,15 @@ socketInstance.on('error', (data) => {
   }
   
   // ============================================
-  // RENDER MESSAGE (only if from other user or server version of own)
+  // RENDER MESSAGE - For EVERYONE
   // ============================================
-  if (!isOwnMessage) {
-    console.log('🎨 Rendering message from other user...');
-    const msgEl = createMessageElement(data, false);
-    
-    if (messagesList) {
-      messagesList.appendChild(msgEl);
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
-  } else {
-    console.log('🎨 Rendering server version of own message...');
-    const msgEl = createMessageElement(data, true);
-    
-    if (messagesList) {
-      messagesList.appendChild(msgEl);
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
+  console.log(`🎨 Rendering message (from ${isOwnMessage ? 'self' : 'other'})`);
+  const msgEl = createMessageElement(data, isOwnMessage);
+  
+  if (messagesList) {
+    messagesList.appendChild(msgEl);
+    messagesList.scrollTop = messagesList.scrollHeight;
+    console.log(`✅ Message rendered in UI`);
   }
   
   // ============================================
@@ -5107,67 +5090,13 @@ if (messageForm) {
     }
 
     console.log('📤 ========================================');
-    console.log('📤 SENDING MESSAGE');
+    console.log('📤 SENDING MESSAGE TO SERVER');
     console.log('📤 ========================================');
     console.log(`   Message: ${message || '[attachment only]'}`);
     console.log(`   Has attachment: ${!!pendingAttachment}`);
 
     // ============================================
-    // CRITICAL FIX: CREATE LOCAL MESSAGE PREVIEW
-    // ============================================
-    const timestamp = Date.now();
-    const tempMessageId = `msg-${currentUser.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    const localMessageData = {
-      messageId: tempMessageId,
-      userId: currentUser.userId,
-      username: currentUser.username,
-      pfpUrl: currentUser.pfpUrl,
-      message: message || '',
-      timestamp: timestamp,
-      _localOnly: true // Flag to identify optimistic messages
-    };
-
-    // Add reply data if replying
-    if (replyingTo) {
-      localMessageData.replyTo = {
-        messageId: replyingTo.messageId,
-        username: replyingTo.username,
-        message: replyingTo.message,
-        userId: replyingTo.userId
-      };
-    }
-
-    // Add attachment metadata if present
-    if (pendingAttachment) {
-      localMessageData.attachment = {
-        fileId: pendingAttachment.fileId,
-        name: pendingAttachment.name,
-        type: pendingAttachment.type,
-        size: pendingAttachment.size
-        // Don't include data - already in IndexedDB
-      };
-      console.log(`   Attachment: ${pendingAttachment.name}`);
-    }
-
-    // ============================================
-    // RENDER MESSAGE IMMEDIATELY (OPTIMISTIC UI)
-    // ============================================
-    console.log('🎨 Rendering optimistic message in UI...');
-    const msgEl = createMessageElement(localMessageData, true); // true = current user
-    
-    if (messagesList) {
-      messagesList.appendChild(msgEl);
-      messagesList.scrollTop = messagesList.scrollHeight;
-      console.log('✅ Message rendered locally');
-    }
-
-    // Add to cache immediately
-    messagesCache.push(localMessageData);
-    console.log(`➕ Added to cache (new size: ${messagesCache.length})`);
-
-    // ============================================
-    // PREPARE SERVER MESSAGE DATA
+    // PREPARE SERVER MESSAGE DATA (NO OPTIMISTIC UI)
     // ============================================
     const serverMessageData = {
       roomId: roomData.roomId,
@@ -5176,7 +5105,12 @@ if (messageForm) {
 
     // Add reply data for server
     if (replyingTo) {
-      serverMessageData.replyTo = localMessageData.replyTo;
+      serverMessageData.replyTo = {
+        messageId: replyingTo.messageId,
+        username: replyingTo.username,
+        message: replyingTo.message,
+        userId: replyingTo.userId
+      };
       hideReplyPreview();
     }
 
@@ -5193,12 +5127,6 @@ if (messageForm) {
         if (!fileData || !fileData.blob) {
           console.error('❌ Failed to retrieve file from IndexedDB');
           toast('Failed to attach file', 'error');
-          
-          // Remove optimistic message on failure
-          if (msgEl && msgEl.parentNode) {
-            msgEl.parentNode.removeChild(msgEl);
-          }
-          messagesCache = messagesCache.filter(m => m.messageId !== tempMessageId);
           return;
         }
         
@@ -5223,7 +5151,7 @@ if (messageForm) {
           name: pendingAttachment.name,
           type: pendingAttachment.type,
           size: pendingAttachment.size,
-          data: base64Data // CRITICAL: Include actual file data
+          data: base64Data
         };
         
         console.log('✅ Attachment data prepared for transmission');
@@ -5231,22 +5159,16 @@ if (messageForm) {
       } catch (error) {
         console.error('❌ Failed to prepare attachment:', error);
         toast('Failed to attach file', 'error');
-        
-        // Remove optimistic message on failure
-        if (msgEl && msgEl.parentNode) {
-          msgEl.parentNode.removeChild(msgEl);
-        }
-        messagesCache = messagesCache.filter(m => m.messageId !== tempMessageId);
         return;
       }
     }
 
     // ============================================
-    // EMIT TO SERVER
+    // EMIT TO SERVER - Server will broadcast to ALL
     // ============================================
-    console.log('📤 Emitting to server...');
+    console.log('📤 Emitting to server (no optimistic UI)...');
     socketInstance?.emit('chat_message', serverMessageData);
-    console.log('✅ Message sent to server');
+    console.log('✅ Message sent to server - waiting for broadcast');
     console.log('📤 ========================================\n');
 
     // ============================================
@@ -5257,9 +5179,6 @@ if (messageForm) {
     if (pendingAttachment) {
       hideAttachmentPreview();
     }
-
-    // Save state immediately
-    saveChatState(roomData.roomId, messagesCache);
   });
 }
 
