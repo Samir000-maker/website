@@ -3740,17 +3740,6 @@ if (shouldUseCache && cachedState) {
       participantCount: data.activeCall.participantCount
     };
     console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
-    
-    // Only update button state if we didn't already restore from cache
-    if (!shouldRestoreCache) {
-      updateCallButtonState(true, data.activeCall);
-    }
-  } else if (!shouldRestoreCache) {
-    // Only update if not restoring from cache
-    console.log('📞 No active call in room');
-    activeCallInRoom = null;
-    updateCallButtonState(false);
-  }
   
   // Start timer updates immediately with server-synced data
   console.log('⏰ Starting timer updates with server-synced time...');
