@@ -1315,7 +1315,7 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     }
 
     // ============================================
-    // CRITICAL FIX: Validate and forward attachment WITH data
+    // CRITICAL FIX: Deep clone attachment to prevent data loss
     // ============================================
     if (attachment) {
       console.log('📎 ========================================');
@@ -1353,36 +1353,64 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
         return;
       }
       
-      // Include complete attachment data for broadcast
+      // CRITICAL FIX: Deep clone attachment for broadcast (preserve data)
       messageData.attachment = {
         fileId: attachment.fileId,
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
-        data: attachment.data // CRITICAL: Forward the actual file data
+        data: attachment.data // Keep for broadcast
       };
       
       console.log('✅ Attachment data validated and ready for broadcast');
+      console.log('   📡 Broadcasting WITH file data to all room participants');
       console.log('📎 ========================================\n');
     }
     // ============================================
 
-    // Store message in room (without file data to save memory)
-    const storedMessage = { ...messageData };
-    if (storedMessage.attachment) {
-      // Don't store base64 data in room history (too much memory)
-      delete storedMessage.attachment.data;
-      console.log('ℹ️ Removed base64 data from stored message (memory optimization)');
+    // CRITICAL FIX: Create DEEP COPY for room storage (without file data)
+    const storedMessage = {
+      messageId: messageData.messageId,
+      userId: messageData.userId,
+      username: messageData.username,
+      pfpUrl: messageData.pfpUrl,
+      message: messageData.message,
+      timestamp: messageData.timestamp
+    };
+
+    // Copy replyTo if present
+    if (messageData.replyTo) {
+      storedMessage.replyTo = { ...messageData.replyTo };
     }
+
+    // Copy attachment metadata ONLY (no data)
+    if (messageData.attachment) {
+      storedMessage.attachment = {
+        fileId: messageData.attachment.fileId,
+        name: messageData.attachment.name,
+        type: messageData.attachment.type,
+        size: messageData.attachment.size
+        // NO data field - saves memory in room history
+      };
+      console.log('💾 Stored message metadata (without file data) to room history');
+    }
+
+    // Store to room history (memory-efficient)
     room.addMessage(storedMessage);
+    console.log(`💾 Message stored to room ${roomId} history`);
     
-    // Broadcast to room WITH file data
+    // CRITICAL: Broadcast WITH file data to ALL users in room
+    console.log(`📡 Broadcasting message to room ${roomId} (${room.users.length} users)`);
+    if (messageData.attachment) {
+      console.log(`   📎 Attachment included: ${messageData.attachment.name} with ${(messageData.attachment.data.length / 1024).toFixed(2)} KB data`);
+    }
+    
     io.to(roomId).emit('chat_message', messageData);
     
     const msgPreview = message ? message.substring(0, 30) : '[attachment]';
-    console.log(`💬 Message from ${user.username} in room ${roomId}: "${msgPreview}..."`);
+    console.log(`✅ Message broadcast complete from ${user.username}: "${msgPreview}..."`);
     if (attachment) {
-      console.log(`   📎 Broadcasted with attachment: ${attachment.name}`);
+      console.log(`   📎 ${room.users.length} user(s) received file: ${attachment.name}`);
     }
     
   } catch (error) {
