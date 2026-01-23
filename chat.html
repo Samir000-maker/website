@@ -3689,7 +3689,7 @@ saveChatState(roomData.roomId, messagesCache);
 console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
   
 // Restore call button state from cache
-if (shouldRestoreCache && cachedState) {
+if (shouldUseCache && cachedState) {
     console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
     console.log('   Cached activeCallInRoom:', cachedState.activeCallInRoom);
     
