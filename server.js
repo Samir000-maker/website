@@ -1290,7 +1290,15 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       return;
     }
 
-    // CRITICAL FIX: Validate room in one atomic check
+    console.log('💬 ========================================');
+    console.log('💬 CHAT MESSAGE RECEIVED FROM CLIENT');
+    console.log('💬 ========================================');
+    console.log(`   From: ${user.username} (${user.userId})`);
+    console.log(`   Room: ${roomId}`);
+    console.log(`   Message: ${message ? message.substring(0, 50) : '[no text]'}`);
+    console.log(`   Has attachment: ${!!attachment}`);
+
+    // Validate room access
     const validation = validateRoomAccess(roomId, user.userId);
     if (!validation.valid) {
       console.error(`❌ ${validation.error} for user ${user.username}`);
@@ -1314,22 +1322,15 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       messageData.replyTo = replyTo;
     }
 
-    // ============================================
-    // CRITICAL FIX: Deep clone attachment to prevent data loss
-    // ============================================
+    // Handle attachment
     if (attachment) {
-      console.log('📎 ========================================');
-      console.log('📎 MESSAGE WITH ATTACHMENT RECEIVED');
-      console.log('📎 ========================================');
-      console.log(`   From: ${user.username}`);
+      console.log('📎 Processing attachment...');
       console.log(`   File: ${attachment.name}`);
       console.log(`   Type: ${attachment.type}`);
       console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
-      console.log(`   FileID: ${attachment.fileId}`);
       
-      // Validate file data is present
       if (!attachment.data) {
-        console.error('❌ Attachment missing file data!');
+        console.error('❌ Attachment missing data!');
         socket.emit('error', { 
           message: 'Attachment data missing',
           code: 'INVALID_ATTACHMENT' 
@@ -1337,9 +1338,7 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
         return;
       }
       
-      console.log(`   Base64 data length: ${(attachment.data.length / 1024).toFixed(2)} KB`);
-      
-      // Validate file size (10MB limit for images/videos)
+      // Validate file size
       const maxSize = attachment.type.startsWith('image/') ? 10 * 1024 * 1024 : 
                       attachment.type.startsWith('video/') ? 50 * 1024 * 1024 : 
                       20 * 1024 * 1024;
@@ -1347,28 +1346,25 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       if (attachment.size > maxSize) {
         console.error(`❌ File too large: ${(attachment.size / 1024 / 1024).toFixed(2)} MB`);
         socket.emit('error', { 
-          message: 'File too large for transmission',
+          message: 'File too large',
           code: 'FILE_TOO_LARGE'
         });
         return;
       }
       
-      // CRITICAL FIX: Deep clone attachment for broadcast (preserve data)
+      // Include attachment WITH data for broadcast
       messageData.attachment = {
         fileId: attachment.fileId,
         name: attachment.name,
         type: attachment.type,
         size: attachment.size,
-        data: attachment.data // Keep for broadcast
+        data: attachment.data // CRITICAL: Keep for broadcast
       };
       
-      console.log('✅ Attachment data validated and ready for broadcast');
-      console.log('   📡 Broadcasting WITH file data to all room participants');
-      console.log('📎 ========================================\n');
+      console.log('✅ Attachment validated and ready for broadcast');
     }
-    // ============================================
 
-    // CRITICAL FIX: Create DEEP COPY for room storage (without file data)
+    // Create storage version (without data to save memory)
     const storedMessage = {
       messageId: messageData.messageId,
       userId: messageData.userId,
@@ -1378,44 +1374,54 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       timestamp: messageData.timestamp
     };
 
-    // Copy replyTo if present
     if (messageData.replyTo) {
       storedMessage.replyTo = { ...messageData.replyTo };
     }
 
-    // Copy attachment metadata ONLY (no data)
     if (messageData.attachment) {
       storedMessage.attachment = {
         fileId: messageData.attachment.fileId,
         name: messageData.attachment.name,
         type: messageData.attachment.type,
         size: messageData.attachment.size
-        // NO data field - saves memory in room history
+        // NO data field - saves memory
       };
-      console.log('💾 Stored message metadata (without file data) to room history');
     }
 
-    // Store to room history (memory-efficient)
+    // Store to room history
     room.addMessage(storedMessage);
-    console.log(`💾 Message stored to room ${roomId} history`);
+    console.log(`💾 Message stored to room history`);
     
-    // CRITICAL: Broadcast WITH file data to ALL users in room
-    console.log(`📡 Broadcasting message to room ${roomId} (${room.users.length} users)`);
+    // ============================================
+    // CRITICAL FIX: BROADCAST TO ALL USERS
+    // ============================================
+    console.log('📡 ========================================');
+    console.log('📡 BROADCASTING MESSAGE TO ROOM');
+    console.log('📡 ========================================');
+    console.log(`   Room: ${roomId}`);
+    console.log(`   Users in room: ${room.users.length}`);
+    console.log(`   MessageID: ${messageData.messageId}`);
+    
     if (messageData.attachment) {
-      console.log(`   📎 Attachment included: ${messageData.attachment.name} with ${(messageData.attachment.data.length / 1024).toFixed(2)} KB data`);
+      console.log(`   📎 Broadcasting WITH attachment data`);
+      console.log(`      File: ${messageData.attachment.name}`);
+      console.log(`      Data size: ${(messageData.attachment.data.length / 1024).toFixed(2)} KB`);
     }
     
+    // Emit to ALL users in the room (including sender)
     io.to(roomId).emit('chat_message', messageData);
     
-    const msgPreview = message ? message.substring(0, 30) : '[attachment]';
-    console.log(`✅ Message broadcast complete from ${user.username}: "${msgPreview}..."`);
-    if (attachment) {
-      console.log(`   📎 ${room.users.length} user(s) received file: ${attachment.name}`);
-    }
+    console.log(`✅ Message broadcast complete to ${roomId}`);
+    console.log('📡 ========================================');
+    console.log('💬 ========================================\n');
     
   } catch (error) {
-    console.error('❌ Chat message error:', error);
+    console.error('❌ ========================================');
+    console.error('❌ CHAT MESSAGE ERROR');
+    console.error('❌ ========================================');
+    console.error('   Error:', error.message);
     console.error('   Stack:', error.stack);
+    console.error('❌ ========================================\n');
     socket.emit('error', { message: 'Failed to send message' });
   }
 });
