@@ -4253,29 +4253,68 @@ socketInstance.on('error', (data) => {
 
    socket.on('chat_message', async (data) => {
   console.log('💬 ========================================');
-  console.log('💬 INCOMING CHAT MESSAGE');
+  console.log('💬 INCOMING CHAT MESSAGE FROM SERVER');
   console.log('💬 ========================================');
   console.log(`   From: ${data.username}`);
   console.log(`   MessageID: ${data.messageId}`);
   console.log(`   Timestamp: ${data.timestamp}`);
-  console.log(`   Message: ${data.message ? data.message.substring(0, 30) + '...' : '[no text]'}`);
   
-  // CRITICAL FIX: Validate messageId exists (should always be set by server)
+  // ============================================
+  // CRITICAL FIX: HANDLE OWN MESSAGE ECHO
+  // ============================================
+  const isOwnMessage = data.userId === currentUser.userId;
+  
+  if (isOwnMessage) {
+    console.log('ℹ️ This is our own message echoed from server');
+    
+    // Find and remove optimistic message if it exists
+    const optimisticIndex = messagesCache.findIndex(m => 
+      m._localOnly && 
+      m.userId === data.userId && 
+      Math.abs((m.timestamp || 0) - (data.timestamp || 0)) < 1000 // Within 1s
+    );
+    
+    if (optimisticIndex !== -1) {
+      console.log('🔄 Replacing optimistic message with server version');
+      
+      // Remove optimistic message from cache
+      const optimisticMsg = messagesCache[optimisticIndex];
+      messagesCache.splice(optimisticIndex, 1);
+      
+      // Remove from DOM
+      const msgElements = messagesList?.querySelectorAll('.message-item');
+      if (msgElements) {
+        msgElements.forEach(el => {
+          if (el.dataset.messageId === optimisticMsg.messageId) {
+            el.remove();
+            console.log('✅ Removed optimistic message from DOM');
+          }
+        });
+      }
+    }
+  }
+  
+  // ============================================
+  // VALIDATE MESSAGE ID
+  // ============================================
   if (!data.messageId) {
     console.error('❌ CRITICAL: Message missing messageId, generating fallback');
     data.messageId = `msg-${data.userId}-${data.timestamp || Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
   
   // ============================================
-  // FIX #2: ROBUST DEDUPLICATION WITH LOGGING
+  // ROBUST DEDUPLICATION
   // ============================================
   const isDuplicate = messagesCache.some(cached => {
+    // Skip optimistic messages in deduplication
+    if (cached._localOnly) return false;
+    
     // Primary check: messageId match
     if (cached.messageId && data.messageId && cached.messageId === data.messageId) {
       return true;
     }
     
-    // Fallback check: userId + timestamp match (within 100ms tolerance for clock skew)
+    // Fallback check: userId + timestamp match (within 100ms)
     if (cached.userId === data.userId && 
         Math.abs((cached.timestamp || 0) - (data.timestamp || 0)) < 100) {
       return true;
@@ -4287,39 +4326,22 @@ socketInstance.on('error', (data) => {
   if (isDuplicate) {
     console.warn(`⚠️ DUPLICATE MESSAGE DETECTED - SKIPPING`);
     console.warn(`   MessageID: ${data.messageId}`);
-    console.warn(`   From: ${data.username} (${data.userId})`);
-    console.warn(`   Timestamp: ${new Date(data.timestamp).toISOString()}`);
-    console.warn(`   Current cache size: ${messagesCache.length}`);
     console.log('💬 ========================================\n');
-    return; // Skip rendering
+    return;
   }
   
   console.log(`✅ New message validated (not duplicate)`);
-  console.log(`   Current cache size: ${messagesCache.length}`);
   
   // ============================================
-  // ATTACHMENT HANDLING (existing code)
+  // ATTACHMENT HANDLING
   // ============================================
   if (data.attachment) {
-    console.log('📎 Message contains attachment:');
-    console.log(`   File: ${data.attachment.name}`);
-    console.log(`   Type: ${data.attachment.type}`);
-    console.log(`   Size: ${(data.attachment.size / 1024).toFixed(2)} KB`);
-    console.log(`   FileID: ${data.attachment.fileId}`);
-    console.log(`   Has data: ${!!data.attachment.data}`);
+    console.log('📎 Message contains attachment');
     
-    if (data.attachment.data) {
-      console.log(`   Base64 data length: ${(data.attachment.data.length / 1024).toFixed(2)} KB`);
-    } else {
-      console.error('❌ CRITICAL: Attachment has NO data field!');
-    }
-    
-    // Store attachment if not our own message AND data present
     if (data.userId !== currentUser.userId && data.attachment.data) {
       try {
         console.log('💾 Storing received attachment to IndexedDB...');
         
-        // Convert base64 to blob
         const byteCharacters = atob(data.attachment.data);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -4328,23 +4350,15 @@ socketInstance.on('error', (data) => {
         const byteArray = new Uint8Array(byteNumbers);
         const blob = new Blob([byteArray], { type: data.attachment.type });
         
-        console.log(`✅ Converted base64 to blob: ${(blob.size / 1024).toFixed(2)} KB`);
-        
-        // Create File object
         const file = new File([blob], data.attachment.name, { type: data.attachment.type });
-        
-        // Store with SAME fileId
         const storedFileId = await storeFileToIndexedDB(file, roomData.roomId, data.messageId);
         
+        data.attachment.fileId = storedFileId;
+        delete data.attachment.data;
         console.log(`✅ Attachment stored: ${storedFileId}`);
         
-        // Update attachment reference
-        data.attachment.fileId = storedFileId;
-        delete data.attachment.data; // Free memory
-        console.log('🧹 Removed base64 data from memory');
-        
       } catch (error) {
-        console.error('❌ Failed to store received attachment:', error);
+        console.error('❌ Failed to store attachment:', error);
       }
     } else if (data.userId === currentUser.userId) {
       console.log('ℹ️ Own message - file already in IndexedDB');
@@ -4353,25 +4367,34 @@ socketInstance.on('error', (data) => {
   }
   
   // ============================================
-  // RENDER MESSAGE
+  // RENDER MESSAGE (only if from other user or server version of own)
   // ============================================
-  const isCurrentUser = data.userId === currentUser.userId;
-  const msgEl = createMessageElement(data, isCurrentUser);
-  
-  if (messagesList) {
-    messagesList.appendChild(msgEl);
-    messagesList.scrollTop = messagesList.scrollHeight;
+  if (!isOwnMessage) {
+    console.log('🎨 Rendering message from other user...');
+    const msgEl = createMessageElement(data, false);
+    
+    if (messagesList) {
+      messagesList.appendChild(msgEl);
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+  } else {
+    console.log('🎨 Rendering server version of own message...');
+    const msgEl = createMessageElement(data, true);
+    
+    if (messagesList) {
+      messagesList.appendChild(msgEl);
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
   }
   
   // ============================================
-  // FIX #2B: UPDATE CACHE AND SAVE ATOMICALLY
+  // UPDATE CACHE AND SAVE
   // ============================================
   messagesCache.push(data);
   console.log(`➕ Added to cache (new size: ${messagesCache.length})`);
   
-  // CRITICAL: Save immediately after updating cache
   saveChatState(roomData.roomId, messagesCache);
-  console.log(`💾 Chat state saved (${messagesCache.length} messages persisted)`);
+  console.log(`💾 Chat state saved`);
   
   console.log('💬 ========================================\n');
 });
@@ -5072,7 +5095,6 @@ if (declineCallBtn) {
   }, { passive: true });
 }
 
-// Message form
 if (messageForm) {
   messageForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -5084,39 +5106,99 @@ if (messageForm) {
       return;
     }
 
-    const messageData = {
-      roomId: roomData.roomId,
-      message: message || '' // Empty string if only attachment
+    console.log('📤 ========================================');
+    console.log('📤 SENDING MESSAGE');
+    console.log('📤 ========================================');
+    console.log(`   Message: ${message || '[attachment only]'}`);
+    console.log(`   Has attachment: ${!!pendingAttachment}`);
+
+    // ============================================
+    // CRITICAL FIX: CREATE LOCAL MESSAGE PREVIEW
+    // ============================================
+    const timestamp = Date.now();
+    const tempMessageId = `msg-${currentUser.userId}-${timestamp}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const localMessageData = {
+      messageId: tempMessageId,
+      userId: currentUser.userId,
+      username: currentUser.username,
+      pfpUrl: currentUser.pfpUrl,
+      message: message || '',
+      timestamp: timestamp,
+      _localOnly: true // Flag to identify optimistic messages
     };
 
     // Add reply data if replying
     if (replyingTo) {
-      messageData.replyTo = {
+      localMessageData.replyTo = {
         messageId: replyingTo.messageId,
         username: replyingTo.username,
         message: replyingTo.message,
         userId: replyingTo.userId
       };
+    }
+
+    // Add attachment metadata if present
+    if (pendingAttachment) {
+      localMessageData.attachment = {
+        fileId: pendingAttachment.fileId,
+        name: pendingAttachment.name,
+        type: pendingAttachment.type,
+        size: pendingAttachment.size
+        // Don't include data - already in IndexedDB
+      };
+      console.log(`   Attachment: ${pendingAttachment.name}`);
+    }
+
+    // ============================================
+    // RENDER MESSAGE IMMEDIATELY (OPTIMISTIC UI)
+    // ============================================
+    console.log('🎨 Rendering optimistic message in UI...');
+    const msgEl = createMessageElement(localMessageData, true); // true = current user
+    
+    if (messagesList) {
+      messagesList.appendChild(msgEl);
+      messagesList.scrollTop = messagesList.scrollHeight;
+      console.log('✅ Message rendered locally');
+    }
+
+    // Add to cache immediately
+    messagesCache.push(localMessageData);
+    console.log(`➕ Added to cache (new size: ${messagesCache.length})`);
+
+    // ============================================
+    // PREPARE SERVER MESSAGE DATA
+    // ============================================
+    const serverMessageData = {
+      roomId: roomData.roomId,
+      message: message || ''
+    };
+
+    // Add reply data for server
+    if (replyingTo) {
+      serverMessageData.replyTo = localMessageData.replyTo;
       hideReplyPreview();
     }
 
     // ============================================
-    // CRITICAL FIX: Send actual file data, not just metadata
+    // HANDLE ATTACHMENT FOR SERVER
     // ============================================
     if (pendingAttachment) {
-      console.log('📎 ========================================');
-      console.log('📎 PREPARING ATTACHMENT FOR TRANSMISSION');
-      console.log('📎 ========================================');
-      console.log(`   File: ${pendingAttachment.name}`);
-      console.log(`   Size: ${(pendingAttachment.size / 1024).toFixed(2)} KB`);
-      
       try {
+        console.log('📎 Preparing attachment for transmission...');
+        
         // Get file data from IndexedDB
         const fileData = await getFileFromIndexedDB(pendingAttachment.fileId);
         
         if (!fileData || !fileData.blob) {
           console.error('❌ Failed to retrieve file from IndexedDB');
           toast('Failed to attach file', 'error');
+          
+          // Remove optimistic message on failure
+          if (msgEl && msgEl.parentNode) {
+            msgEl.parentNode.removeChild(msgEl);
+          }
+          messagesCache = messagesCache.filter(m => m.messageId !== tempMessageId);
           return;
         }
         
@@ -5126,7 +5208,7 @@ if (messageForm) {
         const base64Data = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => {
-            const base64 = reader.result.split(',')[1]; // Remove data:image/png;base64, prefix
+            const base64 = reader.result.split(',')[1];
             resolve(base64);
           };
           reader.onerror = reject;
@@ -5135,8 +5217,8 @@ if (messageForm) {
         
         console.log(`✅ File converted to base64: ${(base64Data.length / 1024).toFixed(2)} KB`);
         
-        // Add attachment with actual file data
-        messageData.attachment = {
+        // Add attachment with actual file data for server
+        serverMessageData.attachment = {
           fileId: pendingAttachment.fileId,
           name: pendingAttachment.name,
           type: pendingAttachment.type,
@@ -5145,27 +5227,39 @@ if (messageForm) {
         };
         
         console.log('✅ Attachment data prepared for transmission');
-        console.log('📎 ========================================\n');
         
       } catch (error) {
         console.error('❌ Failed to prepare attachment:', error);
         toast('Failed to attach file', 'error');
+        
+        // Remove optimistic message on failure
+        if (msgEl && msgEl.parentNode) {
+          msgEl.parentNode.removeChild(msgEl);
+        }
+        messagesCache = messagesCache.filter(m => m.messageId !== tempMessageId);
         return;
       }
     }
-    // ============================================
 
-    // Emit message
-    console.log('📤 Emitting chat_message to server...');
-    socketInstance?.emit('chat_message', messageData);
-    
-    // Clear input
+    // ============================================
+    // EMIT TO SERVER
+    // ============================================
+    console.log('📤 Emitting to server...');
+    socketInstance?.emit('chat_message', serverMessageData);
+    console.log('✅ Message sent to server');
+    console.log('📤 ========================================\n');
+
+    // ============================================
+    // CLEAR INPUT AND ATTACHMENTS
+    // ============================================
     if (messageInput) messageInput.value = '';
     
-    // Clear attachment preview
     if (pendingAttachment) {
       hideAttachmentPreview();
     }
+
+    // Save state immediately
+    saveChatState(roomData.roomId, messagesCache);
   });
 }
 
