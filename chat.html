@@ -3515,19 +3515,33 @@ socketInstance.on('error', (data) => {
   console.log(`   Message: ${data.message ? data.message.substring(0, 30) + '...' : '[no text]'}`);
   
   // ============================================
-  // CRITICAL FIX: Store received attachment to IndexedDB
+  // CRITICAL FIX: Enhanced logging and validation
   // ============================================
   if (data.attachment) {
     console.log('📎 Message contains attachment:');
     console.log(`   File: ${data.attachment.name}`);
     console.log(`   Type: ${data.attachment.type}`);
     console.log(`   Size: ${(data.attachment.size / 1024).toFixed(2)} KB`);
+    console.log(`   FileID: ${data.attachment.fileId}`);
     console.log(`   Has data: ${!!data.attachment.data}`);
     
-    // Only store if we don't already have this file (not our own message)
+    if (data.attachment.data) {
+      console.log(`   Base64 data length: ${(data.attachment.data.length / 1024).toFixed(2)} KB`);
+    } else {
+      console.error('❌ CRITICAL: Attachment has NO data field!');
+      console.error('   This means the file will NOT be stored to IndexedDB');
+      console.error('   User will see "File not found" error when trying to view');
+    }
+    
+    // Only store if we don't already have this file (not our own message) AND data is present
     if (data.userId !== currentUser.userId && data.attachment.data) {
       try {
-        console.log('💾 Storing received attachment to local IndexedDB...');
+        console.log('💾 ========================================');
+        console.log('💾 STORING RECEIVED ATTACHMENT TO INDEXEDDB');
+        console.log('💾 ========================================');
+        console.log(`   Sender: ${data.username}`);
+        console.log(`   File: ${data.attachment.name}`);
+        console.log(`   Will store to local IndexedDB for viewing`);
         
         // Convert base64 back to blob
         const byteCharacters = atob(data.attachment.data);
@@ -3548,6 +3562,7 @@ socketInstance.on('error', (data) => {
         
         console.log(`✅ Attachment stored to IndexedDB: ${storedFileId}`);
         console.log(`   Recipient can now view this file`);
+        console.log('💾 ========================================\n');
         
         // CRITICAL: Update the attachment fileId to match what we stored
         data.attachment.fileId = storedFileId;
@@ -3557,14 +3572,28 @@ socketInstance.on('error', (data) => {
         console.log('🧹 Removed base64 data from memory');
         
       } catch (error) {
-        console.error('❌ Failed to store received attachment:', error);
+        console.error('❌ ========================================');
+        console.error('❌ FAILED TO STORE RECEIVED ATTACHMENT');
+        console.error('❌ ========================================');
+        console.error('   Error:', error);
         console.error('   Stack:', error.stack);
+        console.error('   File:', data.attachment.name);
+        console.error('   User will see "File not found" when trying to view');
+        console.error('❌ ========================================\n');
         // Continue anyway - message will show but file might not load
       }
-    } else {
-      console.log('ℹ️ Own message or no data - skipping storage');
+    } else if (data.userId === currentUser.userId) {
+      console.log('ℹ️ Own message - file already in our IndexedDB, skipping storage');
       // Remove data from our own messages to free memory
       delete data.attachment.data;
+    } else if (!data.attachment.data) {
+      console.error('❌ ========================================');
+      console.error('❌ CANNOT STORE ATTACHMENT - NO DATA');
+      console.error('❌ ========================================');
+      console.error('   This is a BUG - server should send attachment.data');
+      console.error('   File:', data.attachment.name);
+      console.error('   User will see "File not found" error');
+      console.error('❌ ========================================\n');
     }
   }
   // ============================================
