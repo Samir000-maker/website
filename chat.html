@@ -1292,6 +1292,47 @@ async function fetchEmojis() {
   }
 }
 
+
+  const emojiBtn = document.querySelector('.emoji-btn');
+if (emojiBtn) {
+  emojiBtn.addEventListener('click', openEmojiPicker, { passive: true });
+  console.log('✅ Emoji button listener attached');
+}
+
+// Emoji picker overlay click - close picker
+const emojiPickerOverlay = document.getElementById('emojiPickerOverlay');
+if (emojiPickerOverlay) {
+  emojiPickerOverlay.addEventListener('click', (e) => {
+    // Only close if clicking the overlay itself, not the sheet
+    if (e.target === emojiPickerOverlay) {
+      closeEmojiPicker();
+    }
+  }, { passive: true });
+  console.log('✅ Emoji overlay listener attached');
+}
+
+// Emoji search input - filter emojis
+const emojiSearchInput = document.getElementById('emojiSearchInput');
+if (emojiSearchInput) {
+  const debouncedSearch = debounceEmojiSearch((value) => {
+    emojiSearchTerm = value;
+    renderEmojiGrid();
+  }, 150);
+  
+  emojiSearchInput.addEventListener('input', (e) => {
+    debouncedSearch(e.target.value);
+  }, { passive: true });
+  
+  console.log('✅ Emoji search listener attached');
+}
+
+// ESC key - close emoji picker
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isEmojiPickerOpen) {
+    closeEmojiPicker();
+  }
+});
+
 /**
  * Process emoji data into optimized cache structure
  * Groups by category and creates search index
@@ -2936,46 +2977,6 @@ if (data.attachment) {
     }
   }
   
-  
-  const emojiBtn = document.querySelector('.emoji-btn');
-if (emojiBtn) {
-  emojiBtn.addEventListener('click', openEmojiPicker, { passive: true });
-  console.log('✅ Emoji button listener attached');
-}
-
-// Emoji picker overlay click - close picker
-const emojiPickerOverlay = document.getElementById('emojiPickerOverlay');
-if (emojiPickerOverlay) {
-  emojiPickerOverlay.addEventListener('click', (e) => {
-    // Only close if clicking the overlay itself, not the sheet
-    if (e.target === emojiPickerOverlay) {
-      closeEmojiPicker();
-    }
-  }, { passive: true });
-  console.log('✅ Emoji overlay listener attached');
-}
-
-// Emoji search input - filter emojis
-const emojiSearchInput = document.getElementById('emojiSearchInput');
-if (emojiSearchInput) {
-  const debouncedSearch = debounceEmojiSearch((value) => {
-    emojiSearchTerm = value;
-    renderEmojiGrid();
-  }, 150);
-  
-  emojiSearchInput.addEventListener('input', (e) => {
-    debouncedSearch(e.target.value);
-  }, { passive: true });
-  
-  console.log('✅ Emoji search listener attached');
-}
-
-// ESC key - close emoji picker
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && isEmojiPickerOpen) {
-    closeEmojiPicker();
-  }
-});
   
   messageBubble.appendChild(attachmentDiv);
   console.log(`✅ Attachment element added to message bubble`);
