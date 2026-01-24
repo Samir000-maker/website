@@ -735,123 +735,6 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 });
 
 
-// ============================================
-// PEER-TO-PEER FILE TRANSFER VIA SOCKET RELAY
-// ============================================
-
-socket.on('request_attachment_data', async ({ fileId, roomId }) => {
-  try {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) {
-      socket.emit('error', { message: 'Not authenticated' });
-      return;
-    }
-    
-    console.log('📂 ========================================');
-    console.log('📂 ATTACHMENT DATA REQUEST');
-    console.log('📂 ========================================');
-    console.log(`   Requester: ${user.username} (${user.userId})`);
-    console.log(`   FileID: ${fileId}`);
-    console.log(`   Room: ${roomId}`);
-    
-    const room = matchmaking.getRoom(roomId);
-    
-    if (!room) {
-      console.error(`❌ Room ${roomId} not found`);
-      socket.emit('attachment_data_unavailable', { 
-        fileId,
-        reason: 'Room expired or not found' 
-      });
-      return;
-    }
-    
-    if (!room.hasUser(user.userId)) {
-      console.error(`❌ User not in room ${roomId}`);
-      socket.emit('error', { message: 'Not in room' });
-      return;
-    }
-    
-    // Find the message with this attachment in room history
-    const messages = room.getMessages ? room.getMessages() : [];
-    const messageWithFile = messages.find(msg => 
-      msg.attachment && msg.attachment.fileId === fileId
-    );
-    
-    if (!messageWithFile) {
-      console.error(`❌ Message with file ${fileId} not found in room history`);
-      socket.emit('attachment_data_unavailable', { 
-        fileId,
-        reason: 'File not in room history' 
-      });
-      return;
-    }
-    
-    const senderId = messageWithFile.userId;
-    console.log(`📤 Requesting file from sender: ${senderId}`);
-    
-    // Find sender's active socket
-    const senderSocket = findActiveSocketForUser(senderId);
-    
-    if (!senderSocket) {
-      console.error(`❌ Sender ${senderId} not connected`);
-      socket.emit('attachment_data_unavailable', { 
-        fileId,
-        reason: 'File owner not online' 
-      });
-      return;
-    }
-    
-    // Request file data from sender
-    senderSocket.emit('send_attachment_to_peer', {
-      fileId,
-      requesterId: user.userId,
-      requesterSocketId: socket.id
-    });
-    
-    console.log(`✅ File request forwarded to sender`);
-    console.log('📂 ========================================\n');
-    
-  } catch (error) {
-    console.error('❌ Request attachment error:', error);
-    socket.emit('error', { message: 'Failed to request attachment' });
-  }
-});
-
-socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId, data, metadata }) => {
-  try {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) return;
-    
-    console.log('📤 ========================================');
-    console.log('📤 ATTACHMENT DATA RESPONSE');
-    console.log('📤 ========================================');
-    console.log(`   Sender: ${user.username}`);
-    console.log(`   FileID: ${fileId}`);
-    console.log(`   Data size: ${data ? (data.length / 1024).toFixed(2) : 0} KB`);
-    console.log(`   Target socket: ${requesterSocketId}`);
-    
-    // Forward to requester
-    const requesterSocket = io.sockets.sockets.get(requesterSocketId);
-    
-    if (requesterSocket) {
-      requesterSocket.emit('attachment_data_received', {
-        fileId,
-        data,
-        metadata
-      });
-      console.log(`✅ File data forwarded to requester`);
-    } else {
-      console.error(`❌ Requester socket ${requesterSocketId} not found`);
-    }
-    
-    console.log('📤 ========================================\n');
-    
-  } catch (error) {
-    console.error('❌ Attachment response error:', error);
-  }
-});
 
 
 app.get('/api/attachments/:fileId', authenticateFirebase, async (req, res) => {
@@ -985,6 +868,128 @@ app.get('/api/moods', (req, res) => {
 
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
+  
+  
+  
+  
+  
+// ============================================
+// PEER-TO-PEER FILE TRANSFER VIA SOCKET RELAY
+// ============================================
+
+socket.on('request_attachment_data', async ({ fileId, roomId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
+    
+    console.log('📂 ========================================');
+    console.log('📂 ATTACHMENT DATA REQUEST');
+    console.log('📂 ========================================');
+    console.log(`   Requester: ${user.username} (${user.userId})`);
+    console.log(`   FileID: ${fileId}`);
+    console.log(`   Room: ${roomId}`);
+    
+    const room = matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found`);
+      socket.emit('attachment_data_unavailable', { 
+        fileId,
+        reason: 'Room expired or not found' 
+      });
+      return;
+    }
+    
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User not in room ${roomId}`);
+      socket.emit('error', { message: 'Not in room' });
+      return;
+    }
+    
+    // Find the message with this attachment in room history
+    const messages = room.getMessages ? room.getMessages() : [];
+    const messageWithFile = messages.find(msg => 
+      msg.attachment && msg.attachment.fileId === fileId
+    );
+    
+    if (!messageWithFile) {
+      console.error(`❌ Message with file ${fileId} not found in room history`);
+      socket.emit('attachment_data_unavailable', { 
+        fileId,
+        reason: 'File not in room history' 
+      });
+      return;
+    }
+    
+    const senderId = messageWithFile.userId;
+    console.log(`📤 Requesting file from sender: ${senderId}`);
+    
+    // Find sender's active socket
+    const senderSocket = findActiveSocketForUser(senderId);
+    
+    if (!senderSocket) {
+      console.error(`❌ Sender ${senderId} not connected`);
+      socket.emit('attachment_data_unavailable', { 
+        fileId,
+        reason: 'File owner not online' 
+      });
+      return;
+    }
+    
+    // Request file data from sender
+    senderSocket.emit('send_attachment_to_peer', {
+      fileId,
+      requesterId: user.userId,
+      requesterSocketId: socket.id
+    });
+    
+    console.log(`✅ File request forwarded to sender`);
+    console.log('📂 ========================================\n');
+    
+  } catch (error) {
+    console.error('❌ Request attachment error:', error);
+    socket.emit('error', { message: 'Failed to request attachment' });
+  }
+});
+
+socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId, data, metadata }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) return;
+    
+    console.log('📤 ========================================');
+    console.log('📤 ATTACHMENT DATA RESPONSE');
+    console.log('📤 ========================================');
+    console.log(`   Sender: ${user.username}`);
+    console.log(`   FileID: ${fileId}`);
+    console.log(`   Data size: ${data ? (data.length / 1024).toFixed(2) : 0} KB`);
+    console.log(`   Target socket: ${requesterSocketId}`);
+    
+    // Forward to requester
+    const requesterSocket = io.sockets.sockets.get(requesterSocketId);
+    
+    if (requesterSocket) {
+      requesterSocket.emit('attachment_data_received', {
+        fileId,
+        data,
+        metadata
+      });
+      console.log(`✅ File data forwarded to requester`);
+    } else {
+      console.error(`❌ Requester socket ${requesterSocketId} not found`);
+    }
+    
+    console.log('📤 ========================================\n');
+    
+  } catch (error) {
+    console.error('❌ Attachment response error:', error);
+  }
+});
   
   
   
