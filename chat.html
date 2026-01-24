@@ -1917,37 +1917,55 @@ async function getRoomFileCount(roomId) {
 // FILE VALIDATION
 // ============================================
 const SUPPORTED_FILE_TYPES = {
-  // Images
-  'image/jpeg': { ext: ['.jpg', '.jpeg'], maxSize: 10 * 1024 * 1024 }, // 10MB
+  // Images - 10MB max
+  'image/jpeg': { ext: ['.jpg', '.jpeg'], maxSize: 10 * 1024 * 1024 },
   'image/png': { ext: ['.png'], maxSize: 10 * 1024 * 1024 },
   'image/gif': { ext: ['.gif'], maxSize: 10 * 1024 * 1024 },
   'image/webp': { ext: ['.webp'], maxSize: 10 * 1024 * 1024 },
   
-  // Videos
-  'video/mp4': { ext: ['.mp4'], maxSize: 50 * 1024 * 1024 }, // 50MB
-  'video/webm': { ext: ['.webm'], maxSize: 50 * 1024 * 1024 },
-  'video/quicktime': { ext: ['.mov'], maxSize: 50 * 1024 * 1024 },
+  // Videos - 10MB max (production should use CDN for larger)
+  'video/mp4': { ext: ['.mp4'], maxSize: 10 * 1024 * 1024 },
+  'video/webm': { ext: ['.webm'], maxSize: 10 * 1024 * 1024 },
+  'video/quicktime': { ext: ['.mov'], maxSize: 10 * 1024 * 1024 },
   
-  // Documents
-  'application/pdf': { ext: ['.pdf'], maxSize: 20 * 1024 * 1024 }, // 20MB
+  // Documents - 10MB max
+  'application/pdf': { ext: ['.pdf'], maxSize: 10 * 1024 * 1024 },
 };
 
-const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB total per room
+const ABSOLUTE_MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 /**
  * Validate file before processing
  * Returns { valid: boolean, error: string|null }
  */
 function validateFile(file) {
-  console.log('🔍 Validating file:', file.name);
+  console.log('🔍 ========================================');
+  console.log('🔍 FILE VALIDATION');
+  console.log('🔍 ========================================');
+  console.log(`   File: ${file.name}`);
+  console.log(`   Type: ${file.type}`);
+  console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+  
+  // CRITICAL: Absolute size check first
+  if (file.size > ABSOLUTE_MAX_FILE_SIZE) {
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+    const maxMB = (ABSOLUTE_MAX_FILE_SIZE / 1024 / 1024).toFixed(0);
+    console.error(`❌ File exceeds absolute limit: ${sizeMB}MB > ${maxMB}MB`);
+    console.log('🔍 ========================================\n');
+    return {
+      valid: false,
+      error: `File too large (${sizeMB}MB). Maximum file size is ${maxMB}MB.`
+    };
+  }
   
   // Check file type
   const typeConfig = SUPPORTED_FILE_TYPES[file.type];
   if (!typeConfig) {
     console.error(`❌ Unsupported file type: ${file.type}`);
+    console.log('🔍 ========================================\n');
     return {
       valid: false,
-      error: `Unsupported file type. Supported: images, videos (MP4/WebM), and PDFs.`
+      error: `Unsupported file type. Supported: images (JPG, PNG, GIF, WebP), videos (MP4, WebM, MOV), and PDFs.`
     };
   }
   
@@ -1956,25 +1974,315 @@ function validateFile(file) {
   const hasValidExtension = typeConfig.ext.some(ext => fileName.endsWith(ext));
   if (!hasValidExtension) {
     console.error(`❌ File extension doesn't match type: ${file.name}`);
+    console.log('🔍 ========================================\n');
     return {
       valid: false,
-      error: `File extension doesn't match its type.`
+      error: `File extension doesn't match its type. Expected: ${typeConfig.ext.join(', ')}`
     };
   }
   
-  // Check file size
+  // Check type-specific size limit
   if (file.size > typeConfig.maxSize) {
-    console.error(`❌ File too large: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
     const maxMB = (typeConfig.maxSize / 1024 / 1024).toFixed(0);
+    console.error(`❌ File exceeds type limit: ${sizeMB}MB > ${maxMB}MB`);
+    console.log('🔍 ========================================\n');
     return {
       valid: false,
-      error: `File too large. Maximum size for ${file.type}: ${maxMB}MB`
+      error: `${file.type} files must be under ${maxMB}MB. Your file is ${sizeMB}MB.`
     };
   }
   
   console.log('✅ File validation passed');
+  console.log('🔍 ========================================\n');
   return { valid: true, error: null };
 }
+
+
+
+// ============================================
+// CHUNKED FILE TRANSMISSION CONFIGURATION
+// ============================================
+const CHUNK_SIZE = 256 * 1024; // 256KB chunks (safe for Socket.IO)
+const CHUNK_TIMEOUT = 30000; // 30s timeout per chunk
+const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
+
+/**
+ * Chunk file into manageable pieces for transmission
+ * Returns array of { index, data: base64, size }
+ */
+async function chunkFile(file) {
+  console.log('✂️ ========================================');
+  console.log('✂️ CHUNKING FILE FOR TRANSMISSION');
+  console.log('✂️ ========================================');
+  console.log(`   File: ${file.name}`);
+  console.log(`   Total size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+  console.log(`   Chunk size: ${(CHUNK_SIZE / 1024).toFixed(0)} KB`);
+  
+  const chunks = [];
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  console.log(`   Total chunks: ${totalChunks}`);
+  
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const blob = file.slice(start, end);
+    
+    // Convert chunk to base64
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result.split(',')[1];
+        resolve(base64Data);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    
+    chunks.push({
+      index: i,
+      data: base64,
+      size: blob.size
+    });
+    
+    // Log progress every 10 chunks
+    if ((i + 1) % 10 === 0 || i === totalChunks - 1) {
+      const progress = ((i + 1) / totalChunks * 100).toFixed(1);
+      console.log(`   Chunking progress: ${progress}% (${i + 1}/${totalChunks})`);
+    }
+  }
+  
+  console.log(`✅ File chunked: ${chunks.length} chunks ready`);
+  console.log('✂️ ========================================\n');
+  
+  return chunks;
+}
+
+/**
+ * Send file using chunked transmission protocol
+ * Returns Promise that resolves when all chunks are acknowledged
+ */
+async function sendFileInChunks(fileId, fileName, fileType, fileSize, chunks, roomId) {
+  console.log('📤 ========================================');
+  console.log('📤 CHUNKED FILE TRANSMISSION START');
+  console.log('📤 ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   File: ${fileName}`);
+  console.log(`   Chunks: ${chunks.length}`);
+  console.log(`   Room: ${roomId}`);
+  
+  return new Promise((resolve, reject) => {
+    let currentChunk = 0;
+    let ackReceived = false;
+    let timeoutHandle = null;
+    let retryCount = 0;
+    
+    // Listen for chunk acknowledgments
+    const ackHandler = (data) => {
+      if (data.fileId !== fileId) return;
+      
+      console.log(`✅ Chunk ${data.chunkIndex}/${chunks.length - 1} acknowledged`);
+      ackReceived = true;
+      clearTimeout(timeoutHandle);
+      
+      currentChunk++;
+      
+      // Update progress UI
+      const progress = Math.round((currentChunk / chunks.length) * 100);
+      const progressText = document.getElementById('uploadProgressText');
+      if (progressText) {
+        progressText.textContent = `Uploading: ${progress}%`;
+      }
+      
+      if (currentChunk < chunks.length) {
+        retryCount = 0; // Reset retry counter on success
+        sendNextChunk();
+      } else {
+        console.log('✅ All chunks transmitted successfully');
+        socketInstance.off('file_chunk_ack', ackHandler);
+        resolve();
+      }
+    };
+    
+    socketInstance.on('file_chunk_ack', ackHandler);
+    
+    const sendNextChunk = () => {
+      if (currentChunk >= chunks.length) return;
+      
+      ackReceived = false;
+      const chunk = chunks[currentChunk];
+      
+      console.log(`📤 Sending chunk ${currentChunk}/${chunks.length - 1} (${(chunk.size / 1024).toFixed(2)} KB)`);
+      
+      socketInstance.emit('file_chunk', {
+        fileId,
+        fileName,
+        fileType,
+        fileSize,
+        roomId,
+        chunkIndex: currentChunk,
+        totalChunks: chunks.length,
+        chunkData: chunk.data,
+        chunkSize: chunk.size
+      });
+      
+      // Set timeout for this chunk
+      timeoutHandle = setTimeout(() => {
+        if (!ackReceived) {
+          console.error(`❌ Chunk ${currentChunk} timeout (no ACK received)`);
+          
+          if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`🔄 Retrying chunk ${currentChunk} (attempt ${retryCount}/${MAX_RETRIES})`);
+            sendNextChunk();
+          } else {
+            socketInstance.off('file_chunk_ack', ackHandler);
+            reject(new Error(`Chunk ${currentChunk} failed after ${MAX_RETRIES} retries`));
+          }
+        }
+      }, CHUNK_TIMEOUT);
+    };
+    
+    // Start transmission
+    sendNextChunk();
+  });
+}
+
+/**
+ * Receive and reconstruct file from chunks
+ * Stores to IndexedDB incrementally
+ */
+class ChunkedFileReceiver {
+  constructor() {
+    this.activeTransfers = new Map(); // fileId -> { chunks: [], metadata: {} }
+  }
+  
+  async handleChunk(data) {
+    const { fileId, fileName, fileType, fileSize, roomId, chunkIndex, totalChunks, chunkData, chunkSize } = data;
+    
+    console.log(`📥 Received chunk ${chunkIndex}/${totalChunks - 1} for ${fileName}`);
+    
+    if (!this.activeTransfers.has(fileId)) {
+      console.log(`🆕 Starting new file transfer: ${fileId}`);
+      this.activeTransfers.set(fileId, {
+        chunks: new Array(totalChunks),
+        metadata: { fileName, fileType, fileSize, roomId, totalChunks },
+        receivedCount: 0
+      });
+    }
+    
+    const transfer = this.activeTransfers.get(fileId);
+    
+    // Store chunk
+    transfer.chunks[chunkIndex] = chunkData;
+    transfer.receivedCount++;
+    
+    // Send ACK
+    socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
+    
+    const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
+    console.log(`📊 Transfer progress: ${progress}% (${transfer.receivedCount}/${totalChunks})`);
+    
+    // Check if complete
+    if (transfer.receivedCount === totalChunks) {
+      console.log('✅ All chunks received, reconstructing file...');
+      await this.reconstructFile(fileId, transfer);
+    }
+  }
+  
+  async reconstructFile(fileId, transfer) {
+    const { chunks, metadata } = transfer;
+    const { fileName, fileType, fileSize, roomId } = metadata;
+    
+    console.log('🔧 ========================================');
+    console.log('🔧 RECONSTRUCTING FILE FROM CHUNKS');
+    console.log('🔧 ========================================');
+    console.log(`   FileID: ${fileId}`);
+    console.log(`   File: ${fileName}`);
+    console.log(`   Chunks: ${chunks.length}`);
+    
+    try {
+      // Combine all base64 chunks
+      const combinedBase64 = chunks.join('');
+      
+      // Convert to blob
+      const byteCharacters = atob(combinedBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: fileType });
+      
+      console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+      
+      // Verify size matches
+      if (Math.abs(blob.size - fileSize) > 1024) { // Allow 1KB tolerance
+        throw new Error(`Size mismatch: expected ${fileSize}, got ${blob.size}`);
+      }
+      
+      // Store to IndexedDB
+      const db = await initFileDB();
+      
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(FILE_STORE_NAME);
+        
+        const fileRecord = {
+          id: fileId,
+          roomId: roomId,
+          messageId: null,
+          name: fileName,
+          type: fileType,
+          size: fileSize,
+          blob: blob,
+          timestamp: Date.now()
+        };
+        
+        const request = store.put(fileRecord); // Use put instead of add (allows updates)
+        
+        request.onsuccess = () => {
+          console.log(`✅ File stored to IndexedDB: ${fileId}`);
+          resolve();
+        };
+        
+        request.onerror = () => {
+          console.error('❌ Failed to store file:', request.error);
+          reject(request.error);
+        };
+      });
+      
+      // Clean up transfer state
+      this.activeTransfers.delete(fileId);
+      
+      console.log('✅ File reconstruction complete');
+      console.log('🔧 ========================================\n');
+      
+      // Update any pending image elements
+      const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
+      if (imgElements.length > 0) {
+        console.log(`🖼️ Updating ${imgElements.length} image element(s)`);
+        imgElements.forEach(img => loadImageAttachment(fileId, img));
+      }
+      
+    } catch (error) {
+      console.error('❌ File reconstruction failed:', error);
+      console.log('🔧 ========================================\n');
+      this.activeTransfers.delete(fileId);
+      throw error;
+    }
+  }
+  
+  cleanup(fileId) {
+    if (this.activeTransfers.has(fileId)) {
+      console.log(`🧹 Cleaning up incomplete transfer: ${fileId}`);
+      this.activeTransfers.delete(fileId);
+    }
+  }
+}
+
+// Initialize global receiver
+const fileReceiver = new ChunkedFileReceiver();
 
 
 
@@ -3420,6 +3728,32 @@ function showConfirmationDialog() {
     if (!socketInstance) return;
     
     
+    // ============================================
+// CHUNKED FILE TRANSMISSION HANDLERS
+// ============================================
+
+socketInstance.on('file_chunk', async (data) => {
+  try {
+    await fileReceiver.handleChunk(data);
+  } catch (error) {
+    console.error('❌ Error handling chunk:', error);
+  }
+});
+
+socketInstance.on('file_transmission_complete', ({ fileId, fileName }) => {
+  console.log(`✅ File transmission complete: ${fileName} (${fileId})`);
+  toast(`Received: ${fileName}`, 'success');
+});
+
+socketInstance.on('file_transmission_failed', ({ fileId, fileName, reason }) => {
+  console.error(`❌ File transmission failed: ${fileName}`);
+  console.error(`   Reason: ${reason}`);
+  
+  fileReceiver.cleanup(fileId);
+  toast(`Failed to receive: ${fileName}`, 'error');
+});
+    
+    
     socketInstance.on('cached_call_valid', (data) => {
     console.log('✅ Cached call validated by server:', data.callId);
     console.log(`   Showing modal for call from ${data.callerUsername}`);
@@ -3984,16 +4318,7 @@ socketInstance.on('room_expired', async (data) => {
   console.error('💥 ========================================');
   console.error(`   roomId: ${data.roomId}`);
   console.error(`   message: ${data.message}`);
-  console.error(`   Server says room expired at: ${new Date().toISOString()}`);
-  
-  if (serverExpiresAt) {
-    const serverExpiry = new Date(serverExpiresAt).toISOString();
-    const clientNow = new Date().toISOString();
-    const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
-    console.error(`   expiresAt was: ${serverExpiry}`);
-    console.error(`   Client time now: ${clientNow}`);
-    console.error(`   Server time now (adjusted): ${serverNow}`);
-  }
+  console.error(`   cleanupFiles: ${data.cleanupFiles || false}`);
   
   // Stop timer
   if (timerInterval) {
@@ -4002,8 +4327,8 @@ socketInstance.on('room_expired', async (data) => {
     console.error('⏰ Timer stopped');
   }
   
-  // CRITICAL: Delete all room files from IndexedDB FIRST
-  if (roomData?.roomId) {
+  // CRITICAL: Delete all room files from IndexedDB
+  if (data.cleanupFiles && roomData?.roomId) {
     try {
       console.error('🗑️ ========================================');
       console.error('🗑️ DELETING ROOM FILES ON EXPIRY');
@@ -4021,12 +4346,8 @@ socketInstance.on('room_expired', async (data) => {
       console.error('❌ FILE CLEANUP FAILED ON ROOM EXPIRY');
       console.error('❌ ========================================');
       console.error('   Error:', error);
-      console.error('   This may leave orphaned files in IndexedDB');
       console.error('❌ ========================================');
-      // Continue with other cleanup even if file deletion fails
     }
-  } else {
-    console.error('⚠️ No roomData.roomId available for file cleanup');
   }
   
   // Show user notification
@@ -4034,7 +4355,7 @@ socketInstance.on('room_expired', async (data) => {
   
   // Clear all storage
   console.error('🧹 Clearing all chat and call state...');
-  await clearChatState(true); // This also calls deleteRoomFiles, but safe to call twice
+  await clearChatState(true);
   localStorage.removeItem(ACTIVE_CALL_KEY);
   sessionStorage.removeItem('hasBackgroundCall');
   sessionStorage.removeItem('returningFromCall');
@@ -4042,8 +4363,6 @@ socketInstance.on('room_expired', async (data) => {
   sessionStorage.removeItem('returningToBackgroundCall');
   
   console.error('✅ All storage cleared');
-  console.error('💥 ========================================');
-  console.error('💥 ROOM EXPIRY CLEANUP COMPLETE');
   console.error('💥 ========================================\n');
   
   // Navigate and cleanup parent if in iframe
@@ -4428,31 +4747,28 @@ socketInstance.on('error', (data) => {
   console.log('💬 ========================================');
   console.log(`   From: ${data.username} (${data.userId})`);
   console.log(`   MessageID: ${data.messageId}`);
-  console.log(`   Timestamp: ${data.timestamp}`);
-  console.log(`   Current user ID: ${currentUser.userId}`);
+  console.log(`   Has attachment: ${!!data.attachment}`);
+  console.log(`   Attachment chunked: ${data.attachment?.chunked || false}`);
   
-  // ============================================
-  // CRITICAL FIX: SIMPLIFIED DEDUPLICATION
-  // ============================================
   const isOwnMessage = data.userId === currentUser.userId;
   console.log(`   Is own message: ${isOwnMessage}`);
   
-  // Only check for optimistic duplicates from self
+  // ============================================
+  // DEDUPLICATION - Check server messages only
+  // ============================================
   if (isOwnMessage) {
     const optimisticIndex = messagesCache.findIndex(m => 
       m._localOnly && 
       m.userId === data.userId && 
-      Math.abs((m.timestamp || 0) - (data.timestamp || 0)) < 2000 // Within 2s
+      Math.abs((m.timestamp || 0) - (data.timestamp || 0)) < 2000
     );
     
     if (optimisticIndex !== -1) {
       console.log('🔄 Replacing optimistic message with server version');
       
-      // Remove optimistic message from cache
       const optimisticMsg = messagesCache[optimisticIndex];
       messagesCache.splice(optimisticIndex, 1);
       
-      // Remove from DOM
       const msgElements = messagesList?.querySelectorAll('.message-item');
       if (msgElements) {
         msgElements.forEach(el => {
@@ -4465,19 +4781,13 @@ socketInstance.on('error', (data) => {
     }
   }
   
-  // ============================================
-  // ROBUST DEDUPLICATION - Check server messages only
-  // ============================================
   const isDuplicate = messagesCache.some(cached => {
-    // Skip optimistic messages in deduplication
     if (cached._localOnly) return false;
     
-    // Primary check: messageId match
     if (cached.messageId && data.messageId && cached.messageId === data.messageId) {
       return true;
     }
     
-    // Fallback check: userId + timestamp match (within 100ms)
     if (cached.userId === data.userId && 
         Math.abs((cached.timestamp || 0) - (data.timestamp || 0)) < 100) {
       return true;
@@ -4488,23 +4798,33 @@ socketInstance.on('error', (data) => {
   
   if (isDuplicate) {
     console.warn(`⚠️ DUPLICATE MESSAGE DETECTED - SKIPPING`);
-    console.warn(`   MessageID: ${data.messageId}`);
     console.log('💬 ========================================\n');
     return;
   }
   
-  console.log(`✅ New message validated (not duplicate) - will render`);
+  console.log(`✅ New message validated - will render`);
   
   // ============================================
-  // ATTACHMENT HANDLING
+  // ATTACHMENT HANDLING - CHUNKED OR LEGACY
   // ============================================
   if (data.attachment) {
     console.log('📎 Message contains attachment');
+    console.log(`   Chunked: ${data.attachment.chunked || false}`);
     
-    if (data.userId !== currentUser.userId && data.attachment.data) {
+    if (data.attachment.chunked) {
+      // CHUNKED: File will arrive via file_chunk events
+      console.log('📦 Chunked attachment - file will be received separately');
+      console.log(`   FileID: ${data.attachment.fileId}`);
+      console.log(`   Total chunks: ${data.attachment.totalChunks}`);
+      
+      // Message will be rendered with placeholder
+      // File will load when chunks complete
+      
+    } else if (data.userId !== currentUser.userId && data.attachment.data) {
+      // LEGACY: Single base64 payload (for backward compatibility)
+      console.log('📦 Legacy attachment format detected');
+      
       try {
-        console.log('💾 Storing received attachment to IndexedDB...');
-        
         const byteCharacters = atob(data.attachment.data);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
@@ -4518,10 +4838,10 @@ socketInstance.on('error', (data) => {
         
         data.attachment.fileId = storedFileId;
         delete data.attachment.data;
-        console.log(`✅ Attachment stored: ${storedFileId}`);
+        console.log(`✅ Legacy attachment stored: ${storedFileId}`);
         
       } catch (error) {
-        console.error('❌ Failed to store attachment:', error);
+        console.error('❌ Failed to store legacy attachment:', error);
       }
     } else if (data.userId === currentUser.userId) {
       console.log('ℹ️ Own message - file already in IndexedDB');
@@ -4530,9 +4850,9 @@ socketInstance.on('error', (data) => {
   }
   
   // ============================================
-  // RENDER MESSAGE - For EVERYONE
+  // RENDER MESSAGE
   // ============================================
-  console.log(`🎨 Rendering message (from ${isOwnMessage ? 'self' : 'other'})`);
+  console.log(`🎨 Rendering message`);
   const msgEl = createMessageElement(data, isOwnMessage);
   
   if (messagesList) {
@@ -5267,7 +5587,7 @@ if (messageForm) {
     console.log(`   Has attachment: ${!!pendingAttachment}`);
 
     // ============================================
-    // PREPARE SERVER MESSAGE DATA (NO OPTIMISTIC UI)
+    // PREPARE SERVER MESSAGE DATA
     // ============================================
     const serverMessageData = {
       roomId: roomData.roomId,
@@ -5286,60 +5606,107 @@ if (messageForm) {
     }
 
     // ============================================
-    // HANDLE ATTACHMENT FOR SERVER
+    // HANDLE ATTACHMENT - CHUNKED TRANSMISSION
     // ============================================
     if (pendingAttachment) {
       try {
-        console.log('📎 Preparing attachment for transmission...');
+        console.log('📎 ========================================');
+        console.log('📎 PREPARING CHUNKED ATTACHMENT TRANSMISSION');
+        console.log('📎 ========================================');
+        console.log(`   FileID: ${pendingAttachment.fileId}`);
+        console.log(`   File: ${pendingAttachment.name}`);
+        console.log(`   Size: ${(pendingAttachment.size / 1024 / 1024).toFixed(2)} MB`);
         
-        // Get file data from IndexedDB
+        // Show upload progress UI
+        const progressDiv = document.createElement('div');
+        progressDiv.id = 'uploadProgress';
+        progressDiv.className = 'fixed top-4 right-4 bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-3 shadow-lg z-50';
+        progressDiv.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="animate-spin">
+              <span class="material-symbols-outlined text-[#06b6d4]">progress_activity</span>
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-gray-200">${pendingAttachment.name}</div>
+              <div id="uploadProgressText" class="text-xs text-gray-400">Preparing...</div>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(progressDiv);
+        
+        // Get file from IndexedDB
         const fileData = await getFileFromIndexedDB(pendingAttachment.fileId);
         
         if (!fileData || !fileData.blob) {
-          console.error('❌ Failed to retrieve file from IndexedDB');
-          toast('Failed to attach file', 'error');
-          return;
+          throw new Error('Failed to retrieve file from storage');
         }
         
-        console.log('✅ File retrieved from IndexedDB');
+        console.log(`✅ File retrieved from IndexedDB`);
         
-        // Convert blob to base64 for socket transmission
-        const base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result.split(',')[1];
-            resolve(base64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(fileData.blob);
-        });
+        // Create File object from blob
+        const file = new File([fileData.blob], fileData.name, { type: fileData.type });
         
-        console.log(`✅ File converted to base64: ${(base64Data.length / 1024).toFixed(2)} KB`);
+        // Chunk the file
+        const progressText = document.getElementById('uploadProgressText');
+        if (progressText) progressText.textContent = 'Chunking...';
         
-        // Add attachment with actual file data for server
+        const chunks = await chunkFile(file);
+        
+        console.log(`✅ File chunked into ${chunks.length} pieces`);
+        
+        // Add attachment metadata (no data - will be sent separately)
         serverMessageData.attachment = {
           fileId: pendingAttachment.fileId,
           name: pendingAttachment.name,
           type: pendingAttachment.type,
           size: pendingAttachment.size,
-          data: base64Data
+          chunked: true, // Signal that chunks will follow
+          totalChunks: chunks.length
         };
         
-        console.log('✅ Attachment data prepared for transmission');
+        // Send message metadata first (creates message in UI)
+        console.log('📤 Emitting message metadata to server...');
+        socketInstance.emit('chat_message', serverMessageData);
+        
+        // Then send file chunks
+        if (progressText) progressText.textContent = 'Uploading: 0%';
+        
+        await sendFileInChunks(
+          pendingAttachment.fileId,
+          pendingAttachment.name,
+          pendingAttachment.type,
+          pendingAttachment.size,
+          chunks,
+          roomData.roomId
+        );
+        
+        console.log('✅ File transmission complete');
+        
+        // Remove progress UI
+        progressDiv.remove();
+        
+        toast(`File uploaded: ${pendingAttachment.name}`, 'success');
+        
+        console.log('📎 ========================================\n');
         
       } catch (error) {
-        console.error('❌ Failed to prepare attachment:', error);
-        toast('Failed to attach file', 'error');
-        return;
+        console.error('❌ Attachment transmission failed:', error);
+        
+        // Remove progress UI
+        const progressDiv = document.getElementById('uploadProgress');
+        if (progressDiv) progressDiv.remove();
+        
+        toast('Failed to send attachment. Please try again.', 'error');
+        console.log('📎 ========================================\n');
+        return; // Don't clear input on failure
       }
+    } else {
+      // No attachment - send message normally
+      console.log('📤 Emitting text-only message...');
+      socketInstance.emit('chat_message', serverMessageData);
+      console.log('✅ Message sent to server');
     }
 
-    // ============================================
-    // EMIT TO SERVER - Server will broadcast to ALL
-    // ============================================
-    console.log('📤 Emitting to server (no optimistic UI)...');
-    socketInstance?.emit('chat_message', serverMessageData);
-    console.log('✅ Message sent to server - waiting for broadcast');
     console.log('📤 ========================================\n');
 
     // ============================================
