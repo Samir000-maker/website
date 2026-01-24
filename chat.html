@@ -3069,9 +3069,9 @@ if (data.attachment) {
 }
 
 
-
 /**
  * Load image attachment from IndexedDB and display
+ * Now includes retry mechanism and peer request fallback
  */
 async function loadImageAttachment(fileId, imgElement) {
   if (!imgElement) {
@@ -3082,34 +3082,41 @@ async function loadImageAttachment(fileId, imgElement) {
   console.log(`🖼️ Loading image attachment: ${fileId}`);
   
   try {
-    const fileData = await getFileFromIndexedDB(fileId);
+    let fileData = await getFileFromIndexedDB(fileId);
     
+    // ============================================
+    // CRITICAL FIX: If file not found locally, it may be loading
+    // Wait briefly and retry before showing error
+    // ============================================
     if (!fileData || !fileData.blob) {
-      console.error(`❌ File data not found for ${fileId}`);
-      imgElement.alt = 'Image not found';
-      imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EImage not found%3C/text%3E%3C/svg%3E';
-      return;
+      console.log(`⏳ File not found, waiting 2s for peer transfer...`);
+      
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Retry once
+      fileData = await getFileFromIndexedDB(fileId);
+      
+      if (!fileData || !fileData.blob) {
+        console.error(`❌ File ${fileId} still not found after retry`);
+        
+        imgElement.alt = 'Loading...';
+        imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="14"%3ERequesting file...%3C/text%3E%3C/svg%3E';
+        
+        return;
+      }
     }
     
     console.log(`✅ File data retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
     
-    // Create blob URL
     const blobUrl = URL.createObjectURL(fileData.blob);
     console.log(`🔗 Created blob URL for display`);
     
-    // Set image source
     imgElement.src = blobUrl;
     imgElement.alt = fileData.name;
-    
-    // ============================================
-    // CRITICAL FIX: Don't revoke blob URL on load
-    // Store it for later cleanup and allow multiple views
-    // ============================================
-    imgElement.dataset.blobUrl = blobUrl; // Store for cleanup on page unload
+    imgElement.dataset.blobUrl = blobUrl;
     
     imgElement.onload = () => {
       console.log(`✅ Image loaded successfully: ${fileData.name}`);
-      // DON'T revoke here - keep URL alive for re-clicks
     };
     
     imgElement.onerror = () => {
@@ -3118,12 +3125,8 @@ async function loadImageAttachment(fileId, imgElement) {
       imgElement.alt = 'Failed to load image';
     };
     
-    // ============================================
-    // CRITICAL FIX: Create fresh blob URL on EACH click
-    // ============================================
     imgElement.style.cursor = 'pointer';
     
-    // Remove any existing click listeners
     const newImg = imgElement.cloneNode(true);
     imgElement.parentNode?.replaceChild(newImg, imgElement);
     
@@ -3131,7 +3134,6 @@ async function loadImageAttachment(fileId, imgElement) {
       console.log(`🔍 Opening full-size image: ${fileData.name}`);
       
       try {
-        // Create FRESH blob URL for new window (don't reuse old one)
         const freshBlob = await getFileFromIndexedDB(fileId);
         if (!freshBlob || !freshBlob.blob) {
           toast('Failed to open image', 'error');
@@ -3143,7 +3145,6 @@ async function loadImageAttachment(fileId, imgElement) {
         
         console.log(`✅ Opened image in new window`);
         
-        // Clean up after window opens
         if (newWindow) {
           newWindow.addEventListener('load', () => {
             setTimeout(() => {
@@ -3152,7 +3153,6 @@ async function loadImageAttachment(fileId, imgElement) {
             }, 1000);
           });
         } else {
-          // Popup blocked - clean up immediately
           URL.revokeObjectURL(freshBlobUrl);
           toast('Please allow popups to view full image', 'warning');
         }
@@ -3162,7 +3162,6 @@ async function loadImageAttachment(fileId, imgElement) {
         toast('Failed to open image', 'error');
       }
     }, { passive: true });
-    // ============================================
     
   } catch (error) {
     console.error('❌ Error loading image attachment:', error);
@@ -3554,13 +3553,13 @@ socketInstance.on('call_created', (data) => {
 });
 
 
-socketInstance.on('room_joined', (data) => {
+socketInstance.on('room_joined', async (data) => {
   console.log('✅ ========================================');
   console.log('✅ ROOM_JOINED EVENT RECEIVED');
   console.log('✅ ========================================');
   console.log(`   roomId: ${data.roomId}`);
   
-  // CRITICAL: Sync server time and expiry
+  // [Keep existing clock sync code...]
   const clientNow = Date.now();
   
   if (data.serverTime) {
@@ -3587,7 +3586,6 @@ socketInstance.on('room_joined', (data) => {
     console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
     console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
     
-    // Update localStorage with synced data
     const roomStr = localStorage.getItem('currentRoom');
     if (roomStr) {
       try {
@@ -3603,154 +3601,327 @@ socketInstance.on('room_joined', (data) => {
     console.error('❌ No expiresAt in room_joined data!');
   }
   
-const cachedState = loadChatState();
-const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-const isInIframe = window.parent && window.parent !== window;
+  const cachedState = loadChatState();
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  const isInIframe = window.parent && window.parent !== window;
 
-// Determine if we should use cached state as STARTING POINT
-let shouldUseCache = false;
+  let shouldUseCache = false;
 
-if (activeCallStr && isInIframe) {
-  try {
-    const activeCall = JSON.parse(activeCallStr);
-    const roomStr = localStorage.getItem('currentRoom');
-    if (roomStr) {
-      const room = JSON.parse(roomStr);
-      if (activeCall.roomId === room.roomId && cachedState && cachedState.roomId === roomData.roomId) {
-        shouldUseCache = true;
-        console.log('🔄 Active call in iframe detected - will MERGE cache with server');
+  if (activeCallStr && isInIframe) {
+    try {
+      const activeCall = JSON.parse(activeCallStr);
+      const roomStr = localStorage.getItem('currentRoom');
+      if (roomStr) {
+        const room = JSON.parse(roomStr);
+        if (activeCall.roomId === room.roomId && cachedState && cachedState.roomId === roomData.roomId) {
+          shouldUseCache = true;
+          console.log('🔄 Active call in iframe detected - will MERGE cache with server');
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check active call:', e);
+    }
+  }
+
+  let mergedMessages = [];
+
+  if (data.chatHistory?.length > 0) {
+    console.log(`📜 Server provided ${data.chatHistory.length} messages`);
+    
+    mergedMessages = [...data.chatHistory];
+    
+    if (shouldUseCache && cachedState?.messages?.length > 0) {
+      console.log(`📦 Merging ${cachedState.messages.length} cached messages with server data`);
+      
+      const serverMessageIds = new Set(
+        data.chatHistory.map(msg => msg.messageId || `${msg.userId}-${msg.timestamp}`)
+      );
+      
+      const uniqueCachedMessages = cachedState.messages.filter(msg => {
+        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+        return !serverMessageIds.has(msgId);
+      });
+      
+      if (uniqueCachedMessages.length > 0) {
+        console.log(`➕ Adding ${uniqueCachedMessages.length} unique cached messages`);
+        mergedMessages = [...mergedMessages, ...uniqueCachedMessages];
+        mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       }
     }
-  } catch (e) {
-    console.warn('Failed to check active call:', e);
-  }
-}
-
-
-// CRITICAL FIX: Always start with server data as source of truth
-let mergedMessages = [];
-
-if (data.chatHistory?.length > 0) {
-  console.log(`📜 Server provided ${data.chatHistory.length} messages`);
-  
-  // Start with server messages (authoritative source)
-  mergedMessages = [...data.chatHistory];
-  
-  // If we have cache, merge any messages NOT in server history
-  if (shouldUseCache && cachedState?.messages?.length > 0) {
-    console.log(`📦 Merging ${cachedState.messages.length} cached messages with server data`);
     
-    // Build Set of server message IDs for O(1) lookup
-    const serverMessageIds = new Set(
-      data.chatHistory.map(msg => msg.messageId || `${msg.userId}-${msg.timestamp}`)
-    );
+    // ============================================
+    // CRITICAL FIX: REQUEST MISSING FILE DATA
+    // ============================================
+    console.log('🔍 Checking for attachments that need data...');
     
-    // Add cached messages that aren't in server history
-    const uniqueCachedMessages = cachedState.messages.filter(msg => {
-      const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
-      return !serverMessageIds.has(msgId);
-    });
-    
-    if (uniqueCachedMessages.length > 0) {
-      console.log(`➕ Adding ${uniqueCachedMessages.length} unique cached messages`);
-      mergedMessages = [...mergedMessages, ...uniqueCachedMessages];
-      
-      // Sort by timestamp to maintain order
-      mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    for (const msg of mergedMessages) {
+      if (msg.attachment && msg.attachment.fileId) {
+        // Check if file exists in local IndexedDB
+        try {
+          const localFile = await getFileFromIndexedDB(msg.attachment.fileId);
+          
+          if (!localFile) {
+            console.log(`📂 File ${msg.attachment.fileId} not in local storage`);
+            
+            // Only request if sent by someone else
+            if (msg.userId !== currentUser.userId) {
+              console.log(`📡 Requesting file data from peer for ${msg.attachment.name}`);
+              
+              // Request file from sender via socket
+              socketInstance.emit('request_attachment_data', {
+                fileId: msg.attachment.fileId,
+                roomId: roomData.roomId
+              });
+            }
+          } else {
+            console.log(`✅ File ${msg.attachment.name} already in local storage`);
+          }
+        } catch (e) {
+          console.error(`❌ Error checking file ${msg.attachment.fileId}:`, e);
+        }
+      }
     }
+    
+  } else if (shouldUseCache && cachedState?.messages?.length > 0) {
+    console.log(`📦 No server history, using ${cachedState.messages.length} cached messages`);
+    mergedMessages = [...cachedState.messages];
+  } else {
+    console.log('ℹ️ No server history and no cache - starting fresh');
   }
+
+  messagesCache = mergedMessages;
+
+  console.log(`🎨 Rendering ${messagesCache.length} total messages`);
+  messagesCache.forEach(msg => {
+    const isCurrentUser = msg.userId === currentUser.userId;
+    const msgEl = createMessageElement(msg, isCurrentUser);
+    messagesList?.appendChild(msgEl);
+  });
+
+  if (messagesList && messagesCache.length > 0) {
+    messagesList.scrollTop = messagesList.scrollHeight;
+    console.log('✅ Scrolled to latest message');
+  }
+
+  saveChatState(roomData.roomId, messagesCache);
+  console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
   
-} else if (shouldUseCache && cachedState?.messages?.length > 0) {
-  // No server history but we have cache (edge case: all messages cleared server-side)
-  console.log(`📦 No server history, using ${cachedState.messages.length} cached messages`);
-  mergedMessages = [...cachedState.messages];
-} else {
-  console.log('ℹ️ No server history and no cache - starting fresh');
-}
-
-// Update cache with merged data
-messagesCache = mergedMessages;
-
-// Render all merged messages
-console.log(`🎨 Rendering ${messagesCache.length} total messages`);
-messagesCache.forEach(msg => {
-  const isCurrentUser = msg.userId === currentUser.userId;
-  const msgEl = createMessageElement(msg, isCurrentUser);
-  messagesList?.appendChild(msgEl);
-});
-
-if (messagesList && messagesCache.length > 0) {
-  messagesList.scrollTop = messagesList.scrollHeight;
-  console.log('✅ Scrolled to latest message');
-}
-
-// CRITICAL: Save merged state immediately
-saveChatState(roomData.roomId, messagesCache);
-console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
-  
-// Restore call button state from cache
-if (shouldUseCache && cachedState) {
+  // [Rest of room_joined handler...]
+  if (shouldUseCache && cachedState) {
     console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
     console.log('   Cached activeCallInRoom:', cachedState.activeCallInRoom);
     
-    // CRITICAL FIX: Restore activeCallInRoom if it was cached OR if we can derive it
     if (cachedState.activeCallInRoom) {
-        activeCallInRoom = cachedState.activeCallInRoom;
-        console.log('💾 Restored activeCallInRoom from cache:', activeCallInRoom);
+      activeCallInRoom = cachedState.activeCallInRoom;
+      console.log('💾 Restored activeCallInRoom from cache:', activeCallInRoom);
     } else if (cachedState.callButtonState === 'back') {
-        // User was in call - reconstruct activeCallInRoom from activeCall storage
-        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        if (activeCallStr) {
-            try {
-                const activeCallData = JSON.parse(activeCallStr);
-                activeCallInRoom = {
-                    callId: activeCallData.callId,
-                    callType: activeCallData.callType,
-                    participantCount: 2 // Default assumption
-                };
-                console.log('💾 Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
-            } catch (e) {
-                console.error('Failed to reconstruct activeCallInRoom:', e);
-            }
+      const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+      if (activeCallStr) {
+        try {
+          const activeCallData = JSON.parse(activeCallStr);
+          activeCallInRoom = {
+            callId: activeCallData.callId,
+            callType: activeCallData.callType,
+            participantCount: 2
+          };
+          console.log('💾 Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
+        } catch (e) {
+          console.error('Failed to reconstruct activeCallInRoom:', e);
         }
+      }
     } else if (cachedState.callButtonState === 'join' && !activeCallInRoom) {
-        console.warn('⚠️ Cache says "join" but no activeCallInRoom - will wait for server update');
+      console.warn('⚠️ Cache says "join" but no activeCallInRoom - will wait for server update');
     }
     
-    // Update button state immediately based on cache
     if (cachedState.callButtonState === 'back') {
-        updateCallButtonState(true, activeCallInRoom || { participantCount: 1 }); // Will show "Back to Call"
+      updateCallButtonState(true, activeCallInRoom || { participantCount: 1 });
     } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
-        updateCallButtonState(true, activeCallInRoom); // Will show "Join Call"
+      updateCallButtonState(true, activeCallInRoom);
     } else {
-        updateCallButtonState(false); // Will show audio/video buttons
+      updateCallButtonState(false);
     }
     
     console.log('✅ Call button state restored instantly');
-}
+  }
   
-  // Handle active call state (for call buttons) - this is the server update
   if (data.activeCall) {
     console.log('📞 Active call in room detected');
     
-    // CRITICAL FIX: Store activeCallInRoom so Join button has data
     activeCallInRoom = {
       callId: data.activeCall.callId,
       callType: data.activeCall.callType,
       participantCount: data.activeCall.participantCount
     };
     console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
-    
-
   } 
   
-  // Start timer updates immediately with server-synced data
   console.log('⏰ Starting timer updates with server-synced time...');
   updateTimer();
   
   console.log('✅ ========================================\n');
 });
 
+// ============================================
+// PEER-TO-PEER FILE TRANSFER HANDLERS
+// ============================================
+
+socketInstance.on('send_attachment_to_peer', async ({ fileId, requesterId, requesterSocketId }) => {
+  console.log('📤 ========================================');
+  console.log('📤 PEER REQUESTING OUR FILE');
+  console.log('📤 ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   Requester: ${requesterId}`);
+  
+  try {
+    // Get file from our IndexedDB
+    const fileData = await getFileFromIndexedDB(fileId);
+    
+    if (!fileData || !fileData.blob) {
+      console.error(`❌ File ${fileId} not found in our IndexedDB`);
+      socketInstance.emit('attachment_data_response', {
+        fileId,
+        requesterId,
+        requesterSocketId,
+        data: null,
+        metadata: null
+      });
+      return;
+    }
+    
+    console.log(`✅ File found: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+    
+    // Convert blob to base64
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(fileData.blob);
+    });
+    
+    console.log(`✅ Converted to base64: ${(base64Data.length / 1024).toFixed(2)} KB`);
+    
+    // Send to requester via server relay
+    socketInstance.emit('attachment_data_response', {
+      fileId,
+      requesterId,
+      requesterSocketId,
+      data: base64Data,
+      metadata: {
+        name: fileData.name,
+        type: fileData.type,
+        size: fileData.size
+      }
+    });
+    
+    console.log(`📤 File data sent to requester`);
+    console.log('📤 ========================================\n');
+    
+  } catch (error) {
+    console.error('❌ Error sending file to peer:', error);
+    console.log('📤 ========================================\n');
+  }
+});
+
+socketInstance.on('attachment_data_received', async ({ fileId, data, metadata }) => {
+  console.log('📥 ========================================');
+  console.log('📥 ATTACHMENT DATA RECEIVED FROM PEER');
+  console.log('📥 ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   File: ${metadata?.name}`);
+  console.log(`   Size: ${metadata?.size ? (metadata.size / 1024).toFixed(2) : 0} KB`);
+  
+  if (!data || !metadata) {
+    console.error('❌ Invalid data received');
+    console.log('📥 ========================================\n');
+    return;
+  }
+  
+  try {
+    // Convert base64 back to blob
+    const byteCharacters = atob(data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: metadata.type });
+    
+    // Create File object
+    const file = new File([blob], metadata.name, { type: metadata.type });
+    
+    // Store to our IndexedDB with SAME fileId
+    await new Promise((resolve, reject) => {
+      initFileDB().then(db => {
+        const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(FILE_STORE_NAME);
+        
+        const fileRecord = {
+          id: fileId, // Use same ID as sender
+          roomId: roomData.roomId,
+          messageId: null,
+          name: metadata.name,
+          type: metadata.type,
+          size: metadata.size,
+          blob: blob,
+          timestamp: Date.now()
+        };
+        
+        const request = store.add(fileRecord);
+        
+        request.onsuccess = () => {
+          console.log(`✅ File stored to local IndexedDB: ${fileId}`);
+          resolve();
+        };
+        
+        request.onerror = () => {
+          console.error('❌ Failed to store received file:', request.error);
+          reject(request.error);
+        };
+      }).catch(reject);
+    });
+    
+    // Find and update the image element if it's already rendered
+    const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
+    
+    if (imgElements.length > 0) {
+      console.log(`🖼️ Found ${imgElements.length} image element(s) to update`);
+      
+      imgElements.forEach(imgElement => {
+        loadImageAttachment(fileId, imgElement);
+      });
+    } else {
+      console.log('ℹ️ No rendered elements found for this file (will load when message is rendered)');
+    }
+    
+    console.log('✅ File successfully received and stored');
+    console.log('📥 ========================================\n');
+    
+  } catch (error) {
+    console.error('❌ Error processing received file:', error);
+    console.log('📥 ========================================\n');
+  }
+});
+
+socketInstance.on('attachment_data_unavailable', ({ fileId, reason }) => {
+  console.warn('⚠️ ========================================');
+  console.warn('⚠️ ATTACHMENT DATA UNAVAILABLE');
+  console.warn('⚠️ ========================================');
+  console.warn(`   FileID: ${fileId}`);
+  console.warn(`   Reason: ${reason}`);
+  
+  // Update UI to show file unavailable
+  const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
+  
+  imgElements.forEach(img => {
+    img.alt = `File unavailable: ${reason}`;
+    img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="45%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EFile unavailable%3C/text%3E%3Ctext x="50%25" y="60%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="11"%3E' + encodeURIComponent(reason) + '%3C/text%3E%3C/svg%3E';
+  });
+  
+  console.warn('⚠️ ========================================\n');
+});
 
 socketInstance.on('room_sync_data', (data) => {
   console.log('⏰ ========================================');
