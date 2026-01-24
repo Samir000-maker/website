@@ -2148,13 +2148,9 @@ async function sendFileInChunks(fileId, fileName, fileType, fileSize, chunks, ro
   });
 }
 
-/**
- * Receive and reconstruct file from chunks
- * Stores to IndexedDB incrementally
- */
 class ChunkedFileReceiver {
   constructor() {
-    this.activeTransfers = new Map(); // fileId -> { chunks: [], metadata: {} }
+    this.activeTransfers = new Map();
   }
   
   async handleChunk(data) {
@@ -2173,17 +2169,14 @@ class ChunkedFileReceiver {
     
     const transfer = this.activeTransfers.get(fileId);
     
-    // Store chunk
     transfer.chunks[chunkIndex] = chunkData;
     transfer.receivedCount++;
     
-    // Send ACK
     socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
     
     const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
     console.log(`📊 Transfer progress: ${progress}% (${transfer.receivedCount}/${totalChunks})`);
     
-    // Check if complete
     if (transfer.receivedCount === totalChunks) {
       console.log('✅ All chunks received, reconstructing file...');
       await this.reconstructFile(fileId, transfer);
@@ -2202,26 +2195,35 @@ class ChunkedFileReceiver {
     console.log(`   Chunks: ${chunks.length}`);
     
     try {
-      // Combine all base64 chunks
-      const combinedBase64 = chunks.join('');
+      const binaryChunks = [];
+      let totalBytes = 0;
       
-      // Convert to blob
-      const byteCharacters = atob(combinedBase64);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      for (let i = 0; i < chunks.length; i++) {
+        const base64Chunk = chunks[i];
+        
+        const byteCharacters = atob(base64Chunk);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let j = 0; j < byteCharacters.length; j++) {
+          byteNumbers[j] = byteCharacters.charCodeAt(j);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        
+        binaryChunks.push(byteArray);
+        totalBytes += byteArray.length;
       }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: fileType });
       
+      console.log(`✅ All chunks decoded: ${totalBytes} bytes`);
+      
+      const combinedArray = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of binaryChunks) {
+        combinedArray.set(chunk, offset);
+        offset += chunk.length;
+      }
+      
+      const blob = new Blob([combinedArray], { type: fileType });
       console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
       
-      // Verify size matches
-      if (Math.abs(blob.size - fileSize) > 1024) { // Allow 1KB tolerance
-        throw new Error(`Size mismatch: expected ${fileSize}, got ${blob.size}`);
-      }
-      
-      // Store to IndexedDB
       const db = await initFileDB();
       
       await new Promise((resolve, reject) => {
@@ -2234,12 +2236,12 @@ class ChunkedFileReceiver {
           messageId: null,
           name: fileName,
           type: fileType,
-          size: fileSize,
+          size: blob.size,
           blob: blob,
           timestamp: Date.now()
         };
         
-        const request = store.put(fileRecord); // Use put instead of add (allows updates)
+        const request = store.put(fileRecord);
         
         request.onsuccess = () => {
           console.log(`✅ File stored to IndexedDB: ${fileId}`);
@@ -2252,23 +2254,24 @@ class ChunkedFileReceiver {
         };
       });
       
-      // Clean up transfer state
       this.activeTransfers.delete(fileId);
       
       console.log('✅ File reconstruction complete');
       console.log('🔧 ========================================\n');
       
-      // Update any pending image elements
       const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
       if (imgElements.length > 0) {
         console.log(`🖼️ Updating ${imgElements.length} image element(s)`);
         imgElements.forEach(img => loadImageAttachment(fileId, img));
       }
       
+      toast(`Received: ${fileName}`, 'success');
+      
     } catch (error) {
       console.error('❌ File reconstruction failed:', error);
       console.log('🔧 ========================================\n');
       this.activeTransfers.delete(fileId);
+      toast(`Failed to receive: ${fileName}`, 'error');
       throw error;
     }
   }
