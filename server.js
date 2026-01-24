@@ -1598,46 +1598,86 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       messageData.replyTo = replyTo;
     }
 
-    // Handle attachment
+    // ============================================
+    // CRITICAL FIX: Handle CHUNKED vs LEGACY attachments
+    // ============================================
     if (attachment) {
       console.log('📎 Processing attachment...');
       console.log(`   File: ${attachment.name}`);
       console.log(`   Type: ${attachment.type}`);
       console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
+      console.log(`   Chunked: ${!!attachment.chunked}`);
       
-      if (!attachment.data) {
-        console.error('❌ Attachment missing data!');
-        socket.emit('error', { 
-          message: 'Attachment data missing',
-          code: 'INVALID_ATTACHMENT' 
-        });
-        return;
+      if (attachment.chunked) {
+        // ============================================
+        // CHUNKED ATTACHMENT: Data will arrive via file_chunk events
+        // ============================================
+        console.log(`📦 Chunked attachment detected - data will arrive separately`);
+        console.log(`   Total chunks expected: ${attachment.totalChunks}`);
+        
+        // Validate metadata only
+        if (!attachment.fileId || !attachment.name || !attachment.type || !attachment.size) {
+          console.error('❌ Chunked attachment missing required metadata!');
+          socket.emit('error', { 
+            message: 'Attachment metadata incomplete',
+            code: 'INVALID_ATTACHMENT' 
+          });
+          return;
+        }
+        
+        // Include metadata WITHOUT data for broadcast
+        messageData.attachment = {
+          fileId: attachment.fileId,
+          name: attachment.name,
+          type: attachment.type,
+          size: attachment.size,
+          chunked: true,
+          totalChunks: attachment.totalChunks
+          // NO data field - will be transmitted via file_chunk events
+        };
+        
+        console.log('✅ Chunked attachment metadata validated');
+        
+      } else {
+        // ============================================
+        // LEGACY ATTACHMENT: Single base64 payload
+        // ============================================
+        console.log(`📎 Legacy attachment format detected`);
+        
+        if (!attachment.data) {
+          console.error('❌ Legacy attachment missing data!');
+          socket.emit('error', { 
+            message: 'Attachment data missing',
+            code: 'INVALID_ATTACHMENT' 
+          });
+          return;
+        }
+        
+        // Validate file size
+        const maxSize = attachment.type.startsWith('image/') ? 10 * 1024 * 1024 : 
+                        attachment.type.startsWith('video/') ? 50 * 1024 * 1024 : 
+                        20 * 1024 * 1024;
+        
+        if (attachment.size > maxSize) {
+          console.error(`❌ File too large: ${(attachment.size / 1024 / 1024).toFixed(2)} MB`);
+          socket.emit('error', { 
+            message: 'File too large',
+            code: 'FILE_TOO_LARGE'
+          });
+          return;
+        }
+        
+        // Include attachment WITH data for broadcast (legacy format)
+        messageData.attachment = {
+          fileId: attachment.fileId,
+          name: attachment.name,
+          type: attachment.type,
+          size: attachment.size,
+          data: attachment.data // CRITICAL: Keep for legacy broadcast
+        };
+        
+        console.log('✅ Legacy attachment validated and ready for broadcast');
       }
-      
-      // Validate file size
-      const maxSize = attachment.type.startsWith('image/') ? 10 * 1024 * 1024 : 
-                      attachment.type.startsWith('video/') ? 50 * 1024 * 1024 : 
-                      20 * 1024 * 1024;
-      
-      if (attachment.size > maxSize) {
-        console.error(`❌ File too large: ${(attachment.size / 1024 / 1024).toFixed(2)} MB`);
-        socket.emit('error', { 
-          message: 'File too large',
-          code: 'FILE_TOO_LARGE'
-        });
-        return;
-      }
-      
-      // Include attachment WITH data for broadcast
-      messageData.attachment = {
-        fileId: attachment.fileId,
-        name: attachment.name,
-        type: attachment.type,
-        size: attachment.size,
-        data: attachment.data // CRITICAL: Keep for broadcast
-      };
-      
-      console.log('✅ Attachment validated and ready for broadcast');
     }
 
     // Create storage version (without data to save memory)
@@ -1659,9 +1699,14 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
         fileId: messageData.attachment.fileId,
         name: messageData.attachment.name,
         type: messageData.attachment.type,
-        size: messageData.attachment.size
+        size: messageData.attachment.size,
+        chunked: messageData.attachment.chunked || false
         // NO data field - saves memory
       };
+      
+      if (messageData.attachment.totalChunks) {
+        storedMessage.attachment.totalChunks = messageData.attachment.totalChunks;
+      }
     }
 
     // Store to room history
@@ -1669,7 +1714,7 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     console.log(`💾 Message stored to room history`);
     
     // ============================================
-    // CRITICAL FIX: BROADCAST TO ALL USERS
+    // BROADCAST TO ALL USERS
     // ============================================
     console.log('📡 ========================================');
     console.log('📡 BROADCASTING MESSAGE TO ROOM');
@@ -1679,9 +1724,15 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     console.log(`   MessageID: ${messageData.messageId}`);
     
     if (messageData.attachment) {
-      console.log(`   📎 Broadcasting WITH attachment data`);
+      console.log(`   📎 Broadcasting attachment metadata`);
+      console.log(`      Chunked: ${messageData.attachment.chunked}`);
       console.log(`      File: ${messageData.attachment.name}`);
-      console.log(`      Data size: ${(messageData.attachment.data.length / 1024).toFixed(2)} KB`);
+      
+      if (messageData.attachment.data) {
+        console.log(`      Legacy data size: ${(messageData.attachment.data.length / 1024).toFixed(2)} KB`);
+      } else {
+        console.log(`      Chunked - data will arrive separately`);
+      }
     }
     
     // Emit to ALL users in the room (including sender)
