@@ -2174,113 +2174,84 @@ class ChunkedFileReceiver {
   constructor() {
     this.activeTransfers = new Map();
   }
-
+  
   async handleChunk(data) {
-    const {
-      fileId,
-      fileName,
-      fileType,
-      fileSize,
-      roomId,
-      chunkIndex,
-      totalChunks,
-      chunkData,
-      chunkSize
-    } = data;
-
+    const { fileId, fileName, fileType, fileSize, roomId, chunkIndex, totalChunks, chunkData, chunkSize } = data;
+    
     console.log(`📥 Received chunk ${chunkIndex}/${totalChunks - 1} for ${fileName}`);
-
+    
     if (!this.activeTransfers.has(fileId)) {
       console.log(`🆕 Starting new file transfer: ${fileId}`);
       this.activeTransfers.set(fileId, {
         chunks: new Array(totalChunks),
-        metadata: {
-          fileName,
-          fileType,
-          fileSize,
-          roomId,
-          totalChunks
-        },
+        metadata: { fileName, fileType, fileSize, roomId, totalChunks },
         receivedCount: 0
       });
     }
-
+    
     const transfer = this.activeTransfers.get(fileId);
-
+    
     transfer.chunks[chunkIndex] = chunkData;
     transfer.receivedCount++;
-
-    socketInstance.emit('file_chunk_ack', {
-      fileId,
-      chunkIndex
-    });
-
+    
+    socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
+    
     const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
     console.log(`📊 Transfer progress: ${progress}% (${transfer.receivedCount}/${totalChunks})`);
-
+    
     if (transfer.receivedCount === totalChunks) {
       console.log('✅ All chunks received, reconstructing file...');
       await this.reconstructFile(fileId, transfer);
     }
   }
-
+  
   async reconstructFile(fileId, transfer) {
-    const {
-      chunks,
-      metadata
-    } = transfer;
-    const {
-      fileName,
-      fileType,
-      fileSize,
-      roomId
-    } = metadata;
-
+    const { chunks, metadata } = transfer;
+    const { fileName, fileType, fileSize, roomId } = metadata;
+    
     console.log('🔧 ========================================');
     console.log('🔧 RECONSTRUCTING FILE FROM CHUNKS');
     console.log('🔧 ========================================');
     console.log(`   FileID: ${fileId}`);
     console.log(`   File: ${fileName}`);
     console.log(`   Chunks: ${chunks.length}`);
-
+    
     try {
       const binaryChunks = [];
       let totalBytes = 0;
-
+      
       for (let i = 0; i < chunks.length; i++) {
         const base64Chunk = chunks[i];
-
+        
         const byteCharacters = atob(base64Chunk);
         const byteNumbers = new Array(byteCharacters.length);
         for (let j = 0; j < byteCharacters.length; j++) {
           byteNumbers[j] = byteCharacters.charCodeAt(j);
         }
         const byteArray = new Uint8Array(byteNumbers);
-
+        
         binaryChunks.push(byteArray);
         totalBytes += byteArray.length;
       }
-
+      
       console.log(`✅ All chunks decoded: ${totalBytes} bytes`);
-
+      
       const combinedArray = new Uint8Array(totalBytes);
       let offset = 0;
       for (const chunk of binaryChunks) {
         combinedArray.set(chunk, offset);
         offset += chunk.length;
       }
-
-      const blob = new Blob([combinedArray], {
-        type: fileType
-      });
+      
+      const blob = new Blob([combinedArray], { type: fileType });
       console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
-
+      
       const db = await initFileDB();
-
+      
       await new Promise((resolve, reject) => {
         const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
         const store = transaction.objectStore(FILE_STORE_NAME);
-
+        
         const fileRecord = {
           id: fileId,
           roomId: roomId,
@@ -2291,33 +2262,33 @@ class ChunkedFileReceiver {
           blob: blob,
           timestamp: Date.now()
         };
-
+        
         const request = store.put(fileRecord);
-
+        
         request.onsuccess = () => {
           console.log(`✅ File stored to IndexedDB: ${fileId}`);
           resolve();
         };
-
+        
         request.onerror = () => {
           console.error('❌ Failed to store file:', request.error);
           reject(request.error);
         };
       });
-
+      
       this.activeTransfers.delete(fileId);
-
+      
       console.log('✅ File reconstruction complete');
       console.log('🔧 ========================================\n');
-
+      
       const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
       if (imgElements.length > 0) {
         console.log(`🖼️ Updating ${imgElements.length} image element(s)`);
         imgElements.forEach(img => loadImageAttachment(fileId, img));
       }
-
+      
       toast(`Received: ${fileName}`, 'success');
-
+      
     } catch (error) {
       console.error('❌ File reconstruction failed:', error);
       console.log('🔧 ========================================\n');
@@ -2326,7 +2297,7 @@ class ChunkedFileReceiver {
       throw error;
     }
   }
-
+  
   cleanup(fileId) {
     if (this.activeTransfers.has(fileId)) {
       console.log(`🧹 Cleaning up incomplete transfer: ${fileId}`);
