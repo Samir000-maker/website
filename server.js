@@ -360,9 +360,12 @@ function performRoomCleanup(roomId) {
     return;
   }
 
-  console.log(`🗑️ Cleaning up room ${roomId} (${room.users.length} users)`);
+  console.log(`🗑️ ========================================`);
+  console.log(`🗑️ CLEANING UP ROOM: ${roomId}`);
+  console.log(`🗑️ ========================================`);
+  console.log(`   Users: ${room.users.length}`);
 
-  // CRITICAL FIX: Cancel ANY pending room lifecycle timers in the room object itself
+  // CRITICAL FIX: Cancel ANY pending room lifecycle timers
   if (room.expiryTimer) {
     clearTimeout(room.expiryTimer);
     room.expiryTimer = null;
@@ -374,13 +377,14 @@ function performRoomCleanup(roomId) {
     console.log(`⏰ Canceled room's internal warning timer`);
   }
 
-  // Notify all users in the room
+  // Notify all users to clean up their IndexedDB files
   room.users.forEach(user => {
     const userSocket = findActiveSocketForUser(user.userId);
     if (userSocket) {
       userSocket.emit('room_expired', {
         roomId,
-        message: 'Chat room has expired'
+        message: 'Chat room has expired',
+        cleanupFiles: true // Signal to delete IndexedDB files
       });
       userSocket.leave(roomId);
     }
@@ -411,6 +415,7 @@ function performRoomCleanup(roomId) {
   roomCleanupTimers.delete(roomId);
 
   console.log(`✅ Room ${roomId} fully cleaned up and destroyed`);
+  console.log(`🗑️ ========================================\n`);
 }
 
 function cancelRoomCleanup(roomId) {
@@ -876,6 +881,85 @@ io.on('connection', (socket) => {
 // ============================================
 // PEER-TO-PEER FILE TRANSFER VIA SOCKET RELAY
 // ============================================
+
+
+// ============================================
+// CHUNKED FILE TRANSMISSION RELAY
+// ============================================
+
+socket.on('file_chunk', (data) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      console.error('❌ Unauthenticated socket tried to send file chunk');
+      return;
+    }
+    
+    const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize } = data;
+    
+    // Log every 10th chunk or first/last
+    if (chunkIndex === 0 || chunkIndex === totalChunks - 1 || chunkIndex % 10 === 0) {
+      console.log(`📦 Relaying chunk ${chunkIndex}/${totalChunks - 1} of ${fileName} in room ${roomId}`);
+      console.log(`   From: ${user.username} (${user.userId})`);
+      console.log(`   Chunk size: ${(chunkSize / 1024).toFixed(2)} KB`);
+    }
+    
+    // Validate room access
+    const room = matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found for chunk relay`);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'Room not found' 
+      });
+      return;
+    }
+    
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} not in room ${roomId}`);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'Not in room' 
+      });
+      return;
+    }
+    
+    // Relay chunk to all OTHER users in room
+    socket.to(roomId).emit('file_chunk', data);
+    
+    // Send ACK back to sender
+    socket.emit('file_chunk_ack', { 
+      fileId, 
+      chunkIndex 
+    });
+    
+    // Log completion
+    if (chunkIndex === totalChunks - 1) {
+      console.log(`✅ File transmission complete: ${fileName} (${fileId})`);
+      console.log(`   Total chunks relayed: ${totalChunks}`);
+      
+      // Notify sender and receivers
+      socket.emit('file_transmission_complete', { fileId, fileName });
+      socket.to(roomId).emit('file_transmission_complete', { fileId, fileName });
+    }
+    
+  } catch (error) {
+    console.error('❌ File chunk relay error:', error);
+  }
+});
+
+socket.on('file_chunk_ack', (data) => {
+  // ACKs are sent TO sender, not relayed to room
+  // This handler can log or track reliability metrics if needed
+  const { fileId, chunkIndex } = data;
+  
+  // Optional: Track chunk delivery success rate
+  // console.log(`✅ Chunk ${chunkIndex} of ${fileId} acknowledged by receiver`);
+});
 
 socket.on('request_attachment_data', async ({ fileId, roomId }) => {
   try {
