@@ -4312,65 +4312,148 @@ socketInstance.on('room_sync_data', (data) => {
   updateTimer();
 });
 
-socketInstance.on('room_expired', async (data) => {
-  console.error('💥 ========================================');
-  console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
-  console.error('💥 ========================================');
-  console.error(`   roomId: ${data.roomId}`);
-  console.error(`   message: ${data.message}`);
-  console.error(`   cleanupFiles: ${data.cleanupFiles || false}`);
+async reconstructFile(fileId, transfer) {
+  const { chunks, metadata } = transfer;
+  const { fileName, fileType, fileSize, roomId } = metadata;
   
-  // Stop timer
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    console.error('⏰ Timer stopped');
-  }
+  console.log('🔧 ========================================');
+  console.log('🔧 RECONSTRUCTING FILE FROM CHUNKS');
+  console.log('🔧 ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   File: ${fileName}`);
+  console.log(`   Chunks: ${chunks.length}`);
   
-  // CRITICAL: Delete all room files from IndexedDB
-  if (data.cleanupFiles && roomData?.roomId) {
-    try {
-      console.error('🗑️ ========================================');
-      console.error('🗑️ DELETING ROOM FILES ON EXPIRY');
-      console.error('🗑️ ========================================');
-      console.error(`   Room ID: ${roomData.roomId}`);
+  try {
+    // ============================================
+    // CRITICAL FIX: Decode each chunk individually, then combine binary data
+    // ============================================
+    const binaryChunks = [];
+    let totalBytes = 0;
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const base64Chunk = chunks[i];
       
-      const deletedCount = await deleteRoomFiles(roomData.roomId);
+      if (!base64Chunk || typeof base64Chunk !== 'string') {
+        throw new Error(`Invalid chunk at index ${i}: ${typeof base64Chunk}`);
+      }
       
-      console.error(`✅ Successfully deleted ${deletedCount} file(s) from IndexedDB`);
-      console.error('   All room attachments permanently removed from disk storage');
-      console.error('🗑️ ========================================');
-      
-    } catch (error) {
-      console.error('❌ ========================================');
-      console.error('❌ FILE CLEANUP FAILED ON ROOM EXPIRY');
-      console.error('❌ ========================================');
-      console.error('   Error:', error);
-      console.error('❌ ========================================');
+      try {
+        // Decode this chunk's base64
+        const byteCharacters = atob(base64Chunk);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let j = 0; j < byteCharacters.length; j++) {
+          byteNumbers[j] = byteCharacters.charCodeAt(j);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        
+        binaryChunks.push(byteArray);
+        totalBytes += byteArray.length;
+        
+        // Log progress every 10 chunks
+        if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
+          const progress = ((i + 1) / chunks.length * 100).toFixed(1);
+          console.log(`   Decoding progress: ${progress}% (${i + 1}/${chunks.length})`);
+        }
+      } catch (decodeError) {
+        console.error(`❌ Failed to decode chunk ${i}:`, decodeError);
+        console.error(`   Chunk length: ${base64Chunk.length}`);
+        console.error(`   First 50 chars: ${base64Chunk.substring(0, 50)}`);
+        throw new Error(`Chunk ${i} decode failed: ${decodeError.message}`);
+      }
     }
+    
+    console.log(`✅ All chunks decoded: ${totalBytes} bytes total`);
+    
+    // Combine all binary chunks into single Uint8Array
+    const combinedArray = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of binaryChunks) {
+      combinedArray.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    console.log(`✅ Binary data combined: ${(combinedArray.length / 1024 / 1024).toFixed(2)} MB`);
+    
+    // Create blob from combined binary data
+    const blob = new Blob([combinedArray], { type: fileType });
+    
+    console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+    
+    // Verify size matches (allow 1% tolerance for encoding overhead)
+    const sizeDiff = Math.abs(blob.size - fileSize);
+    const tolerance = fileSize * 0.01; // 1% tolerance
+    
+    if (sizeDiff > tolerance) {
+      console.warn(`⚠️ Size mismatch: expected ${fileSize}, got ${blob.size} (diff: ${sizeDiff} bytes)`);
+      // Don't throw - some encoding variations are acceptable
+    }
+    
+    // Store to IndexedDB
+    const db = await initFileDB();
+    
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction([FILE_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(FILE_STORE_NAME);
+      
+      const fileRecord = {
+        id: fileId,
+        roomId: roomId,
+        messageId: null,
+        name: fileName,
+        type: fileType,
+        size: blob.size, // Use actual blob size
+        blob: blob,
+        timestamp: Date.now()
+      };
+      
+      const request = store.put(fileRecord); // Use put to allow overwrite
+      
+      request.onsuccess = () => {
+        console.log(`✅ File stored to IndexedDB: ${fileId}`);
+        resolve();
+      };
+      
+      request.onerror = () => {
+        console.error('❌ Failed to store file:', request.error);
+        reject(request.error);
+      };
+    });
+    
+    // Clean up transfer state
+    this.activeTransfers.delete(fileId);
+    
+    console.log('✅ File reconstruction complete');
+    console.log('🔧 ========================================\n');
+    
+    // Update any pending image elements
+    const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
+    if (imgElements.length > 0) {
+      console.log(`🖼️ Updating ${imgElements.length} image element(s)`);
+      imgElements.forEach(img => loadImageAttachment(fileId, img));
+    }
+    
+    // Notify UI of successful reception
+    toast(`Received: ${fileName}`, 'success');
+    
+  } catch (error) {
+    console.error('❌ ========================================');
+    console.error('❌ FILE RECONSTRUCTION FAILED');
+    console.error('❌ ========================================');
+    console.error('   FileID:', fileId);
+    console.error('   Error:', error.message);
+    console.error('   Stack:', error.stack);
+    console.error('   Chunks received:', chunks.length);
+    console.error('   Expected size:', fileSize);
+    console.error('❌ ========================================\n');
+    
+    this.activeTransfers.delete(fileId);
+    
+    // Show error to user
+    toast(`Failed to receive: ${fileName}`, 'error');
+    
+    throw error;
   }
-  
-  // Show user notification
-  toast(data.message || 'Room has expired', 'warning');
-  
-  // Clear all storage
-  console.error('🧹 Clearing all chat and call state...');
-  await clearChatState(true);
-  localStorage.removeItem(ACTIVE_CALL_KEY);
-  sessionStorage.removeItem('hasBackgroundCall');
-  sessionStorage.removeItem('returningFromCall');
-  sessionStorage.removeItem('backgroundCallMode');
-  sessionStorage.removeItem('returningToBackgroundCall');
-  
-  console.error('✅ All storage cleared');
-  console.error('💥 ========================================\n');
-  
-  // Navigate and cleanup parent if in iframe
-  setTimeout(() => {
-    console.error('🔄 Navigating to mood.html after room expiry');
-    cleanupParentCallPage();
-  }, 2000);
-});
+}
 
 socketInstance.on('room_expiring_soon', (data) => {
   console.warn('⚠️ ========================================');
