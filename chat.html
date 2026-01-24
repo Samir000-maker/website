@@ -1253,6 +1253,25 @@ let authenticationPromise = null;
  * Fetch all emojis from EmojiHub API
  * Implements caching to avoid repeated API calls
  */
+
+function findActiveSocketForUser(userId) {
+  // CRITICAL FIX: O(1) lookup instead of O(n)
+  const socketId = userToSocketId.get(userId);
+  if (!socketId) {
+    return null;
+  }
+  
+  const socketInstance = io.sockets.sockets.get(socketId);
+  if (socketInstance && socketInstance.connected) {
+    return socketInstance;
+  }
+  
+  // Socket disconnected but index not cleaned - remove stale entry
+  userToSocketId.delete(userId);
+  return null;
+}
+
+    
 async function fetchEmojis() {
   console.log('😀 ========================================');
   console.log('😀 FETCHING EMOJIS FROM API');
@@ -1332,6 +1351,9 @@ document.addEventListener('keydown', (e) => {
     closeEmojiPicker();
   }
 });
+
+
+    
 
 /**
  * Process emoji data into optimized cache structure
