@@ -887,6 +887,7 @@ io.on('connection', (socket) => {
 // CHUNKED FILE TRANSMISSION RELAY
 // ============================================
 
+// In server.js - file_chunk handler
 socket.on('file_chunk', (data) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -896,20 +897,32 @@ socket.on('file_chunk', (data) => {
       return;
     }
     
-    const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize } = data;
+    const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
+    
+    // CRITICAL: Validate chunk data exists
+    if (!chunkData || typeof chunkData !== 'string') {
+      console.error(`❌ Invalid chunk data at index ${chunkIndex}`);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'Invalid chunk data' 
+      });
+      return;
+    }
     
     // Log every 10th chunk or first/last
     if (chunkIndex === 0 || chunkIndex === totalChunks - 1 || chunkIndex % 10 === 0) {
-      console.log(`📦 Relaying chunk ${chunkIndex}/${totalChunks - 1} of ${fileName} in room ${roomId}`);
-      console.log(`   From: ${user.username} (${user.userId})`);
+      console.log(`📦 Relaying chunk ${chunkIndex}/${totalChunks - 1} of ${fileName}`);
+      console.log(`   From: ${user.username}`);
       console.log(`   Chunk size: ${(chunkSize / 1024).toFixed(2)} KB`);
+      console.log(`   Data length: ${chunkData.length} chars`);
     }
     
     // Validate room access
     const room = matchmaking.getRoom(roomId);
     
     if (!room) {
-      console.error(`❌ Room ${roomId} not found for chunk relay`);
+      console.error(`❌ Room ${roomId} not found`);
       socket.emit('file_transmission_failed', { 
         fileId, 
         fileName,
@@ -919,7 +932,7 @@ socket.on('file_chunk', (data) => {
     }
     
     if (!room.hasUser(user.userId)) {
-      console.error(`❌ User ${user.username} not in room ${roomId}`);
+      console.error(`❌ User not in room`);
       socket.emit('file_transmission_failed', { 
         fileId, 
         fileName,
@@ -929,7 +942,18 @@ socket.on('file_chunk', (data) => {
     }
     
     // Relay chunk to all OTHER users in room
-    socket.to(roomId).emit('file_chunk', data);
+    // CRITICAL: Relay the ENTIRE data object unchanged
+    socket.to(roomId).emit('file_chunk', {
+      fileId,
+      fileName,
+      fileType: data.fileType,
+      fileSize: data.fileSize,
+      roomId,
+      chunkIndex,
+      totalChunks,
+      chunkData, // Preserve exact base64 string
+      chunkSize
+    });
     
     // Send ACK back to sender
     socket.emit('file_chunk_ack', { 
@@ -939,16 +963,16 @@ socket.on('file_chunk', (data) => {
     
     // Log completion
     if (chunkIndex === totalChunks - 1) {
-      console.log(`✅ File transmission complete: ${fileName} (${fileId})`);
+      console.log(`✅ File transmission complete: ${fileName}`);
       console.log(`   Total chunks relayed: ${totalChunks}`);
       
-      // Notify sender and receivers
       socket.emit('file_transmission_complete', { fileId, fileName });
       socket.to(roomId).emit('file_transmission_complete', { fileId, fileName });
     }
     
   } catch (error) {
     console.error('❌ File chunk relay error:', error);
+    console.error('   Stack:', error.stack);
   }
 });
 
