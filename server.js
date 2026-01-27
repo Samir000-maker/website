@@ -110,30 +110,40 @@ function getUserDataForParticipant(participantId, socketUsers, room) {
   return null;
 }
 
-
 async function withCallMutex(callId, operation) {
-  // Wait for any pending operation on this call
+  // Wait for any pending operation
   while (callMutexes.has(callId)) {
-    await callMutexes.get(callId);
+    try {
+      await callMutexes.get(callId);
+    } catch (err) {
+      // Previous operation failed, continue
+    }
   }
   
-  // Create new mutex with guaranteed cleanup
-  const mutexPromise = (async () => {
-    try {
-      return await operation();
-    } catch (error) {
-      // CRITICAL FIX: Log error but still clean up mutex
-      console.error(`❌ Mutex operation failed for call ${callId}:`, error);
-      throw error; // Re-throw after logging
-    } finally {
-      // CRITICAL: Always delete mutex, even on error
-      callMutexes.delete(callId);
-      console.log(`🔓 Released mutex for call ${callId}`);
-    }
-  })();
+  // Create new mutex with atomic cleanup
+  let resolve, reject;
+  const mutexPromise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   
   callMutexes.set(callId, mutexPromise);
-  return mutexPromise;
+  
+  try {
+    const result = await operation();
+    resolve(result);
+    return result;
+  } catch (error) {
+    console.error(`❌ Mutex operation failed for call ${callId}:`, error);
+    reject(error);
+    throw error;
+  } finally {
+    // CRITICAL: Delay deletion to let waiters see completion
+    setImmediate(() => {
+      callMutexes.delete(callId);
+      console.log(`🔓 Released mutex for call ${callId}`);
+    });
+  }
 }
 
 
@@ -326,16 +336,17 @@ const OFFER_DEDUPE_WINDOW = 2000; // 2 seconds
 // ============================================
 
 function scheduleRoomCleanup(roomId, expiresAt) {
-  // Clear existing timer if any
+  // CRITICAL: Clear AND delete old timer
   if (roomCleanupTimers.has(roomId)) {
-    clearTimeout(roomCleanupTimers.get(roomId));
+    const oldTimer = roomCleanupTimers.get(roomId);
+    clearTimeout(oldTimer);
+    roomCleanupTimers.delete(roomId); // Prevent reference leak
   }
 
   const now = Date.now();
   const timeUntilExpiry = expiresAt - now;
 
   if (timeUntilExpiry <= 0) {
-    // Room already expired
     console.log(`⏰ Room ${roomId} already expired, cleaning up immediately`);
     performRoomCleanup(roomId);
     return;
@@ -346,6 +357,7 @@ function scheduleRoomCleanup(roomId, expiresAt) {
   const timer = setTimeout(() => {
     console.log(`⏰ Room ${roomId} expiry timer triggered`);
     performRoomCleanup(roomId);
+    roomCleanupTimers.delete(roomId); // Self-cleanup
   }, timeUntilExpiry + ROOM_CLEANUP_GRACE);
 
   roomCleanupTimers.set(roomId, timer);
@@ -689,9 +701,19 @@ app.post('/api/users/upload-pfp',
 
       const firebaseUser = req.firebaseUser;
       const db = getDB();
-      const user = await db.collection('users').findOne({ 
-        email: firebaseUser.email 
-      });
+const user = await db.collection('users').findOne(
+  { email: firebaseUser.email },
+  { 
+    projection: { 
+      _id: 1, 
+      username: 1, 
+      pfpUrl: 1, 
+      email: 1,
+      firebaseUid: 1 
+      // Exclude unused fields
+    } 
+  }
+);
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -835,48 +857,54 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
     
     const db = getDB();
     
-    // CRITICAL FIX: Fetch notes with proper user data population
-    const notes = await db.collection('notes')
-      .find({})
-      .sort({ createdAt: -1 })
-      .skip(page * limit)
-      .limit(limit)
-      .toArray();
+const notes = await db.collection('notes')
+  .find({})
+  .sort({ createdAt: -1 })
+  .skip(page * limit)
+  .limit(limit)
+  .toArray();
 
-    console.log(`✅ Fetched ${notes.length} notes from database`);
+console.log(`✅ Fetched ${notes.length} notes from database`);
 
-    // CRITICAL FIX: Enrich notes with complete user data
-    const enrichedNotes = await Promise.all(notes.map(async (note) => {
-      const user = await db.collection('users').findOne(
-        { _id: note.userId },
-        { projection: { username: 1, pfpUrl: 1 } }
-      );
+// CRITICAL: Batch user lookup to prevent N+1
+const userIds = [...new Set(notes.map(note => note.userId))];
+const users = await db.collection('users')
+  .find(
+    { _id: { $in: userIds } },
+    { projection: { username: 1, pfpUrl: 1 } }
+  )
+  .toArray();
 
-      if (!user) {
-        console.warn(`⚠️ User not found for note ${note._id}, using fallback`);
-        return {
-          _id: note._id,
-          username: 'Anonymous',
-          pfpUrl: null, // Will trigger mood emoji fallback in frontend
-          text: note.text,
-          mood: note.mood,
-          createdAt: note.createdAt
-        };
-      }
+// Create lookup map
+const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-      console.log(`✅ Enriched note ${note._id}: username=${user.username}, hasPfp=${!!user.pfpUrl}`);
+// Enrich notes using map (O(1) lookup per note)
+const enrichedNotes = notes.map(note => {
+  const user = userMap.get(note.userId.toString());
+  
+  if (!user) {
+    console.warn(`⚠️ User not found for note ${note._id}`);
+    return {
+      _id: note._id,
+      username: 'Anonymous',
+      pfpUrl: null,
+      text: note.text,
+      mood: note.mood,
+      createdAt: note.createdAt
+    };
+  }
 
-      return {
-        _id: note._id,
-        username: user.username,
-        pfpUrl: user.pfpUrl || null, // Explicit null if no profile picture
-        text: note.text,
-        mood: note.mood,
-        createdAt: note.createdAt
-      };
-    }));
+  return {
+    _id: note._id,
+    username: user.username,
+    pfpUrl: user.pfpUrl || null,
+    text: note.text,
+    mood: note.mood,
+    createdAt: note.createdAt
+  };
+});
 
-    const total = await db.collection('notes').countDocuments();
+const total = await db.collection('notes').countDocuments();
 
     console.log(`📤 Sending ${enrichedNotes.length} enriched notes (${total} total)`);
     console.log(`   Page ${page + 1} of ${Math.ceil(total / limit)}`);
@@ -909,7 +937,18 @@ io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
   
   
+    socket.on('error', (error) => {
+    console.error(`❌ Socket error [${socket.id}]:`, error);
+    const user = socketUsers.get(socket.id);
+    if (user) {
+      console.error(`   User: ${user.username} (${user.userId})`);
+    }
+    // Don't crash - socket.io will handle cleanup
+  });
   
+  socket.on('connect_error', (error) => {
+    console.error(`❌ Connection error [${socket.id}]:`, error);
+  });
   
   
 // ============================================
@@ -921,7 +960,10 @@ io.on('connection', (socket) => {
 // CHUNKED FILE TRANSMISSION RELAY
 // ============================================
 
-// In server.js - file_chunk handler
+const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
+
 socket.on('file_chunk', (data) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -944,12 +986,59 @@ socket.on('file_chunk', (data) => {
       return;
     }
     
+    // CRITICAL: Track file transfer and enforce limits
+    if (!activeFileTransfers.has(fileId)) {
+      activeFileTransfers.set(fileId, {
+        roomId,
+        userId: user.userId,
+        bytesTransferred: 0,
+        startTime: Date.now(),
+        totalChunks: totalChunks
+      });
+    }
+    
+    const transfer = activeFileTransfers.get(fileId);
+    
+    // Validate ownership
+    if (transfer.userId !== user.userId) {
+      console.error(`❌ User ${user.username} tried to send chunk for someone else's file`);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'Unauthorized' 
+      });
+      return;
+    }
+    
+    // Enforce size limit
+    transfer.bytesTransferred += chunkSize;
+    if (transfer.bytesTransferred > MAX_FILE_SIZE) {
+      console.error(`❌ File ${fileName} exceeds size limit: ${transfer.bytesTransferred} bytes`);
+      activeFileTransfers.delete(fileId);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'File too large' 
+      });
+      return;
+    }
+    
+    // Enforce time limit (prevent slowloris-style attacks)
+    if (Date.now() - transfer.startTime > MAX_TRANSFER_TIME) {
+      console.error(`❌ File ${fileName} transfer timeout`);
+      activeFileTransfers.delete(fileId);
+      socket.emit('file_transmission_failed', { 
+        fileId, 
+        fileName,
+        reason: 'Transfer timeout' 
+      });
+      return;
+    }
+    
     // Log every 10th chunk or first/last
     if (chunkIndex === 0 || chunkIndex === totalChunks - 1 || chunkIndex % 10 === 0) {
       console.log(`📦 Relaying chunk ${chunkIndex}/${totalChunks - 1} of ${fileName}`);
-      console.log(`   From: ${user.username}`);
-      console.log(`   Chunk size: ${(chunkSize / 1024).toFixed(2)} KB`);
-      console.log(`   Data length: ${chunkData.length} chars`);
+      console.log(`   Progress: ${(transfer.bytesTransferred / 1024 / 1024).toFixed(2)} MB`);
     }
     
     // Validate room access
@@ -957,6 +1046,7 @@ socket.on('file_chunk', (data) => {
     
     if (!room) {
       console.error(`❌ Room ${roomId} not found`);
+      activeFileTransfers.delete(fileId);
       socket.emit('file_transmission_failed', { 
         fileId, 
         fileName,
@@ -967,6 +1057,7 @@ socket.on('file_chunk', (data) => {
     
     if (!room.hasUser(user.userId)) {
       console.error(`❌ User not in room`);
+      activeFileTransfers.delete(fileId);
       socket.emit('file_transmission_failed', { 
         fileId, 
         fileName,
@@ -976,7 +1067,6 @@ socket.on('file_chunk', (data) => {
     }
     
     // Relay chunk to all OTHER users in room
-    // CRITICAL: Relay the ENTIRE data object unchanged
     socket.to(roomId).emit('file_chunk', {
       fileId,
       fileName,
@@ -985,7 +1075,7 @@ socket.on('file_chunk', (data) => {
       roomId,
       chunkIndex,
       totalChunks,
-      chunkData, // Preserve exact base64 string
+      chunkData,
       chunkSize
     });
     
@@ -998,7 +1088,9 @@ socket.on('file_chunk', (data) => {
     // Log completion
     if (chunkIndex === totalChunks - 1) {
       console.log(`✅ File transmission complete: ${fileName}`);
-      console.log(`   Total chunks relayed: ${totalChunks}`);
+      console.log(`   Total size: ${(transfer.bytesTransferred / 1024 / 1024).toFixed(2)} MB`);
+      
+      activeFileTransfers.delete(fileId); // Cleanup
       
       socket.emit('file_transmission_complete', { fileId, fileName });
       socket.to(roomId).emit('file_transmission_complete', { fileId, fileName });
@@ -1006,7 +1098,6 @@ socket.on('file_chunk', (data) => {
     
   } catch (error) {
     console.error('❌ File chunk relay error:', error);
-    console.error('   Stack:', error.stack);
   }
 });
 
@@ -1297,69 +1388,262 @@ socket.on('request_room_sync', ({ roomId }) => {
 
 socket.on('authenticate', async ({ token, userId }) => {
   try {
-    console.log('🔐 Authenticating socket for userId:', userId);
+    // ============================================
+    // INPUT VALIDATION
+    // ============================================
+    if (!token || typeof token !== 'string') {
+      console.error('❌ [authenticate] Missing or invalid token');
+      socket.emit('auth_error', { 
+        message: 'Invalid authentication token', 
+        code: 'INVALID_TOKEN' 
+      });
+      return;
+    }
 
+    if (!userId || typeof userId !== 'string') {
+      console.error('❌ [authenticate] Missing or invalid userId');
+      socket.emit('auth_error', { 
+        message: 'Invalid user ID', 
+        code: 'INVALID_USER_ID' 
+      });
+      return;
+    }
+
+    // Validate userId format (MongoDB ObjectId)
+    if (!/^[a-f\d]{24}$/i.test(userId)) {
+      console.error(`❌ [authenticate] Invalid ObjectId format: ${userId}`);
+      socket.emit('auth_error', { 
+        message: 'Invalid user ID format', 
+        code: 'INVALID_USER_ID' 
+      });
+      return;
+    }
+
+    console.log(`🔐 Authenticating socket for userId: ${userId}`);
+
+    // ============================================
+    // TOKEN VERIFICATION
+    // ============================================
     let decodedToken;
     try {
       decodedToken = await verifyToken(token);
+      
+      // Additional token validation
+      if (!decodedToken || !decodedToken.uid) {
+        throw new Error('Invalid token structure');
+      }
+      
+      console.log(`✅ Token verified for Firebase UID: ${decodedToken.uid}`);
     } catch (error) {
-      console.error('❌ Token verification failed:', error);
-      socket.emit('auth_error', { message: 'Invalid or expired token' });
+      console.error('❌ Token verification failed:', error.message);
+      socket.emit('auth_error', { 
+        message: 'Invalid or expired token', 
+        code: 'TOKEN_VERIFICATION_FAILED' 
+      });
       return;
     }
 
+    // ============================================
+    // DATABASE LOOKUP WITH CIRCUIT BREAKER
+    // ============================================
     const db = getDB();
-    const user = await db.collection('users').findOne({ 
-      _id: new ObjectId(userId) 
-    });
+    
+    let user;
+    try {
+      // CRITICAL: Use projection to minimize data transfer
+      user = await db.collection('users').findOne(
+        { _id: new ObjectId(userId) },
+        { 
+          projection: { 
+            _id: 1, 
+            username: 1, 
+            pfpUrl: 1, 
+            email: 1,
+            firebaseUid: 1
+            // Exclude password, createdAt, updatedAt, etc.
+          } 
+        }
+      );
+    } catch (dbError) {
+      console.error('❌ Database error during authentication:', dbError);
+      socket.emit('auth_error', { 
+        message: 'Database error - please try again', 
+        code: 'DB_ERROR' 
+      });
+      return;
+    }
 
     if (!user) {
-      socket.emit('auth_error', { message: 'User not found' });
+      console.error(`❌ User not found in database: ${userId}`);
+      socket.emit('auth_error', { 
+        message: 'User not found', 
+        code: 'USER_NOT_FOUND' 
+      });
       return;
     }
 
-    socketUsers.set(socket.id, {
+    // CRITICAL: Verify Firebase UID matches (prevent token spoofing)
+    if (user.firebaseUid !== decodedToken.uid) {
+      console.error(`❌ Firebase UID mismatch for user ${userId}`);
+      console.error(`   Expected: ${user.firebaseUid}, Got: ${decodedToken.uid}`);
+      socket.emit('auth_error', { 
+        message: 'Authentication mismatch', 
+        code: 'UID_MISMATCH' 
+      });
+      return;
+    }
+
+    // ============================================
+    // HANDLE EXISTING SOCKET FOR SAME USER
+    // ============================================
+    const oldSocketId = userToSocketId.get(user._id.toString());
+    
+    if (oldSocketId && oldSocketId !== socket.id) {
+      console.log(`🔄 User ${user.username} reconnected from new socket`);
+      console.log(`   Old socket: ${oldSocketId}`);
+      console.log(`   New socket: ${socket.id}`);
+      
+      // Clean up old socket mapping
+      const oldSocketData = socketUsers.get(oldSocketId);
+      if (oldSocketData) {
+        console.log(`🗑️ Removing old socket data for ${user.username}`);
+        socketUsers.delete(oldSocketId);
+      }
+      
+      // Gracefully disconnect old socket if still connected
+      const oldSocket = io.sockets.sockets.get(oldSocketId);
+      if (oldSocket && oldSocket.connected) {
+        console.log(`🔌 Disconnecting old socket ${oldSocketId}`);
+        
+        // Notify old client they've been replaced
+        oldSocket.emit('session_replaced', {
+          message: 'You have been logged in from another device',
+          newSocketId: socket.id
+        });
+        
+        // Force disconnect with small delay
+        setTimeout(() => {
+          if (oldSocket.connected) {
+            oldSocket.disconnect(true);
+            console.log(`✅ Old socket ${oldSocketId} disconnected`);
+          }
+        }, 100);
+      }
+      
+      // Clean up any pending socket cleanup timers
+      if (socketUserCleanup.has(oldSocketId)) {
+        clearTimeout(socketUserCleanup.get(oldSocketId));
+        socketUserCleanup.delete(oldSocketId);
+        console.log(`⏰ Cancelled pending cleanup for old socket ${oldSocketId}`);
+      }
+    }
+
+    // ============================================
+    // REGISTER NEW SOCKET
+    // ============================================
+    const userSocketData = {
       userId: user._id.toString(),
       username: user.username,
       pfpUrl: user.pfpUrl,
-      email: user.email
-    });
+      email: user.email,
+      authenticatedAt: Date.now()
+    };
 
-    // CRITICAL FIX: Maintain reverse lookup index
+    // Store in both directions for O(1) lookups
+    socketUsers.set(socket.id, userSocketData);
     userToSocketId.set(user._id.toString(), socket.id);
 
+    console.log('✅ Socket authenticated successfully');
+    console.log(`   User: ${user.username} (${user._id.toString()})`);
+    console.log(`   Socket: ${socket.id}`);
+    console.log(`   Active sockets: ${socketUsers.size}`);
+
+    // ============================================
+    // SEND SUCCESS RESPONSE
+    // ============================================
     socket.emit('authenticated', { 
       success: true, 
       user: {
         userId: user._id.toString(),
         username: user.username,
         pfpUrl: user.pfpUrl
-      }
+      },
+      socketId: socket.id,
+      timestamp: Date.now()
     });
 
-    console.log('✅ Socket authenticated:', user.username, socket.id);
+    // ============================================
+    // OPTIONAL: RESTORE USER STATE
+    // ============================================
+    // If user was in a room before disconnect, rejoin them
+    const roomId = matchmaking.getRoomIdByUser(user._id.toString());
+    if (roomId) {
+      const room = matchmaking.getRoom(roomId);
+      if (room && !room.isExpired) {
+        console.log(`🔄 User ${user.username} was in room ${roomId}, auto-rejoining`);
+        socket.join(roomId);
+        
+        // Notify user they can resume
+        socket.emit('room_reconnected', {
+          roomId: room.id,
+          expiresAt: room.expiresAt,
+          timeRemaining: room.getTimeUntilExpiration()
+        });
+        
+        // Notify other users in room
+        socket.to(roomId).emit('user_reconnected', {
+          userId: user._id.toString(),
+          username: user.username,
+          pfpUrl: user.pfpUrl
+        });
+      } else {
+        // Room expired while user was disconnected
+        console.log(`⚠️ User ${user.username} was in expired room ${roomId}`);
+        matchmaking.leaveRoom(user._id.toString());
+      }
+    }
+
+    // Check if user was in an active call
+    const activeCallId = userCalls.get(user._id.toString());
+    if (activeCallId) {
+      const call = activeCalls.get(activeCallId);
+      if (call && call.status === 'active' && call.participants.includes(user._id.toString())) {
+        console.log(`📞 User ${user.username} was in call ${activeCallId}, notifying of reconnection opportunity`);
+        
+        socket.emit('call_reconnect_available', {
+          callId: activeCallId,
+          callType: call.callType,
+          participantCount: call.participants.length,
+          roomId: call.roomId
+        });
+      } else {
+        // Call ended while user was disconnected
+        console.log(`⚠️ User ${user.username} was in ended call ${activeCallId}`);
+        userCalls.delete(user._id.toString());
+      }
+    }
+
   } catch (error) {
-    console.error('Socket auth error:', error);
-    socket.emit('auth_error', { message: 'Authentication failed' });
+    // ============================================
+    // GLOBAL ERROR HANDLER
+    // ============================================
+    console.error(`❌ [authenticate] Unexpected error for user ${userId}:`, error);
+    console.error('   Stack:', error.stack);
+    
+    // Send generic error to client (don't leak internal details)
+    socket.emit('auth_error', { 
+      message: 'Authentication failed due to server error', 
+      code: 'AUTH_FAILED',
+      retryable: true
+    });
+    
+    // CRITICAL: Log to external monitoring (Sentry, DataDog, etc.)
+    // Example: Sentry.captureException(error, { extra: { userId, socketId: socket.id } });
   }
 });
 
 
 // ================== DISCONNECT CLEANUP ==================
-socket.on('disconnect', () => {
-  const user = socketUsers.get(socket.id);
-
-  // Remove reverse lookup
-  if (user?.userId) {
-    userToSocketId.delete(user.userId);
-    console.log(`🗑️ Cleaned up userToSocketId for ${user.username}`);
-  }
-
-  // Remove socket mapping
-  socketUsers.delete(socket.id);
-
-  console.log('🔌 Socket disconnected:', socket.id);
-});
 
 socket.on('join_matchmaking', async ({ mood }) => {
   try {
@@ -2069,25 +2353,22 @@ socket.on('accept_call', async ({ callId, roomId }) => {
         return;
       }
 
-    const emitPromises = callUsers.map(roomUser => {
-        return new Promise((resolve) => {
-          const targetSocket = findActiveSocketForUser(roomUser.userId);
-          if (targetSocket) {
-            targetSocket.emit('call_accepted', {
-              callId,
-              callType: call.callType,
-              users: callUsers
-            });
-            console.log(`📤 Sent call_accepted to ${roomUser.username}`);
-            resolve();
-          } else {
-            console.error(`❌ No active socket for ${roomUser.username}`);
-            resolve();
-          }
-        });
-      });
+// Emit synchronously - Socket.IO handles queueing
+callUsers.forEach(roomUser => {
+  const targetSocket = findActiveSocketForUser(roomUser.userId);
+  if (targetSocket) {
+    targetSocket.emit('call_accepted', {
+      callId,
+      callType: call.callType,
+      users: callUsers
+    });
+    console.log(`📤 Sent call_accepted to ${roomUser.username}`);
+  } else {
+    console.error(`❌ No active socket for ${roomUser.username}`);
+  }
+});
 
-      await Promise.all(emitPromises);
+// REMOVED: No need for Promise.all - emits are synchronous
 
       // CRITICAL FIX: Single broadcast instead of duplicate
       broadcastCallStateUpdate(callId);
@@ -2941,6 +3222,7 @@ socket.on('disconnect', () => {
   
     if (user?.userId) {
     joinCallDebounce.delete(user.userId);
+    userToSocketId.delete(user.userId);
     console.log(`🗑️ Cleaned up joinCallDebounce for ${user.username}`);
   }
   
@@ -2959,6 +3241,12 @@ socket.on('disconnect', () => {
   
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
+    for (const [fileId, transfer] of activeFileTransfers.entries()) {
+      if (transfer.userId === user.userId) {
+        activeFileTransfers.delete(fileId);
+        console.log(`🗑️ Cleaned up incomplete file transfer ${fileId} for ${user.username}`);
+      }
+    }
 
     // CRITICAL FIX: Schedule immediate socketUsers cleanup with grace period
     const cleanupTimeout = setTimeout(() => {
@@ -3241,6 +3529,60 @@ setInterval(() => {
 }, 5000);
 
 
+// Add after line 2182 (in periodic cleanup interval)
+setInterval(() => {
+  const now = Date.now();
+  
+  // Clean up expired offers (> 5 seconds old)
+  let expiredOffers = 0;
+  for (const [key, timestamp] of activeOffers.entries()) {
+    if (now - timestamp > 5000) {
+      activeOffers.delete(key);
+      expiredOffers++;
+    }
+  }
+  if (expiredOffers > 0) {
+    console.log(`🗑️ Cleaned up ${expiredOffers} expired offers`);
+  }
+  
+  // Clean up expired answer debounce (> 5 seconds old)
+  let expiredAnswers = 0;
+  for (const [key, timestamp] of answerDebounce.entries()) {
+    if (now - timestamp > 5000) {
+      answerDebounce.delete(key);
+      expiredAnswers++;
+    }
+  }
+  if (expiredAnswers > 0) {
+    console.log(`🗑️ Cleaned up ${expiredAnswers} expired answer debounce entries`);
+  }
+  
+  // Clean up expired join debounce (> 5 seconds old)
+  let expiredJoins = 0;
+  for (const [key, timestamp] of joinCallDebounce.entries()) {
+    if (now - timestamp > 5000) {
+      joinCallDebounce.delete(key);
+      expiredJoins++;
+    }
+  }
+  if (expiredJoins > 0) {
+    console.log(`🗑️ Cleaned up ${expiredJoins} expired join debounce entries`);
+  }
+  
+  // Clean up expired room join states (> 15 seconds old)
+  let expiredRoomJoins = 0;
+  for (const [key, data] of roomJoinState.entries()) {
+    if (now - data.timestamp > 15000) {
+      roomJoinState.delete(key);
+      expiredRoomJoins++;
+    }
+  }
+  if (expiredRoomJoins > 0) {
+    console.log(`🗑️ Cleaned up ${expiredRoomJoins} expired room join states`);
+  }
+  
+}, 30000); // Every 30 seconds
+
 
 // ============================================
 // START SERVER
@@ -3250,6 +3592,17 @@ async function startServer() {
   try {
     await connectDB();
     initializeFirebase();
+    
+        const client = db.client;
+    client.on('error', (error) => {
+      console.error('💥 MongoDB connection error:', error);
+      // Implement reconnection logic or graceful degradation
+    });
+    
+        client.on('close', () => {
+      console.error('💥 MongoDB connection closed unexpectedly');
+      // Alert monitoring system
+    });
 
     const PORT = config.PORT;
     server.listen(PORT, () => {
