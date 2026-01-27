@@ -24,6 +24,9 @@ import * as matchmaking from './matchmaking.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import pidusage from "pidusage";
+import os from "os";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const callMutexes = new Map();
@@ -737,6 +740,22 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+
+app.get("/metrics", async (req, res) => {
+  const stats = await pidusage(process.pid);
+
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+
+  res.json({
+    cpu_percent: Number(stats.cpu.toFixed(2)), // REAL CPU %
+    ram_used_mb: Number((stats.memory / 1024 / 1024).toFixed(2)),
+    ram_total_mb: Number((totalMem / 1024 / 1024).toFixed(2)),
+    ram_usage_percent: Number((((stats.memory) / totalMem) * 100).toFixed(2)),
+    uptime_sec: process.uptime()
+  });
 });
 
 
