@@ -831,32 +831,66 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
       config.NOTES_PAGE_SIZE
     );
 
+    console.log(`📊 Notes fetch request: page=${page}, limit=${limit}`);
+    
     const db = getDB();
+    
+    // CRITICAL FIX: Fetch notes with proper user data population
     const notes = await db.collection('notes')
       .find({})
       .sort({ createdAt: -1 })
       .skip(page * limit)
       .limit(limit)
-      .project({ 
-        username: 1, 
-        pfpUrl: 1, 
-        text: 1, 
-        mood: 1, 
-        createdAt: 1 
-      })
       .toArray();
+
+    console.log(`✅ Fetched ${notes.length} notes from database`);
+
+    // CRITICAL FIX: Enrich notes with complete user data
+    const enrichedNotes = await Promise.all(notes.map(async (note) => {
+      const user = await db.collection('users').findOne(
+        { _id: note.userId },
+        { projection: { username: 1, pfpUrl: 1 } }
+      );
+
+      if (!user) {
+        console.warn(`⚠️ User not found for note ${note._id}, using fallback`);
+        return {
+          _id: note._id,
+          username: 'Anonymous',
+          pfpUrl: null, // Will trigger mood emoji fallback in frontend
+          text: note.text,
+          mood: note.mood,
+          createdAt: note.createdAt
+        };
+      }
+
+      console.log(`✅ Enriched note ${note._id}: username=${user.username}, hasPfp=${!!user.pfpUrl}`);
+
+      return {
+        _id: note._id,
+        username: user.username,
+        pfpUrl: user.pfpUrl || null, // Explicit null if no profile picture
+        text: note.text,
+        mood: note.mood,
+        createdAt: note.createdAt
+      };
+    }));
 
     const total = await db.collection('notes').countDocuments();
 
+    console.log(`📤 Sending ${enrichedNotes.length} enriched notes (${total} total)`);
+    console.log(`   Page ${page + 1} of ${Math.ceil(total / limit)}`);
+    console.log(`   Has more: ${(page + 1) * limit < total}`);
+
     res.json({ 
-      notes, 
+      notes: enrichedNotes, 
       page, 
       limit, 
       total,
       hasMore: (page + 1) * limit < total
     });
   } catch (error) {
-    console.error('Get notes error:', error);
+    console.error('❌ Get notes error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
