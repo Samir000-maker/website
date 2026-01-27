@@ -3226,6 +3226,22 @@ process.on('unhandledRejection', (reason, promise) => {
   // Log to external monitoring service here
 });
 
+
+let lastCpuUsage = process.cpuUsage();
+
+setInterval(() => {
+  const current = process.cpuUsage(lastCpuUsage);
+  lastCpuUsage = process.cpuUsage();
+
+  console.log({
+    userMsLast5s: current.user / 1000,
+    systemMsLast5s: current.system / 1000,
+    memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024)
+  });
+}, 5000);
+
+
+
 // ============================================
 // START SERVER
 // ============================================
