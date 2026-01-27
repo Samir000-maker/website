@@ -36,41 +36,42 @@ const socketUsers = new Map();
 const joinCallDebounce = new Map(); // userId -> timestamp
 
 
-// We'll keep a rolling sample baseline to compute CPU %
-let prevCpuUsage = process.cpuUsage();       // { user: µs, system: µs }
-let prevHrtimeNs = process.hrtime.bigint(); // bigint nanoseconds
+let prevCpuUsage = process.cpuUsage();
+let prevHrtimeNs = process.hrtime.bigint();
 
 function computeCpuPercent() {
   const curCpu = process.cpuUsage();
   const curHrtimeNs = process.hrtime.bigint();
 
-  // total CPU time used by process (microseconds)
-  const prevTotalMicros = prevCpuUsage.user + prevCpuUsage.system;
-  const curTotalMicros = curCpu.user + curCpu.system;
-  const deltaCpuMicros = curTotalMicros - prevTotalMicros;
+  const deltaCpuMicros = curCpu.user + curCpu.system
+    - (prevCpuUsage.user + prevCpuUsage.system);
+  const deltaTimeMicros = Number((curHrtimeNs - prevHrtimeNs) / 1000n);
 
-  // elapsed real time in microseconds
-  const deltaTimeMicros = Number((curHrtimeNs - prevHrtimeNs) / 1000n); // ns -> µs
-
-  // fallback safety
-  if (deltaTimeMicros <= 0 || !Number.isFinite(deltaTimeMicros)) {
-    // update baselines and return 0
+  if (deltaTimeMicros <= 0) {
     prevCpuUsage = curCpu;
     prevHrtimeNs = curHrtimeNs;
     return 0;
   }
 
   const cores = Math.max(1, os.cpus()?.length || 1);
-
-  // CPU percent = (CPU used by process / (elapsed_time * cores)) * 100
   const cpuPercent = (deltaCpuMicros / (deltaTimeMicros * cores)) * 100;
 
-  // update baselines for next call
   prevCpuUsage = curCpu;
   prevHrtimeNs = curHrtimeNs;
-
-  // clamp and return
   return Math.max(0, Math.min(100, cpuPercent));
+}
+
+async function getContainerMemoryLimitMB() {
+  try {
+    const raw = await fs.readFile(
+      "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+      "utf8"
+    );
+    const limitBytes = parseInt(raw.trim(), 10);
+    return +(limitBytes / 1024 / 1024).toFixed(2); // MB
+  } catch (err) {
+    return null;
+  }
 }
 
 
@@ -470,22 +471,22 @@ function cancelRoomCleanup(roomId) {
 // ============================================
 
 
-app.get("/metrics", (req, res) => {
-  // memory (RSS = resident set size - actual memory used)
+app.get("/metrics", async (req, res) => {
+  // Actual process memory usage
   const memBytes = process.memoryUsage().rss;
-  const totalMemBytes = os.totalmem();
+
+  // Attempt to read container memory limit
+  const containerLimitMB = await getContainerMemoryLimitMB();
 
   const ramUsedMB = +(memBytes / 1024 / 1024).toFixed(2);
-  const ramTotalMB = +(totalMemBytes / 1024 / 1024).toFixed(2);
-  const ramPercent = +((memBytes / totalMemBytes) * 100).toFixed(2);
-
-  // compute CPU percent (this measures since the last /metrics call)
-  const cpu = +computeCpuPercent().toFixed(2);
+  const ramPercent = containerLimitMB
+    ? +((ramUsedMB / containerLimitMB) * 100).toFixed(2)
+    : null;
 
   res.json({
-    cpu_percent: cpu,           // percent, 0..100
+    cpu_percent: +computeCpuPercent().toFixed(2),
     ram_used_mb: ramUsedMB,
-    ram_total_mb: ramTotalMB,
+    ram_total_mb: containerLimitMB,
     ram_usage_percent: ramPercent,
     uptime_sec: Math.floor(process.uptime())
   });
