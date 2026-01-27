@@ -20,12 +20,9 @@ import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyT
 import { uploadProfilePicture, getDefaultProfilePicture } from './cloudflare-storage.js';
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
 import * as matchmaking from './matchmaking.js';
-
+import os from "node:os";
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-import pidusage from "pidusage";
-import os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,6 +33,44 @@ const userToSocketId = new Map()
 const socketUsers = new Map();
 // Add at top with other Maps
 const joinCallDebounce = new Map(); // userId -> timestamp
+
+
+// We'll keep a rolling sample baseline to compute CPU %
+let prevCpuUsage = process.cpuUsage();       // { user: µs, system: µs }
+let prevHrtimeNs = process.hrtime.bigint(); // bigint nanoseconds
+
+function computeCpuPercent() {
+  const curCpu = process.cpuUsage();
+  const curHrtimeNs = process.hrtime.bigint();
+
+  // total CPU time used by process (microseconds)
+  const prevTotalMicros = prevCpuUsage.user + prevCpuUsage.system;
+  const curTotalMicros = curCpu.user + curCpu.system;
+  const deltaCpuMicros = curTotalMicros - prevTotalMicros;
+
+  // elapsed real time in microseconds
+  const deltaTimeMicros = Number((curHrtimeNs - prevHrtimeNs) / 1000n); // ns -> µs
+
+  // fallback safety
+  if (deltaTimeMicros <= 0 || !Number.isFinite(deltaTimeMicros)) {
+    // update baselines and return 0
+    prevCpuUsage = curCpu;
+    prevHrtimeNs = curHrtimeNs;
+    return 0;
+  }
+
+  const cores = Math.max(1, os.cpus()?.length || 1);
+
+  // CPU percent = (CPU used by process / (elapsed_time * cores)) * 100
+  const cpuPercent = (deltaCpuMicros / (deltaTimeMicros * cores)) * 100;
+
+  // update baselines for next call
+  prevCpuUsage = curCpu;
+  prevHrtimeNs = curHrtimeNs;
+
+  // clamp and return
+  return Math.max(0, Math.min(100, cpuPercent));
+}
 
 
 
@@ -433,6 +468,29 @@ function cancelRoomCleanup(roomId) {
 // API ROUTES
 // ============================================
 
+
+app.get("/metrics", (req, res) => {
+  // memory (RSS = resident set size - actual memory used)
+  const memBytes = process.memoryUsage().rss;
+  const totalMemBytes = os.totalmem();
+
+  const ramUsedMB = +(memBytes / 1024 / 1024).toFixed(2);
+  const ramTotalMB = +(totalMemBytes / 1024 / 1024).toFixed(2);
+  const ramPercent = +((memBytes / totalMemBytes) * 100).toFixed(2);
+
+  // compute CPU percent (this measures since the last /metrics call)
+  const cpu = +computeCpuPercent().toFixed(2);
+
+  res.json({
+    cpu_percent: cpu,           // percent, 0..100
+    ram_used_mb: ramUsedMB,
+    ram_total_mb: ramTotalMB,
+    ram_usage_percent: ramPercent,
+    uptime_sec: Math.floor(process.uptime())
+  });
+});
+
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -740,22 +798,6 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
-
-
-app.get("/metrics", async (req, res) => {
-  const stats = await pidusage(process.pid);
-
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-
-  res.json({
-    cpu_percent: Number(stats.cpu.toFixed(2)), // REAL CPU %
-    ram_used_mb: Number((stats.memory / 1024 / 1024).toFixed(2)),
-    ram_total_mb: Number((totalMem / 1024 / 1024).toFixed(2)),
-    ram_usage_percent: Number((((stats.memory) / totalMem) * 100).toFixed(2)),
-    uptime_sec: process.uptime()
-  });
 });
 
 
