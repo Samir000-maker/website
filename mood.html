@@ -645,12 +645,12 @@
 
     <div class="sessions-section">
       <div class="sessions-header">
-        <h2 class="sessions-title">Recent Sessions</h2>
-        <a href="#" class="view-all-link" id="loadMoreBtn">
-          <span>View History</span>
-          <span>→</span>
-        </a>
-      </div>
+  <h2 class="sessions-title">Recent Sessions</h2>
+  <span class="view-all-link" style="cursor: default; opacity: 0.6;">
+    <span>Scroll for more</span>
+    <span>↓</span>
+  </span>
+</div>
 
       <div id="notesList" class="sessions-grid">
         <!-- Sessions will be loaded here -->
@@ -925,81 +925,193 @@ if (window.StateManager) {
     // ============================================
     // LOG MOOD (NOTES)
     // ============================================
-    async function handleLogMood() {
-      const text = (noteText && noteText.value) ? noteText.value.trim() : '';
-      if (!text) {
-        toast('Please add a note', 'warning');
-        return;
-      }
-      if (!selectedMood) {
-        toast('Please select a mood', 'warning');
-        return;
-      }
+async function handleLogMood() {
+  const text = (noteText && noteText.value) ? noteText.value.trim() : '';
+  if (!text) {
+    toast('Please add a note', 'warning');
+    return;
+  }
+  if (!selectedMood) {
+    toast('Please select a mood', 'warning');
+    return;
+  }
 
-      showLoading('Saving your mood...');
-      try {
-        if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
-        await _API.post('/api/notes', { text, mood: selectedMood });
-        hideLoading();
-        toast('Mood logged!', 'success');
-        if (noteText) noteText.value = '';
-        loadNotes(0);
-      } catch (err) {
-        hideLoading();
-        console.error('Failed to log mood:', err);
-        toast(err.message || 'Failed to log mood', 'error');
-      }
-    }
+  showLoading('Saving your mood...');
+  try {
+    if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
+    
+    console.log(`💾 Logging mood: ${selectedMood} - "${text.substring(0, 50)}..."`);
+    
+    await _API.post('/api/notes', { text, mood: selectedMood });
+    
+    hideLoading();
+    toast('Mood logged!', 'success');
+    
+    if (noteText) noteText.value = '';
+    
+    // CRITICAL: Reset pagination and reload from start
+    console.log(`🔄 Refreshing notes list after new entry`);
+    currentNotePage = 0;
+    hasMoreNotes = true;
+    loadNotes(0, false); // Fresh load, not append
+    
+  } catch (err) {
+    hideLoading();
+    console.error('❌ Failed to log mood:', err);
+    toast(err.message || 'Failed to log mood', 'error');
+  }
+}
 
     // ============================================
     // NOTES DISPLAY
     // ============================================
-    function renderNote(note) {
-      const card = document.createElement('div');
-      card.className = 'session-card';
-      const moodEmoji = note && note.mood ? (moods[note.mood] || '😊') : '😊';
-      const username = note && note.username ? note.username : 'Anonymous';
-      const createdAt = note && note.createdAt ? 
-        (_Utils && typeof _Utils.formatDate === 'function' ? 
-          _Utils.formatDate(note.createdAt) : 
-          new Date(note.createdAt).toLocaleString()) : '';
-      const moodLabel = note && note.mood ? note.mood.charAt(0).toUpperCase() + note.mood.slice(1) : 'Unknown';
-      const textHtml = note && note.text ? 
-        (_Utils && typeof _Utils.escapeHtml === 'function' ? 
-          _Utils.escapeHtml(note.text) : 
-          (()=>{const d=document.createElement('div');d.textContent=note.text;return d.innerHTML;})()) : '';
-      
-      card.innerHTML = `
-        <div class="session-header">
-          <div class="session-emoji">${moodEmoji}</div>
-          <div class="session-info">
-            <div class="session-mood">${moodLabel}</div>
-            <div class="session-time">${createdAt}</div>
-          </div>
-        </div>
-        <div class="session-text">${textHtml}</div>
-      `;
-      return card;
-    }
+function renderNote(note) {
+  console.log(`📝 Rendering note:`, {
+    id: note._id,
+    username: note.username,
+    hasPfp: !!note.pfpUrl,
+    mood: note.mood
+  });
 
-    async function loadNotes(pageNum = 0) {
-      if (loadingEl) loadingEl.classList.remove('hidden');
-      try {
-        if (!_API || typeof _API.get !== 'function') throw new Error('API.get missing');
-        const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
-        if (pageNum === 0 && notesList) notesList.innerHTML = '';
-        const notesArray = Array.isArray(data.notes) ? data.notes : [];
-        notesArray.forEach(n => { 
-          if (notesList) notesList.appendChild(renderNote(n)); 
-        });
-        page = pageNum;
-      } catch (err) {
-        console.error('Failed to load notes:', err);
-        toast(err.message || 'Failed to load notes','error');
-      } finally {
-        if (loadingEl) loadingEl.classList.add('hidden');
-      }
+  const card = document.createElement('div');
+  card.className = 'session-card';
+  
+  // CRITICAL FIX: Prioritize profile picture, fallback to mood emoji
+  const moodEmoji = note?.mood ? (moods[note.mood] || '😊') : '😊';
+  const hasPfp = note?.pfpUrl && note.pfpUrl !== null;
+  
+  // CRITICAL FIX: Use actual username from database
+  const username = note?.username || 'Anonymous';
+  
+  const createdAt = note?.createdAt ? 
+    (_Utils && typeof _Utils.formatDate === 'function' ? 
+      _Utils.formatDate(note.createdAt) : 
+      new Date(note.createdAt).toLocaleString()) : '';
+      
+  const moodLabel = note?.mood ? 
+    note.mood.charAt(0).toUpperCase() + note.mood.slice(1) : 
+    'Unknown';
+    
+  const textHtml = note?.text ? 
+    (_Utils && typeof _Utils.escapeHtml === 'function' ? 
+      _Utils.escapeHtml(note.text) : 
+      (()=>{const d=document.createElement('div');d.textContent=note.text;return d.innerHTML;})()) : '';
+  
+  // CRITICAL FIX: Conditional rendering - profile picture OR mood emoji
+  const avatarHtml = hasPfp 
+    ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">` 
+    : `<div class="session-emoji">${moodEmoji}</div>`;
+  
+  console.log(`✅ Using ${hasPfp ? 'profile picture' : 'mood emoji fallback'} for ${username}`);
+  
+  card.innerHTML = `
+    <div class="session-header">
+      ${avatarHtml}
+      <div class="session-info">
+        <div class="session-mood">${username} · ${moodLabel}</div>
+        <div class="session-time">${createdAt}</div>
+      </div>
+    </div>
+    <div class="session-text">${textHtml}</div>
+  `;
+  
+  return card;
+}
+
+let isLoadingNotes = false;
+let hasMoreNotes = true;
+let currentNotePage = 0;
+
+async function loadNotes(pageNum = 0, append = false) {
+  if (isLoadingNotes) {
+    console.log(`⏳ Already loading notes, skipping duplicate request`);
+    return;
+  }
+  
+  if (!hasMoreNotes && append) {
+    console.log(`✋ No more notes to load`);
+    return;
+  }
+
+  isLoadingNotes = true;
+  console.log(`📥 Loading notes: page=${pageNum}, append=${append}`);
+  
+  if (loadingEl) loadingEl.classList.remove('hidden');
+  
+  try {
+    if (!_API || typeof _API.get !== 'function') {
+      throw new Error('API.get missing');
     }
+    
+    const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
+    
+    console.log(`✅ Received ${data.notes?.length || 0} notes from server`);
+    console.log(`   Total in database: ${data.total}`);
+    console.log(`   Has more: ${data.hasMore}`);
+    
+    // Clear or append based on mode
+    if (!append && notesList) {
+      notesList.innerHTML = '';
+      console.log(`🗑️ Cleared notes list (fresh load)`);
+    }
+    
+    const notesArray = Array.isArray(data.notes) ? data.notes : [];
+    
+    if (notesArray.length === 0) {
+      console.log(`ℹ️ No notes returned for page ${pageNum}`);
+      if (!append && notesList) {
+        notesList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">No mood entries yet. Log your first mood above!</div>';
+      }
+    } else {
+      notesArray.forEach((n, idx) => { 
+        console.log(`  [${idx}] ${n.username}: ${n.mood}`);
+        if (notesList) notesList.appendChild(renderNote(n)); 
+      });
+      console.log(`✅ Rendered ${notesArray.length} note cards`);
+    }
+    
+    currentNotePage = pageNum;
+    hasMoreNotes = data.hasMore;
+    
+    console.log(`📊 Pagination state: page=${currentNotePage}, hasMore=${hasMoreNotes}`);
+    
+  } catch (err) {
+    console.error('❌ Failed to load notes:', err);
+    toast(err.message || 'Failed to load notes', 'error');
+  } finally {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    isLoadingNotes = false;
+    console.log(`🔓 Released loading lock`);
+  }
+}
+
+// CRITICAL: Implement scroll-based lazy loading
+function initInfiniteScroll() {
+  const scrollContainer = window;
+  let scrollTimeout;
+
+  scrollContainer.addEventListener('scroll', () => {
+    // Debounce scroll events
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const windowHeight = window.innerHeight;
+      const documentHeight = document.documentElement.scrollHeight;
+      
+      // Trigger when 200px from bottom
+      const threshold = 200;
+      const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
+      
+      if (distanceFromBottom < threshold && hasMoreNotes && !isLoadingNotes) {
+        console.log(`📜 Scroll threshold reached (${distanceFromBottom.toFixed(0)}px from bottom)`);
+        console.log(`   Loading next page: ${currentNotePage + 1}`);
+        loadNotes(currentNotePage + 1, true); // Append mode
+      }
+    }, 100); // 100ms debounce
+  });
+
+  console.log(`✅ Infinite scroll initialized (threshold: 200px from bottom)`);
+}
 
     // ============================================
     // LOGOUT
@@ -1035,19 +1147,26 @@ if (window.StateManager) {
     // ============================================
     // EVENT LISTENERS
     // ============================================
-    function attachListeners() {
-      if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
-      if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
-      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
-      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-      if (noteText) {
-        noteText.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            if (!logMoodBtn.disabled) handleLogMood();
-          }
-        });
+function attachListeners() {
+  if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
+  if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
+  
+  // REMOVED: Manual "View History" button - now auto-loads on scroll
+  // if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
+  
+  if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+  if (noteText) {
+    noteText.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        if (!logMoodBtn.disabled) handleLogMood();
       }
-    }
+    });
+  }
+  
+  // CRITICAL: Initialize infinite scroll
+  initInfiniteScroll();
+  console.log(`✅ Event listeners attached`);
+}
 
     // ============================================
     // INITIALIZATION
