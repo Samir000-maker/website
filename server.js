@@ -75,6 +75,40 @@ async function getContainerMemoryLimitMB() {
 }
 
 
+async function readCgroupFile(path) {
+  try {
+    return (await fs.readFile(path, "utf8")).trim();
+  } catch {
+    return null;
+  }
+}
+
+async function getCgroupMemoryInfo() {
+  // Supports both cgroup v1 and v2
+  const limit =
+    (await readCgroupFile("/sys/fs/cgroup/memory.max")) ||
+    (await readCgroupFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"));
+  const usage =
+    (await readCgroupFile("/sys/fs/cgroup/memory.current")) ||
+    (await readCgroupFile("/sys/fs/cgroup/memory/memory.usage_in_bytes"));
+
+  return {
+    limit: limit ? parseInt(limit, 10) : null,
+    usage: usage ? parseInt(usage, 10) : null,
+  };
+}
+
+async function getCgroupCpuQuota() {
+  const quota = await readCgroupFile("/sys/fs/cgroup/cpu.max");
+  if (!quota) return null;
+
+  // format is like "50000 100000"
+  const [q, period] = quota.split(" ").map((val) => parseInt(val, 10));
+  if (!q || !period) return null;
+
+  return { quota: q, period };
+}
+
 
 // Add helper function at top
 function validateRoomAccess(roomId, userId) {
@@ -470,26 +504,31 @@ function cancelRoomCleanup(roomId) {
 // API ROUTES
 // ============================================
 
-
 app.get("/metrics", async (req, res) => {
-  // Actual process memory usage
-  const memBytes = process.memoryUsage().rss;
+  // RAM from cgroup
+  const { limit, usage } = await getCgroupMemoryInfo();
+  const ramUsedMB = usage ? +(usage / 1024 / 1024).toFixed(2) : null;
+  const ramLimitMB = limit ? +(limit / 1024 / 1024).toFixed(2) : null;
+  const ramPercent =
+    limit && usage ? +((usage / limit) * 100).toFixed(2) : null;
 
-  // Attempt to read container memory limit
-  const containerLimitMB = await getContainerMemoryLimitMB();
-
-  const ramUsedMB = +(memBytes / 1024 / 1024).toFixed(2);
-  const ramPercent = containerLimitMB
-    ? +((ramUsedMB / containerLimitMB) * 100).toFixed(2)
-    : null;
+  // CPU quota (how many CPU slices your container can use)
+  const cpuInfo = await getCgroupCpuQuota();
+  let cpuQuotaCores = null;
+  if (cpuInfo) {
+    cpuQuotaCores = +(cpuInfo.quota / cpuInfo.period).toFixed(2);
+  }
 
   res.json({
-    cpu_percent: +computeCpuPercent().toFixed(2),
     ram_used_mb: ramUsedMB,
-    ram_total_mb: containerLimitMB,
+    ram_total_mb: ramLimitMB,
     ram_usage_percent: ramPercent,
-    uptime_sec: Math.floor(process.uptime())
+    cpu_quota_cores: cpuQuotaCores,
   });
+});
+
+app.listen(PORT, () => {
+  console.log(`Metrics running on port ${PORT}`);
 });
 
 
