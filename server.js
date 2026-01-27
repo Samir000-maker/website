@@ -20,10 +20,9 @@ import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyT
 import { uploadProfilePicture, getDefaultProfilePicture } from './cloudflare-storage.js';
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
 import * as matchmaking from './matchmaking.js';
-import os from "node:os";
+
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from "fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,79 +34,6 @@ const socketUsers = new Map();
 // Add at top with other Maps
 const joinCallDebounce = new Map(); // userId -> timestamp
 
-
-let prevCpuUsage = process.cpuUsage();
-let prevHrtimeNs = process.hrtime.bigint();
-
-function computeCpuPercent() {
-  const curCpu = process.cpuUsage();
-  const curHrtimeNs = process.hrtime.bigint();
-
-  const deltaCpuMicros = curCpu.user + curCpu.system
-    - (prevCpuUsage.user + prevCpuUsage.system);
-  const deltaTimeMicros = Number((curHrtimeNs - prevHrtimeNs) / 1000n);
-
-  if (deltaTimeMicros <= 0) {
-    prevCpuUsage = curCpu;
-    prevHrtimeNs = curHrtimeNs;
-    return 0;
-  }
-
-  const cores = Math.max(1, os.cpus()?.length || 1);
-  const cpuPercent = (deltaCpuMicros / (deltaTimeMicros * cores)) * 100;
-
-  prevCpuUsage = curCpu;
-  prevHrtimeNs = curHrtimeNs;
-  return Math.max(0, Math.min(100, cpuPercent));
-}
-
-async function getContainerMemoryLimitMB() {
-  try {
-    const raw = await fs.readFile(
-      "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-      "utf8"
-    );
-    const limitBytes = parseInt(raw.trim(), 10);
-    return +(limitBytes / 1024 / 1024).toFixed(2); // MB
-  } catch (err) {
-    return null;
-  }
-}
-
-
-async function readCgroupFile(path) {
-  try {
-    return (await fs.readFile(path, "utf8")).trim();
-  } catch {
-    return null;
-  }
-}
-
-async function getCgroupMemoryInfo() {
-  // Supports both cgroup v1 and v2
-  const limit =
-    (await readCgroupFile("/sys/fs/cgroup/memory.max")) ||
-    (await readCgroupFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"));
-  const usage =
-    (await readCgroupFile("/sys/fs/cgroup/memory.current")) ||
-    (await readCgroupFile("/sys/fs/cgroup/memory/memory.usage_in_bytes"));
-
-  return {
-    limit: limit ? parseInt(limit, 10) : null,
-    usage: usage ? parseInt(usage, 10) : null,
-  };
-}
-
-async function getCgroupCpuQuota() {
-  const quota = await readCgroupFile("/sys/fs/cgroup/cpu.max");
-  if (!quota) return null;
-
-  // format is like "50000 100000"
-  const [q, period] = quota.split(" ").map((val) => parseInt(val, 10));
-  if (!q || !period) return null;
-
-  return { quota: q, period };
-}
 
 
 // Add helper function at top
@@ -503,30 +429,6 @@ function cancelRoomCleanup(roomId) {
 // ============================================
 // API ROUTES
 // ============================================
-
-app.get("/metrics", async (req, res) => {
-  // RAM from cgroup
-  const { limit, usage } = await getCgroupMemoryInfo();
-  const ramUsedMB = usage ? +(usage / 1024 / 1024).toFixed(2) : null;
-  const ramLimitMB = limit ? +(limit / 1024 / 1024).toFixed(2) : null;
-  const ramPercent =
-    limit && usage ? +((usage / limit) * 100).toFixed(2) : null;
-
-  // CPU quota (how many CPU slices your container can use)
-  const cpuInfo = await getCgroupCpuQuota();
-  let cpuQuotaCores = null;
-  if (cpuInfo) {
-    cpuQuotaCores = +(cpuInfo.quota / cpuInfo.period).toFixed(2);
-  }
-
-  res.json({
-    ram_used_mb: ramUsedMB,
-    ram_total_mb: ramLimitMB,
-    ram_usage_percent: ramPercent,
-    cpu_quota_cores: cpuQuotaCores,
-  });
-});
-
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
