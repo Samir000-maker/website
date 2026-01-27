@@ -3587,41 +3587,180 @@ setInterval(() => {
 // ============================================
 // START SERVER
 // ============================================
-
 async function startServer() {
   try {
+    // ============================================
+    // DATABASE CONNECTION
+    // ============================================
     await connectDB();
+    console.log('✅ Connected to MongoDB');
+    
+    const db = getDB(); // ✅ Get database instance
+    
+    // ============================================
+    // DATABASE INDEXES
+    // ============================================
+    try {
+      // Ensure indexes exist for performance
+      await db.collection('users').createIndex({ email: 1 }, { unique: true });
+      await db.collection('users').createIndex({ username: 1 }, { unique: true });
+      await db.collection('users').createIndex({ firebaseUid: 1 });
+      
+      await db.collection('notes').createIndex({ createdAt: -1 }); // For pagination
+      await db.collection('notes').createIndex({ userId: 1 }); // For user lookup
+      
+      console.log('✅ Database indexes created');
+    } catch (indexError) {
+      // Indexes might already exist - this is fine
+      if (indexError.code !== 11000) {
+        console.warn('⚠️ Index creation warning:', indexError.message);
+      }
+    }
+    
+    // ============================================
+    // MONGODB CONNECTION MONITORING
+    // ============================================
+    const mongoClient = db.client || db.s?.client;
+    
+    if (mongoClient) {
+      mongoClient.on('error', (error) => {
+        console.error('💥 MongoDB connection error:', error);
+        // TODO: Implement reconnection logic or alert monitoring system
+      });
+      
+      mongoClient.on('close', () => {
+        console.error('💥 MongoDB connection closed unexpectedly');
+        // TODO: Alert monitoring system (Sentry, PagerDuty, etc.)
+      });
+      
+      mongoClient.on('reconnect', () => {
+        console.log('✅ MongoDB reconnected successfully');
+      });
+      
+      console.log('✅ MongoDB connection monitoring enabled');
+    } else {
+      console.warn('⚠️ Could not attach MongoDB connection event listeners');
+    }
+
+    // ============================================
+    // FIREBASE INITIALIZATION
+    // ============================================
     initializeFirebase();
+
+    // ============================================
+    // START HTTP SERVER
+    // ============================================
+    const PORT = config.PORT || 3000;
     
-        const client = db.client;
-    client.on('error', (error) => {
-      console.error('💥 MongoDB connection error:', error);
-      // Implement reconnection logic or graceful degradation
-    });
-    
-        client.on('close', () => {
-      console.error('💥 MongoDB connection closed unexpectedly');
-      // Alert monitoring system
+    server.listen(PORT, () => {
+      console.log('');
+      console.log('🚀 ========================================');
+      console.log('🚀 SERVER STARTED SUCCESSFULLY');
+      console.log('🚀 ========================================');
+      console.log(`   Port: ${PORT}`);
+      console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`   Health check: http://localhost:${PORT}/health`);
+      console.log('');
+      console.log('📊 Configuration:');
+      console.log(`   Socket.IO: Ready`);
+      console.log(`   WebRTC Signaling: Enabled`);
+      console.log(`   Room Expiry: ${ROOM_EXPIRY_TIME / 60000} minutes`);
+      
+      const hasTurn = !!(
+        process.env.CLOUDFLARE_TURN_TOKEN_ID || 
+        '726fccae33334279a71e962da3d8e01c'
+      );
+      
+      if (hasTurn) {
+        console.log(`   TURN Server: Cloudflare (configured)`);
+        console.log(`   ICE Priority: host → srflx (STUN) → relay (TURN)`);
+      } else {
+        console.log(`   TURN Server: Not configured (STUN only)`);
+      }
+      
+      console.log('');
+      console.log('✅ Server is ready to accept connections');
+      console.log('🚀 ========================================');
+      console.log('');
     });
 
-    const PORT = config.PORT;
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📊 Health check: http://localhost:${PORT}/health`);
-      console.log(`🔌 Socket.IO ready for connections`);
-      console.log(`📞 WebRTC signaling enabled with ICE prioritization`);
-      console.log(`⏰ Room cleanup: ${ROOM_EXPIRY_TIME / 60000} minutes`);
+    // ============================================
+    // GRACEFUL SHUTDOWN HANDLERS
+    // ============================================
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+    
+    async function gracefulShutdown() {
+      console.log('');
+      console.log('🛑 ========================================');
+      console.log('🛑 GRACEFUL SHUTDOWN INITIATED');
+      console.log('🛑 ========================================');
       
-      const hasTurn = !!(process.env.CLOUDFLARE_TURN_TOKEN_ID || '726fccae33334279a71e962da3d8e01c');
-      if (hasTurn) {
-        console.log(`✅ Cloudflare TURN server configured`);
-        console.log(`   Priority: host → srflx (STUN) → relay (TURN)`);
-      } else {
-        console.log(`⚠️ TURN server NOT configured - STUN only mode`);
+      // Stop accepting new connections
+      server.close(() => {
+        console.log('✅ HTTP server closed');
+      });
+      
+      // Notify all connected clients
+      io.emit('server_shutdown', { 
+        message: 'Server is shutting down for maintenance',
+        reconnectIn: 10000 
+      });
+      
+      console.log(`📢 Notified ${socketUsers.size} connected clients`);
+      
+      // Give clients time to save state
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Clean up all timers
+      let timerCount = 0;
+      roomCleanupTimers.forEach(timer => {
+        clearTimeout(timer);
+        timerCount++;
+      });
+      callGracePeriod.forEach(timer => {
+        clearTimeout(timer);
+        timerCount++;
+      });
+      socketUserCleanup.forEach(timer => {
+        clearTimeout(timer);
+        timerCount++;
+      });
+      
+      console.log(`✅ Cleaned up ${timerCount} timers`);
+      
+      // Close Socket.IO
+      io.close(() => {
+        console.log('✅ Socket.IO server closed');
+      });
+      
+      // Close MongoDB connection
+      try {
+        if (mongoClient) {
+          await mongoClient.close();
+          console.log('✅ MongoDB connection closed');
+        }
+      } catch (error) {
+        console.error('❌ Error closing MongoDB:', error);
       }
-    });
+      
+      console.log('');
+      console.log('✅ Graceful shutdown complete');
+      console.log('🛑 ========================================');
+      console.log('');
+      
+      process.exit(0);
+    }
+
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('');
+    console.error('💥 ========================================');
+    console.error('💥 FATAL: Failed to start server');
+    console.error('💥 ========================================');
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('💥 ========================================');
+    console.error('');
     process.exit(1);
   }
 }
