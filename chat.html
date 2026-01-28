@@ -1317,60 +1317,73 @@ let authenticationPromise = null;
   });
 }
 
-/**
- * Authenticate socket with tab management
- * ✅ Works even when page is backgrounded
- */
-  async function authenticateSocket(socket, userId) {
-    try {
-      console.log('🔐 [Auth] Starting socket authentication...');
-      
-      // 1. Get Firebase token
-      const firebaseUser = firebase.auth().currentUser;
-      if (!firebaseUser) {
-        throw new Error('Not authenticated with Firebase');
-      }
-      
-      const token = await firebaseUser.getIdToken();
-      console.log('✅ [Auth] Firebase token retrieved');
-      
-      // 2. Get TabId from TabManager (if available, otherwise use fallback)
-      const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
-      console.log('✅ [Auth] TabId:', tabId);
-      
-      // 3. Send authentication event
-      console.log('📤 [Auth] Sending authenticate event');
-      
-      socket.emit('authenticate', {
-        token: token,
-        userId: userId,
-        tabId: tabId
-      });
-      
-      // 4. Wait for authentication response
-      return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Authentication timeout (15s)'));
-        }, 15000);
-        
-        socket.once('authenticated', (data) => {
-          clearTimeout(timeout);
-          console.log('✅ [Auth] Socket authenticated:', data);
-          resolve(data);
-        });
-        
-        socket.once('auth_error', (error) => {
-          clearTimeout(timeout);
-          console.error('❌ [Auth] Authentication failed:', error);
-          reject(new Error(error.message || 'Authentication failed'));
-        });
-      });
-      
-    } catch (error) {
-      console.error('❌ [Auth] Socket authentication error:', error);
-      throw error;
+async function authenticateSocket(socket, userId) {
+  try {
+    console.log('🔐 ========================================');
+    console.log('🔐 AUTHENTICATING SOCKET');
+    console.log('🔐 ========================================');
+    console.log(`   Socket ID: ${socket.id}`);
+    console.log(`   User ID: ${userId}`);
+    
+    // 1. Get Firebase token
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      throw new Error('Not authenticated with Firebase');
     }
+    
+    const token = await firebaseUser.getIdToken();
+    console.log('✅ Firebase token retrieved');
+    
+    // 2. Get TabId from TabManager (if available, otherwise use fallback)
+    const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
+    console.log(`✅ TabId: ${tabId}`);
+    
+    // 3. Send authentication event
+    console.log('📤 Sending authenticate event to server...');
+    
+    socket.emit('authenticate', {
+      token: token,
+      userId: userId,
+      tabId: tabId
+    });
+    
+    // 4. Wait for authentication response
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        console.error('❌ Authentication timeout (15s)');
+        reject(new Error('Authentication timeout (15s)'));
+      }, 15000);
+      
+      const onAuthenticated = (data) => {
+        clearTimeout(timeout);
+        socket.off('auth_error', onAuthError); // Clean up other listener
+        console.log('✅ Socket authenticated successfully:', data);
+        console.log('🔐 ========================================\n');
+        resolve(data);
+      };
+      
+      const onAuthError = (error) => {
+        clearTimeout(timeout);
+        socket.off('authenticated', onAuthenticated); // Clean up other listener
+        console.error('❌ Authentication failed:', error);
+        console.error('🔐 ========================================\n');
+        reject(new Error(error.message || 'Authentication failed'));
+      };
+      
+      socket.once('authenticated', onAuthenticated);
+      socket.once('auth_error', onAuthError);
+    });
+    
+  } catch (error) {
+    console.error('❌ ========================================');
+    console.error('❌ SOCKET AUTHENTICATION ERROR');
+    console.error('❌ ========================================');
+    console.error('   Error:', error.message);
+    console.error('   Stack:', error.stack);
+    console.error('❌ ========================================\n');
+    throw error;
   }
+}
 
   console.log('✅ Socket authentication ready');
 
@@ -3931,53 +3944,40 @@ socketInstance.on('cached_call_invalid', (data) => {
     console.log('🗑️ Cleared invalid cached call');
 });
     
-// socketInstance.on('connect', () => {
-//   console.log('🔌 ========================================');
-//   console.log('🔌 SOCKET CONNECTED');
-//   console.log('🔌 ========================================');
-//   console.log(`   Socket ID: ${socketInstance.id}`);
-//   console.log(`   User: ${currentUser?.username || 'unknown'}`);
-  
-//   // CRITICAL: Reset auth state on new connection
-//   setAuthenticationState(false);
-  
-//   firebase.auth().currentUser?.getIdToken().then(idToken => {
-//     console.log('📤 Sending authentication to server...');
-//     socketInstance.emit('authenticate', {
-//       token: idToken,
-//       userId: currentUser.userId
-//     });
-//   }).catch(err => {
-//     console.error('❌ Failed to get token:', err);
-//     toast('Authentication failed. Please refresh.', 'error');
-//   });
-  
-//   console.log('🔌 ========================================\n');
-// });
-
-
-
 socketInstance.on('connect', async () => {
-          if (resolved) return;
-          console.log('🔌 Socket connected:', socketInstance.id);
-          
-          try {
-            // ✅ Simple authentication - no TabManager waiting
-            await authenticateSocket(socketInstance, currentUser.userId);
-            
-            resolved = true;
-            clearTimeout(timeout);
-            console.log('✅ Socket authenticated and ready');
-            resolve(socketInstance);
-            
-          } catch (error) {
-            if (resolved) return;
-            resolved = true;
-            clearTimeout(timeout);
-            console.error('❌ Authentication failed:', error);
-            reject(error);
-          }
-        });
+  console.log('🔌 ========================================');
+  console.log('🔌 SOCKET CONNECTED');
+  console.log('🔌 ========================================');
+  console.log(`   Socket ID: ${socketInstance.id}`);
+  console.log(`   User: ${currentUser?.username || 'unknown'}`);
+  
+  // CRITICAL: Reset auth state on new connection
+  setAuthenticationState(false);
+  
+  try {
+    console.log('🔐 Starting authentication process...');
+    
+    // Get Firebase token
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      throw new Error('No Firebase user found');
+    }
+    
+    const idToken = await firebaseUser.getIdToken();
+    console.log('✅ Firebase token retrieved');
+    
+    // Authenticate socket
+    await authenticateSocket(socketInstance, currentUser.userId);
+    console.log('✅ Socket authentication complete');
+    
+  } catch (error) {
+    console.error('❌ Socket connection/authentication error:', error);
+    toast('Connection failed. Please refresh.', 'error');
+  }
+  
+  console.log('🔌 ========================================\n');
+});
+
 
 
 socketInstance.on('connect_error', (error) => {
@@ -6196,25 +6196,45 @@ if (cachedState && cachedState.roomId === roomData.roomId) {
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
 
-  // Initialize socket
-  try {
-    const idToken = await firebaseUser.getIdToken();
-    const socketUrl = window.location.origin;
-    
-    socketInstance = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 500,
-      reconnectionAttempts: 10,
-      auth: { token: idToken },
-      timeout: 10000
-    });
+// Initialize socket
+try {
+  console.log('🔌 ========================================');
+  console.log('🔌 INITIALIZING SOCKET CONNECTION');
+  console.log('🔌 ========================================');
+  
+  const idToken = await firebaseUser.getIdToken();
+  const socketUrl = window.location.origin;
+  
+  console.log(`   Socket URL: ${socketUrl}`);
+  console.log(`   User: ${currentUser.username} (${currentUser.userId})`);
+  
+  socketInstance = io(socketUrl, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 500,
+    reconnectionAttempts: 10,
+    timeout: 10000,
+    // Don't auto-authenticate - we'll do it manually after connect
+    autoConnect: true
+  });
 
-    setupSocketHandlers();
-  } catch (err) {
-    console.error('❌ Socket initialization failed:', err);
-    toast('Connection failed', 'error');
-  }
+  console.log('✅ Socket instance created');
+  
+  // Setup handlers before connecting
+  setupSocketHandlers();
+  console.log('✅ Socket handlers registered');
+  
+  console.log('🔌 ========================================\n');
+  
+} catch (err) {
+  console.error('❌ ========================================');
+  console.error('❌ SOCKET INITIALIZATION FAILED');
+  console.error('❌ ========================================');
+  console.error('   Error:', err.message);
+  console.error('   Stack:', err.stack);
+  console.error('❌ ========================================\n');
+  toast('Connection failed', 'error');
+}
 
   // Setup all event listeners
   setupEventListeners();
