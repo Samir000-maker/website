@@ -716,7 +716,6 @@ async function initializeSocket() {
       throw new Error('Not authenticated');
     }
 
-    const idToken = await firebaseUser.getIdToken();
     const userData = await _API.get('/api/users/me');
     
     currentUser = {
@@ -732,68 +731,43 @@ async function initializeSocket() {
     displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
     displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-    // ✅ FIX: Get tabId from window.tabManager (initialized in app.js)
-    const tabId = window.tabManager ? window.tabManager.tabId : null;
-    
-    if (!tabId) {
-      console.error('❌ TabManager not initialized');
-      throw new Error('Tab management system not ready');
-    }
-    
-    console.log('✅ TabId retrieved from TabManager:', tabId);
+    // ❌ REMOVE THIS OLD CHECK - Don't check for TabManager here
+    // ❌ DELETE: const tabId = window.tabManager ? window.tabManager.tabId : null;
+    // ❌ DELETE: if (!tabId) { throw new Error(...) }
 
-    // Connect socket
+    // Connect socket (WITHOUT checking TabManager yet)
     const socketUrl = window.location.origin;
     socketInstance = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      auth: { token: idToken }
+      reconnectionDelay: 1000
     });
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Socket connection timeout'));
-      }, 10000);
+      }, 15000);
 
-socket.on('connect', async () => {
-  console.log('🔌 Socket connected:', socket.id);
-  
-  try {
-    // ✅ Authenticate with tab management (now waits for TabManager)
-    await authenticateSocketWithTabManagement(socket, currentUser.userId);
-    
-    // ✅ Setup session replacement handler
-    setupSessionReplacementHandler(socket);
-    
-    console.log('✅ Socket authenticated and ready');
-    
-  } catch (error) {
-    console.error('❌ Authentication failed:', error);
-    // Handle error appropriately
-    MoodApp.Toast.error('Connection failed. Please refresh the page.');
-  }
-});
-
-      socketInstance.on('authenticated', (data) => {
-        console.log('✅ Socket authenticated:', data);
-        resolve(socketInstance);
-      });
-
-      socketInstance.on('auth_error', (data) => {
-        console.error('❌ Socket auth error:', data);
-        clearTimeout(timeout);
+      socketInstance.on('connect', async () => {
+        console.log('🔌 Socket connected:', socketInstance.id);
         
-        // ✅ Handle duplicate tab error
-        if (data.code === 'DUPLICATE_TAB') {
-          toast('Vibe is already open in another tab', 'error');
-          setTimeout(() => {
-            window.location.href = '/mood.html';
-          }, 2000);
+        try {
+          // ✅ Use the helper function (it will wait for TabManager)
+          await authenticateSocketWithTabManagement(socketInstance, currentUser.userId);
+          
+          // ✅ Setup session replacement handler
+          setupSessionReplacementHandler(socketInstance);
+          
+          clearTimeout(timeout);
+          console.log('✅ Socket authenticated and ready');
+          resolve(socketInstance);
+          
+        } catch (error) {
+          clearTimeout(timeout);
+          console.error('❌ Authentication failed:', error);
+          reject(error);
         }
-        
-        reject(new Error(data.message || 'Authentication failed'));
       });
 
       socketInstance.on('connect_error', (error) => {
@@ -801,22 +775,8 @@ socket.on('connect', async () => {
         clearTimeout(timeout);
         reject(error);
       });
-      
-      // ✅ Handle session replacement
-      socketInstance.on('session_replaced', (data) => {
-        console.log('⚠️ Session replaced:', data);
-        toast('Vibe opened in another tab', 'error');
-        
-        // Clean up
-        isInMatchmaking = false;
-        clearState();
-        
-        // Show inactive overlay or redirect
-        setTimeout(() => {
-          window.location.href = '/mood.html';
-        }, 2000);
-      });
     });
+    
   } catch (error) {
     console.error('Socket initialization error:', error);
     throw error;
