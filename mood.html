@@ -770,16 +770,53 @@ if (window.StateManager) {
     // ============================================
     
     
-    async function authenticateSocketWithTabManagement(socket, userId) {
+function waitForTabManager() {
+  return new Promise((resolve, reject) => {
+    // Check if already available
+    if (window.tabManager && window.tabManager.tabId) {
+      console.log('✅ [Auth] TabManager already ready:', window.tabManager.tabId);
+      resolve(window.tabManager);
+      return;
+    }
+    
+    console.log('⏳ [Auth] Waiting for TabManager to initialize...');
+    
+    // Poll for TabManager (handles race conditions)
+    let attempts = 0;
+    const maxAttempts = 100; // 10 seconds max wait
+    
+    const interval = setInterval(() => {
+      attempts++;
+      
+      if (window.tabManager && window.tabManager.tabId) {
+        clearInterval(interval);
+        console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+        resolve(window.tabManager);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        console.error('❌ [Auth] TabManager timeout after 10s');
+        reject(new Error('TabManager initialization timeout'));
+      }
+    }, 100); // Check every 100ms
+  });
+}
+
+/**
+ * Authenticate socket with tab management
+ * Call this INSTEAD of manually emitting 'authenticate'
+ * 
+ * @param {Socket} socket - Socket.IO instance
+ * @param {string} userId - User's database ID
+ * @returns {Promise} - Resolves when authenticated
+ */
+async function authenticateSocketWithTabManagement(socket, userId) {
   try {
     console.log('🔐 [Auth] Starting socket authentication...');
     
     // 1. Wait for TabManager to be ready
-    if (!window.tabManager || !window.tabManager.tabId) {
-      throw new Error('TabManager not initialized. Make sure app.js is loaded first.');
-    }
+    const tabManager = await waitForTabManager();
+    const tabId = tabManager.tabId;
     
-    const tabId = window.tabManager.tabId;
     console.log('✅ [Auth] TabId retrieved:', tabId);
     
     // 2. Get Firebase token
@@ -903,24 +940,26 @@ console.log('✅ Socket authentication helpers loaded');
           }
         });
 
-        // Socket event handlers
-socketInstance.on('connect', async () => {
-  console.log('🔌 Socket connected:', socketInstance.id);
+socket.on('connect', async () => {
+  console.log('🔌 Socket connected:', socket.id);
   
   try {
-    // ✅ Use the helper function
-    await authenticateSocketWithTabManagement(socketInstance, currentUser.userId);
+    // ✅ Authenticate with tab management (now waits for TabManager)
+    await authenticateSocketWithTabManagement(socket, currentUser.userId);
     
     // ✅ Setup session replacement handler
-    setupSessionReplacementHandler(socketInstance);
+    setupSessionReplacementHandler(socket);
     
-    console.log('✅ Socket ready for use');
-    resolve(socketInstance);
+    console.log('✅ Socket authenticated and ready');
+    
   } catch (error) {
     console.error('❌ Authentication failed:', error);
-    reject(error);
+    // Handle error appropriately
+    MoodApp.Toast.error('Connection failed. Please refresh the page.');
   }
 });
+
+
         socketInstance.on('authenticated', (data) => {
           console.log('✅ Socket authenticated:', data);
         });
