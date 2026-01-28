@@ -315,76 +315,54 @@ const Utils = {
    ========================================================= */
    
    
+/* =========================================================
+   TAB MANAGER (NON-BLOCKING BACKGROUND CHECK)
+   ========================================================= */
+   
 class TabManager {
   constructor() {
     this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     this.channelName = 'vibe_app_tab_control';
     this.channel = new BroadcastChannel(this.channelName);
-    this.isActive = false;
+    this.isActive = true; // ✅ Always active by default
     this.heartbeatInterval = null;
     
+    console.log(`📱 [TabManager] Initialized: ${this.tabId}`);
+    
     this.setupMessageHandlers();
-    this.claimActiveTab();
+    this.checkForExistingTabs();
+    this.startHeartbeat();
   }
   
   setupMessageHandlers() {
-    // Listen for messages from other tabs
     this.channel.addEventListener('message', (event) => {
       const { type, tabId, timestamp } = event.data;
       
-      console.log(`📱 [TabManager] Message received:`, { type, tabId, timestamp });
-      
       switch (type) {
-        case 'CLAIM_ACTIVE':
-          // Another tab is claiming to be active
-          if (tabId !== this.tabId) {
-            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            const theirTimestamp = timestamp;
-            
-            if (theirTimestamp > ourTimestamp) {
-              // Newer tab is claiming - we must yield
-              console.log(`📱 [TabManager] Newer tab detected, this tab is now BLOCKED`);
-              this.blockTab();
-            } else {
-              // We're older - reject the newer tab
-              console.log(`📱 [TabManager] Rejecting newer tab's claim (we're the active tab)`);
-              this.channel.postMessage({
-                type: 'REJECT_CLAIM',
-                tabId: this.tabId,
-                timestamp: ourTimestamp
-              });
-            }
-          }
-          break;
-          
-        case 'REJECT_CLAIM':
-          // Our claim was rejected by an older tab
-          if (this.tabId !== tabId) {
-            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            if (timestamp < ourTimestamp) {
-              console.log(`📱 [TabManager] Claim rejected by older tab, blocking this tab`);
-              this.blockTab();
-            }
-          }
-          break;
-          
         case 'HEARTBEAT':
           // Another tab is alive
           if (tabId !== this.tabId) {
+            const theirTimestamp = timestamp;
             const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            if (timestamp < ourTimestamp && this.isActive) {
-              // Older tab is active - we should not be active
-              console.log(`⚠️ [TabManager] Older active tab detected, blocking this tab`);
+            
+            // If their tab is OLDER, we should block ourselves
+            if (theirTimestamp < ourTimestamp) {
+              console.log(`⚠️ [TabManager] Older tab detected, blocking this tab`);
               this.blockTab();
             }
           }
           break;
           
         case 'TAB_CLOSING':
-          // A tab is closing - if it was the active one and we're blocked, we can activate
-          if (tabId !== this.tabId && !this.isActive) {
-            console.log(`📱 [TabManager] Active tab closing, attempting to claim...`);
-            setTimeout(() => this.claimActiveTab(), 100);
+          // A tab is closing - if it was older and we're blocked, unblock
+          if (tabId !== this.tabId) {
+            const theirTimestamp = timestamp;
+            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+            
+            if (theirTimestamp < ourTimestamp && !this.isActive) {
+              console.log(`✅ [TabManager] Older tab closed, unblocking this tab`);
+              this.unblockTab();
+            }
           }
           break;
       }
@@ -392,49 +370,26 @@ class TabManager {
     
     // Cleanup on tab close
     window.addEventListener('beforeunload', () => {
-      if (this.isActive) {
-        console.log(`📱 [TabManager] Active tab closing, notifying others`);
-        this.channel.postMessage({
-          type: 'TAB_CLOSING',
-          tabId: this.tabId,
-          timestamp: Date.now()
-        });
-      }
+      this.channel.postMessage({
+        type: 'TAB_CLOSING',
+        tabId: this.tabId,
+        timestamp: parseInt(this.tabId.split('_')[1])
+      });
       this.cleanup();
     });
   }
   
-claimActiveTab() {
-  console.log(`📱 [TabManager] Claiming active tab status: ${this.tabId}`);
-  
-  // ✅ FIX: Set active immediately so auth can proceed
-  this.isActive = true;
-  
-  // Broadcast claim to other tabs
-  this.channel.postMessage({
-    type: 'CLAIM_ACTIVE',
-    tabId: this.tabId,
-    timestamp: parseInt(this.tabId.split('_')[1])
-  });
-  
-  // ✅ FIX: Start heartbeat immediately
-  this.startHeartbeat();
-  
-  // Wait to see if anyone rejects our claim
-  setTimeout(() => {
-    if (this.isActive) {
-      console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
-      
-      // Notify application that this tab is active
-      window.dispatchEvent(new CustomEvent('tab_active', { 
-        detail: { tabId: this.tabId } 
-      }));
-    }
-  }, 200);
-}
+  checkForExistingTabs() {
+    // Send a ping to see if any tabs respond
+    this.channel.postMessage({
+      type: 'HEARTBEAT',
+      tabId: this.tabId,
+      timestamp: parseInt(this.tabId.split('_')[1])
+    });
+  }
   
   startHeartbeat() {
-    // Send heartbeat every 2 seconds to let other tabs know we're alive
+    // Send heartbeat every 2 seconds
     this.heartbeatInterval = setInterval(() => {
       if (this.isActive) {
         this.channel.postMessage({
@@ -447,7 +402,7 @@ claimActiveTab() {
   }
   
   blockTab() {
-    console.log(`🚫 [TabManager] BLOCKING this tab - another tab is active: ${this.tabId}`);
+    console.log(`🚫 [TabManager] BLOCKING this tab: ${this.tabId}`);
     
     this.isActive = false;
     
@@ -462,14 +417,37 @@ claimActiveTab() {
       detail: { tabId: this.tabId } 
     }));
     
-    // Show blocking overlay (NO "Use Here" button)
+    // Show blocking overlay
     this.showBlockingOverlay();
     
-    // Disconnect socket to prevent any activity
+    // Disconnect socket
     if (window.socket && window.socket.instance && window.socket.instance.connected) {
       console.log(`🔌 [TabManager] Disconnecting socket from blocked tab`);
       window.socket.instance.disconnect();
     }
+  }
+  
+  unblockTab() {
+    console.log(`✅ [TabManager] UNBLOCKING this tab: ${this.tabId}`);
+    
+    this.isActive = true;
+    
+    // Remove blocking overlay
+    const overlay = document.getElementById('blocked-tab-overlay');
+    if (overlay) {
+      overlay.remove();
+    }
+    
+    // Restart heartbeat
+    this.startHeartbeat();
+    
+    // Notify application
+    window.dispatchEvent(new CustomEvent('tab_unblocked', { 
+      detail: { tabId: this.tabId } 
+    }));
+    
+    // Reload page to reconnect
+    window.location.reload();
   }
   
   showBlockingOverlay() {
@@ -512,17 +490,12 @@ claimActiveTab() {
         <p style="font-size: 16px; color: rgba(255, 255, 255, 0.6); line-height: 1.5;">
           Please close this tab and use the existing one.
         </p>
-        <div style="margin-top: 32px; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px;">
-          <p style="font-size: 14px; color: rgba(255, 255, 255, 0.7); margin: 0;">
-            ⚠️ This tab is completely disabled to prevent conflicts.
-          </p>
-        </div>
       </div>
     `;
     
     document.body.appendChild(overlay);
     
-    console.log(`🚫 [TabManager] Blocking overlay displayed - tab is now non-functional`);
+    console.log(`🚫 [TabManager] Blocking overlay displayed`);
   }
   
   cleanup() {
@@ -533,24 +506,19 @@ claimActiveTab() {
   }
 }
 
-// Initialize tab manager before anything else
+// ✅ Initialize TabManager (runs in background, never blocks)
 const tabManager = new TabManager();
 
-// Handle tab activation
-window.addEventListener('tab_active', () => {
-  console.log(`✅ [App] This tab is now active, enabling features`);
-});
-
-// Handle tab blocking (NEW)
+// ✅ Handle tab blocking (stop all activity)
 window.addEventListener('tab_blocked', () => {
-  console.log(`🚫 [App] This tab is now BLOCKED, all features disabled`);
+  console.log(`🚫 [App] This tab is now BLOCKED`);
   
   // Stop ALL activity
   if (window.socket && window.socket.instance) {
     window.socket.instance.disconnect();
   }
   
-  // Clear any intervals/timeouts
+  // Clear intervals/timeouts
   for (let i = 1; i < 99999; i++) {
     window.clearInterval(i);
     window.clearTimeout(i);
