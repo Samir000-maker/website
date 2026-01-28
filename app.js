@@ -407,7 +407,7 @@ class TabManager {
 claimActiveTab() {
   console.log(`📱 [TabManager] Claiming active tab status: ${this.tabId}`);
   
-  // ✅ FIX: Set active immediately
+  // ✅ FIX: Set active immediately so auth can proceed
   this.isActive = true;
   
   // Broadcast claim to other tabs
