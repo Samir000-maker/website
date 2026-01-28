@@ -313,6 +313,254 @@ const Utils = {
 /* =========================================================
    SOCKET CLIENT (EXPOSES .instance, .connect(), .authenticate(), .emit(), .on())
    ========================================================= */
+   
+   
+   // Add to client-side initialization (before socket connection)
+
+class TabManager {
+  constructor() {
+    this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.channelName = 'vibe_app_tab_control';
+    this.channel = new BroadcastChannel(this.channelName);
+    this.isActive = false;
+    this.heartbeatInterval = null;
+    
+    this.setupMessageHandlers();
+    this.claimActiveTab();
+  }
+  
+  setupMessageHandlers() {
+    // Listen for messages from other tabs
+    this.channel.addEventListener('message', (event) => {
+      const { type, tabId, timestamp } = event.data;
+      
+      console.log(`📱 [TabManager] Message received:`, { type, tabId, timestamp });
+      
+      switch (type) {
+        case 'CLAIM_ACTIVE':
+          // Another tab is claiming to be active
+          if (tabId !== this.tabId) {
+            console.log(`📱 [TabManager] Another tab claimed active status, yielding...`);
+            this.handleTabTakeover();
+          }
+          break;
+          
+        case 'HEARTBEAT':
+          // Another tab is alive
+          if (tabId !== this.tabId && this.isActive) {
+            // We're both claiming to be active - resolve by timestamp
+            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+            if (timestamp < ourTimestamp) {
+              console.log(`⚠️ [TabManager] Older tab detected, yielding control`);
+              this.handleTabTakeover();
+            }
+          }
+          break;
+          
+        case 'TAB_CLOSING':
+          // A tab is closing - if it was active and we're not, try to claim
+          if (tabId !== this.tabId && !this.isActive) {
+            console.log(`📱 [TabManager] Active tab closing, attempting to claim...`);
+            setTimeout(() => this.claimActiveTab(), 100);
+          }
+          break;
+      }
+    });
+    
+    // Cleanup on tab close
+    window.addEventListener('beforeunload', () => {
+      if (this.isActive) {
+        console.log(`📱 [TabManager] Active tab closing, notifying others`);
+        this.channel.postMessage({
+          type: 'TAB_CLOSING',
+          tabId: this.tabId,
+          timestamp: Date.now()
+        });
+      }
+      this.cleanup();
+    });
+    
+    // Handle visibility changes
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && !this.isActive) {
+        console.log(`📱 [TabManager] Tab became visible, checking if we should claim active`);
+        this.attemptReclaim();
+      }
+    });
+  }
+  
+  claimActiveTab() {
+    console.log(`📱 [TabManager] Claiming active tab status: ${this.tabId}`);
+    
+    // Broadcast claim to other tabs
+    this.channel.postMessage({
+      type: 'CLAIM_ACTIVE',
+      tabId: this.tabId,
+      timestamp: Date.now()
+    });
+    
+    // Wait a moment to see if anyone objects
+    setTimeout(() => {
+      this.isActive = true;
+      this.startHeartbeat();
+      
+      console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
+      
+      // Notify application that this tab is active
+      window.dispatchEvent(new CustomEvent('tab_active', { 
+        detail: { tabId: this.tabId } 
+      }));
+      
+      // Remove any inactive overlays
+      this.removeInactiveOverlay();
+      
+    }, 200);
+  }
+  
+  startHeartbeat() {
+    // Send heartbeat every 2 seconds to let other tabs know we're alive
+    this.heartbeatInterval = setInterval(() => {
+      if (this.isActive) {
+        this.channel.postMessage({
+          type: 'HEARTBEAT',
+          tabId: this.tabId,
+          timestamp: parseInt(this.tabId.split('_')[1])
+        });
+      }
+    }, 2000);
+  }
+  
+  handleTabTakeover() {
+    console.log(`🔄 [TabManager] Tab takeover - becoming inactive: ${this.tabId}`);
+    
+    this.isActive = false;
+    
+    // Stop heartbeat
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    
+    // Notify application
+    window.dispatchEvent(new CustomEvent('tab_inactive', { 
+      detail: { tabId: this.tabId } 
+    }));
+    
+    // Show inactive overlay
+    this.showInactiveOverlay();
+    
+    // Disconnect socket to prevent duplicate connections
+    if (window.socket && window.socket.connected) {
+      console.log(`🔌 [TabManager] Disconnecting socket from inactive tab`);
+      window.socket.disconnect();
+    }
+  }
+  
+  attemptReclaim() {
+    // Try to reclaim active status after becoming visible
+    console.log(`🔄 [TabManager] Attempting to reclaim active status: ${this.tabId}`);
+    this.claimActiveTab();
+  }
+  
+  showInactiveOverlay() {
+    // Remove existing overlay if any
+    this.removeInactiveOverlay();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'inactive-tab-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      z-index: 999999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+    
+    overlay.innerHTML = `
+      <div style="text-align: center; max-width: 500px; padding: 40px;">
+        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" style="margin-bottom: 24px;">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1 style="font-size: 24px; font-weight: 600; margin-bottom: 12px;">
+          Vibe is open in another tab
+        </h1>
+        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.7); margin-bottom: 24px;">
+          To use Vibe in this tab, close it in other tabs or click below to use it here instead.
+        </p>
+        <button id="use-here-btn" style="
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          padding: 14px 32px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 0.2s, box-shadow 0.2s;
+        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+          Use Here
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Add click handler to reclaim active status
+    document.getElementById('use-here-btn').addEventListener('click', () => {
+      console.log(`🔄 [TabManager] User clicked 'Use Here', reclaiming...`);
+      this.claimActiveTab();
+      
+      // Reconnect socket if needed
+      if (window.socket && !window.socket.connected) {
+        console.log(`🔌 [TabManager] Reconnecting socket in active tab`);
+        window.socket.connect();
+      }
+    });
+    
+    console.log(`🚫 [TabManager] Inactive tab overlay displayed`);
+  }
+  
+  removeInactiveOverlay() {
+    const overlay = document.getElementById('inactive-tab-overlay');
+    if (overlay) {
+      overlay.remove();
+      console.log(`✅ [TabManager] Inactive tab overlay removed`);
+    }
+  }
+  
+  cleanup() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    this.channel.close();
+  }
+}
+
+// Initialize tab manager before anything else
+const tabManager = new TabManager();
+
+// Only allow socket connection if this is the active tab
+window.addEventListener('tab_active', () => {
+  console.log(`✅ [App] This tab is now active, enabling features`);
+  // Your existing socket initialization code here
+  // initializeSocket();
+});
+
+window.addEventListener('tab_inactive', () => {
+  console.log(`🚫 [App] This tab is now inactive, disabling features`);
+  // Clean up any active operations
+});
+   
 
 class SocketClient {
   constructor() {
