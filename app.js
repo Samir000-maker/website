@@ -404,31 +404,34 @@ class TabManager {
     });
   }
   
-  claimActiveTab() {
-    console.log(`📱 [TabManager] Claiming active tab status: ${this.tabId}`);
-    
-    // Broadcast claim to other tabs
-    this.channel.postMessage({
-      type: 'CLAIM_ACTIVE',
-      tabId: this.tabId,
-      timestamp: parseInt(this.tabId.split('_')[1])
-    });
-    
-    // Wait to see if anyone rejects our claim
-    setTimeout(() => {
-      if (!this.isActive) {
-        this.isActive = true;
-        this.startHeartbeat();
-        
-        console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
-        
-        // Notify application that this tab is active
-        window.dispatchEvent(new CustomEvent('tab_active', { 
-          detail: { tabId: this.tabId } 
-        }));
-      }
-    }, 200);
-  }
+claimActiveTab() {
+  console.log(`📱 [TabManager] Claiming active tab status: ${this.tabId}`);
+  
+  // ✅ FIX: Set active immediately
+  this.isActive = true;
+  
+  // Broadcast claim to other tabs
+  this.channel.postMessage({
+    type: 'CLAIM_ACTIVE',
+    tabId: this.tabId,
+    timestamp: parseInt(this.tabId.split('_')[1])
+  });
+  
+  // ✅ FIX: Start heartbeat immediately
+  this.startHeartbeat();
+  
+  // Wait to see if anyone rejects our claim
+  setTimeout(() => {
+    if (this.isActive) {
+      console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
+      
+      // Notify application that this tab is active
+      window.dispatchEvent(new CustomEvent('tab_active', { 
+        detail: { tabId: this.tabId } 
+      }));
+    }
+  }, 200);
+}
   
   startHeartbeat() {
     // Send heartbeat every 2 seconds to let other tabs know we're alive
