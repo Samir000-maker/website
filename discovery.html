@@ -391,30 +391,58 @@
 
 function waitForTabManager() {
   return new Promise((resolve, reject) => {
-    // Check if already available
-    if (window.tabManager && window.tabManager.tabId) {
-      console.log('✅ [Auth] TabManager already ready:', window.tabManager.tabId);
+    // Check if tab is already blocked
+    const overlay = document.getElementById('blocked-tab-overlay');
+    if (overlay) {
+      console.error('❌ [Auth] Tab is BLOCKED - authentication aborted');
+      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+      return;
+    }
+    
+    // Check if already available and active
+    if (window.tabManager && window.tabManager.tabId && window.tabManager.isActive) {
+      console.log('✅ [Auth] TabManager ready and active:', window.tabManager.tabId);
       resolve(window.tabManager);
       return;
     }
     
-    console.log('⏳ [Auth] Waiting for TabManager to initialize...');
+    console.log('⏳ [Auth] Waiting for TabManager to be ready and active...');
     
-    // Poll for TabManager (handles race conditions)
+    // Listen for blocking event
+    const blockHandler = () => {
+      console.error('❌ [Auth] Tab was BLOCKED during authentication');
+      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+    };
+    
+    window.addEventListener('tab_blocked', blockHandler, { once: true });
+    
+    // Poll for TabManager
     let attempts = 0;
-    const maxAttempts = 100; // 10 seconds max wait
+    const maxAttempts = 50; // 5 seconds max wait
     
     const interval = setInterval(() => {
       attempts++;
       
-      if (window.tabManager && window.tabManager.tabId) {
+      // Check if blocked during wait
+      const overlay = document.getElementById('blocked-tab-overlay');
+      if (overlay) {
         clearInterval(interval);
-        console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.error('❌ [Auth] Tab BLOCKED during wait');
+        reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+        return;
+      }
+      
+      if (window.tabManager && window.tabManager.tabId && window.tabManager.isActive) {
+        clearInterval(interval);
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.log('✅ [Auth] TabManager ready and active after waiting:', window.tabManager.tabId);
         resolve(window.tabManager);
       } else if (attempts >= maxAttempts) {
         clearInterval(interval);
-        console.error('❌ [Auth] TabManager timeout after 10s');
-        reject(new Error('TabManager initialization timeout'));
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.error('❌ [Auth] TabManager timeout - tab may be blocked');
+        reject(new Error('Tab initialization timeout. This tab may be blocked.'));
       }
     }, 100); // Check every 100ms
   });
@@ -432,7 +460,7 @@ async function authenticateSocketWithTabManagement(socket, userId) {
   try {
     console.log('🔐 [Auth] Starting socket authentication...');
     
-    // 1. Wait for TabManager to be ready
+    // 1. Wait for TabManager to be ready AND active
     const tabManager = await waitForTabManager();
     const tabId = tabManager.tabId;
     
@@ -457,7 +485,7 @@ async function authenticateSocketWithTabManagement(socket, userId) {
     socket.emit('authenticate', {
       token: token,
       userId: userId,
-      tabId: tabId  // ← CRITICAL: Include tabId
+      tabId: tabId
     });
     
     // 4. Wait for authentication response
@@ -466,24 +494,15 @@ async function authenticateSocketWithTabManagement(socket, userId) {
         reject(new Error('Authentication timeout (10s)'));
       }, 10000);
       
-      // Success handler
       socket.once('authenticated', (data) => {
         clearTimeout(timeout);
         console.log('✅ [Auth] Socket authenticated successfully:', data);
         resolve(data);
       });
       
-      // Error handler
       socket.once('auth_error', (error) => {
         clearTimeout(timeout);
         console.error('❌ [Auth] Authentication failed:', error);
-        
-        // Handle specific error codes
-        if (error.code === 'DUPLICATE_TAB') {
-          console.warn('⚠️ [Auth] Another tab is active');
-          // The TabManager will handle showing the overlay
-        }
-        
         reject(new Error(error.message || 'Authentication failed'));
       });
     });
@@ -496,19 +515,12 @@ async function authenticateSocketWithTabManagement(socket, userId) {
 
 /**
  * Setup session replacement handler
- * Call this ONCE after socket connection
- * 
  * @param {Socket} socket - Socket.IO instance
  */
 function setupSessionReplacementHandler(socket) {
   socket.on('session_replaced', (data) => {
-    console.log('⚠️ [Session] This tab has been replaced by another:', data);
-    
-    // The TabManager will automatically show the "Use Here" overlay
-    // No need for additional UI here
-    
-    // Optionally: Clean up page-specific state
-    // e.g., stop timers, clear intervals, etc.
+    console.log('⚠️ [Session] This tab has been replaced:', data);
+    // TabManager will handle blocking
   });
   
   console.log('✅ [Session] Replacement handler registered');
