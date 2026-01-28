@@ -457,77 +457,58 @@ function waitForTabManager() {
  * Authenticate socket with tab management
  * ✅ Works even when page is backgrounded
  */
-async function authenticateSocketWithTabManagement(socket, userId) {
-  try {
-    console.log('🔐 [Auth] Starting socket authentication...');
-    
-    // 1. Wait for TabManager to be ready
-    const tabManager = await waitForTabManager();
-    const tabId = tabManager.tabId;
-    
-    console.log('✅ [Auth] TabId retrieved:', tabId);
-    
-    // 2. Get Firebase token
-    const firebaseUser = firebase.auth().currentUser;
-    if (!firebaseUser) {
-      throw new Error('Not authenticated with Firebase');
+  async function authenticateSocket(socket, userId) {
+    try {
+      console.log('🔐 [Auth] Starting socket authentication...');
+      
+      // 1. Get Firebase token
+      const firebaseUser = firebase.auth().currentUser;
+      if (!firebaseUser) {
+        throw new Error('Not authenticated with Firebase');
+      }
+      
+      const token = await firebaseUser.getIdToken();
+      console.log('✅ [Auth] Firebase token retrieved');
+      
+      // 2. Get TabId from TabManager (if available, otherwise use fallback)
+      const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
+      console.log('✅ [Auth] TabId:', tabId);
+      
+      // 3. Send authentication event
+      console.log('📤 [Auth] Sending authenticate event');
+      
+      socket.emit('authenticate', {
+        token: token,
+        userId: userId,
+        tabId: tabId
+      });
+      
+      // 4. Wait for authentication response
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Authentication timeout (15s)'));
+        }, 15000);
+        
+        socket.once('authenticated', (data) => {
+          clearTimeout(timeout);
+          console.log('✅ [Auth] Socket authenticated:', data);
+          resolve(data);
+        });
+        
+        socket.once('auth_error', (error) => {
+          clearTimeout(timeout);
+          console.error('❌ [Auth] Authentication failed:', error);
+          reject(new Error(error.message || 'Authentication failed'));
+        });
+      });
+      
+    } catch (error) {
+      console.error('❌ [Auth] Socket authentication error:', error);
+      throw error;
     }
-    
-    const token = await firebaseUser.getIdToken();
-    console.log('✅ [Auth] Firebase token retrieved');
-    
-    // 3. Send authentication event
-    console.log('📤 [Auth] Sending authenticate event:', {
-      userId,
-      tabId,
-      socketId: socket.id
-    });
-    
-    socket.emit('authenticate', {
-      token: token,
-      userId: userId,
-      tabId: tabId
-    });
-    
-    // 4. Wait for authentication response with extended timeout for backgrounded pages
-    return new Promise((resolve, reject) => {
-      const TIMEOUT_DURATION = 15000; // 15 seconds (reasonable for backgrounded pages)
-      let resolved = false;
-
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          console.error('❌ [Auth] Authentication timeout after 15s');
-          reject(new Error('Authentication timeout'));
-        }
-      }, TIMEOUT_DURATION);
-      
-      socket.once('authenticated', (data) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(timeout);
-        console.log('✅ [Auth] Socket authenticated successfully:', data);
-        resolve(data);
-      });
-      
-      socket.once('auth_error', (error) => {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(timeout);
-        console.error('❌ [Auth] Authentication failed:', error);
-        
-        if (error.code === 'DUPLICATE_TAB') {
-          console.warn('⚠️ [Auth] Server detected duplicate tab');
-        }
-        
-        reject(new Error(error.message || 'Authentication failed'));
-      });
-    });
-    
-  } catch (error) {
-    console.error('❌ [Auth] Socket authentication error:', error);
-    throw error;
   }
-}
+
+  console.log('✅ Socket authentication ready');
 
 /**
  * Setup session replacement handler
@@ -741,87 +722,83 @@ console.log('✅ Socket authentication helpers loaded');
   // ============================================
   
 async function initializeSocket() {
-  try {
-    const firebaseUser = firebase.auth().currentUser;
-    if (!firebaseUser) {
-      throw new Error('Not authenticated');
-    }
+    try {
+      const firebaseUser = firebase.auth().currentUser;
+      if (!firebaseUser) {
+        throw new Error('Not authenticated');
+      }
 
-    const userData = await _API.get('/api/users/me');
-    
-    currentUser = {
-      userId: userData._id,
-      username: userData.username,
-      pfpUrl: userData.pfpUrl,
-      email: userData.email
-    };
-
-    console.log('✅ User loaded:', currentUser);
-
-    // Update avatars
-    displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
-    displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
-
-    // Connect socket
-    const socketUrl = window.location.origin;
-    socketInstance = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      timeout: 20000 // ✅ Increased timeout for backgrounded pages
-    });
-
-    return new Promise((resolve, reject) => {
-      let resolved = false;
+      const userData = await _API.get('/api/users/me');
       
-      // ✅ Extended timeout for backgrounded scenarios
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          console.error('❌ [Socket] Connection timeout after 20s');
-          reject(new Error('Socket connection timeout'));
-        }
-      }, 20000);
+      currentUser = {
+        userId: userData._id,
+        username: userData.username,
+        pfpUrl: userData.pfpUrl,
+        email: userData.email
+      };
 
-      socketInstance.on('connect', async () => {
-        if (resolved) return;
-        console.log('🔌 Socket connected:', socketInstance.id);
+      console.log('✅ User loaded:', currentUser);
+
+      // Update avatars
+      displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
+      displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
+
+      // Connect socket
+      const socketUrl = window.location.origin;
+      socketInstance = io(socketUrl, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        timeout: 15000
+      });
+
+      return new Promise((resolve, reject) => {
+        let resolved = false;
         
-        try {
-          // ✅ Use the helper function (works even when backgrounded)
-          await authenticateSocketWithTabManagement(socketInstance, currentUser.userId);
-          
-          // ✅ Setup session replacement handler
-          setupSessionReplacementHandler(socketInstance);
-          
-          resolved = true;
-          clearTimeout(timeout);
-          console.log('✅ Socket authenticated and ready');
-          resolve(socketInstance);
-          
-        } catch (error) {
-          if (resolved) return;
-          resolved = true;
-          clearTimeout(timeout);
-          console.error('❌ Authentication failed:', error);
-          reject(error);
-        }
-      });
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            console.error('❌ [Socket] Connection timeout');
+            reject(new Error('Socket connection timeout'));
+          }
+        }, 15000);
 
-      socketInstance.on('connect_error', (error) => {
-        if (resolved) return;
-        console.error('🔌 Connection error:', error);
-        resolved = true;
-        clearTimeout(timeout);
-        reject(error);
+        socketInstance.on('connect', async () => {
+          if (resolved) return;
+          console.log('🔌 Socket connected:', socketInstance.id);
+          
+          try {
+            // ✅ Simple authentication - no TabManager waiting
+            await authenticateSocket(socketInstance, currentUser.userId);
+            
+            resolved = true;
+            clearTimeout(timeout);
+            console.log('✅ Socket authenticated and ready');
+            resolve(socketInstance);
+            
+          } catch (error) {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timeout);
+            console.error('❌ Authentication failed:', error);
+            reject(error);
+          }
+        });
+
+        socketInstance.on('connect_error', (error) => {
+          if (resolved) return;
+          console.error('🔌 Connection error:', error);
+          resolved = true;
+          clearTimeout(timeout);
+          reject(error);
+        });
       });
-    });
-    
-  } catch (error) {
-    console.error('❌ Socket initialization error:', error);
-    throw error;
+      
+    } catch (error) {
+      console.error('❌ Socket initialization error:', error);
+      throw error;
+    }
   }
-}
 
   async function joinMatchmaking() {
     if (!socketInstance || !socketInstance.connected) {
