@@ -762,47 +762,33 @@ async function initializeSocket() {
     displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
     displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-    // ❌ REMOVE THIS OLD CHECK - Don't check for TabManager here
-    // ❌ DELETE: const tabId = window.tabManager ? window.tabManager.tabId : null;
-    // ❌ DELETE: if (!tabId) { throw new Error(...) }
-
-    // Connect socket (WITHOUT checking TabManager yet)
+    // Connect socket
     const socketUrl = window.location.origin;
     socketInstance = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
-      reconnectionDelay: 1000
+      reconnectionDelay: 1000,
+      timeout: 20000 // ✅ Increased timeout for backgrounded pages
     });
 
     return new Promise((resolve, reject) => {
-      // Track visibility state for timeout handling  
-      let isPageVisible = !document.hidden;
-      let timeoutStartTime = Date.now();
-      const TIMEOUT_DURATION = 30000; // 30 seconds
       let resolved = false;
-
-      const handleVisibilityChange = () => {
-        const wasVisible = isPageVisible;
-        isPageVisible = !document.hidden;
-        if (!wasVisible && isPageVisible) {
-          // Page became visible after being hidden - reset timeout
-          timeoutStartTime = Date.now();
-          console.log('📱 [Socket] Page visible again, resetting timeout tracker');
-        }
-      };
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
+      
+      // ✅ Extended timeout for backgrounded scenarios
       const timeout = setTimeout(() => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        reject(new Error('Socket connection timeout (30s) - page may have been backgrounded'));
-      }, TIMEOUT_DURATION);
+        if (!resolved) {
+          console.error('❌ [Socket] Connection timeout after 20s');
+          reject(new Error('Socket connection timeout'));
+        }
+      }, 20000);
 
       socketInstance.on('connect', async () => {
+        if (resolved) return;
         console.log('🔌 Socket connected:', socketInstance.id);
         
         try {
-          // ✅ Use the helper function (it will wait for TabManager)
+          // ✅ Use the helper function (works even when backgrounded)
           await authenticateSocketWithTabManagement(socketInstance, currentUser.userId);
           
           // ✅ Setup session replacement handler
@@ -810,30 +796,29 @@ async function initializeSocket() {
           
           resolved = true;
           clearTimeout(timeout);
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
           console.log('✅ Socket authenticated and ready');
           resolve(socketInstance);
           
         } catch (error) {
+          if (resolved) return;
           resolved = true;
           clearTimeout(timeout);
-          document.removeEventListener('visibilitychange', handleVisibilityChange);
           console.error('❌ Authentication failed:', error);
           reject(error);
         }
       });
 
       socketInstance.on('connect_error', (error) => {
+        if (resolved) return;
         console.error('🔌 Connection error:', error);
         resolved = true;
         clearTimeout(timeout);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
         reject(error);
       });
     });
     
   } catch (error) {
-    console.error('Socket initialization error:', error);
+    console.error('❌ Socket initialization error:', error);
     throw error;
   }
 }
