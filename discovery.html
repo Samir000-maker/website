@@ -386,6 +386,102 @@
   const STATE_KEY = 'discovery_state';
   const STATE_TIMESTAMP_KEY = 'discovery_state_timestamp';
   const STATE_EXPIRY = 15 * 60 * 1000; // 15 minutes
+
+
+
+
+async function authenticateSocketWithTabManagement(socket, userId) {
+  try {
+    console.log('🔐 [Auth] Starting socket authentication...');
+    
+    // 1. Wait for TabManager to be ready
+    if (!window.tabManager || !window.tabManager.tabId) {
+      throw new Error('TabManager not initialized. Make sure app.js is loaded first.');
+    }
+    
+    const tabId = window.tabManager.tabId;
+    console.log('✅ [Auth] TabId retrieved:', tabId);
+    
+    // 2. Get Firebase token
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      throw new Error('Not authenticated with Firebase');
+    }
+    
+    const token = await firebaseUser.getIdToken();
+    console.log('✅ [Auth] Firebase token retrieved');
+    
+    // 3. Send authentication event
+    console.log('📤 [Auth] Sending authenticate event:', {
+      userId,
+      tabId,
+      socketId: socket.id
+    });
+    
+    socket.emit('authenticate', {
+      token: token,
+      userId: userId,
+      tabId: tabId  // ← CRITICAL: Include tabId
+    });
+    
+    // 4. Wait for authentication response
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Authentication timeout (10s)'));
+      }, 10000);
+      
+      // Success handler
+      socket.once('authenticated', (data) => {
+        clearTimeout(timeout);
+        console.log('✅ [Auth] Socket authenticated successfully:', data);
+        resolve(data);
+      });
+      
+      // Error handler
+      socket.once('auth_error', (error) => {
+        clearTimeout(timeout);
+        console.error('❌ [Auth] Authentication failed:', error);
+        
+        // Handle specific error codes
+        if (error.code === 'DUPLICATE_TAB') {
+          console.warn('⚠️ [Auth] Another tab is active');
+          // The TabManager will handle showing the overlay
+        }
+        
+        reject(new Error(error.message || 'Authentication failed'));
+      });
+    });
+    
+  } catch (error) {
+    console.error('❌ [Auth] Socket authentication error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Setup session replacement handler
+ * Call this ONCE after socket connection
+ * 
+ * @param {Socket} socket - Socket.IO instance
+ */
+function setupSessionReplacementHandler(socket) {
+  socket.on('session_replaced', (data) => {
+    console.log('⚠️ [Session] This tab has been replaced by another:', data);
+    
+    // The TabManager will automatically show the "Use Here" overlay
+    // No need for additional UI here
+    
+    // Optionally: Clean up page-specific state
+    // e.g., stop timers, clear intervals, etc.
+  });
+  
+  console.log('✅ [Session] Replacement handler registered');
+}
+
+console.log('✅ Socket authentication helpers loaded');
+
+  
+
   
   function saveState(state) {
     try {
@@ -625,22 +721,23 @@ async function initializeSocket() {
         reject(new Error('Socket connection timeout'));
       }, 10000);
 
-      socketInstance.on('connect', () => {
-        console.log('🔌 Socket connected:', socketInstance.id);
-        clearTimeout(timeout);
-        
-        // ✅ FIX: Include tabId in authenticate event
-        console.log('🔐 Authenticating with:', {
-          userId: currentUser.userId,
-          tabId: tabId
-        });
-        
-        socketInstance.emit('authenticate', {
-          token: idToken,
-          userId: currentUser.userId,
-          tabId: tabId  // ← CRITICAL: Pass tabId
-        });
-      });
+socketInstance.on('connect', async () => {
+  console.log('🔌 Socket connected:', socketInstance.id);
+  
+  try {
+    // ✅ Use the helper function
+    await authenticateSocketWithTabManagement(socketInstance, currentUser.userId);
+    
+    // ✅ Setup session replacement handler
+    setupSessionReplacementHandler(socketInstance);
+    
+    console.log('✅ Socket ready for use');
+    resolve(socketInstance);
+  } catch (error) {
+    console.error('❌ Authentication failed:', error);
+    reject(error);
+  }
+});
 
       socketInstance.on('authenticated', (data) => {
         console.log('✅ Socket authenticated:', data);
