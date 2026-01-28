@@ -443,7 +443,7 @@ function waitForTabManager() {
         clearInterval(interval);
         window.removeEventListener('tab_blocked', blockHandler);
         console.error('❌ [Auth] TabManager timeout after 15s - attempts:', attempts);
-        reject(new Error('TabManager initialization timeout - app.js may not be loading properly'));
+        reject(new Error('TabManager initialization timeout'));
       }
     }, 100); // Check every 100ms
   });
@@ -491,18 +491,37 @@ async function authenticateSocketWithTabManagement(socket, userId) {
     
     // 4. Wait for authentication response
     return new Promise((resolve, reject) => {
+      // Track visibility state for timeout handling
+      let isPageVisible = !document.hidden;
+      let timeoutStartTime = Date.now();
+      const TIMEOUT_DURATION = 30000;
+      let resolved = false;
+
+      const handleVisibilityChange = () => {
+        const wasVisible = isPageVisible;
+        isPageVisible = !document.hidden;
+        if (!wasVisible && isPageVisible) {
+          // Page became visible after being hidden - reset timeout
+          timeoutStartTime = Date.now();
+          console.log('📱 [Socket] Page visible again, resetting timeout tracker');
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       const timeout = setTimeout(() => {
-        reject(new Error('Authentication timeout (10s)'));
-      }, 10000);
+        reject(new Error('Authentication timeout (20s)'));
+      }, 20000);
       
       socket.once('authenticated', (data) => {
-        clearTimeout(timeout);
+        resolved = true;
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         console.log('✅ [Auth] Socket authenticated successfully:', data);
         resolve(data);
       });
       
       socket.once('auth_error', (error) => {
-        clearTimeout(timeout);
+        resolved = true;
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         console.error('❌ [Auth] Authentication failed:', error);
         
         // If duplicate tab error, the server will disconnect us
@@ -768,9 +787,27 @@ async function initializeSocket() {
     });
 
     return new Promise((resolve, reject) => {
+      // Track visibility state for timeout handling  
+      let isPageVisible = !document.hidden;
+      let timeoutStartTime = Date.now();
+      const TIMEOUT_DURATION = 30000; // 30 seconds
+      let resolved = false;
+
+      const handleVisibilityChange = () => {
+        const wasVisible = isPageVisible;
+        isPageVisible = !document.hidden;
+        if (!wasVisible && isPageVisible) {
+          // Page became visible after being hidden - reset timeout
+          timeoutStartTime = Date.now();
+          console.log('📱 [Socket] Page visible again, resetting timeout tracker');
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       const timeout = setTimeout(() => {
-        reject(new Error('Socket connection timeout'));
-      }, 15000);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        reject(new Error('Socket connection timeout (30s) - page may have been backgrounded'));
+      }, TIMEOUT_DURATION);
 
       socketInstance.on('connect', async () => {
         console.log('🔌 Socket connected:', socketInstance.id);
@@ -782,12 +819,16 @@ async function initializeSocket() {
           // ✅ Setup session replacement handler
           setupSessionReplacementHandler(socketInstance);
           
+          resolved = true;
           clearTimeout(timeout);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
           console.log('✅ Socket authenticated and ready');
           resolve(socketInstance);
           
         } catch (error) {
+          resolved = true;
           clearTimeout(timeout);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
           console.error('❌ Authentication failed:', error);
           reject(error);
         }
@@ -795,7 +836,9 @@ async function initializeSocket() {
 
       socketInstance.on('connect_error', (error) => {
         console.error('🔌 Connection error:', error);
+        resolved = true;
         clearTimeout(timeout);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         reject(error);
       });
     });
