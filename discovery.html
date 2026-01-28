@@ -166,6 +166,7 @@
       transform: scale(0.97);
     }
   </style>
+<base target="_blank">
 </head>
 
 <body class="font-display bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-100 antialiased selection:bg-primary/20">
@@ -417,7 +418,7 @@ function waitForTabManager() {
     
     // Poll for TabManager
     let attempts = 0;
-    const maxAttempts = 50; // 5 seconds max wait
+    const maxAttempts = 150; // 15 seconds max wait (increased from 5s)
     
     const interval = setInterval(() => {
       attempts++;
@@ -441,8 +442,8 @@ function waitForTabManager() {
       } else if (attempts >= maxAttempts) {
         clearInterval(interval);
         window.removeEventListener('tab_blocked', blockHandler);
-        console.error('❌ [Auth] TabManager timeout after 5s');
-        reject(new Error('TabManager initialization timeout'));
+        console.error('❌ [Auth] TabManager timeout after 15s - attempts:', attempts);
+        reject(new Error('TabManager initialization timeout - app.js may not be loading properly'));
       }
     }, 100); // Check every 100ms
   });
