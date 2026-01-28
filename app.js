@@ -315,8 +315,6 @@ const Utils = {
    ========================================================= */
    
    
-   // Add to client-side initialization (before socket connection)
-
 class TabManager {
   constructor() {
     this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -340,25 +338,50 @@ class TabManager {
         case 'CLAIM_ACTIVE':
           // Another tab is claiming to be active
           if (tabId !== this.tabId) {
-            console.log(`📱 [TabManager] Another tab claimed active status, yielding...`);
-            this.handleTabTakeover();
+            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+            const theirTimestamp = timestamp;
+            
+            if (theirTimestamp > ourTimestamp) {
+              // Newer tab is claiming - we must yield
+              console.log(`📱 [TabManager] Newer tab detected, this tab is now BLOCKED`);
+              this.blockTab();
+            } else {
+              // We're older - reject the newer tab
+              console.log(`📱 [TabManager] Rejecting newer tab's claim (we're the active tab)`);
+              this.channel.postMessage({
+                type: 'REJECT_CLAIM',
+                tabId: this.tabId,
+                timestamp: ourTimestamp
+              });
+            }
+          }
+          break;
+          
+        case 'REJECT_CLAIM':
+          // Our claim was rejected by an older tab
+          if (this.tabId !== tabId) {
+            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+            if (timestamp < ourTimestamp) {
+              console.log(`📱 [TabManager] Claim rejected by older tab, blocking this tab`);
+              this.blockTab();
+            }
           }
           break;
           
         case 'HEARTBEAT':
           // Another tab is alive
-          if (tabId !== this.tabId && this.isActive) {
-            // We're both claiming to be active - resolve by timestamp
+          if (tabId !== this.tabId) {
             const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            if (timestamp < ourTimestamp) {
-              console.log(`⚠️ [TabManager] Older tab detected, yielding control`);
-              this.handleTabTakeover();
+            if (timestamp < ourTimestamp && this.isActive) {
+              // Older tab is active - we should not be active
+              console.log(`⚠️ [TabManager] Older active tab detected, blocking this tab`);
+              this.blockTab();
             }
           }
           break;
           
         case 'TAB_CLOSING':
-          // A tab is closing - if it was active and we're not, try to claim
+          // A tab is closing - if it was the active one and we're blocked, we can activate
           if (tabId !== this.tabId && !this.isActive) {
             console.log(`📱 [TabManager] Active tab closing, attempting to claim...`);
             setTimeout(() => this.claimActiveTab(), 100);
@@ -379,14 +402,6 @@ class TabManager {
       }
       this.cleanup();
     });
-    
-    // Handle visibility changes
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden && !this.isActive) {
-        console.log(`📱 [TabManager] Tab became visible, checking if we should claim active`);
-        this.attemptReclaim();
-      }
-    });
   }
   
   claimActiveTab() {
@@ -396,24 +411,22 @@ class TabManager {
     this.channel.postMessage({
       type: 'CLAIM_ACTIVE',
       tabId: this.tabId,
-      timestamp: Date.now()
+      timestamp: parseInt(this.tabId.split('_')[1])
     });
     
-    // Wait a moment to see if anyone objects
+    // Wait to see if anyone rejects our claim
     setTimeout(() => {
-      this.isActive = true;
-      this.startHeartbeat();
-      
-      console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
-      
-      // Notify application that this tab is active
-      window.dispatchEvent(new CustomEvent('tab_active', { 
-        detail: { tabId: this.tabId } 
-      }));
-      
-      // Remove any inactive overlays
-      this.removeInactiveOverlay();
-      
+      if (!this.isActive) {
+        this.isActive = true;
+        this.startHeartbeat();
+        
+        console.log(`✅ [TabManager] Active tab status confirmed: ${this.tabId}`);
+        
+        // Notify application that this tab is active
+        window.dispatchEvent(new CustomEvent('tab_active', { 
+          detail: { tabId: this.tabId } 
+        }));
+      }
     }, 200);
   }
   
@@ -430,8 +443,8 @@ class TabManager {
     }, 2000);
   }
   
-  handleTabTakeover() {
-    console.log(`🔄 [TabManager] Tab takeover - becoming inactive: ${this.tabId}`);
+  blockTab() {
+    console.log(`🚫 [TabManager] BLOCKING this tab - another tab is active: ${this.tabId}`);
     
     this.isActive = false;
     
@@ -442,39 +455,36 @@ class TabManager {
     }
     
     // Notify application
-    window.dispatchEvent(new CustomEvent('tab_inactive', { 
+    window.dispatchEvent(new CustomEvent('tab_blocked', { 
       detail: { tabId: this.tabId } 
     }));
     
-    // Show inactive overlay
-    this.showInactiveOverlay();
+    // Show blocking overlay (NO "Use Here" button)
+    this.showBlockingOverlay();
     
-    // Disconnect socket to prevent duplicate connections
-    if (window.socket && window.socket.connected) {
-      console.log(`🔌 [TabManager] Disconnecting socket from inactive tab`);
-      window.socket.disconnect();
+    // Disconnect socket to prevent any activity
+    if (window.socket && window.socket.instance && window.socket.instance.connected) {
+      console.log(`🔌 [TabManager] Disconnecting socket from blocked tab`);
+      window.socket.instance.disconnect();
     }
   }
   
-  attemptReclaim() {
-    // Try to reclaim active status after becoming visible
-    console.log(`🔄 [TabManager] Attempting to reclaim active status: ${this.tabId}`);
-    this.claimActiveTab();
-  }
-  
-  showInactiveOverlay() {
+  showBlockingOverlay() {
     // Remove existing overlay if any
-    this.removeInactiveOverlay();
+    const existingOverlay = document.getElementById('blocked-tab-overlay');
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
     
     const overlay = document.createElement('div');
-    overlay.id = 'inactive-tab-overlay';
+    overlay.id = 'blocked-tab-overlay';
     overlay.style.cssText = `
       position: fixed;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0, 0, 0, 0.95);
+      background: rgba(0, 0, 0, 0.98);
       z-index: 999999;
       display: flex;
       flex-direction: column;
@@ -486,56 +496,30 @@ class TabManager {
     
     overlay.innerHTML = `
       <div style="text-align: center; max-width: 500px; padding: 40px;">
-        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" style="margin-bottom: 24px;">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg width="100" height="100" viewBox="0 0 24 24" fill="none" style="margin-bottom: 32px; opacity: 0.7;">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" stroke="currentColor" stroke-width="2"/>
         </svg>
-        <h1 style="font-size: 24px; font-weight: 600; margin-bottom: 12px;">
-          Vibe is open in another tab
+        <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 16px; color: #ef4444;">
+          Tab Blocked
         </h1>
-        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.7); margin-bottom: 24px;">
-          To use Vibe in this tab, close it in other tabs or click below to use it here instead.
+        <p style="font-size: 18px; color: rgba(255, 255, 255, 0.8); line-height: 1.6; margin-bottom: 24px;">
+          Vibe is already open in another tab.
         </p>
-        <button id="use-here-btn" style="
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          border: none;
-          padding: 14px 32px;
-          border-radius: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: transform 0.2s, box-shadow 0.2s;
-        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-          Use Here
-        </button>
+        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.6); line-height: 1.5;">
+          Please close this tab and use the existing one.
+        </p>
+        <div style="margin-top: 32px; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px;">
+          <p style="font-size: 14px; color: rgba(255, 255, 255, 0.7); margin: 0;">
+            ⚠️ This tab is completely disabled to prevent conflicts.
+          </p>
+        </div>
       </div>
     `;
     
     document.body.appendChild(overlay);
     
-    // Add click handler to reclaim active status
-    document.getElementById('use-here-btn').addEventListener('click', () => {
-      console.log(`🔄 [TabManager] User clicked 'Use Here', reclaiming...`);
-      this.claimActiveTab();
-      
-      // Reconnect socket if needed
-      if (window.socket && !window.socket.connected) {
-        console.log(`🔌 [TabManager] Reconnecting socket in active tab`);
-        window.socket.connect();
-      }
-    });
-    
-    console.log(`🚫 [TabManager] Inactive tab overlay displayed`);
-  }
-  
-  removeInactiveOverlay() {
-    const overlay = document.getElementById('inactive-tab-overlay');
-    if (overlay) {
-      overlay.remove();
-      console.log(`✅ [TabManager] Inactive tab overlay removed`);
-    }
+    console.log(`🚫 [TabManager] Blocking overlay displayed - tab is now non-functional`);
   }
   
   cleanup() {
@@ -549,16 +533,25 @@ class TabManager {
 // Initialize tab manager before anything else
 const tabManager = new TabManager();
 
-// Only allow socket connection if this is the active tab
+// Handle tab activation
 window.addEventListener('tab_active', () => {
   console.log(`✅ [App] This tab is now active, enabling features`);
-  // Your existing socket initialization code here
-  // initializeSocket();
 });
 
-window.addEventListener('tab_inactive', () => {
-  console.log(`🚫 [App] This tab is now inactive, disabling features`);
-  // Clean up any active operations
+// Handle tab blocking (NEW)
+window.addEventListener('tab_blocked', () => {
+  console.log(`🚫 [App] This tab is now BLOCKED, all features disabled`);
+  
+  // Stop ALL activity
+  if (window.socket && window.socket.instance) {
+    window.socket.instance.disconnect();
+  }
+  
+  // Clear any intervals/timeouts
+  for (let i = 1; i < 99999; i++) {
+    window.clearInterval(i);
+    window.clearTimeout(i);
+  }
 });
    
 
