@@ -15,6 +15,315 @@
    - `firebase` global exists
    - `firebase.apps` exists and has at least one app (i.e., initializeApp() called)
 */
+
+
+
+/* =========================================================
+   TAB MANAGER (IMMEDIATE BLOCKING - NO ACTIVITY ALLOWED)
+   ========================================================= */
+
+class TabManager {
+  constructor() {
+    this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.channelName = 'vibe_app_tab_control';
+    this.channel = new BroadcastChannel(this.channelName);
+    this.isActive = false; // ❌ CRITICAL: Start as INACTIVE until proven otherwise
+    this.isBlocked = false;
+    this.heartbeatInterval = null;
+    this.initPromise = null;
+    
+    console.log(`📱 [TabManager] Created: ${this.tabId}`);
+    
+    // ✅ CRITICAL: Synchronous check FIRST before anything else
+    this.initPromise = this.immediateBlockCheck();
+  }
+  
+  /**
+   * ✅ CRITICAL: Synchronous + async check to block IMMEDIATELY
+   */
+  async immediateBlockCheck() {
+    console.log(`🔍 [TabManager] Checking for existing tabs...`);
+    
+    return new Promise((resolve) => {
+      let responseReceived = false;
+      const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+      
+      // ✅ Listen for ANY existing tab response
+      const checkHandler = (event) => {
+        const { type, tabId, timestamp } = event.data;
+        
+        if (type === 'HEARTBEAT' && tabId !== this.tabId) {
+          console.log(`⚠️ [TabManager] Detected existing tab: ${tabId}`);
+          const theirTimestamp = timestamp;
+          
+          // If their tab is OLDER (lower timestamp), we MUST block
+          if (theirTimestamp < ourTimestamp) {
+            console.error(`🚫 [TabManager] BLOCKING THIS TAB - older tab exists`);
+            responseReceived = true;
+            this.channel.removeEventListener('message', checkHandler);
+            this.blockTabImmediately();
+            resolve(false); // ❌ NOT ACTIVE
+          }
+        }
+      };
+      
+      this.channel.addEventListener('message', checkHandler);
+      
+      // ✅ Send ping to existing tabs
+      this.channel.postMessage({
+        type: 'HEARTBEAT_REQUEST',
+        tabId: this.tabId,
+        timestamp: ourTimestamp
+      });
+      
+      // ✅ Wait 200ms for response (if no response, we're the first tab)
+      setTimeout(() => {
+        this.channel.removeEventListener('message', checkHandler);
+        
+        if (!responseReceived) {
+          console.log(`✅ [TabManager] No existing tabs - this tab is ACTIVE`);
+          this.isActive = true;
+          this.setupMessageHandlers();
+          this.startHeartbeat();
+          resolve(true); // ✅ ACTIVE
+        }
+      }, 200);
+    });
+  }
+  
+  /**
+   * ✅ CRITICAL: Block tab IMMEDIATELY with no async operations
+   */
+  blockTabImmediately() {
+    console.error(`🚫 [TabManager] IMMEDIATE BLOCK: ${this.tabId}`);
+    
+    this.isBlocked = true;
+    this.isActive = false;
+    
+    // ✅ Show blocking overlay IMMEDIATELY (synchronous DOM operation)
+    this.showBlockingOverlay();
+    
+    // ✅ Dispatch block event IMMEDIATELY
+    window.dispatchEvent(new CustomEvent('tab_blocked', { 
+      detail: { tabId: this.tabId, immediate: true } 
+    }));
+    
+    // ✅ Prevent ALL JavaScript execution
+    this.killAllActivity();
+  }
+  
+  /**
+   * ✅ CRITICAL: Stop ALL activity in blocked tab
+   */
+  killAllActivity() {
+    console.log(`💀 [TabManager] Killing all activity in blocked tab`);
+    
+    // Clear ALL intervals and timeouts
+    for (let i = 1; i < 99999; i++) {
+      window.clearInterval(i);
+      window.clearTimeout(i);
+    }
+    
+    // Override critical functions to prevent any activity
+    window.fetch = () => Promise.reject(new Error('Tab blocked'));
+    window.XMLHttpRequest = function() { 
+      throw new Error('Tab blocked'); 
+    };
+    
+    // Prevent socket connections
+    if (typeof io !== 'undefined') {
+      window.io = () => {
+        console.error('🚫 Socket connection blocked');
+        return null;
+      };
+    }
+    
+    console.log(`✅ [TabManager] All activity killed`);
+  }
+  
+  setupMessageHandlers() {
+    console.log(`📡 [TabManager] Setting up message handlers`);
+    
+    this.channel.addEventListener('message', (event) => {
+      const { type, tabId, timestamp } = event.data;
+      
+      switch (type) {
+        case 'HEARTBEAT_REQUEST':
+          // Someone is checking if we exist - respond immediately
+          if (this.isActive && !this.isBlocked) {
+            this.channel.postMessage({
+              type: 'HEARTBEAT',
+              tabId: this.tabId,
+              timestamp: parseInt(this.tabId.split('_')[1])
+            });
+          }
+          break;
+          
+        case 'TAB_CLOSING':
+          // A tab is closing
+          if (tabId !== this.tabId && this.isBlocked) {
+            const theirTimestamp = timestamp;
+            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
+            
+            // If it was the older tab, unblock
+            if (theirTimestamp < ourTimestamp) {
+              console.log(`✅ [TabManager] Older tab closed, unblocking`);
+              this.unblockTab();
+            }
+          }
+          break;
+      }
+    });
+    
+    // Cleanup on tab close
+    window.addEventListener('beforeunload', () => {
+      this.channel.postMessage({
+        type: 'TAB_CLOSING',
+        tabId: this.tabId,
+        timestamp: parseInt(this.tabId.split('_')[1])
+      });
+      this.cleanup();
+    });
+  }
+  
+  startHeartbeat() {
+    console.log(`💓 [TabManager] Starting heartbeat`);
+    
+    this.heartbeatInterval = setInterval(() => {
+      if (this.isActive && !this.isBlocked) {
+        this.channel.postMessage({
+          type: 'HEARTBEAT',
+          tabId: this.tabId,
+          timestamp: parseInt(this.tabId.split('_')[1])
+        });
+      }
+    }, 2000);
+  }
+  
+  unblockTab() {
+    console.log(`✅ [TabManager] UNBLOCKING: ${this.tabId}`);
+    
+    this.isBlocked = false;
+    this.isActive = true;
+    
+    // Remove blocking overlay
+    const overlay = document.getElementById('blocked-tab-overlay');
+    if (overlay) overlay.remove();
+    
+    // Reload to restore normal functionality
+    window.location.reload();
+  }
+  
+  showBlockingOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = 'blocked-tab-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.98);
+      z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+    
+    overlay.innerHTML = `
+      <div style="text-align: center; max-width: 500px; padding: 40px;">
+        <svg width="100" height="100" viewBox="0 0 24 24" fill="none" style="margin-bottom: 32px; opacity: 0.7;">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 16px; color: #ef4444;">
+          Tab Blocked
+        </h1>
+        <p style="font-size: 18px; color: rgba(255, 255, 255, 0.8); line-height: 1.6; margin-bottom: 24px;">
+          Vibe is already open in another tab.
+        </p>
+        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.6); line-height: 1.5;">
+          Please close this tab and use the existing one.
+        </p>
+        <button onclick="window.close()" style="
+          margin-top: 32px;
+          padding: 12px 32px;
+          background: #ef4444;
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+        ">
+          Close This Tab
+        </button>
+      </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    console.log(`🚫 [TabManager] Blocking overlay shown`);
+  }
+  
+  cleanup() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    this.channel.close();
+  }
+}
+
+// ✅ CRITICAL: Initialize TabManager IMMEDIATELY (blocking)
+console.log(`🚀 [App] Initializing TabManager...`);
+const tabManager = new TabManager();
+window.tabManager = tabManager;
+
+// ✅ CRITICAL: Wait for tab check BEFORE doing ANYTHING else
+(async () => {
+  console.log(`⏳ [App] Waiting for tab validation...`);
+  const isActive = await tabManager.initPromise;
+  
+  if (!isActive) {
+    console.error(`🚫 [App] This tab is BLOCKED - stopping all initialization`);
+    return; // ❌ STOP HERE - don't initialize anything
+  }
+  
+  console.log(`✅ [App] Tab is active - continuing initialization`);
+})();
+
+// ✅ CRITICAL: Block event handler (kill everything immediately)
+window.addEventListener('tab_blocked', (e) => {
+  console.error(`🚫 [App] TAB_BLOCKED EVENT - immediate shutdown`);
+  console.error(`   TabId: ${e.detail.tabId}`);
+  console.error(`   Immediate: ${e.detail.immediate}`);
+  
+  // Stop socket if exists
+  if (window.socket && window.socket.instance) {
+    console.log(`🔌 [App] Disconnecting socket`);
+    window.socket.instance.disconnect();
+    window.socket.instance = null;
+    window.socket.connected = false;
+  }
+  
+  // Override all network functions
+  window.fetch = () => Promise.reject(new Error('Tab blocked'));
+  window.XMLHttpRequest = function() { throw new Error('Tab blocked'); };
+  
+  // Clear all intervals/timeouts
+  for (let i = 1; i < 99999; i++) {
+    window.clearInterval(i);
+    window.clearTimeout(i);
+  }
+  
+  console.error(`💀 [App] All activity terminated`);
+});
+
+
+
+
 const FirebaseReady = (() => {
   let resolved = false;
   let resolver = null;
@@ -315,215 +624,6 @@ const Utils = {
    ========================================================= */
    
    
-/* =========================================================
-   TAB MANAGER (NON-BLOCKING BACKGROUND CHECK)
-   ========================================================= */
-   
-class TabManager {
-  constructor() {
-    this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    this.channelName = 'vibe_app_tab_control';
-    this.channel = new BroadcastChannel(this.channelName);
-    this.isActive = true; // ✅ Always active by default
-    this.heartbeatInterval = null;
-    
-    console.log(`📱 [TabManager] Initialized: ${this.tabId}`);
-    
-    this.setupMessageHandlers();
-    this.checkForExistingTabs();
-    this.startHeartbeat();
-  }
-  
-  setupMessageHandlers() {
-    this.channel.addEventListener('message', (event) => {
-      const { type, tabId, timestamp } = event.data;
-      
-      switch (type) {
-        case 'HEARTBEAT':
-          // Another tab is alive
-          if (tabId !== this.tabId) {
-            const theirTimestamp = timestamp;
-            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            
-            // If their tab is OLDER, we should block ourselves
-            if (theirTimestamp < ourTimestamp) {
-              console.log(`⚠️ [TabManager] Older tab detected, blocking this tab`);
-              this.blockTab();
-            }
-          }
-          break;
-          
-        case 'TAB_CLOSING':
-          // A tab is closing - if it was older and we're blocked, unblock
-          if (tabId !== this.tabId) {
-            const theirTimestamp = timestamp;
-            const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            
-            if (theirTimestamp < ourTimestamp && !this.isActive) {
-              console.log(`✅ [TabManager] Older tab closed, unblocking this tab`);
-              this.unblockTab();
-            }
-          }
-          break;
-      }
-    });
-    
-    // Cleanup on tab close
-    window.addEventListener('beforeunload', () => {
-      this.channel.postMessage({
-        type: 'TAB_CLOSING',
-        tabId: this.tabId,
-        timestamp: parseInt(this.tabId.split('_')[1])
-      });
-      this.cleanup();
-    });
-  }
-  
-  checkForExistingTabs() {
-    // Send a ping to see if any tabs respond
-    this.channel.postMessage({
-      type: 'HEARTBEAT',
-      tabId: this.tabId,
-      timestamp: parseInt(this.tabId.split('_')[1])
-    });
-  }
-  
-  startHeartbeat() {
-    // Send heartbeat every 2 seconds
-    this.heartbeatInterval = setInterval(() => {
-      if (this.isActive) {
-        this.channel.postMessage({
-          type: 'HEARTBEAT',
-          tabId: this.tabId,
-          timestamp: parseInt(this.tabId.split('_')[1])
-        });
-      }
-    }, 2000);
-  }
-  
-  blockTab() {
-    console.log(`🚫 [TabManager] BLOCKING this tab: ${this.tabId}`);
-    
-    this.isActive = false;
-    
-    // Stop heartbeat
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-    
-    // Notify application
-    window.dispatchEvent(new CustomEvent('tab_blocked', { 
-      detail: { tabId: this.tabId } 
-    }));
-    
-    // Show blocking overlay
-    this.showBlockingOverlay();
-    
-    // Disconnect socket
-    if (window.socket && window.socket.instance && window.socket.instance.connected) {
-      console.log(`🔌 [TabManager] Disconnecting socket from blocked tab`);
-      window.socket.instance.disconnect();
-    }
-  }
-  
-  unblockTab() {
-    console.log(`✅ [TabManager] UNBLOCKING this tab: ${this.tabId}`);
-    
-    this.isActive = true;
-    
-    // Remove blocking overlay
-    const overlay = document.getElementById('blocked-tab-overlay');
-    if (overlay) {
-      overlay.remove();
-    }
-    
-    // Restart heartbeat
-    this.startHeartbeat();
-    
-    // Notify application
-    window.dispatchEvent(new CustomEvent('tab_unblocked', { 
-      detail: { tabId: this.tabId } 
-    }));
-    
-    // Reload page to reconnect
-    window.location.reload();
-  }
-  
-  showBlockingOverlay() {
-    // Remove existing overlay if any
-    const existingOverlay = document.getElementById('blocked-tab-overlay');
-    if (existingOverlay) {
-      existingOverlay.remove();
-    }
-    
-    const overlay = document.createElement('div');
-    overlay.id = 'blocked-tab-overlay';
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.98);
-      z-index: 999999;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-    
-    overlay.innerHTML = `
-      <div style="text-align: center; max-width: 500px; padding: 40px;">
-        <svg width="100" height="100" viewBox="0 0 24 24" fill="none" style="margin-bottom: 32px; opacity: 0.7;">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" stroke="currentColor" stroke-width="2"/>
-        </svg>
-        <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 16px; color: #ef4444;">
-          Tab Blocked
-        </h1>
-        <p style="font-size: 18px; color: rgba(255, 255, 255, 0.8); line-height: 1.6; margin-bottom: 24px;">
-          Vibe is already open in another tab.
-        </p>
-        <p style="font-size: 16px; color: rgba(255, 255, 255, 0.6); line-height: 1.5;">
-          Please close this tab and use the existing one.
-        </p>
-      </div>
-    `;
-    
-    document.body.appendChild(overlay);
-    
-    console.log(`🚫 [TabManager] Blocking overlay displayed`);
-  }
-  
-  cleanup() {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-    }
-    this.channel.close();
-  }
-}
-
-// ✅ Initialize TabManager (runs in background, never blocks)
-const tabManager = new TabManager();
-
-// ✅ Handle tab blocking (stop all activity)
-window.addEventListener('tab_blocked', () => {
-  console.log(`🚫 [App] This tab is now BLOCKED`);
-  
-  // Stop ALL activity
-  if (window.socket && window.socket.instance) {
-    window.socket.instance.disconnect();
-  }
-  
-  // Clear intervals/timeouts
-  for (let i = 1; i < 99999; i++) {
-    window.clearInterval(i);
-    window.clearTimeout(i);
-  }
-});
    
 
 class SocketClient {
