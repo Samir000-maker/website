@@ -3796,25 +3796,6 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 
-const INTERVAL_MS = 5000;
-let lastCpuUsage = process.cpuUsage();
-
-setInterval(() => {
-  const usage = process.cpuUsage(lastCpuUsage);
-  lastCpuUsage = process.cpuUsage();
-
-  const totalCpuMs = (usage.user + usage.system) / 1000; // micro → ms
-  const cpuPercent = (totalCpuMs / INTERVAL_MS) * 100;
-
-  console.log({
-    cpuPercentLast5s: cpuPercent.toFixed(2) + '%',
-    userMsLast5s: (usage.user / 1000).toFixed(2),
-    systemMsLast5s: (usage.system / 1000).toFixed(2),
-    memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024)
-  });
-}, INTERVAL_MS);
-
-
 // Add after line 2182 (in periodic cleanup interval)
 setInterval(() => {
   const now = Date.now();
