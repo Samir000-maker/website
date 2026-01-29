@@ -24,15 +24,27 @@
 
 class TabManager {
   constructor() {
-    this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // ✅ CRITICAL FIX: Use sessionStorage to persist tab ID across page navigation
+    // sessionStorage persists within the SAME browser tab/window, but is unique per tab
+    let existingTabId = sessionStorage.getItem('vibe_tab_id');
+    
+    if (existingTabId) {
+      // This is a page navigation within the same tab
+      this.tabId = existingTabId;
+      console.log(`📱 [TabManager] Reusing existing tab ID: ${this.tabId} (page navigation)`);
+    } else {
+      // This is a genuinely new tab/window
+      this.tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      sessionStorage.setItem('vibe_tab_id', this.tabId);
+      console.log(`📱 [TabManager] Created NEW tab ID: ${this.tabId} (new tab)`);
+    }
+    
     this.channelName = 'vibe_app_tab_control';
     this.channel = new BroadcastChannel(this.channelName);
     this.isActive = false; // ❌ CRITICAL: Start as INACTIVE until proven otherwise
     this.isBlocked = false;
     this.heartbeatInterval = null;
     this.initPromise = null;
-    
-    console.log(`📱 [TabManager] Created: ${this.tabId}`);
     
     // ✅ CRITICAL: Synchronous check FIRST before anything else
     this.initPromise = this.immediateBlockCheck();
@@ -273,6 +285,8 @@ class TabManager {
       clearInterval(this.heartbeatInterval);
     }
     this.channel.close();
+    // Note: We intentionally do NOT clear sessionStorage here
+    // This allows the same tab ID to persist across page navigation
   }
 }
 
