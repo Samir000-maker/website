@@ -2820,14 +2820,104 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     });
   }
 });
+const answerDebounce = new Map(); // userId:targetUserId -> timestamp
+const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
 
 
-  // WebRTC Signaling
+
+
+const MAX_SDP_SIZE = 100 * 1024; // 100KB max for SDP (offers/answers)
+const MAX_ICE_CANDIDATE_SIZE = 5 * 1024; // 5KB max for ICE candidate
+const MAX_SIGNALING_RATE = 50; // Max 50 signaling messages per 10 seconds per user
+const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
+
+function checkSignalingRateLimit(userId) {
+  const now = Date.now();
+  const userLimit = signalingRateLimiter.get(userId);
+  
+  if (!userLimit || now > userLimit.resetTime) {
+    signalingRateLimiter.set(userId, {
+      count: 1,
+      resetTime: now + 10000 // 10 seconds
+    });
+    return true;
+  }
+  
+  if (userLimit.count >= MAX_SIGNALING_RATE) {
+    return false;
+  }
+  
+  userLimit.count++;
+  return true;
+}
+
+function validateSDP(sdp, maxSize = MAX_SDP_SIZE) {
+  if (!sdp || typeof sdp !== 'string') {
+    return { valid: false, error: 'SDP must be a string' };
+  }
+  
+  if (sdp.length > maxSize) {
+    return { valid: false, error: `SDP exceeds maximum size of ${maxSize} bytes` };
+  }
+  
+  // Basic structure validation
+  if (!sdp.includes('v=0') || !sdp.includes('m=')) {
+    return { valid: false, error: 'Invalid SDP structure' };
+  }
+  
+  return { valid: true };
+}
+
+function validateICECandidate(candidate) {
+  if (candidate === null || candidate === undefined) {
+    return { valid: true }; // End-of-candidates signal
+  }
+  
+  if (typeof candidate !== 'object') {
+    return { valid: false, error: 'ICE candidate must be an object' };
+  }
+  
+  const candidateStr = JSON.stringify(candidate);
+  if (candidateStr.length > MAX_ICE_CANDIDATE_SIZE) {
+    return { valid: false, error: `ICE candidate exceeds ${MAX_ICE_CANDIDATE_SIZE} bytes` };
+  }
+  
+  return { valid: true };
+}
+
+// Replace webrtc_offer handler (line 2826)
 socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
+
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      socket.emit('error', { 
+        message: 'Too many signaling messages. Please slow down.',
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+      return;
+    }
+
+    // ✅ FIX: Validate offer structure
+    if (!offer || typeof offer !== 'object') {
+      console.error(`❌ Invalid offer structure from ${user.username}`);
+      return;
+    }
+
+    // ✅ FIX: Validate SDP size and structure
+    const sdpValidation = validateSDP(offer.sdp);
+    if (!sdpValidation.valid) {
+      console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
+      socket.emit('error', { 
+        message: 'Invalid WebRTC offer',
+        code: 'INVALID_OFFER'
+      });
+      return;
+    }
 
     const offerKey = `${callId}:${user.userId}:${targetUserId}`;
     const now = Date.now();
@@ -2845,14 +2935,17 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     activeOffers.set(offerKey, now);
     
     console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
-    console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
+    console.log(`   Offer SDP length: ${offer.sdp.length} bytes (validated)`);
 
     const targetSocket = findActiveSocketForUser(targetUserId);
     
     if (targetSocket) {
       targetSocket.emit('webrtc_offer', {
         fromUserId: user.userId,
-        offer
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        }
       });
       console.log(`✅ Offer forwarded to ${targetUserId}`);
     } else {
@@ -2869,17 +2962,41 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
   }
 });
 
-const answerDebounce = new Map(); // userId:targetUserId -> timestamp
-const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
-
-// Replace existing webrtc_answer handler
+// Replace webrtc_answer handler (line 2876)
 socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
 
-    // ✅ DEDUPLICATION: Prevent duplicate answers
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      socket.emit('error', { 
+        message: 'Too many signaling messages. Please slow down.',
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+      return;
+    }
+
+    // ✅ FIX: Validate answer structure
+    if (!answer || typeof answer !== 'object') {
+      console.error(`❌ Invalid answer structure from ${user.username}`);
+      return;
+    }
+
+    // ✅ FIX: Validate SDP size and structure
+    const sdpValidation = validateSDP(answer.sdp);
+    if (!sdpValidation.valid) {
+      console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
+      socket.emit('error', { 
+        message: 'Invalid WebRTC answer',
+        code: 'INVALID_ANSWER'
+      });
+      return;
+    }
+
+    // Deduplication
     const answerKey = `${user.userId}:${targetUserId}`;
     const now = Date.now();
     
@@ -2895,14 +3012,17 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
     answerDebounce.set(answerKey, now);
     
     console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
-    console.log(`   Answer SDP length: ${answer.sdp?.length || 0} bytes`);
+    console.log(`   Answer SDP length: ${answer.sdp.length} bytes (validated)`);
 
     const targetSocket = findActiveSocketForUser(targetUserId);
     
     if (targetSocket) {
       targetSocket.emit('webrtc_answer', {
         fromUserId: user.userId,
-        answer
+        answer: {
+          type: answer.type,
+          sdp: answer.sdp
+        }
       });
       console.log(`✅ Answer forwarded to ${targetUserId}`);
     } else {
@@ -2943,6 +3063,19 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     
     if (!user) return;
 
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      return; // Silently drop ICE candidates on rate limit
+    }
+
+    // ✅ FIX: Validate ICE candidate
+    const validation = validateICECandidate(candidate);
+    if (!validation.valid) {
+      console.error(`❌ Invalid ICE candidate from ${user.username}: ${validation.error}`);
+      return;
+    }
+
     // Log candidate details
     if (candidate) {
       const candidateType = candidate.type || 'unknown';
@@ -2956,7 +3089,7 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     if (targetSocket) {
       targetSocket.emit('ice_candidate', {
         fromUserId: user.userId,
-        candidate
+        candidate: candidate
       });
       console.log(`✅ [ICE] Candidate forwarded to ${targetUserId}`);
     } else {
@@ -2967,6 +3100,18 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     console.error('❌ [ICE] Candidate error:', error);
   }
 });
+
+
+let expiredSignaling = 0;
+for (const [userId, limit] of signalingRateLimiter.entries()) {
+  if (Date.now() > limit.resetTime) {
+    signalingRateLimiter.delete(userId);
+    expiredSignaling++;
+  }
+}
+if (expiredSignaling > 0) {
+  console.log(`🗑️ Cleaned up ${expiredSignaling} expired signaling rate limit entries`);
+}
 
   socket.on('connection_state_update', ({ callId, state, candidateType }) => {
     const user = socketUsers.get(socket.id);
