@@ -194,33 +194,8 @@
         </div>
     </footer>
     
-<div id="chatOverlayContainer" class="hidden fixed inset-0 z-[9999] bg-white dark:bg-background-dark">
-    <div class="w-full h-full flex flex-col">
-        <!-- Header -->
-        <div class="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-surface-dark flex items-center justify-between">
-            <button id="backToCallBtn" class="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:brightness-110 transition-all">
-                <span class="material-symbols-outlined">arrow_back</span>
-                <span class="font-semibold">Back to Call</span>
-            </button>
-            <div class="flex items-center gap-2">
-                <div class="relative flex h-2 w-2">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </div>
-                <span class="text-sm text-slate-500 dark:text-slate-400">Call in progress</span>
-            </div>
-        </div>
-        
-        <!-- Chat Content Area -->
-        <div id="chatContentArea" class="flex-1 overflow-y-auto p-4">
-            <div class="flex items-center justify-center h-full">
-                <div class="text-center">
-                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p class="text-slate-500 dark:text-slate-400">Loading chat...</p>
-                </div>
-            </div>
-        </div>
-    </div>
+<div id="chatOverlayContainer" class="hidden fixed inset-0 z-[9999] bg-white">
+    <iframe id="chatOverlayIframe" class="w-full h-full border-none"></iframe>
 </div>
 
 <!-- Mini Call Indicator -->
@@ -337,19 +312,25 @@ async function fetchIceServers() {
   // Set initial state
   history.pushState({ view: 'call' }, 'Call', window.location.href);
   
-  // CRITICAL: Setup back to call button click handler
-  setTimeout(() => {
-    const backBtn = document.getElementById('backToCallBtn');
-    if (backBtn) {
-      backBtn.addEventListener('click', () => {
-        console.log('🔙 Back to call button clicked');
-        hideChat();
-      });
-      console.log('✅ Back to call button handler attached');
-    }
-  }, 100);
   
-  // Listen for back button
+  // Listen for messages from chat iframe
+window.addEventListener('message', (event) => {
+  console.log('📨 ========================================');
+  console.log('📨 MESSAGE RECEIVED FROM IFRAME');
+  console.log('📨 ========================================');
+  console.log(`   action: ${event.data?.action}`);
+  
+  if (event.data && event.data.action === 'hideChat') {
+    console.log('💬 Hiding chat overlay as requested by iframe');
+    hideChat();
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
+  }
+  
+  console.log('📨 ========================================\n');
+});
+
+console.log('✅ Message listener added for iframe communication');
+  
   window.addEventListener('popstate', (event) => {
     console.log('⬅️ ========================================');
     console.log('⬅️ BACK BUTTON PRESSED');
@@ -360,25 +341,28 @@ async function fetchIceServers() {
     
     console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
     
+    // CRITICAL: Always prevent default navigation
+    event.preventDefault();
+    
     if (isShowingChat) {
-      // Close chat, show call
-      console.log('📞 Closing chat, showing call');
+      // Hide chat, show call
+      console.log('📞 Hiding chat, showing call');
       hideChat();
+      history.pushState({ view: 'call' }, 'Call', window.location.href);
     } else {
-      // Show chat while keeping call active
+      // Hide call, show chat
       if (!callData || !localStream) {
-        console.log('⚠️ No active call, navigating away');
+        console.log('⚠️ No active call, allowing navigation');
         window.location.href = '/chat.html';
         return;
       }
       
-      console.log('💬 Showing chat overlay (same tab!)');
+      console.log('💬 Hiding call, showing chat');
       console.log(`   Active peer connections: ${peerConnections.size}`);
       console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
       
       showChat();
-      // Push state so next back button closes overlay
-      history.pushState({ view: 'chat-overlay' }, 'Chat', window.location.href);
+      history.pushState({ view: 'chat' }, 'Chat', window.location.href);
     }
     
     console.log('⬅️ ========================================\n');
@@ -387,7 +371,7 @@ async function fetchIceServers() {
 
 function showChat() {
   console.log('💬 ========================================');
-  console.log('💬 SHOWING CHAT OVERLAY (No iframe - same tab!)');
+  console.log('💬 SHOWING CHAT OVERLAY');
   console.log('💬 ========================================');
   
   // Hide call UI elements
@@ -401,62 +385,33 @@ function showChat() {
   
   // Show chat overlay
   const chatOverlay = document.getElementById('chatOverlayContainer');
+  const chatIframe = document.getElementById('chatOverlayIframe');
+  const miniIndicator = document.getElementById('miniCallIndicator');
   
   if (chatOverlay) {
     chatOverlay.classList.remove('hidden');
     
-    // Load chat UI (simple placeholder for now)
-    loadChatContent();
+    // Load chat page in iframe
+    if (chatIframe) {
+      chatIframe.src = '/chat.html';
+      console.log('✅ Chat iframe loaded');
+    }
   }
   
-  console.log('✅ Chat overlay shown - call remains active (same tab!)');
+  // Show mini indicator
+  if (miniIndicator) {
+    miniIndicator.classList.remove('hidden');
+    miniIndicator.onclick = () => {
+      console.log('🔙 Mini indicator clicked');
+      hideChat();
+      history.pushState({ view: 'call' }, 'Call', window.location.href);
+    };
+  }
+  
+  console.log('✅ Chat overlay shown - call remains active');
   console.log(`   PeerConnections: ${peerConnections.size}`);
   console.log(`   LocalStream: ${localStream?.getTracks().length} tracks`);
   console.log('💬 ========================================\n');
-}
-
-// ADD THIS NEW FUNCTION:
-async function loadChatContent() {
-  const chatArea = document.getElementById('chatContentArea');
-  
-  if (!chatArea) return;
-  
-  // For now, show a simple message
-  // (You can later fetch /chat.html and extract its content)
-  chatArea.innerHTML = `
-    <div class="max-w-4xl mx-auto">
-      <div class="bg-white dark:bg-surface-dark rounded-lg shadow-lg p-6 mb-4">
-        <div class="flex items-center gap-3 mb-4">
-          <div class="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-            <span class="material-symbols-outlined text-primary text-2xl">chat</span>
-          </div>
-          <div>
-            <h2 class="text-xl font-bold">Chat</h2>
-            <p class="text-sm text-slate-500 dark:text-slate-400">Your call is running in the background</p>
-          </div>
-        </div>
-        
-        <div class="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 mb-4">
-          <div class="flex items-start gap-3">
-            <span class="material-symbols-outlined text-green-600 dark:text-green-400">check_circle</span>
-            <div>
-              <p class="font-semibold text-green-900 dark:text-green-100">Call is active</p>
-              <p class="text-sm text-green-700 dark:text-green-300">You can navigate here while your call continues in the background.</p>
-            </div>
-          </div>
-        </div>
-        
-        <div class="text-center py-8">
-          <p class="text-slate-500 dark:text-slate-400 mb-4">Chat content will be loaded here</p>
-          <button onclick="window.location.reload()" class="px-6 py-2 bg-primary text-white rounded-lg hover:brightness-110">
-            Reload Chat
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-  
-  console.log('✅ Chat content placeholder loaded (same tab - no blocking!)');
 }
 
 function hideChat() {
@@ -466,7 +421,23 @@ function hideChat() {
   
   // Hide chat overlay
   const chatOverlay = document.getElementById('chatOverlayContainer');
+  const miniIndicator = document.getElementById('miniCallIndicator');
+  
   if (chatOverlay) chatOverlay.classList.add('hidden');
+  if (miniIndicator) miniIndicator.classList.add('hidden');
+  
+  // CRITICAL: Also hide the floating button that might be in the parent window
+  try {
+    if (window.parent && window.parent !== window) {
+      const parentFloatingBtn = window.parent.document.getElementById('floatingReturnToCall');
+      if (parentFloatingBtn) {
+        parentFloatingBtn.classList.add('hidden');
+        console.log('✅ Parent floating button hidden');
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not access parent window:', e);
+  }
   
   // Show call UI elements
   const header = document.querySelector('header');
