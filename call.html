@@ -2417,27 +2417,78 @@ async function toggleVideo() {
 }
 
       function leaveCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-       audioContexts.forEach(ac => {
-  try {
-    if (ac.stop) ac.stop();
-    if (ac.context && ac.context.state !== 'closed') {
-      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-    }
-  } catch (e) {
-    console.warn('Failed to cleanup audio context:', e);
+  console.log('🚪 ========================================');
+  console.log('🚪 LEAVE CALL BUTTON CLICKED');
+  console.log('🚪 ========================================');
+  
+  if (isInitializing) {
+    console.log('⚠️ Call still initializing, ignoring leave');
+    return;
   }
-});
-        audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
-        peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-        if (durationInterval) clearInterval(durationInterval);
-        localStorage.removeItem('activeCall');
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+  
+  isInitializing = true;
+  
+  const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+  
+  console.log(`   Background mode: ${backgroundCallActive}`);
+  console.log('🗑️ Performing full cleanup - user explicitly leaving call');
+  
+  // Clean up audio contexts
+  audioContexts.forEach(ac => {
+    try {
+      if (ac.stop) ac.stop();
+      if (ac.context && ac.context.state !== 'closed') {
+        ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
       }
+    } catch (e) {
+      console.warn('Failed to cleanup audio context:', e);
+    }
+  });
+  audioContexts.clear();
+  console.log('   ✓ Audio contexts closed');
+  
+  // Stop local stream
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    console.log('   ✓ Local stream stopped');
+  }
+  
+  // Close peer connections
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  console.log('   ✓ Peer connections closed');
+  
+  // Emit leave call
+  if (socketInstance && socketInstance.connected) {
+    socketInstance.emit('leave_call', { callId: callData.callId });
+    console.log('   ✓ Leave call emitted');
+  }
+  
+  // Stop timer
+  if (durationInterval) {
+    clearInterval(durationInterval);
+    console.log('   ✓ Timer stopped');
+  }
+  
+  // Clear ALL storage related to call and background mode
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('backgroundCallActive');
+  sessionStorage.removeItem('backgroundCallId');
+  sessionStorage.removeItem('backgroundCallType');
+  sessionStorage.removeItem('callConnectionState');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  
+  console.log('✅ Full cleanup complete - all storage cleared');
+  console.log('🔄 Navigating to chat.html...');
+  console.log('🚪 ========================================\n');
+  
+  setTimeout(() => { 
+    window.location.href = '/chat.html'; 
+  }, 500);
+}
       
       
       
@@ -2489,628 +2540,728 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
       
 
       async function initCall() {
-      
-        const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+  console.log('🎬 ========================================');
+  console.log('🎬 INIT CALL FUNCTION STARTED');
+  console.log('🎬 ========================================');
   
-  if (returningToBackground) {
+  // CRITICAL: Check if already initializing
+  if (isInitializing) {
+    console.log('⚠️ Call already initializing, aborting duplicate call');
+    console.log('🎬 ========================================\n');
+    return;
+  }
+  
+  // CRITICAL: Check if returning to background call from chat
+  const returningToBackgroundCall = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+  const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+  
+  console.log(`   Returning to background call: ${returningToBackgroundCall}`);
+  console.log(`   Background call active flag: ${backgroundCallActive}`);
+  
+  if (returningToBackgroundCall) {
     console.log('🔄 ========================================');
     console.log('🔄 RETURNING TO BACKGROUND CALL');
     console.log('🔄 ========================================');
+    console.log('   User clicked "Back to Call" from chat');
+    console.log('   Call is already running - just showing UI');
     
+    // Clear the navigation flags
     sessionStorage.removeItem('returningToBackgroundCall');
+    sessionStorage.removeItem('backgroundCallActive');
     
-    // Call is already active, we're just returning to the UI
-    console.log('ℹ️ Call connections should already be active');
-    console.log('ℹ️ Reconnecting to existing call state...');
+    console.log('✅ Background flags cleared');
+    console.log('✅ Call UI will display normally');
+    console.log('🔄 ========================================\n');
     
-    // The rest of initCall will handle reconnection
-  }
-      
-        if (isInitializing) return;
-        isInitializing = true;
-        console.log('=== INIT CALL ===');
-        
-        try {
-          await _Auth.requireAuth();
-          await fetchIceServers();
-          
-          const callStr = localStorage.getItem('activeCall');
-          if (!callStr) { toast('No active call', 'error'); setTimeout(() => window.location.href = '/chat.html', 1500); return; }
-          
-          callData = JSON.parse(callStr);
-          console.log(`📞 Call: ${callData.callId} (${callData.callType})`);
-          
-          const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) { window.location.href = '/login.html'; return; }
-          
-          const userData = await _API.get('/api/users/me');
-          currentUser = { userId: userData._id, username: userData.username, pfpUrl: userData.pfpUrl };
-          console.log(`👤 Current user: ${currentUser.username} (${currentUser.userId})`);
-          
-          const title = document.getElementById('callTitle');
-          if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
-          
-          const token = await firebaseUser.getIdToken();
-          socketInstance = io(window.location.origin, {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            auth: { token }
-          });
-          
-          // socketInstance.on('connect', () => {
-          //   console.log(`🔌 Connected: ${socketInstance.id}`);
-          //   socketInstance.emit('authenticate', { token, userId: currentUser.userId });
-          // });
-          
-          
-          socketInstance.on('connect', async () => {
-  console.log('🔌 ========================================');
-  console.log('🔌 SOCKET CONNECTED');
-  console.log('🔌 ========================================');
-  console.log(`   Socket ID: ${socketInstance.id}`);
-  console.log(`   User: ${currentUser?.username || 'unknown'}`);
-  
-  // CRITICAL: Check if already authenticated
-  if (getAuthenticationState()) {
-    console.log('⚠️ Socket already authenticated, skipping re-authentication');
-    console.log('🔌 ========================================\n');
+    // Don't re-initialize - call is already running
+    // Just ensure UI is visible
+    const header = document.querySelector('header');
+    const main = document.querySelector('main');
+    const footer = document.querySelector('footer');
+    
+    if (header) header.style.display = '';
+    if (main) main.style.display = '';
+    if (footer) footer.style.display = '';
+    
+    console.log('✅ Call UI restored - returning to active call');
+    console.log('🎬 ========================================\n');
     return;
   }
   
-  // CRITICAL: Reset auth state on new connection
-  setAuthenticationState(false);
+  if (backgroundCallActive) {
+    console.log('⚠️ ========================================');
+    console.log('⚠️ BACKGROUND CALL DETECTED ON INIT');
+    console.log('⚠️ ========================================');
+    console.log('   This should not happen - backgroundCallActive should be cleared');
+    console.log('   Clearing flag and proceeding with normal init');
+    sessionStorage.removeItem('backgroundCallActive');
+    console.log('⚠️ ========================================\n');
+  }
+  
+  // Mark as initializing
+  isInitializing = true;
+  console.log('✅ Marked as initializing');
+  
+  console.log('=== NORMAL CALL INITIALIZATION ===');
   
   try {
-    console.log('🔐 Starting authentication process...');
+    // Auth check
+    console.log('🔐 Checking authentication...');
+    await _Auth.requireAuth();
+    console.log('✅ Authentication verified');
     
-    // Get Firebase token
-    const firebaseUser = firebase.auth().currentUser;
-    if (!firebaseUser) {
-      throw new Error('No Firebase user found');
-    }
+    // Fetch ICE servers
+    console.log('📡 Fetching ICE servers...');
+    await fetchIceServers();
+    console.log('✅ ICE servers loaded');
     
-    const idToken = await firebaseUser.getIdToken();
-    console.log('✅ Firebase token retrieved');
-    
-    // Authenticate socket
-    await authenticateSocket(socketInstance, currentUser.userId);
-    console.log('✅ Socket authentication complete');
-    
-    // Mark as authenticated
-    setAuthenticationState(true);
-    
-  } catch (error) {
-    console.error('❌ Socket connection/authentication error:', error);
-    toast('Connection failed. Please refresh.', 'error');
-    setAuthenticationState(false);
-  }
-  
-  console.log('🔌 ========================================\n');
-});
-
-socketInstance.on('disconnect', (reason) => {
-  console.log('🔌 ========================================');
-  console.log('🔌 SOCKET DISCONNECTED');
-  console.log('🔌 ========================================');
-  console.log(`   Reason: ${reason}`);
-  console.log(`   Socket ID was: ${socketInstance.id}`);
-  
-  // Reset authentication state
-  setAuthenticationState(false);
-  
-  console.log('🔌 ========================================\n');
-});
-          
-          
-          // Inside initCall() function, replace the 'authenticated' handler:
-
-
-
-socketInstance.on('room_expired', (data) => {
-  console.error('💥 ========================================');
-  console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
-  console.error('💥 ========================================');
-  console.error(`   roomId: ${data.roomId}`);
-  console.error(`   message: ${data.message}`);
-  console.error(`   Server says room expired at: ${new Date().toISOString()}`);
-  
-  if (roomExpiresAt) {
-    const serverExpiry = new Date(roomExpiresAt).toISOString();
-    const clientNow = new Date().toISOString();
-    const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
-    console.error(`   expiresAt was: ${serverExpiry}`);
-    console.error(`   Client time now: ${clientNow}`);
-    console.error(`   Server time now (adjusted): ${serverNow}`);
-  }
-  
-  console.error('💥 ========================================\n');
-  
-  if (durationInterval) clearInterval(durationInterval);
-  toast(data.message || 'Room has expired', 'warning');
-  
-  // Clean up and redirect
-  leaveCall();
-});
-
-socketInstance.on('room_expiring_soon', (data) => {
-  console.warn('⚠️ ========================================');
-  console.warn('⚠️ ROOM EXPIRING SOON');
-  console.warn('⚠️ ========================================');
-  console.warn(`   Expires in: ${data.expiresIn / 1000} seconds`);
-  console.warn(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
-  
-  const clientNow = Date.now();
-  const serverNow = clientNow + serverClockOffset;
-  const remaining = data.expiresAt - serverNow;
-  
-  console.warn(`   Client now: ${new Date(clientNow).toISOString()}`);
-  console.warn(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-  console.warn(`   Remaining (adjusted): ${(remaining / 1000).toFixed(1)}s`);
-  console.warn('⚠️ ========================================\n');
-  
-  toast(`Room expiring soon!`, 'warning');
-});
-
-socketInstance.on('authenticated', async () => {
-  console.log('✅ ========================================');
-  console.log('✅ AUTHENTICATED EVENT RECEIVED');
-  console.log('✅ ========================================');
-  
-  // Mark as authenticated
-  setAuthenticationState(true);
-  
-  // CRITICAL: Request room data from server to get clock sync
-  const roomStr = localStorage.getItem('currentRoom');
-  if (roomStr) {
-    try {
-      const roomData = JSON.parse(roomStr);
-      console.log('📦 Requesting fresh room data for clock sync...');
-      
-      // Emit a request for fresh room data
-      socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
-      
-    } catch (e) {
-      console.error('❌ Failed to parse room data:', e);
-    }
-  }
-  
-  // CRITICAL FIX: Prevent duplicate join attempts
-  if (isJoiningCall) {
-    console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
-    console.log('✅ ========================================\n');
-    return;
-  }
-  
-  if (!hasJoinedCall) {
-    isJoiningCall = true;
-    hasJoinedCall = true;
-    
-    try {
-      console.log(`📞 Attempting to join call ${callData.callId}...`);
-      await attemptJoinCall(callData.callId);
-      console.log(`✅ Successfully joined call ${callData.callId}`);
-    } catch (error) {
-      console.error('❌ Failed to join call:', error);
-      toast('Failed to join call. Returning to chat...', 'error');
-      setTimeout(() => {
-        window.location.href = '/chat.html';
-      }, 2000);
-    } finally {
-      isJoiningCall = false;
-    }
-  }
-  
-  console.log('✅ ========================================\n');
-});
-
-
-socketInstance.on('room_sync_data', (data) => {
-  console.log('⏰ ========================================');
-  console.log('⏰ ROOM SYNC DATA RECEIVED');
-  console.log('⏰ ========================================');
-  
-  const clientNow = Date.now();
-  
-  if (!data.serverTime) {
-    console.warn('⚠️ No serverTime in sync data, assuming no clock skew');
-    data.serverTime = clientNow;
-  }
-  
-  // Calculate clock offset
-  serverClockOffset = data.serverTime - clientNow;
-  
-  console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
-  console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
-  console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
-  
-  if (Math.abs(serverClockOffset) > 5000) {
-    console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
-    console.warn(`   Timer will be adjusted to compensate`);
-  }
-  
-  if (data.expiresAt) {
-    roomExpiresAt = data.expiresAt;
-    
-    // Calculate time remaining using server-adjusted time
-    const serverNow = clientNow + serverClockOffset;
-    const timeRemaining = data.expiresAt - serverNow;
-    
-    console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
-    console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-    console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
-    
-    // Update localStorage with synced data
-    const roomStr = localStorage.getItem('currentRoom');
-    if (roomStr) {
-      try {
-        const roomData = JSON.parse(roomStr);
-        roomData.expiresAt = data.expiresAt;
-        localStorage.setItem('currentRoom', JSON.stringify(roomData));
-        console.log('✅ Updated localStorage with server expiry time');
-      } catch (e) {
-        console.error('❌ Failed to update localStorage:', e);
-      }
-    }
-  }
-  
-  console.log('⏰ ========================================\n');
-  
-  // Force timer update with new data
-  updateDuration();
-});
-          
-          
-socketInstance.on('webrtc_offer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
-  handleOffer(d.fromUserId, d.offer);
-});
-
-socketInstance.on('webrtc_answer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
-  handleAnswer(d.fromUserId, d.answer);
-});
-
-socketInstance.on('ice_candidate', (d) => {
-  console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
-  handleIceCandidate(d.fromUserId, d.candidate);
-});
-          
-          
-socketInstance.on('call_joined', async (data) => {
-  console.log(`✅ ========================================`);
-  console.log(`✅ CALL_JOINED EVENT RECEIVED`);
-  console.log(`✅ ========================================`);
-  console.log(`📊 Participants: ${data.participants.length}`);
-  
-  // Log all participants
-  data.participants.forEach((p, i) => {
-    console.log(`   [${i}] ${p.username} (${p.userId}) video:${p.videoEnabled} audio:${p.audioEnabled}`);
-  });
-  
-  if (!data.participants || data.participants.length === 0) {
-    console.error('❌ Received call_joined with 0 participants!');
-    toast('Call state error. Please try again.', 'error');
-    setTimeout(() => {
-      window.location.href = '/chat.html';
-    }, 2000);
-    return;
-  }
-  
-  const subtitle = document.getElementById('callSubtitle');
-  if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
-  
-  console.log(`🎬 Initializing local media...`);
-  try {
-    await initLocalMedia();
-    console.log(`✅ Local media initialized successfully`);
-  } catch (mediaError) {
-    console.error(`❌ Media initialization failed:`, mediaError);
-    toast('Failed to initialize media.', 'error');
-  }
-  
-  if (!localStream) {
-    console.error(`❌ CRITICAL: localStream is still null!`);
-    localStream = new MediaStream();
-  }
-  
-  console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
-  localStream.getTracks().forEach((track, i) => {
-    console.log(`   [${i}] ${track.kind} (${track.id.substring(0, 8)}...) enabled:${track.enabled}`);
-  });
-  
-  const grid = document.getElementById('participantGrid');
-  if (!grid) {
-    console.error('❌ Grid element not found!');
-    return;
-  }
-  
-  const fragment = document.createDocumentFragment();
-  
-  console.log(`🧹 Clearing grid and tracking`);
-  grid.innerHTML = '';
-  renderedParticipants.clear();
-  
-  console.log(`📋 Rendering ${data.participants.length} tiles`);
-  
-  const sortedParticipants = [...data.participants].sort((a, b) => 
-    a.userId.localeCompare(b.userId)
-  );
-  
-  let selfTileRendered = false;
-  
-  sortedParticipants.forEach((p, index) => {
-    const isSelf = p.userId === currentUser.userId;
-    const videoState = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
-    const audioState = p.audioEnabled !== undefined ? p.audioEnabled : true;
-    
-    console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${videoState} audio=${audioState}`);
-    
-    const tile = createParticipantTile(p, isSelf);
-    if (tile) {
-      fragment.appendChild(tile);
-      console.log(`✅ [${index}] Tile created for ${p.username}`);
-      
-      if (isSelf) selfTileRendered = true;
-      
-      if (audioState === false) {
-        const micIndicator = tile.querySelector(`#mic-${p.userId}`);
-        if (micIndicator) {
-          micIndicator.classList.remove('hidden');
-          console.log(`   🔇 Mic indicator shown for ${p.username}`);
-        }
-      }
-      
-      if (!isSelf && videoState === false) {
-        const vid = tile.querySelector(`#video-${p.userId}`);
-        const pfp = tile.querySelector(`#pfp-${p.userId}`);
-        if (vid && pfp) {
-          vid.classList.add('hidden');
-          pfp.classList.remove('hidden');
-          console.log(`   📹 Video hidden for ${p.username}`);
-        }
-      }
-    }
-  });
-  
-  grid.appendChild(fragment);
-  
-  console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
-  console.log(`📊 Rendered participants:`, Array.from(renderedParticipants));
-  
-  if (selfTileRendered) {
-    console.log(`🎬 Setting up local video...`);
-    await setupLocalVideo();
-  } else {
-    console.warn(`⚠️ Self tile not rendered!`);
-  }
-  
-  const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
-  
-  console.log(`🔗 Processing ${remoteParticipants.length} remote participants for WebRTC...`);
-  
-  for (let i = 0; i < remoteParticipants.length; i++) {
-    const p = remoteParticipants[i];
-    const shouldInitiateOffer = currentUser.userId < p.userId;
-    
-    console.log(`🔗 [${i}] ${p.username} (${p.userId}): shouldInitiate=${shouldInitiateOffer}`);
-    
-    if (shouldInitiateOffer) {
-      const delay = 1000 + (i * 500);
-      console.log(`   ⏱️ Will create offer in ${delay}ms`);
-      setTimeout(() => {
-        console.log(`📤 [${i}] Creating offer to ${p.username}`);
-        createOffer(p.userId);
-      }, delay);
-    } else {
-      console.log(`   ⏳ Will wait for offer from ${p.username}`);
-    }
-  }
-  
-  console.log('⏰ Starting synced timer with room expiry and clock compensation');
-  console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
-  
-  durationInterval = setInterval(updateDuration, 1000);
-  updateDuration(); // Update immediately
-  
-  isInitializing = false;
-  console.log('✅ ========================================');
-  console.log('✅ INIT COMPLETE');
-  console.log('✅ ========================================\n');
-});
-          
-// Replace the entire user_joined_call handler
-socketInstance.on('user_joined_call', (data) => {
-  const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
-  const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
-  
-  console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
-  
-  // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
-  if (renderedParticipants.has(data.user.userId)) {
-    console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
-    return;
-  }
-  
-  const grid = document.getElementById('participantGrid');
-  const existingTile = document.getElementById(`participant-${data.user.userId}`);
-  
-  if (existingTile) {
-    console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
-    existingTile.remove();
-    renderedParticipants.delete(data.user.userId);
-  }
-  
-  console.log(`➕ Adding NEW participant ${data.user.username}`);
-  
-  if (grid) {
-    const isSelf = data.user.userId === currentUser.userId;
-    const tile = createParticipantTile(data.user, isSelf);
-    
-    if (tile) {
-      grid.appendChild(tile);
-      
-      const micIndicator = document.getElementById(`mic-${data.user.userId}`);
-      if (micIndicator && audioState === false) {
-        micIndicator.classList.remove('hidden');
-      }
-      
-      // CRITICAL FIX: If this is our own tile, setup local video NOW
-      if (isSelf) {
-        console.log(`✅ Self tile created via user_joined_call - setting up local video...`);
-        setupLocalVideo().catch(err => {
-          console.error('❌ Failed to setup local video for self:', err);
-        });
-      } else {
-        // For remote users, initiate connection with delay to avoid race
-        const shouldInitiateOffer = currentUser.userId < data.user.userId;
-        if (shouldInitiateOffer) {
-          setTimeout(() => {
-            console.log(`📤 Creating offer to late joiner ${data.user.username}`);
-            createOffer(data.user.userId);
-          }, 2000); // Increased delay to 2s
-        }
-      }
-      
-      console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
-    }
-  }
-});
-          
-socketInstance.on('user_left_call', (data) => {
-  console.log(`👋 User left: ${data.userId}`);
-  
-  // Remove tile
-  const tile = document.getElementById(`participant-${data.userId}`);
-  if (tile) tile.remove();
-  renderedParticipants.delete(data.userId);
-  
-  // Clean up peer connection
-  const pc = peerConnections.get(data.userId);
-  if (pc) { 
-    pc.close(); 
-    peerConnections.delete(data.userId); 
-  }
-  
-  // CRITICAL FIX: Clean up audio context properly
-  const ac = audioContexts.get(data.userId);
-  if (ac) {
-    if (ac.stop) ac.stop(); // Stop detection first
-    if (ac.context && ac.context.state !== 'closed') {
-      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-    }
-    audioContexts.delete(data.userId);
-  }
-  
-  // Clean up connection stats and monitoring
-  const stats = connectionStats.get(data.userId);
-  if (stats && stats.monitorInterval) {
-    clearInterval(stats.monitorInterval);
-  }
-  connectionStats.delete(data.userId);
-  
-  // Clean up pending candidates
-  pendingIceCandidates.delete(data.userId);
-  
-  // Clean up negotiation mutex
-  negotiationMutex.delete(data.userId);
-  makingOffer.delete(data.userId);
-  
-  console.log(`✅ Fully cleaned up resources for ${data.userId}`);
-});
-          
-          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
-          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
-          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
-          
-          socketInstance.on('speaking_state', (d) => {
-            const s = document.getElementById(`speaking-${d.userId}`);
-            const t = document.getElementById(`participant-${d.userId}`);
-            if (s && t) {
-              if (d.speaking) { s.classList.remove('hidden'); t.classList.add('active-speaker'); }
-              else { s.classList.add('hidden'); t.classList.remove('active-speaker'); }
-            }
-          });
-          
-          socketInstance.on('audio_state_changed', (data) => {
-  console.log(`🎤 Received audio_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
-  
-  const micIndicator = document.getElementById(`mic-${data.userId}`);
-  if (micIndicator) {
-    if (data.enabled) {
-      micIndicator.classList.add('hidden');
-    } else {
-      micIndicator.classList.remove('hidden');
-    }
-  }
-});
-
-socketInstance.on('video_state_changed', (data) => {
-  console.log(`📹 ========================================`);
-  console.log(`📹 RECEIVED: video_state_changed`);
-  console.log(`📹 ========================================`);
-  console.log(`   From userId: ${data.userId}`);
-  console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
-  console.log(`   My userId: ${currentUser.userId}`);
-  
-  // Sanity check - should NEVER receive own state back
-  if (data.userId === currentUser.userId) {
-    console.error(`❌ CRITICAL: Received own video state from server!`);
-    console.error(`   This should not happen - server should exclude sender`);
-    console.error(`   Ignoring to prevent state desync`);
-    console.log(`📹 ========================================\n`);
-    return;
-  }
-  
-  // ✅ Update remote user's video visibility
-  console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
-  
-  // ✅ CRITICAL: Check if video element has video tracks
-  const remoteVideo = document.getElementById(`video-${data.userId}`);
-  if (remoteVideo && remoteVideo.srcObject) {
-    const videoTracks = remoteVideo.srcObject.getVideoTracks();
-    console.log(`   Remote video element has ${videoTracks.length} video track(s)`);
-    
-    if (videoTracks.length === 0 && data.enabled) {
-      console.warn(`⚠️ Remote wants to show video but no video tracks in stream yet`);
-      console.warn(`   Waiting for ontrack event to deliver video track...`);
-      // Don't update visibility yet - wait for track to arrive
-      console.log(`📹 ========================================\n`);
+    // Get call data from localStorage
+    const callStr = localStorage.getItem('activeCall');
+    if (!callStr) {
+      console.error('❌ No active call data in localStorage');
+      toast('No active call', 'error');
+      setTimeout(() => window.location.href = '/chat.html', 1500);
       return;
     }
-  }
-  
-  updateVideoVisibility(data.userId, data.enabled, true);
-  
-  console.log(`✅ Remote video state updated successfully`);
-  console.log(`📹 ========================================\n`);
-});
+    
+    callData = JSON.parse(callStr);
+    console.log(`📞 ========================================`);
+    console.log(`📞 CALL DATA LOADED`);
+    console.log(`📞 ========================================`);
+    console.log(`   Call ID: ${callData.callId}`);
+    console.log(`   Call Type: ${callData.callType}`);
+    console.log(`   Room ID: ${callData.roomId}`);
+    console.log(`📞 ========================================\n`);
+    
+    // Get Firebase user
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      console.error('❌ No Firebase user');
+      window.location.href = '/login.html';
+      return;
+    }
+    
+    // Get current user data
+    console.log('👤 Fetching user data...');
+    const userData = await _API.get('/api/users/me');
+    currentUser = { 
+      userId: userData._id, 
+      username: userData.username, 
+      pfpUrl: userData.pfpUrl 
+    };
+    console.log(`✅ User loaded: ${currentUser.username} (${currentUser.userId})`);
+    
+    // Update page title
+    const title = document.getElementById('callTitle');
+    if (title) {
+      title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
+      console.log(`✅ Page title updated`);
+    }
+    
+    // Get Firebase token for socket auth
+    console.log('🎫 Getting Firebase token...');
+    const token = await firebaseUser.getIdToken();
+    console.log('✅ Firebase token retrieved');
+    
+    // Initialize Socket.IO
+    console.log('🔌 ========================================');
+    console.log('🔌 INITIALIZING SOCKET CONNECTION');
+    console.log('🔌 ========================================');
+    
+    socketInstance = io(window.location.origin, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      auth: { token }
+    });
+    
+    console.log('✅ Socket instance created');
+    
+    // Socket event handlers
+    socketInstance.on('connect', async () => {
+      console.log('🔌 ========================================');
+      console.log('🔌 SOCKET CONNECTED');
+      console.log('🔌 ========================================');
+      console.log(`   Socket ID: ${socketInstance.id}`);
+      console.log(`   User: ${currentUser?.username || 'unknown'}`);
+      
+      // CRITICAL: Check if already authenticated
+      if (getAuthenticationState()) {
+        console.log('⚠️ Socket already authenticated, skipping re-authentication');
+        console.log('🔌 ========================================\n');
+        return;
+      }
+      
+      // CRITICAL: Reset auth state on new connection
+      setAuthenticationState(false);
+      
+      try {
+        console.log('🔐 Starting authentication process...');
+        
+        // Get Firebase token
+        const firebaseUser = firebase.auth().currentUser;
+        if (!firebaseUser) {
+          throw new Error('No Firebase user found');
+        }
+        
+        const idToken = await firebaseUser.getIdToken();
+        console.log('✅ Firebase token retrieved');
+        
+        // Authenticate socket
+        await authenticateSocket(socketInstance, currentUser.userId);
+        console.log('✅ Socket authentication complete');
+        
+        // Mark as authenticated
+        setAuthenticationState(true);
+        
+      } catch (error) {
+        console.error('❌ Socket connection/authentication error:', error);
+        toast('Connection failed. Please refresh.', 'error');
+        setAuthenticationState(false);
+      }
+      
+      console.log('🔌 ========================================\n');
+    });
+    
+    socketInstance.on('disconnect', (reason) => {
+      console.log('🔌 ========================================');
+      console.log('🔌 SOCKET DISCONNECTED');
+      console.log('🔌 ========================================');
+      console.log(`   Reason: ${reason}`);
+      console.log(`   Socket ID was: ${socketInstance.id}`);
+      
+      // Reset authentication state
+      setAuthenticationState(false);
+      
+      console.log('🔌 ========================================\n');
+    });
+    
+    // Room expiration handlers
+    socketInstance.on('room_expired', (data) => {
+      console.error('💥 ========================================');
+      console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
+      console.error('💥 ========================================');
+      console.error(`   roomId: ${data.roomId}`);
+      console.error(`   message: ${data.message}`);
+      console.error(`   Server says room expired at: ${new Date().toISOString()}`);
+      
+      if (roomExpiresAt) {
+        const serverExpiry = new Date(roomExpiresAt).toISOString();
+        const clientNow = new Date().toISOString();
+        const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
+        console.error(`   expiresAt was: ${serverExpiry}`);
+        console.error(`   Client time now: ${clientNow}`);
+        console.error(`   Server time now (adjusted): ${serverNow}`);
+      }
+      
+      console.error('💥 ========================================\n');
+      
+      if (durationInterval) clearInterval(durationInterval);
+      toast(data.message || 'Room has expired', 'warning');
+      
+      // Clean up and redirect
+      leaveCall();
+    });
+    
+    socketInstance.on('room_expiring_soon', (data) => {
+      console.warn('⚠️ ========================================');
+      console.warn('⚠️ ROOM EXPIRING SOON');
+      console.warn('⚠️ ========================================');
+      console.warn(`   Expires in: ${data.expiresIn / 1000} seconds`);
+      console.warn(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
+      
+      const clientNow = Date.now();
+      const serverNow = clientNow + serverClockOffset;
+      const remaining = data.expiresAt - serverNow;
+      
+      console.warn(`   Client now: ${new Date(clientNow).toISOString()}`);
+      console.warn(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
+      console.warn(`   Remaining (adjusted): ${(remaining / 1000).toFixed(1)}s`);
+      console.warn('⚠️ ========================================\n');
+      
+      toast(`Room expiring soon!`, 'warning');
+    });
+    
+    socketInstance.on('authenticated', async () => {
+      console.log('✅ ========================================');
+      console.log('✅ AUTHENTICATED EVENT RECEIVED');
+      console.log('✅ ========================================');
+      
+      // Mark as authenticated
+      setAuthenticationState(true);
+      
+      // CRITICAL: Request room data from server to get clock sync
+      const roomStr = localStorage.getItem('currentRoom');
+      if (roomStr) {
+        try {
+          const roomData = JSON.parse(roomStr);
+          console.log('📦 Requesting fresh room data for clock sync...');
           
-          socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
-          
-          const mic = document.getElementById('micBtn');
-          const vid = document.getElementById('videoBtn');
-          const leave = document.getElementById('leaveCallBtn');
-          if (mic) mic.addEventListener('click', toggleMic);
-          if (vid) vid.addEventListener('click', toggleVideo);
-          if (leave) leave.addEventListener('click', leaveCall, { passive: true });
-
-// Setup back button handler for background call
-setupCallBackButtonHandler();
-
-// Setup cleanup handler
-setupCallCleanup();
-
-console.log('✅ Call page event handlers initialized');
+          // Emit a request for fresh room data
+          socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
           
         } catch (e) {
-          console.error('❌ Init error:', e);
-          toast('Failed to initialize call', 'error');
-          isInitializing = false;
-          setTimeout(() => window.location.href = '/chat.html', 2000);
+          console.error('❌ Failed to parse room data:', e);
         }
       }
+      
+      // CRITICAL FIX: Prevent duplicate join attempts
+      if (isJoiningCall) {
+        console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
+        console.log('✅ ========================================\n');
+        return;
+      }
+      
+      if (!hasJoinedCall) {
+        isJoiningCall = true;
+        hasJoinedCall = true;
+        
+        try {
+          console.log(`📞 Attempting to join call ${callData.callId}...`);
+          await attemptJoinCall(callData.callId);
+          console.log(`✅ Successfully joined call ${callData.callId}`);
+        } catch (error) {
+          console.error('❌ Failed to join call:', error);
+          toast('Failed to join call. Returning to chat...', 'error');
+          setTimeout(() => {
+            window.location.href = '/chat.html';
+          }, 2000);
+        } finally {
+          isJoiningCall = false;
+        }
+      }
+      
+      console.log('✅ ========================================\n');
+    });
+    
+    socketInstance.on('room_sync_data', (data) => {
+      console.log('⏰ ========================================');
+      console.log('⏰ ROOM SYNC DATA RECEIVED');
+      console.log('⏰ ========================================');
+      
+      const clientNow = Date.now();
+      
+      if (!data.serverTime) {
+        console.warn('⚠️ No serverTime in sync data, assuming no clock skew');
+        data.serverTime = clientNow;
+      }
+      
+      // Calculate clock offset
+      serverClockOffset = data.serverTime - clientNow;
+      
+      console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
+      console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
+      console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
+      
+      if (Math.abs(serverClockOffset) > 5000) {
+        console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+        console.warn(`   Timer will be adjusted to compensate`);
+      }
+      
+      if (data.expiresAt) {
+        roomExpiresAt = data.expiresAt;
+        
+        // Calculate time remaining using server-adjusted time
+        const serverNow = clientNow + serverClockOffset;
+        const timeRemaining = data.expiresAt - serverNow;
+        
+        console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
+        console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
+        console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
+        
+        // Update localStorage with synced data
+        const roomStr = localStorage.getItem('currentRoom');
+        if (roomStr) {
+          try {
+            const roomData = JSON.parse(roomStr);
+            roomData.expiresAt = data.expiresAt;
+            localStorage.setItem('currentRoom', JSON.stringify(roomData));
+            console.log('✅ Updated localStorage with server expiry time');
+          } catch (e) {
+            console.error('❌ Failed to update localStorage:', e);
+          }
+        }
+      }
+      
+      console.log('⏰ ========================================\n');
+      
+      // Force timer update with new data
+      updateDuration();
+    });
+    
+    // WebRTC signaling handlers
+    socketInstance.on('webrtc_offer', (d) => {
+      console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
+      handleOffer(d.fromUserId, d.offer);
+    });
+    
+    socketInstance.on('webrtc_answer', (d) => {
+      console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
+      handleAnswer(d.fromUserId, d.answer);
+    });
+    
+    socketInstance.on('ice_candidate', (d) => {
+      console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
+      handleIceCandidate(d.fromUserId, d.candidate);
+    });
+    
+    // Call joined handler
+    socketInstance.on('call_joined', async (data) => {
+      console.log(`✅ ========================================`);
+      console.log(`✅ CALL_JOINED EVENT RECEIVED`);
+      console.log(`✅ ========================================`);
+      console.log(`📊 Participants: ${data.participants.length}`);
+      
+      // Log all participants
+      data.participants.forEach((p, i) => {
+        console.log(`   [${i}] ${p.username} (${p.userId}) video:${p.videoEnabled} audio:${p.audioEnabled}`);
+      });
+      
+      if (!data.participants || data.participants.length === 0) {
+        console.error('❌ Received call_joined with 0 participants!');
+        toast('Call state error. Please try again.', 'error');
+        setTimeout(() => {
+          window.location.href = '/chat.html';
+        }, 2000);
+        return;
+      }
+      
+      const subtitle = document.getElementById('callSubtitle');
+      if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length>1?'s':''}`;
+      
+      console.log(`🎬 Initializing local media...`);
+      try {
+        await initLocalMedia();
+        console.log(`✅ Local media initialized successfully`);
+      } catch (mediaError) {
+        console.error(`❌ Media initialization failed:`, mediaError);
+        toast('Failed to initialize media.', 'error');
+      }
+      
+      if (!localStream) {
+        console.error(`❌ CRITICAL: localStream is still null!`);
+        localStream = new MediaStream();
+      }
+      
+      console.log(`📊 LocalStream: ${localStream.getTracks().length} tracks`);
+      localStream.getTracks().forEach((track, i) => {
+        console.log(`   [${i}] ${track.kind} (${track.id.substring(0, 8)}...) enabled:${track.enabled}`);
+      });
+      
+      const grid = document.getElementById('participantGrid');
+      if (!grid) {
+        console.error('❌ Grid element not found!');
+        return;
+      }
+      
+      const fragment = document.createDocumentFragment();
+      
+      console.log(`🧹 Clearing grid and tracking`);
+      grid.innerHTML = '';
+      renderedParticipants.clear();
+      
+      console.log(`📋 Rendering ${data.participants.length} tiles`);
+      
+      const sortedParticipants = [...data.participants].sort((a, b) => 
+        a.userId.localeCompare(b.userId)
+      );
+      
+      let selfTileRendered = false;
+      
+      sortedParticipants.forEach((p, index) => {
+        const isSelf = p.userId === currentUser.userId;
+        const videoState = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
+        const audioState = p.audioEnabled !== undefined ? p.audioEnabled : true;
+        
+        console.log(`[${index}] Rendering ${p.username} (${p.userId}) isSelf=${isSelf} video=${videoState} audio=${audioState}`);
+        
+        const tile = createParticipantTile(p, isSelf);
+        if (tile) {
+          fragment.appendChild(tile);
+          console.log(`✅ [${index}] Tile created for ${p.username}`);
+          
+          if (isSelf) selfTileRendered = true;
+          
+          if (audioState === false) {
+            const micIndicator = tile.querySelector(`#mic-${p.userId}`);
+            if (micIndicator) {
+              micIndicator.classList.remove('hidden');
+              console.log(`   🔇 Mic indicator shown for ${p.username}`);
+            }
+          }
+          
+          if (!isSelf && videoState === false) {
+            const vid = tile.querySelector(`#video-${p.userId}`);
+            const pfp = tile.querySelector(`#pfp-${p.userId}`);
+            if (vid && pfp) {
+              vid.classList.add('hidden');
+              pfp.classList.remove('hidden');
+              console.log(`   📹 Video hidden for ${p.username}`);
+            }
+          }
+        }
+      });
+      
+      grid.appendChild(fragment);
+      
+      console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
+      console.log(`📊 Rendered participants:`, Array.from(renderedParticipants));
+      
+      if (selfTileRendered) {
+        console.log(`🎬 Setting up local video...`);
+        await setupLocalVideo();
+      } else {
+        console.warn(`⚠️ Self tile not rendered!`);
+      }
+      
+      const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
+      
+      console.log(`🔗 Processing ${remoteParticipants.length} remote participants for WebRTC...`);
+      
+      for (let i = 0; i < remoteParticipants.length; i++) {
+        const p = remoteParticipants[i];
+        const shouldInitiateOffer = currentUser.userId < p.userId;
+        
+        console.log(`🔗 [${i}] ${p.username} (${p.userId}): shouldInitiate=${shouldInitiateOffer}`);
+        
+        if (shouldInitiateOffer) {
+          const delay = 1000 + (i * 500);
+          console.log(`   ⏱️ Will create offer in ${delay}ms`);
+          setTimeout(() => {
+            console.log(`📤 [${i}] Creating offer to ${p.username}`);
+            createOffer(p.userId);
+          }, delay);
+        } else {
+          console.log(`   ⏳ Will wait for offer from ${p.username}`);
+        }
+      }
+      
+      console.log('⏰ Starting synced timer with room expiry and clock compensation');
+      console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+      
+      durationInterval = setInterval(updateDuration, 1000);
+      updateDuration(); // Update immediately
+      
+      isInitializing = false;
+      console.log('✅ ========================================');
+      console.log('✅ INIT COMPLETE');
+      console.log('✅ ========================================\n');
+    });
+    
+    // User joined/left handlers
+    socketInstance.on('user_joined_call', (data) => {
+      const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
+      const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
+      
+      console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
+      
+      // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
+      if (renderedParticipants.has(data.user.userId)) {
+        console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
+        return;
+      }
+      
+      const grid = document.getElementById('participantGrid');
+      const existingTile = document.getElementById(`participant-${data.user.userId}`);
+      
+      if (existingTile) {
+        console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
+        existingTile.remove();
+        renderedParticipants.delete(data.user.userId);
+      }
+      
+      console.log(`➕ Adding NEW participant ${data.user.username}`);
+      
+      if (grid) {
+        const isSelf = data.user.userId === currentUser.userId;
+        const tile = createParticipantTile(data.user, isSelf);
+        
+        if (tile) {
+          grid.appendChild(tile);
+          
+          const micIndicator = document.getElementById(`mic-${data.user.userId}`);
+          if (micIndicator && audioState === false) {
+            micIndicator.classList.remove('hidden');
+          }
+          
+          // CRITICAL FIX: If this is our own tile, setup local video NOW
+          if (isSelf) {
+            console.log(`✅ Self tile created via user_joined_call - setting up local video...`);
+            setupLocalVideo().catch(err => {
+              console.error('❌ Failed to setup local video for self:', err);
+            });
+          } else {
+            // For remote users, initiate connection with delay to avoid race
+            const shouldInitiateOffer = currentUser.userId < data.user.userId;
+            if (shouldInitiateOffer) {
+              setTimeout(() => {
+                console.log(`📤 Creating offer to late joiner ${data.user.username}`);
+                createOffer(data.user.userId);
+              }, 2000); // Increased delay to 2s
+            }
+          }
+          
+          console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
+        }
+      }
+    });
+    
+    socketInstance.on('user_left_call', (data) => {
+      console.log(`👋 User left: ${data.userId}`);
+      
+      // Remove tile
+      const tile = document.getElementById(`participant-${data.userId}`);
+      if (tile) tile.remove();
+      renderedParticipants.delete(data.userId);
+      
+      // Clean up peer connection
+      const pc = peerConnections.get(data.userId);
+      if (pc) { 
+        pc.close(); 
+        peerConnections.delete(data.userId); 
+      }
+      
+      // CRITICAL FIX: Clean up audio context properly
+      const ac = audioContexts.get(data.userId);
+      if (ac) {
+        if (ac.stop) ac.stop(); // Stop detection first
+        if (ac.context && ac.context.state !== 'closed') {
+          ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
+        }
+        audioContexts.delete(data.userId);
+      }
+      
+      // Clean up connection stats and monitoring
+      const stats = connectionStats.get(data.userId);
+      if (stats && stats.monitorInterval) {
+        clearInterval(stats.monitorInterval);
+      }
+      connectionStats.delete(data.userId);
+      
+      // Clean up pending candidates
+      pendingIceCandidates.delete(data.userId);
+      
+      // Clean up negotiation mutex
+      negotiationMutex.delete(data.userId);
+      makingOffer.delete(data.userId);
+      
+      console.log(`✅ Fully cleaned up resources for ${data.userId}`);
+    });
+    
+    // Speaking state handler
+    socketInstance.on('speaking_state', (d) => {
+      const s = document.getElementById(`speaking-${d.userId}`);
+      const t = document.getElementById(`participant-${d.userId}`);
+      if (s && t) {
+        if (d.speaking) { 
+          s.classList.remove('hidden'); 
+          t.classList.add('active-speaker'); 
+        } else { 
+          s.classList.add('hidden'); 
+          t.classList.remove('active-speaker'); 
+        }
+      }
+    });
+    
+    // Audio/video state change handlers
+    socketInstance.on('audio_state_changed', (data) => {
+      console.log(`🎤 Received audio_state_changed: userId=${data.userId}, enabled=${data.enabled}`);
+      
+      const micIndicator = document.getElementById(`mic-${data.userId}`);
+      if (micIndicator) {
+        if (data.enabled) {
+          micIndicator.classList.add('hidden');
+        } else {
+          micIndicator.classList.remove('hidden');
+        }
+      }
+    });
+    
+    socketInstance.on('video_state_changed', (data) => {
+      console.log(`📹 ========================================`);
+      console.log(`📹 RECEIVED: video_state_changed`);
+      console.log(`📹 ========================================`);
+      console.log(`   From userId: ${data.userId}`);
+      console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
+      console.log(`   My userId: ${currentUser.userId}`);
+      
+      // Sanity check - should NEVER receive own state back
+      if (data.userId === currentUser.userId) {
+        console.error(`❌ CRITICAL: Received own video state from server!`);
+        console.error(`   This should not happen - server should exclude sender`);
+        console.error(`   Ignoring to prevent state desync`);
+        console.log(`📹 ========================================\n`);
+        return;
+      }
+      
+      // ✅ Update remote user's video visibility
+      console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
+      
+      // ✅ CRITICAL: Check if video element has video tracks
+      const remoteVideo = document.getElementById(`video-${data.userId}`);
+      if (remoteVideo && remoteVideo.srcObject) {
+        const videoTracks = remoteVideo.srcObject.getVideoTracks();
+        console.log(`   Remote video element has ${videoTracks.length} video track(s)`);
+        
+        if (videoTracks.length === 0 && data.enabled) {
+          console.warn(`⚠️ Remote wants to show video but no video tracks in stream yet`);
+          console.warn(`   Waiting for ontrack event to deliver video track...`);
+          // Don't update visibility yet - wait for track to arrive
+          console.log(`📹 ========================================\n`);
+          return;
+        }
+      }
+      
+      updateVideoVisibility(data.userId, data.enabled, true);
+      
+      console.log(`✅ Remote video state updated successfully`);
+      console.log(`📹 ========================================\n`);
+    });
+    
+    // Call ended handler
+    socketInstance.on('call_ended', () => { 
+      toast('Call ended', 'warning'); 
+      leaveCall(); 
+    });
+    
+    // Setup UI button handlers
+    console.log('🎛️ Setting up UI button handlers...');
+    
+    const mic = document.getElementById('micBtn');
+    const vid = document.getElementById('videoBtn');
+    const leave = document.getElementById('leaveCallBtn');
+    
+    if (mic) mic.addEventListener('click', toggleMic);
+    if (vid) vid.addEventListener('click', toggleVideo);
+    if (leave) leave.addEventListener('click', leaveCall, { passive: true });
+    
+    console.log('✅ UI button handlers configured');
+    
+    // Setup back button handler for background call
+    setupCallBackButtonHandler();
+    
+    // Setup cleanup handler
+    setupCallCleanup();
+    
+    console.log('✅ Call page event handlers initialized');
+    console.log('🎬 ========================================');
+    console.log('🎬 INIT CALL SETUP COMPLETE');
+    console.log('🎬 ========================================\n');
+    
+  } catch (e) {
+    console.error('❌ ========================================');
+    console.error('❌ INIT CALL ERROR');
+    console.error('❌ ========================================');
+    console.error('   Error:', e.message);
+    console.error('   Stack:', e.stack);
+    console.error('❌ ========================================\n');
+    
+    toast('Failed to initialize call', 'error');
+    isInitializing = false;
+    setTimeout(() => window.location.href = '/chat.html', 2000);
+  }
+}
 
       console.log('✅ Page loaded - starting initialization');
       initCall();
