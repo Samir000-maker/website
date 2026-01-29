@@ -2887,31 +2887,61 @@ function returnToActiveCall() {
 }
 
 function checkForBackgroundCall() {
-  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+  console.log('🔍 ========================================');
+  console.log('🔍 CHECKING FOR BACKGROUND CALL');
+  console.log('🔍 ========================================');
+  
+  const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+  const backgroundCallId = sessionStorage.getItem('backgroundCallId');
   const activeCallStr = localStorage.getItem('activeCall');
   
-  console.log('🔍 Checking for background call...');
-  console.log(`   hasBackgroundCall flag: ${hasBackgroundCall}`);
+  console.log(`   backgroundCallActive: ${backgroundCallActive}`);
+  console.log(`   backgroundCallId: ${backgroundCallId}`);
   console.log(`   activeCall in storage: ${!!activeCallStr}`);
   
-  if (hasBackgroundCall && activeCallStr) {
+  if (backgroundCallActive && backgroundCallId && activeCallStr) {
     console.log('✅ Background call detected - showing return button');
     
-    const returnBtn = document.getElementById('floatingReturnToCall');
-    if (returnBtn) {
-      returnBtn.classList.remove('hidden');
+    try {
+      const activeCallData = JSON.parse(activeCallStr);
       
-      returnBtn.onclick = () => {
-        console.log('📞 Return to call clicked');
-        sessionStorage.removeItem('hasBackgroundCall');
-        window.location.href = '/call.html';
-      };
-      
-      console.log('✅ Return to call button activated');
+      if (activeCallData.callId === backgroundCallId) {
+        console.log(`   Call ID match: ${backgroundCallId}`);
+        console.log(`   Call type: ${activeCallData.callType}`);
+        
+        // Update UI to show "Back to Call" button
+        if (audioCallBtn) audioCallBtn.classList.add('hidden');
+        if (videoCallBtn) videoCallBtn.classList.add('hidden');
+        
+        if (joinCallBtn) {
+          joinCallBtn.classList.remove('hidden');
+          joinCallBtn.classList.add('flex');
+          
+          const btnIcon = joinCallBtn.querySelector('.material-symbols-outlined');
+          const btnTextLong = joinCallBtn.querySelector('span:not(.material-symbols-outlined).hidden.sm\\:inline');
+          const btnTextShort = joinCallBtn.querySelector('span:not(.material-symbols-outlined).sm\\:hidden');
+          
+          if (btnIcon) btnIcon.textContent = 'call';
+          if (btnTextLong) btnTextLong.textContent = 'Back to Call';
+          if (btnTextShort) btnTextShort.textContent = 'Back';
+          
+          joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+          joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
+          
+          console.log('✅ "Back to Call" button configured');
+        }
+        
+        console.log('🔍 ========================================\n');
+        return true;
+      }
+    } catch (e) {
+      console.error('❌ Failed to parse active call data:', e);
     }
-  } else {
-    console.log('ℹ️ No background call detected');
   }
+  
+  console.log('ℹ️ No background call detected');
+  console.log('🔍 ========================================\n');
+  return false;
 }
   
   
@@ -5529,95 +5559,81 @@ if (videoCallBtn) {
 
 
 
+// Update the joinCallBtn click handler
 if (joinCallBtn) {
-    joinCallBtn.addEventListener('click', () => {
-        console.log('🔘 ========================================');
-        console.log('🔘 JOIN CALL BUTTON CLICKED');
-        console.log('🔘 ========================================');
+  joinCallBtn.addEventListener('click', () => {
+    console.log('🔘 ========================================');
+    console.log('🔘 JOIN/BACK BUTTON CLICKED');
+    console.log('🔘 ========================================');
+    
+    const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+    const activeCallStr = localStorage.getItem('activeCall');
+    
+    console.log(`   Background call active: ${backgroundCallActive}`);
+    console.log(`   Active call exists: ${!!activeCallStr}`);
+    
+    if (backgroundCallActive && activeCallStr) {
+      console.log('📞 RETURNING TO BACKGROUND CALL');
+      
+      try {
+        const activeCallData = JSON.parse(activeCallStr);
+        console.log(`   Call ID: ${activeCallData.callId}`);
+        console.log(`   Call type: ${activeCallData.callType}`);
         
-        // Check if this is "Back to Call" or "Join Call"
-        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
+        // Mark that we're returning to call (not starting new)
+        sessionStorage.setItem('returningToBackgroundCall', 'true');
         
-        console.log(`   activeCallStr exists: ${!!activeCallStr}`);
-        console.log(`   userInCall: ${userInCall}`);
-        console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
+        // Clear background flag so call page shows normal UI
+        sessionStorage.removeItem('backgroundCallActive');
         
-        if (userInCall) {
-            // User is already in call - show call UI in iframe/overlay
-            console.log('📞 BACK TO CALL MODE');
-            
-            const activeCallData = JSON.parse(activeCallStr);
-            console.log(`   callId: ${activeCallData.callId}`);
-            console.log(`   Call is running in background - will hide chat overlay`);
-            
-            if (window.parent && window.parent !== window) {
-                console.log('📱 We are in iframe - posting message to parent');
-                window.parent.postMessage({ action: 'hideChat' }, '*');
-            } else {
-                console.log('⚠️ Not in iframe - navigating directly');
-                window.location.href = '/call.html';
-            }
-            
-            console.log('🔘 ========================================\n');
-        } else {
-            // No active call - join existing call
-            console.log('📞 JOIN EXISTING CALL MODE');
-            
-            if (!activeCallInRoom) {
-                console.error('❌ activeCallInRoom is null/undefined!');
-                console.log('   This should not happen - UI should not show Join button');
-                toast('No active call to join', 'warning');
-                console.log('🔘 ========================================\n');
-                return;
-            }
-            
-            console.log(`   activeCallInRoom.callId: ${activeCallInRoom.callId}`);
-            console.log(`   activeCallInRoom.callType: ${activeCallInRoom.callType}`);
-            console.log(`   activeCallInRoom.participantCount: ${activeCallInRoom.participantCount}`);
-            console.log(`   roomData.roomId: ${roomData.roomId}`);
-            
-            // Add loading state
-            joinCallBtn.classList.add('join-btn-loading');
-            joinCallBtn.disabled = true;
-            console.log('⏳ Join button set to loading state');
-            
-            // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
-            const callDataToStore = {
-                callId: activeCallInRoom.callId,
-                roomId: roomData.roomId,
-                callType: activeCallInRoom.callType,
-                users: []
-            };
-            
-            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(callDataToStore));
-            console.log('💾 Stored call data to localStorage (pre-join):');
-            console.log('   ', JSON.stringify(callDataToStore, null, 2));
-            
-            const eventData = {
-                callId: activeCallInRoom.callId,
-                roomId: roomData.roomId
-            };
-            
-            console.log('📤 Emitting join_existing_call with data:');
-            console.log('   ', JSON.stringify(eventData, null, 2));
-            
-            if (!socketInstance || !socketInstance.connected) {
-                console.error('❌ Socket not connected!');
-                toast('Connection lost. Please refresh the page.', 'error');
-                joinCallBtn.classList.remove('join-btn-loading');
-                joinCallBtn.disabled = false;
-                console.log('🔘 ========================================\n');
-                return;
-            }
-            
-            socketInstance.emit('join_existing_call', eventData);
-            
-            toast('Joining call...', 'success');
-            console.log('✅ Event emitted successfully');
-            console.log('🔘 ========================================\n');
-        }
-    }, { passive: true });
+        // Save current chat state
+        saveChatState(roomData.roomId, messagesCache);
+        console.log('✅ Chat state saved');
+        
+        console.log('🔄 Navigating back to call.html...');
+        window.location.href = '/call.html';
+        
+      } catch (e) {
+        console.error('❌ Failed to parse active call:', e);
+        toast('Failed to return to call', 'error');
+      }
+      
+    } else {
+      console.log('📞 JOINING NEW CALL');
+      
+      if (!activeCallInRoom) {
+        console.error('❌ No active call to join');
+        toast('No active call to join', 'warning');
+        console.log('🔘 ========================================\n');
+        return;
+      }
+      
+      console.log(`   Call ID: ${activeCallInRoom.callId}`);
+      
+      joinCallBtn.classList.add('join-btn-loading');
+      joinCallBtn.disabled = true;
+      
+      const callDataToStore = {
+        callId: activeCallInRoom.callId,
+        roomId: roomData.roomId,
+        callType: activeCallInRoom.callType,
+        users: []
+      };
+      
+      localStorage.setItem('activeCall', JSON.stringify(callDataToStore));
+      console.log('💾 Call data stored');
+      
+      socketInstance.emit('join_existing_call', {
+        callId: activeCallInRoom.callId,
+        roomId: roomData.roomId
+      });
+      
+      console.log('📤 Join request sent');
+      toast('Joining call...', 'success');
+    }
+    
+    console.log('🔘 ========================================\n');
+  }, { passive: true });
 }
 
 if (acceptCallBtn) {
@@ -5849,58 +5865,69 @@ if (messageForm) {
   });
 }
 
+// Update the leaveBtn handler to properly cleanup background calls
 leaveBtn?.addEventListener('click', async () => {
-  console.log('🚪 Leave button clicked - starting cleanup sequence');
+  console.log('🚪 ========================================');
+  console.log('🚪 LEAVE BUTTON CLICKED');
+  console.log('🚪 ========================================');
+  
   stopCachedCallMonitoring();
   
-  // CRITICAL: Check if there's a background call running
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  // Check for background call
+  const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+  const activeCallStr = localStorage.getItem('activeCall');
   
-  if (activeCallStr) {
-    console.log('📞 Active call detected - cleaning up before leaving');
+  console.log(`   Background call active: ${backgroundCallActive}`);
+  console.log(`   Active call exists: ${!!activeCallStr}`);
+  
+  if (backgroundCallActive || activeCallStr) {
+    console.log('📞 Active/background call detected - cleaning up');
     
     try {
-      const callData = JSON.parse(activeCallStr);
+      const callData = activeCallStr ? JSON.parse(activeCallStr) : null;
       
-      // 1. Emit leave_call to server
-      if (socketInstance && socketInstance.connected) {
-        console.log('📤 Emitting leave_call to server...');
-        socketInstance.emit('leave_call', { callId: callData.callId });
-        
-        // Wait for server to process the leave_call
-        await new Promise(resolve => setTimeout(resolve, 500));
-        console.log('✅ Leave_call processed');
+      if (callData) {
+        // Emit leave_call to server
+        if (socketInstance && socketInstance.connected) {
+          console.log('📤 Emitting leave_call...');
+          socketInstance.emit('leave_call', { callId: callData.callId });
+          await new Promise(resolve => setTimeout(resolve, 500));
+          console.log('✅ Leave_call processed');
+        }
       }
       
-      // 2. Clear all call-related storage
-      localStorage.removeItem(ACTIVE_CALL_KEY);
+      // Clear all call-related storage
+      localStorage.removeItem('activeCall');
+      sessionStorage.removeItem('backgroundCallActive');
+      sessionStorage.removeItem('backgroundCallId');
+      sessionStorage.removeItem('backgroundCallType');
+      sessionStorage.removeItem('callConnectionState');
+      sessionStorage.removeItem('returningToBackgroundCall');
       sessionStorage.removeItem('hasBackgroundCall');
       sessionStorage.removeItem('returningFromCall');
       sessionStorage.removeItem('backgroundCallMode');
-      sessionStorage.removeItem('returningToBackgroundCall');
       
-      console.log('✅ All call data cleared');
+      console.log('✅ All call storage cleared');
       
     } catch (e) {
       console.error('❌ Error during call cleanup:', e);
     }
   }
   
-  // 3. Leave the chat room
+  // Leave chat room
   if (socketInstance && socketInstance.connected) {
     console.log('📤 Emitting leave_room...');
     socketInstance.emit('leave_room');
-    
-    // Wait for server to process
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   
-  // 4. Clear chat state
+  // Clear chat state
   clearChatState(true);
   
-  // 5. Navigate - this will handle both iframe and standalone cases
-  console.log('✅ Cleanup complete - initiating navigation');
-  cleanupParentCallPage();
+  console.log('✅ Cleanup complete - navigating to mood.html');
+  console.log('🚪 ========================================\n');
+  
+  window.location.href = '/mood.html';
 });
 
     // Visibility change
@@ -5971,6 +5998,25 @@ window.addEventListener('beforeunload', (e) => {
   try {
   await initFileDB();
   console.log('✅ File storage initialized');
+  
+  
+    const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
+  
+  if (backgroundCallActive) {
+    console.log('🔄 ========================================');
+    console.log('🔄 RETURNING FROM BACKGROUND CALL');
+    console.log('🔄 ========================================');
+    console.log('   Call is still active in background');
+    console.log('   Will show "Back to Call" button');
+    
+    // Don't clear chat state - preserve it
+    console.log('🔒 Preserving chat state for background call mode');
+    console.log('🔄 ========================================\n');
+  } else {
+    // Normal entry - clear old state
+    console.log('🧹 Fresh chat entry - clearing old state');
+    clearAllChatData();
+  }
   
   // Clean up any orphaned files from previous sessions
   if (roomData?.roomId) {
