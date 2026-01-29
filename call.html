@@ -474,56 +474,52 @@ async function fetchIceServers() {
       let isNavigatingToChat = false;
       let isInChatView = false;
       
-      function setupCallBackButtonHandler() {
+      // Replace the setupCallBackButtonHandler function
+function setupCallBackButtonHandler() {
   console.log('🔙 Setting up call page back button handler');
   
   // Set initial state
   history.pushState({ view: 'call' }, 'Call', window.location.href);
   
+  window.addEventListener('popstate', (event) => {
+    console.log('⬅️ ========================================');
+    console.log('⬅️ BACK BUTTON PRESSED ON CALL PAGE');
+    console.log('⬅️ ========================================');
+    
+    // Prevent default back navigation
+    event.preventDefault();
+    
+    console.log('💬 Navigating to chat with background call...');
+    console.log(`   Call ID: ${callData?.callId || 'unknown'}`);
+    console.log(`   Active peer connections: ${peerConnections.size}`);
+    console.log(`   Local stream tracks: ${localStream?.getTracks().length || 0}`);
+    
+    // CRITICAL: Mark that call should continue in background
+    sessionStorage.setItem('backgroundCallActive', 'true');
+    sessionStorage.setItem('backgroundCallId', callData.callId);
+    sessionStorage.setItem('backgroundCallType', callData.callType);
+    
+    // Store connection state for restoration
+    const connectionState = {
+      callId: callData.callId,
+      callType: callData.callType,
+      peerCount: peerConnections.size,
+      hasLocalStream: !!localStream,
+      audioEnabled: isAudioEnabled,
+      videoEnabled: isVideoEnabled
+    };
+    sessionStorage.setItem('callConnectionState', JSON.stringify(connectionState));
+    
+    console.log('✅ Background call state preserved');
+    console.log('🔄 Navigating directly to chat.html...');
+    
+    // Navigate to chat - call stays alive in background
+    window.location.href = '/chat.html';
+    
+    console.log('⬅️ ========================================\n');
+  });
   
-// Listen for messages from chat iframe (legacy - no longer used with direct navigation)
-window.addEventListener('message', (event) => {
-  console.log('📨 ========================================');
-  console.log('📨 MESSAGE RECEIVED (legacy iframe approach)');
-  console.log('📨 ========================================');
-  console.log(`   action: ${event.data?.action}`);
-  console.log('   ℹ️ This should not be called with direct navigation');
-  console.log('📨 ========================================\n');
-});
-
-console.log('✅ Message listener added (legacy compatibility)');
-
-console.log('✅ Message listener added for iframe communication');
-  
-window.addEventListener('popstate', (event) => {
-  console.log('⬅️ ========================================');
-  console.log('⬅️ BACK BUTTON PRESSED ON CALL PAGE');
-  console.log('⬅️ ========================================');
-  
-  // Prevent default back navigation
-  event.preventDefault();
-  
-  console.log('💬 Navigating to chat with background call...');
-  console.log(`   Call ID: ${callData?.callId || 'unknown'}`);
-  console.log(`   Active peer connections: ${peerConnections.size}`);
-  console.log(`   Local stream tracks: ${localStream?.getTracks().length || 0}`);
-  
-  // CRITICAL: Keep activeCall in localStorage
-  if (callData && callData.callId) {
-    console.log(`✅ activeCall preserved: ${callData.callId}`);
-  }
-  
-  // Set background call flags
-  sessionStorage.setItem('hasBackgroundCall', 'true');
-  sessionStorage.setItem('backgroundCallMode', 'true');
-  sessionStorage.setItem('returningFromCall', 'true');
-  sessionStorage.setItem('backgroundCallId', callData.callId);
-  
-  // Navigate to chat
-  window.location.href = '/chat.html';
-  
-  console.log('⬅️ ========================================\n');
-});
+  console.log('✅ Back button handler configured for background call mode');
 }
 
 function showChat() {
@@ -818,6 +814,7 @@ function showChatOverlay() {
   console.log('✅ Chat overlay created');
 }
 
+// Replace setupCallCleanup function
 function setupCallCleanup() {
   window.addEventListener('beforeunload', (e) => {
     console.log('🚪 ========================================');
@@ -825,15 +822,15 @@ function setupCallCleanup() {
     console.log('🚪 ========================================');
     
     // Check if we're navigating to chat (background mode)
-    const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
-    const backgroundMode = sessionStorage.getItem('backgroundCallMode') === 'true';
+    const backgroundCallActive = sessionStorage.getItem('backgroundCallActive') === 'true';
     
-    if (hasBackgroundCall || backgroundMode) {
+    if (backgroundCallActive) {
       console.log('🔒 Background call mode - NOT cleaning up');
-      console.log('   Preserving activeCall in localStorage');
       console.log('   Call will remain active in background');
+      console.log('   WebRTC connections preserved');
+      console.log('   Socket connection preserved');
       console.log('🚪 ========================================\n');
-      return; // Don't cleanup - call continues in background
+      return; // Don't cleanup - call continues
     }
     
     console.log('🗑️ Performing full cleanup (user leaving call)');
@@ -889,6 +886,10 @@ function setupCallCleanup() {
     
     // Clear storage
     localStorage.removeItem('activeCall');
+    sessionStorage.removeItem('backgroundCallActive');
+    sessionStorage.removeItem('backgroundCallId');
+    sessionStorage.removeItem('backgroundCallType');
+    sessionStorage.removeItem('callConnectionState');
     
     console.log('✅ Full cleanup complete');
     console.log('🚪 ========================================\n');
