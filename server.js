@@ -951,70 +951,6 @@ io.on('connection', (socket) => {
   });
   
   
-  // Add after existing socket.on handlers (around line 1900)
-
-socket.on('validate_tab', ({ tabId }) => {
-  try {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) {
-      console.warn(`⚠️ [validate_tab] Unauthenticated socket tried to validate tab`);
-      socket.emit('tab_invalid', { 
-        reason: 'Not authenticated',
-        code: 'NOT_AUTHENTICATED'
-      });
-      return;
-    }
-    
-    console.log(`🔍 [validate_tab] Validating tab ${tabId} for user ${user.username}`);
-    
-    if (user.tabId !== tabId) {
-      console.warn(`⚠️ [validate_tab] Tab ID mismatch for ${user.username}`);
-      console.warn(`   Expected: ${user.tabId}, Got: ${tabId}`);
-      
-      socket.emit('tab_invalid', {
-        reason: 'Tab ID mismatch - another tab may be active',
-        code: 'TAB_MISMATCH',
-        expectedTabId: user.tabId,
-        receivedTabId: tabId
-      });
-      return;
-    }
-    
-    // Check if this is still the active socket for this user
-    const activeSocketId = userToSocketId.get(user.userId);
-    
-    if (activeSocketId !== socket.id) {
-      console.warn(`⚠️ [validate_tab] Socket ${socket.id} is not the active socket for user ${user.username}`);
-      console.warn(`   Active socket: ${activeSocketId}`);
-      
-      socket.emit('tab_invalid', {
-        reason: 'This tab is no longer active',
-        code: 'NOT_ACTIVE_TAB',
-        activeSocketId: activeSocketId
-      });
-      return;
-    }
-    
-    console.log(`✅ [validate_tab] Tab ${tabId} is valid for ${user.username}`);
-    
-    socket.emit('tab_valid', {
-      tabId: tabId,
-      socketId: socket.id,
-      userId: user.userId,
-      timestamp: Date.now()
-    });
-    
-  } catch (error) {
-    console.error(`❌ [validate_tab] Error:`, error);
-    socket.emit('tab_invalid', {
-      reason: 'Validation error',
-      code: 'VALIDATION_ERROR'
-    });
-  }
-});
-  
-  
 // ============================================
 // PEER-TO-PEER FILE TRANSFER VIA SOCKET RELAY
 // ============================================
@@ -1450,7 +1386,7 @@ socket.on('request_room_sync', ({ roomId }) => {
   }
 });
 
-socket.on('authenticate', async ({ token, userId, tabId }) => {
+socket.on('authenticate', async ({ token, userId }) => {
   try {
     // ============================================
     // INPUT VALIDATION
@@ -1483,22 +1419,7 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
       return;
     }
 
-    // CRITICAL: Validate tabId for multi-tab management
-    if (!tabId || typeof tabId !== 'string') {
-      console.error('❌ [authenticate] Missing or invalid tabId');
-      socket.emit('auth_error', { 
-        message: 'Invalid tab identifier', 
-        code: 'INVALID_TAB_ID' 
-      });
-      return;
-    }
-
-    console.log(`🔐 ========================================`);
-    console.log(`🔐 AUTHENTICATION REQUEST`);
-    console.log(`🔐 ========================================`);
-    console.log(`   Socket: ${socket.id}`);
-    console.log(`   User: ${userId}`);
-    console.log(`   TabId: ${tabId}`);
+    console.log(`🔐 Authenticating socket for userId: ${userId}`);
 
     // ============================================
     // TOKEN VERIFICATION
@@ -1507,13 +1428,14 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
     try {
       decodedToken = await verifyToken(token);
       
+      // Additional token validation
       if (!decodedToken || !decodedToken.uid) {
         throw new Error('Invalid token structure');
       }
       
-      console.log(`✅ [authenticate] Token verified for Firebase UID: ${decodedToken.uid}`);
+      console.log(`✅ Token verified for Firebase UID: ${decodedToken.uid}`);
     } catch (error) {
-      console.error('❌ [authenticate] Token verification failed:', error.message);
+      console.error('❌ Token verification failed:', error.message);
       socket.emit('auth_error', { 
         message: 'Invalid or expired token', 
         code: 'TOKEN_VERIFICATION_FAILED' 
@@ -1522,12 +1444,13 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
     }
 
     // ============================================
-    // DATABASE LOOKUP
+    // DATABASE LOOKUP WITH CIRCUIT BREAKER
     // ============================================
     const db = getDB();
     
     let user;
     try {
+      // CRITICAL: Use projection to minimize data transfer
       user = await db.collection('users').findOne(
         { _id: new ObjectId(userId) },
         { 
@@ -1537,11 +1460,12 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
             pfpUrl: 1, 
             email: 1,
             firebaseUid: 1
+            // Exclude password, createdAt, updatedAt, etc.
           } 
         }
       );
     } catch (dbError) {
-      console.error('❌ [authenticate] Database error:', dbError);
+      console.error('❌ Database error during authentication:', dbError);
       socket.emit('auth_error', { 
         message: 'Database error - please try again', 
         code: 'DB_ERROR' 
@@ -1550,7 +1474,7 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
     }
 
     if (!user) {
-      console.error(`❌ [authenticate] User not found: ${userId}`);
+      console.error(`❌ User not found in database: ${userId}`);
       socket.emit('auth_error', { 
         message: 'User not found', 
         code: 'USER_NOT_FOUND' 
@@ -1558,9 +1482,9 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
       return;
     }
 
-    // Verify Firebase UID matches
+    // CRITICAL: Verify Firebase UID matches (prevent token spoofing)
     if (user.firebaseUid !== decodedToken.uid) {
-      console.error(`❌ [authenticate] Firebase UID mismatch for user ${userId}`);
+      console.error(`❌ Firebase UID mismatch for user ${userId}`);
       console.error(`   Expected: ${user.firebaseUid}, Got: ${decodedToken.uid}`);
       socket.emit('auth_error', { 
         message: 'Authentication mismatch', 
@@ -1569,144 +1493,70 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
       return;
     }
 
-    console.log(`✅ [authenticate] User validated: ${user.username}`);
-
     // ============================================
-    // MULTI-TAB DETECTION AND HANDLING
+    // HANDLE EXISTING SOCKET FOR SAME USER
     // ============================================
-    const existingSocketId = userToSocketId.get(user._id.toString());
+    const oldSocketId = userToSocketId.get(user._id.toString());
     
-    if (existingSocketId && existingSocketId !== socket.id) {
-      const existingSocket = io.sockets.sockets.get(existingSocketId);
-      const existingSocketData = socketUsers.get(existingSocketId);
+    if (oldSocketId && oldSocketId !== socket.id) {
+      console.log(`🔄 User ${user.username} reconnected from new socket`);
+      console.log(`   Old socket: ${oldSocketId}`);
+      console.log(`   New socket: ${socket.id}`);
       
-      if (existingSocket && existingSocket.connected && existingSocketData) {
-        const existingTabId = existingSocketData.tabId;
-        
-        console.log(`⚠️ ========================================`);
-        console.log(`⚠️ DUPLICATE CONNECTION DETECTED`);
-        console.log(`⚠️ ========================================`);
-        console.log(`   User: ${user.username} (${user._id.toString()})`);
-        console.log(`   Existing Socket: ${existingSocketId}`);
-        console.log(`   Existing TabId: ${existingTabId}`);
-        console.log(`   New Socket: ${socket.id}`);
-        console.log(`   New TabId: ${tabId}`);
-        
-        // Extract timestamps from tab IDs (format: tab_TIMESTAMP_RANDOM)
-        const existingTimestamp = parseInt(existingTabId?.split('_')[1]) || 0;
-        const newTimestamp = parseInt(tabId?.split('_')[1]) || 0;
-        
-        console.log(`   Existing tab timestamp: ${existingTimestamp}`);
-        console.log(`   New tab timestamp: ${newTimestamp}`);
-        
-        if (newTimestamp > existingTimestamp) {
-          // NEW TAB IS NEWER - Disconnect old socket
-          console.log(`🔄 [authenticate] New tab is newer, disconnecting old socket`);
-          console.log(`   Old socket ${existingSocketId} will be terminated`);
-          
-          // Notify old client about session replacement
-          existingSocket.emit('session_replaced', {
-            message: 'Vibe is now open in another tab',
-            newSocketId: socket.id,
-            newTabId: tabId,
-            code: 'NEW_TAB_ACTIVE',
-            timestamp: Date.now()
-          });
-          
-          console.log(`📤 [authenticate] Sent session_replaced to old socket ${existingSocketId}`);
-          
-          // Give old client 500ms to show overlay and clean up
-          setTimeout(() => {
-            if (existingSocket.connected) {
-              existingSocket.disconnect(true);
-              console.log(`✅ [authenticate] Old socket ${existingSocketId} forcefully disconnected`);
-            }
-          }, 500);
-          
-          // Clean up old socket data immediately
-          socketUsers.delete(existingSocketId);
-          
-          // Cancel any pending cleanup for old socket
-          if (socketUserCleanup.has(existingSocketId)) {
-            clearTimeout(socketUserCleanup.get(existingSocketId));
-            socketUserCleanup.delete(existingSocketId);
-            console.log(`⏰ [authenticate] Cancelled cleanup timer for old socket ${existingSocketId}`);
-          }
-          
-          console.log(`✅ [authenticate] Old socket data cleaned up, proceeding with new socket`);
-          
-        } else if (existingTimestamp > newTimestamp) {
-          // EXISTING TAB IS NEWER - Reject new connection
-          console.log(`🚫 [authenticate] Existing tab is newer, rejecting new socket`);
-          console.log(`   New socket ${socket.id} will be rejected`);
-          
-          socket.emit('auth_error', { 
-            message: 'Vibe is already open in another tab',
-            code: 'DUPLICATE_TAB',
-            existingTabId: existingTabId,
-            existingSocketId: existingSocketId,
-            hint: 'Close other tabs or click "Use Here" to switch',
-            timestamp: Date.now()
-          });
-          
-          console.log(`📤 [authenticate] Sent DUPLICATE_TAB error to new socket ${socket.id}`);
-          console.log(`⚠️ ========================================\n`);
-          
-          // Don't disconnect immediately - let client handle gracefully
-          return;
-          
-        } else {
-          // SAME TIMESTAMP (rare edge case) - Keep existing, reject new
-          console.log(`⚠️ [authenticate] Same timestamp detected (rare), keeping existing socket`);
-          
-          socket.emit('auth_error', { 
-            message: 'Vibe is already open in another tab',
-            code: 'DUPLICATE_TAB',
-            existingTabId: existingTabId,
-            hint: 'Close other tabs or click "Use Here" to switch'
-          });
-          
-          console.log(`⚠️ ========================================\n`);
-          return;
-        }
-        
-      } else {
-        // Stale entry - old socket no longer connected
-        console.log(`🗑️ [authenticate] Cleaning up stale socket entry ${existingSocketId}`);
-        socketUsers.delete(existingSocketId);
-        userToSocketId.delete(user._id.toString());
+      // Clean up old socket mapping
+      const oldSocketData = socketUsers.get(oldSocketId);
+      if (oldSocketData) {
+        console.log(`🗑️ Removing old socket data for ${user.username}`);
+        socketUsers.delete(oldSocketId);
       }
-    } else if (existingSocketId === socket.id) {
-      console.log(`ℹ️ [authenticate] Re-authentication from same socket ${socket.id}`);
-    } else {
-      console.log(`✅ [authenticate] First connection for user ${user.username}`);
+      
+      // Gracefully disconnect old socket if still connected
+      const oldSocket = io.sockets.sockets.get(oldSocketId);
+      if (oldSocket && oldSocket.connected) {
+        console.log(`🔌 Disconnecting old socket ${oldSocketId}`);
+        
+        // Notify old client they've been replaced
+        oldSocket.emit('session_replaced', {
+          message: 'You have been logged in from another device',
+          newSocketId: socket.id
+        });
+        
+        // Force disconnect with small delay
+        setTimeout(() => {
+          if (oldSocket.connected) {
+            oldSocket.disconnect(true);
+            console.log(`✅ Old socket ${oldSocketId} disconnected`);
+          }
+        }, 100);
+      }
+      
+      // Clean up any pending socket cleanup timers
+      if (socketUserCleanup.has(oldSocketId)) {
+        clearTimeout(socketUserCleanup.get(oldSocketId));
+        socketUserCleanup.delete(oldSocketId);
+        console.log(`⏰ Cancelled pending cleanup for old socket ${oldSocketId}`);
+      }
     }
 
     // ============================================
-    // REGISTER NEW SOCKET WITH TAB TRACKING
+    // REGISTER NEW SOCKET
     // ============================================
     const userSocketData = {
       userId: user._id.toString(),
       username: user.username,
       pfpUrl: user.pfpUrl,
       email: user.email,
-      tabId: tabId,  // CRITICAL: Store tab ID for multi-tab management
-      authenticatedAt: Date.now(),
-      socketId: socket.id
+      authenticatedAt: Date.now()
     };
 
     // Store in both directions for O(1) lookups
     socketUsers.set(socket.id, userSocketData);
     userToSocketId.set(user._id.toString(), socket.id);
 
-    console.log('✅ ========================================');
-    console.log('✅ AUTHENTICATION SUCCESSFUL');
-    console.log('✅ ========================================');
+    console.log('✅ Socket authenticated successfully');
     console.log(`   User: ${user.username} (${user._id.toString()})`);
     console.log(`   Socket: ${socket.id}`);
-    console.log(`   TabId: ${tabId}`);
     console.log(`   Active sockets: ${socketUsers.size}`);
-    console.log(`   Active users: ${new Set(Array.from(socketUsers.values()).map(u => u.userId)).size}`);
 
     // ============================================
     // SEND SUCCESS RESPONSE
@@ -1719,33 +1569,26 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
         pfpUrl: user.pfpUrl
       },
       socketId: socket.id,
-      tabId: tabId,
       timestamp: Date.now()
     });
 
-    console.log(`📤 [authenticate] Sent authenticated event to socket ${socket.id}`);
-    console.log('✅ ========================================\n');
-
     // ============================================
-    // RESTORE USER STATE (if applicable)
+    // OPTIONAL: RESTORE USER STATE
     // ============================================
-    
-    // Check if user was in a room before disconnect
+    // If user was in a room before disconnect, rejoin them
     const roomId = matchmaking.getRoomIdByUser(user._id.toString());
     if (roomId) {
       const room = matchmaking.getRoom(roomId);
       if (room && !room.isExpired) {
-        console.log(`🔄 [authenticate] User ${user.username} was in room ${roomId}, auto-rejoining`);
+        console.log(`🔄 User ${user.username} was in room ${roomId}, auto-rejoining`);
         socket.join(roomId);
         
+        // Notify user they can resume
         socket.emit('room_reconnected', {
           roomId: room.id,
           expiresAt: room.expiresAt,
-          timeRemaining: room.getTimeUntilExpiration(),
-          serverTime: Date.now()
+          timeRemaining: room.getTimeUntilExpiration()
         });
-        
-        console.log(`📤 [authenticate] Sent room_reconnected to ${user.username}`);
         
         // Notify other users in room
         socket.to(roomId).emit('user_reconnected', {
@@ -1753,10 +1596,9 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
           username: user.username,
           pfpUrl: user.pfpUrl
         });
-        
-        console.log(`📢 [authenticate] Notified room ${roomId} of reconnection`);
       } else {
-        console.log(`⚠️ [authenticate] User ${user.username} was in expired room ${roomId}`);
+        // Room expired while user was disconnected
+        console.log(`⚠️ User ${user.username} was in expired room ${roomId}`);
         matchmaking.leaveRoom(user._id.toString());
       }
     }
@@ -1766,8 +1608,7 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
     if (activeCallId) {
       const call = activeCalls.get(activeCallId);
       if (call && call.status === 'active' && call.participants.includes(user._id.toString())) {
-        console.log(`📞 [authenticate] User ${user.username} was in call ${activeCallId}`);
-        console.log(`   Call status: ${call.status}, Participants: ${call.participants.length}`);
+        console.log(`📞 User ${user.username} was in call ${activeCallId}, notifying of reconnection opportunity`);
         
         socket.emit('call_reconnect_available', {
           callId: activeCallId,
@@ -1775,10 +1616,9 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
           participantCount: call.participants.length,
           roomId: call.roomId
         });
-        
-        console.log(`📤 [authenticate] Sent call_reconnect_available to ${user.username}`);
       } else {
-        console.log(`⚠️ [authenticate] User ${user.username} was in ended call ${activeCallId}`);
+        // Call ended while user was disconnected
+        console.log(`⚠️ User ${user.username} was in ended call ${activeCallId}`);
         userCalls.delete(user._id.toString());
       }
     }
@@ -1787,23 +1627,18 @@ socket.on('authenticate', async ({ token, userId, tabId }) => {
     // ============================================
     // GLOBAL ERROR HANDLER
     // ============================================
-    console.error(`❌ ========================================`);
-    console.error(`❌ AUTHENTICATION ERROR`);
-    console.error(`❌ ========================================`);
-    console.error(`   Socket: ${socket.id}`);
-    console.error(`   Error: ${error.message}`);
-    console.error(`   Stack:`, error.stack);
-    console.error(`❌ ========================================\n`);
+    console.error(`❌ [authenticate] Unexpected error for user ${userId}:`, error);
+    console.error('   Stack:', error.stack);
     
+    // Send generic error to client (don't leak internal details)
     socket.emit('auth_error', { 
       message: 'Authentication failed due to server error', 
       code: 'AUTH_FAILED',
-      retryable: true,
-      timestamp: Date.now()
+      retryable: true
     });
     
-    // TODO: Log to external monitoring (Sentry, DataDog, etc.)
-    // Example: Sentry.captureException(error, { extra: { userId, socketId: socket.id, tabId } });
+    // CRITICAL: Log to external monitoring (Sentry, DataDog, etc.)
+    // Example: Sentry.captureException(error, { extra: { userId, socketId: socket.id } });
   }
 });
 
@@ -3381,288 +3216,172 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
     }
   });
 
-socket.on('disconnect', (reason) => {
+socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
-  console.log(`🔌 ========================================`);
-  console.log(`🔌 SOCKET DISCONNECT`);
-  console.log(`🔌 ========================================`);
-  console.log(`   Socket: ${socket.id}`);
-  console.log(`   Reason: ${reason}`);
+  
+    if (user?.userId) {
+    joinCallDebounce.delete(user.userId);
+    userToSocketId.delete(user.userId);
+    console.log(`🗑️ Cleaned up joinCallDebounce for ${user.username}`);
+  }
+  
+    const offersToDelete = [];
+  for (const [key, _] of activeOffers.entries()) {
+    if (key.includes(user?.userId)) {
+      offersToDelete.push(key);
+    }
+  }
+  offersToDelete.forEach(key => {
+    activeOffers.delete(key);
+  });
+  if (offersToDelete.length > 0) {
+    console.log(`🗑️ Cleaned up ${offersToDelete.length} pending offers for ${user?.username || socket.id}`);
+  }
   
   if (user) {
-    console.log(`   User: ${user.username} (${user.userId})`);
-    console.log(`   TabId: ${user.tabId || 'unknown'}`);
-    console.log(`   Authenticated at: ${new Date(user.authenticatedAt).toISOString()}`);
+    console.log(`🔌 User ${user.username} disconnected`);
+    for (const [fileId, transfer] of activeFileTransfers.entries()) {
+      if (transfer.userId === user.userId) {
+        activeFileTransfers.delete(fileId);
+        console.log(`🗑️ Cleaned up incomplete file transfer ${fileId} for ${user.username}`);
+      }
+    }
+
+    // CRITICAL FIX: Schedule immediate socketUsers cleanup with grace period
+    const cleanupTimeout = setTimeout(() => {
+      // Check if user reconnected with different socket
+      const hasOtherSocket = Array.from(socketUsers.entries()).some(
+        ([sid, u]) => sid !== socket.id && u.userId === user.userId
+      );
+      
+      if (!hasOtherSocket) {
+        console.log(`🗑️ Cleaning up socketUsers entry for ${user.username} (${socket.id})`);
+        socketUsers.delete(socket.id);
+      } else {
+        console.log(`✅ User ${user.username} has active connection, keeping old socket entry`);
+      }
+      
+      socketUserCleanup.delete(socket.id);
+    }, 15000); // 15s grace period
     
-    // ============================================
-    // VERIFY THIS WAS THE ACTIVE SOCKET
-    // ============================================
-    const currentActiveSocket = userToSocketId.get(user.userId);
-    
-    if (currentActiveSocket === socket.id) {
-      console.log(`✅ [disconnect] This was the ACTIVE socket for ${user.username}`);
-      console.log(`   Proceeding with full cleanup...`);
-      
-      // ============================================
-      // CLEAN UP FILE TRANSFERS
-      // ============================================
-      let cleanedFiles = 0;
-      for (const [fileId, transfer] of activeFileTransfers.entries()) {
-        if (transfer.userId === user.userId) {
-          activeFileTransfers.delete(fileId);
-          cleanedFiles++;
-        }
-      }
-      if (cleanedFiles > 0) {
-        console.log(`🗑️ [disconnect] Cleaned up ${cleanedFiles} incomplete file transfer(s)`);
-      }
-      
-      // ============================================
-      // CLEAN UP DEBOUNCE ENTRIES
-      // ============================================
-      joinCallDebounce.delete(user.userId);
-      
-      const offersToDelete = [];
-      for (const [key] of activeOffers.entries()) {
-        if (key.includes(user.userId)) {
-          offersToDelete.push(key);
-        }
-      }
-      offersToDelete.forEach(key => activeOffers.delete(key));
-      if (offersToDelete.length > 0) {
-        console.log(`🗑️ [disconnect] Cleaned up ${offersToDelete.length} pending offer(s)`);
-      }
-      
-      const answersToDelete = [];
-      for (const [key] of answerDebounce.entries()) {
-        if (key.includes(user.userId)) {
-          answersToDelete.push(key);
-        }
-      }
-      answersToDelete.forEach(key => answerDebounce.delete(key));
-      if (answersToDelete.length > 0) {
-        console.log(`🗑️ [disconnect] Cleaned up ${answersToDelete.length} answer debounce entrie(s)`);
-      }
-      
-      // ============================================
-      // CLEAN UP USER-TO-SOCKET MAPPING
-      // ============================================
-      userToSocketId.delete(user.userId);
-      console.log(`🗑️ [disconnect] Removed user-to-socket mapping for ${user.username}`);
-      
-      // ============================================
-      // SCHEDULE SOCKET DATA CLEANUP WITH GRACE PERIOD
-      // ============================================
-      const cleanupTimeout = setTimeout(() => {
-        // Check if user reconnected with different socket
-        const hasOtherSocket = Array.from(socketUsers.entries()).some(
-          ([sid, u]) => sid !== socket.id && u.userId === user.userId
-        );
+    socketUserCleanup.set(socket.id, cleanupTimeout);
+
+    const callId = userCalls.get(user.userId);
+    if (callId) {
+      const call = activeCalls.get(callId);
+      if (call && call.status === 'active') {
+        console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
         
-        if (!hasOtherSocket) {
-          console.log(`🗑️ [disconnect] Grace period expired for ${user.username}`);
-          console.log(`   No reconnection detected, removing socket data`);
-          socketUsers.delete(socket.id);
-        } else {
-          console.log(`✅ [disconnect] User ${user.username} reconnected with new socket`);
-          console.log(`   Preserving user state`);
-        }
-        
-        socketUserCleanup.delete(socket.id);
-      }, 15000); // 15 second grace period
-      
-      socketUserCleanup.set(socket.id, cleanupTimeout);
-      console.log(`⏰ [disconnect] Scheduled cleanup in 15s for socket ${socket.id}`);
-      
-      // ============================================
-      // HANDLE ACTIVE CALL DISCONNECTION
-      // ============================================
-      const callId = userCalls.get(user.userId);
-      if (callId) {
-        const call = activeCalls.get(callId);
-        if (call && call.status === 'active') {
-          console.log(`📞 [disconnect] User ${user.username} was in active call ${callId}`);
-          console.log(`   Call participants before: [${call.participants.join(', ')}]`);
-          console.log(`   Starting grace period for call reconnection...`);
+        const graceTimeout = setTimeout(() => {
+          console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
           
-          // CRITICAL: Don't remove from call immediately - give grace period
-          const callGraceTimeout = setTimeout(() => {
-            console.log(`⏱️ [disconnect] Call grace period expired for ${user.username}`);
+          const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+          
+          if (!reconnected) {
+            console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
             
-            // Check if user reconnected
-            const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
-            
-            if (!reconnected) {
-              console.log(`❌ [disconnect] User ${user.username} did not rejoin, removing from call ${callId}`);
+            call.participants = call.participants.filter(p => p !== user.userId);
+            userCalls.delete(user.userId);
+            call.userMediaStates.delete(user.userId);
+
+            io.to(`call-${callId}`).emit('user_left_call', {
+              userId: user.userId,
+              username: user.username
+            });
+
+            if (call.participants.length === 0) {
+              console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
               
-              const currentCall = activeCalls.get(callId);
-              if (currentCall) {
-                // Remove user from call
-                currentCall.participants = currentCall.participants.filter(p => p !== user.userId);
-                userCalls.delete(user.userId);
-                currentCall.userMediaStates.delete(user.userId);
-                
-                console.log(`   Updated participants: [${currentCall.participants.join(', ')}]`);
-                console.log(`   Remaining count: ${currentCall.participants.length}`);
-                
-                // Notify others in call
-                io.to(`call-${callId}`).emit('user_left_call', {
-                  userId: user.userId,
-                  username: user.username
-                });
-                console.log(`📢 [disconnect] Notified call participants of ${user.username} leaving`);
-                
-                // Update call state in room
-                const room = matchmaking.getRoom(currentCall.roomId);
-                if (room) {
-                  io.to(currentCall.roomId).emit('call_state_update', {
-                    callId: callId,
-                    isActive: currentCall.participants.length > 0,
-                    participantCount: currentCall.participants.length,
-                    callType: currentCall.callType
-                  });
-                  console.log(`📢 [disconnect] Broadcasted call_state_update to room ${currentCall.roomId}`);
-                }
-                
-                // If call is now empty, schedule call cleanup
-                if (currentCall.participants.length === 0) {
-                  console.log(`📞 [disconnect] Call ${callId} is now empty, scheduling cleanup`);
+              const room = matchmaking.getRoom(call.roomId);
+              if (room) {
+                room.setActiveCall(false);
+              }
+              
+              setTimeout(() => {
+                const currentCall = activeCalls.get(callId);
+                if (currentCall && currentCall.participants.length === 0) {
+                  activeCalls.delete(callId);
+                  console.log(`🗑️ Call ${callId} fully cleaned up`);
                   
                   if (room) {
-                    room.setActiveCall(false);
-                    console.log(`   Room ${currentCall.roomId} marked as call-free`);
+                    io.to(call.roomId).emit('call_ended_notification', {
+                      callId: callId
+                    });
+                    console.log(`📢 Call ${callId} ended, room ${call.roomId} still active`);
                   }
-                  
-                  // Clear any existing call cleanup timer
-                  if (callGracePeriod.has(callId)) {
-                    clearTimeout(callGracePeriod.get(callId));
-                  }
-                  
-                  const callCleanupTimeout = setTimeout(() => {
-                    const finalCall = activeCalls.get(callId);
-                    if (finalCall && finalCall.participants.length === 0) {
-                      console.log(`🗑️ [disconnect] Cleaning up empty call ${callId}`);
-                      activeCalls.delete(callId);
-                      callGracePeriod.delete(callId);
-                      
-                      if (room) {
-                        io.to(finalCall.roomId).emit('call_ended_notification', {
-                          callId: callId
-                        });
-                        console.log(`📢 [disconnect] Sent call_ended_notification to room ${finalCall.roomId}`);
-                      }
-                    }
-                  }, 5000);
-                  
-                  callGracePeriod.set(callId, callCleanupTimeout);
                 }
-              }
-            } else {
-              console.log(`✅ [disconnect] User ${user.username} reconnected, keeping in call ${callId}`);
+              }, 5000);
             }
-          }, 10000); // 10 second grace period for call reconnection
-          
-          callGracePeriod.set(callId, callGraceTimeout);
-          console.log(`⏰ [disconnect] Scheduled call grace period (10s) for ${user.username}`);
-        }
-      }
-      
-      // ============================================
-      // CANCEL MATCHMAKING
-      // ============================================
-      matchmaking.cancelMatchmaking(user.userId);
-      console.log(`🎮 [disconnect] Cancelled matchmaking for ${user.username}`);
-      
-      // ============================================
-      // HANDLE ROOM DISCONNECTION
-      // ============================================
-      const roomId = matchmaking.getRoomIdByUser(user.userId);
-      
-      if (roomId) {
-        const room = matchmaking.getRoom(roomId);
-        
-        // Check if room has active call
-        let hasActiveCall = false;
-        activeCalls.forEach((call) => {
-          if (call.roomId === roomId && call.participants.length > 0) {
-            hasActiveCall = true;
+          } else {
+            console.log(`✅ User ${user.username} rejoined call`);
           }
-        });
+        }, 10000);
         
-        if (hasActiveCall) {
-          console.log(`🛡️ [disconnect] Room ${roomId} has active call, PRESERVING room`);
-          console.log(`   User ${user.username} can rejoin if they reconnect`);
-        } else {
-          console.log(`⏳ [disconnect] Starting grace period for room ${roomId}`);
-          
-          setTimeout(() => {
-            const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
-            
-            if (stillDisconnected) {
-              console.log(`👋 [disconnect] User ${user.username} did not reconnect, removing from room ${roomId}`);
-              
-              // Check again for active calls
-              let stillHasActiveCall = false;
-              activeCalls.forEach((call) => {
-                if (call.roomId === roomId && call.participants.length > 0) {
-                  stillHasActiveCall = true;
-                }
-              });
-              
-              const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
-              
-              if (result.roomId && !result.destroyed) {
-                io.to(result.roomId).emit('user_left', {
-                  userId: user.userId,
-                  username: user.username,
-                  remainingUsers: result.remainingUsers
-                });
-                console.log(`📢 [disconnect] Notified room ${result.roomId} of user leaving`);
-              }
-              
-              if (result.destroyed) {
-                console.log(`🗑️ [disconnect] Room ${result.roomId} destroyed after user left`);
-                cancelRoomCleanup(result.roomId);
-                performRoomCleanup(result.roomId);
-              }
-            } else {
-              console.log(`✅ [disconnect] User ${user.username} reconnected, staying in room ${roomId}`);
-            }
-          }, 5000); // 5 second grace period for room
-        }
-      }
-      
-    } else {
-      // This was NOT the active socket - another tab took over
-      console.log(`ℹ️ [disconnect] This was NOT the active socket for ${user.username}`);
-      console.log(`   Active socket: ${currentActiveSocket || 'none'}`);
-      console.log(`   Immediate cleanup of inactive socket data`);
-      
-      socketUsers.delete(socket.id);
-      
-      // Cancel any pending cleanup
-      if (socketUserCleanup.has(socket.id)) {
-        clearTimeout(socketUserCleanup.get(socket.id));
-        socketUserCleanup.delete(socket.id);
+        callGracePeriod.set(callId, graceTimeout);
       }
     }
     
-    console.log(`📊 [disconnect] Current state after disconnect:`);
-    console.log(`   Active sockets: ${socketUsers.size}`);
-    console.log(`   Active users: ${new Set(Array.from(socketUsers.values()).map(u => u.userId)).size}`);
-    console.log(`   Active calls: ${activeCalls.size}`);
-    console.log(`   Active rooms: ${matchmaking.getActiveRooms().length}`);
+    matchmaking.cancelMatchmaking(user.userId);
     
+    const roomId = matchmaking.getRoomIdByUser(user.userId);
+    
+    if (roomId) {
+      const room = matchmaking.getRoom(roomId);
+      
+      let hasActiveCall = false;
+      activeCalls.forEach((call) => {
+        if (call.roomId === roomId && call.participants.length > 0) {
+          hasActiveCall = true;
+          console.log(`🛡️ Room ${roomId} has active call ${call.callId}`);
+        }
+      });
+      
+      if (hasActiveCall) {
+        console.log(`🛡️ User ${user.username} disconnected - room ${roomId} PRESERVED (active call)`);
+      } else {
+        console.log(`⏳ User ${user.username} disconnected - grace period for room ${roomId}`);
+        
+        setTimeout(() => {
+          const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
+          
+          if (stillDisconnected) {
+            console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
+            
+            let stillHasActiveCall = false;
+            activeCalls.forEach((call) => {
+              if (call.roomId === roomId && call.participants.length > 0) {
+                stillHasActiveCall = true;
+              }
+            });
+            
+            const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
+            
+            if (result.roomId && !result.destroyed) {
+              io.to(result.roomId).emit('user_left', {
+                userId: user.userId,
+                username: user.username,
+                remainingUsers: result.remainingUsers
+              });
+            }
+            
+            if (result.destroyed) {
+              console.log(`🗑️ Room ${result.roomId} destroyed after user disconnect`);
+              cancelRoomCleanup(result.roomId);
+              performRoomCleanup(result.roomId);
+            }
+          } else {
+            console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
+          }
+        }, 5000);
+      }
+    }
+
   } else {
-    console.log(`ℹ️ [disconnect] Unauthenticated socket disconnected`);
-    console.log(`   No user data associated with socket ${socket.id}`);
-    
-    // Still clean up just in case
+    console.log('🔌 Unauthenticated client disconnected:', socket.id);
+    // CRITICAL: Still need to clean up socketUsers entry
     socketUsers.delete(socket.id);
   }
-  
-  console.log(`🔌 ========================================\n`);
 });
 });
 
@@ -3794,6 +3513,25 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('💥 UNHANDLED PROMISE REJECTION at:', promise, 'reason:', reason);
   // Log to external monitoring service here
 });
+
+
+const INTERVAL_MS = 5000;
+let lastCpuUsage = process.cpuUsage();
+
+setInterval(() => {
+  const usage = process.cpuUsage(lastCpuUsage);
+  lastCpuUsage = process.cpuUsage();
+
+  const totalCpuMs = (usage.user + usage.system) / 1000; // micro → ms
+  const cpuPercent = (totalCpuMs / INTERVAL_MS) * 100;
+
+  console.log({
+    cpuPercentLast5s: cpuPercent.toFixed(2) + '%',
+    userMsLast5s: (usage.user / 1000).toFixed(2),
+    systemMsLast5s: (usage.system / 1000).toFixed(2),
+    memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024)
+  });
+}, INTERVAL_MS);
 
 
 // Add after line 2182 (in periodic cleanup interval)
