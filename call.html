@@ -481,60 +481,43 @@ async function fetchIceServers() {
   history.pushState({ view: 'call' }, 'Call', window.location.href);
   
   
-  // Listen for messages from chat iframe
+// Listen for messages from chat iframe (legacy - no longer used with direct navigation)
 window.addEventListener('message', (event) => {
   console.log('📨 ========================================');
-  console.log('📨 MESSAGE RECEIVED FROM IFRAME');
+  console.log('📨 MESSAGE RECEIVED (legacy iframe approach)');
   console.log('📨 ========================================');
   console.log(`   action: ${event.data?.action}`);
-  
-  if (event.data && event.data.action === 'hideChat') {
-    console.log('💬 Hiding chat overlay as requested by iframe');
-    hideChat();
-    history.pushState({ view: 'call' }, 'Call', window.location.href);
-  }
-  
+  console.log('   ℹ️ This should not be called with direct navigation');
   console.log('📨 ========================================\n');
 });
 
+console.log('✅ Message listener added (legacy compatibility)');
+
 console.log('✅ Message listener added for iframe communication');
   
-  window.addEventListener('popstate', (event) => {
-    console.log('⬅️ ========================================');
-    console.log('⬅️ BACK BUTTON PRESSED');
-    console.log('⬅️ ========================================');
-    
-    const chatOverlay = document.getElementById('chatOverlayContainer');
-    const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
-    
-    console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
-    
-    // CRITICAL: Always prevent default navigation
-    event.preventDefault();
-    
-    if (isShowingChat) {
-      // Hide chat, show call
-      console.log('📞 Hiding chat, showing call');
-      hideChat();
-      history.pushState({ view: 'call' }, 'Call', window.location.href);
-    } else {
-      // Hide call, show chat
-      if (!callData || !localStream) {
-        console.log('⚠️ No active call, allowing navigation');
-        window.location.href = '/chat.html';
-        return;
-      }
-      
-      console.log('💬 Hiding call, showing chat');
-      console.log(`   Active peer connections: ${peerConnections.size}`);
-      console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
-      
-      showChat();
-      history.pushState({ view: 'chat' }, 'Chat', window.location.href);
-    }
-    
-    console.log('⬅️ ========================================\n');
-  });
+window.addEventListener('popstate', (event) => {
+  console.log('⬅️ ========================================');
+  console.log('⬅️ BACK BUTTON PRESSED');
+  console.log('⬅️ ========================================');
+  
+  // CRITICAL: Since we're using direct navigation, back button on call page
+  // should go to chat page with background call mode
+  
+  console.log('💬 Navigating to chat with background call...');
+  
+  // Set flags for background call
+  sessionStorage.setItem('hasBackgroundCall', 'true');
+  sessionStorage.setItem('backgroundCallMode', 'true');
+  sessionStorage.setItem('returningFromCall', 'true');
+  
+  console.log(`   Active peer connections: ${peerConnections.size}`);
+  console.log(`   Local stream tracks: ${localStream?.getTracks().length || 0}`);
+  
+  // Navigate to chat
+  window.location.href = '/chat.html';
+  
+  console.log('⬅️ ========================================\n');
+});
 }
 
 function showChat() {
@@ -542,44 +525,33 @@ function showChat() {
   console.log('💬 SHOWING CHAT OVERLAY');
   console.log('💬 ========================================');
   
-  // Hide call UI elements
-  const header = document.querySelector('header');
-  const main = document.querySelector('main');
-  const footer = document.querySelector('footer');
+  // CRITICAL: Don't use iframe - it creates tab conflicts
+  // Instead, mark that we're in background mode and navigate
+  sessionStorage.setItem('hasBackgroundCall', 'true');
+  sessionStorage.setItem('backgroundCallMode', 'true');
+  sessionStorage.setItem('returningFromCall', 'true');
   
-  if (header) header.style.display = 'none';
-  if (main) main.style.display = 'none';
-  if (footer) footer.style.display = 'none';
+  console.log('✅ Background call flags set');
+  console.log(`   PeerConnections: ${peerConnections.size} (will remain connected)`);
+  console.log(`   LocalStream: ${localStream?.getTracks().length} tracks (will remain active)`);
   
-  // Show chat overlay
-  const chatOverlay = document.getElementById('chatOverlayContainer');
-  const chatIframe = document.getElementById('chatOverlayIframe');
-  const miniIndicator = document.getElementById('miniCallIndicator');
+  // Navigate to actual chat page (not iframe)
+  console.log('🔄 Navigating to chat page with background call...');
+  window.location.href = '/chat.html';
   
-  if (chatOverlay) {
-    chatOverlay.classList.remove('hidden');
-    
-    // Load chat page in iframe
-    if (chatIframe) {
-      chatIframe.src = '/chat.html';
-      console.log('✅ Chat iframe loaded');
-    }
-  }
-  
-  // Show mini indicator
-  if (miniIndicator) {
-    miniIndicator.classList.remove('hidden');
-    miniIndicator.onclick = () => {
-      console.log('🔙 Mini indicator clicked');
-      hideChat();
-      history.pushState({ view: 'call' }, 'Call', window.location.href);
-    };
-  }
-  
-  console.log('✅ Chat overlay shown - call remains active');
-  console.log(`   PeerConnections: ${peerConnections.size}`);
-  console.log(`   LocalStream: ${localStream?.getTracks().length} tracks`);
   console.log('💬 ========================================\n');
+}
+
+function hideChat() {
+  console.log('📞 ========================================');
+  console.log('📞 HIDING CHAT OVERLAY');
+  console.log('📞 ========================================');
+  
+  // This function is no longer needed with direct navigation
+  // But keeping it for backward compatibility
+  
+  console.log('ℹ️ hideChat called but using direct navigation approach');
+  console.log('📞 ========================================\n');
 }
 
 function hideChat() {
