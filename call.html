@@ -249,7 +249,8 @@ let makingOffer = new Map();
 let ICE_SERVERS = null;
 let useTurnFallback = false; // Global flag for TURN fallback
 
-
+let isSocketAuthenticated = false;
+let authenticationPromise = null;
 
 
  function waitForTabManager() {
@@ -402,6 +403,25 @@ function setupSessionReplacementHandler(socket) {
 console.log('✅ Socket authentication helpers loaded');
  
 
+function setAuthenticationState(authenticated) {
+  console.log(`🔐 ========================================`);
+  console.log(`🔐 AUTHENTICATION STATE CHANGE`);
+  console.log(`🔐 ========================================`);
+  console.log(`   Previous state: ${isSocketAuthenticated}`);
+  console.log(`   New state: ${authenticated}`);
+  
+  isSocketAuthenticated = authenticated;
+  
+  if (authenticated) {
+    console.log(`✅ Socket fully authenticated - enabling call features`);
+    enableCallButtons();
+  } else {
+    console.log(`🔒 Socket not authenticated - disabling call features`);
+    disableCallButtons(true); // true = show loading state
+  }
+  
+  console.log(`🔐 ========================================\n`);
+}
 
 
 
