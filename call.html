@@ -404,24 +404,15 @@ console.log('✅ Socket authentication helpers loaded');
  
 
 function setAuthenticationState(authenticated) {
-  console.log(`🔐 ========================================`);
-  console.log(`🔐 AUTHENTICATION STATE CHANGE`);
-  console.log(`🔐 ========================================`);
-  console.log(`   Previous state: ${isSocketAuthenticated}`);
-  console.log(`   New state: ${authenticated}`);
-  
   isSocketAuthenticated = authenticated;
-  
-  if (authenticated) {
-    console.log(`✅ Socket fully authenticated - enabling call features`);
-    enableCallButtons();
-  } else {
-    console.log(`🔒 Socket not authenticated - disabling call features`);
-    disableCallButtons(true); // true = show loading state
-  }
-  
-  console.log(`🔐 ========================================\n`);
+  console.log(`🔐 [Auth] State updated: ${authenticated ? 'AUTHENTICATED' : 'NOT AUTHENTICATED'}`);
 }
+
+function getAuthenticationState() {
+  return isSocketAuthenticated;
+}
+
+console.log('✅ Authentication state management initialized');
 
 
 
@@ -2545,6 +2536,13 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
   console.log(`   Socket ID: ${socketInstance.id}`);
   console.log(`   User: ${currentUser?.username || 'unknown'}`);
   
+  // CRITICAL: Check if already authenticated
+  if (getAuthenticationState()) {
+    console.log('⚠️ Socket already authenticated, skipping re-authentication');
+    console.log('🔌 ========================================\n');
+    return;
+  }
+  
   // CRITICAL: Reset auth state on new connection
   setAuthenticationState(false);
   
@@ -2564,10 +2562,27 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
     await authenticateSocket(socketInstance, currentUser.userId);
     console.log('✅ Socket authentication complete');
     
+    // Mark as authenticated
+    setAuthenticationState(true);
+    
   } catch (error) {
     console.error('❌ Socket connection/authentication error:', error);
     toast('Connection failed. Please refresh.', 'error');
+    setAuthenticationState(false);
   }
+  
+  console.log('🔌 ========================================\n');
+});
+
+socketInstance.on('disconnect', (reason) => {
+  console.log('🔌 ========================================');
+  console.log('🔌 SOCKET DISCONNECTED');
+  console.log('🔌 ========================================');
+  console.log(`   Reason: ${reason}`);
+  console.log(`   Socket ID was: ${socketInstance.id}`);
+  
+  // Reset authentication state
+  setAuthenticationState(false);
   
   console.log('🔌 ========================================\n');
 });
@@ -2623,7 +2638,12 @@ socketInstance.on('room_expiring_soon', (data) => {
 });
 
 socketInstance.on('authenticated', async () => {
-  console.log('✅ Authenticated');
+  console.log('✅ ========================================');
+  console.log('✅ AUTHENTICATED EVENT RECEIVED');
+  console.log('✅ ========================================');
+  
+  // Mark as authenticated
+  setAuthenticationState(true);
   
   // CRITICAL: Request room data from server to get clock sync
   const roomStr = localStorage.getItem('currentRoom');
@@ -2632,7 +2652,7 @@ socketInstance.on('authenticated', async () => {
       const roomData = JSON.parse(roomStr);
       console.log('📦 Requesting fresh room data for clock sync...');
       
-      // Emit a request for fresh room data (you'll need to add this handler on server)
+      // Emit a request for fresh room data
       socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
       
     } catch (e) {
@@ -2643,6 +2663,7 @@ socketInstance.on('authenticated', async () => {
   // CRITICAL FIX: Prevent duplicate join attempts
   if (isJoiningCall) {
     console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
+    console.log('✅ ========================================\n');
     return;
   }
   
@@ -2664,6 +2685,8 @@ socketInstance.on('authenticated', async () => {
       isJoiningCall = false;
     }
   }
+  
+  console.log('✅ ========================================\n');
 });
 
 
