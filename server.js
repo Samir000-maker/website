@@ -1560,7 +1560,6 @@ socket.on('authenticate', async ({ token, userId }) => {
     });
   }
 });
-});
 
 
 // ================== DISCONNECT CLEANUP ==================
