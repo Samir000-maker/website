@@ -3302,6 +3302,7 @@ socket.on('disconnect', () => {
     socketUsers.delete(socket.id);
   }
 });
+});
 
 // ============================================
 // PERIODIC CLEANUP
