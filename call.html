@@ -527,34 +527,61 @@ window.addEventListener('popstate', (event) => {
 }
 
 function showChat() {
-  console.log('💬 ========================================');
-  console.log('💬 SHOWING CHAT - BACKGROUND CALL MODE');
-  console.log('💬 ========================================');
+  console.log('💬 Showing chat in overlay (call remains active)');
   
-  // CRITICAL: Keep activeCall in localStorage so chat page knows call is active
-  if (callData && callData.callId) {
-    console.log(`✅ Preserving activeCall in localStorage: ${callData.callId}`);
-    // Don't remove activeCall - chat page needs it!
+  // Hide call UI
+  const header = document.querySelector('header');
+  const main = document.querySelector('main');
+  const footer = document.querySelector('footer');
+  
+  if (header) header.style.display = 'none';
+  if (main) main.style.display = 'none';
+  if (footer) footer.style.display = 'none';
+  
+  // Show chat iframe
+  let chatOverlay = document.getElementById('chatOverlay');
+  if (!chatOverlay) {
+    chatOverlay = document.createElement('div');
+    chatOverlay.id = 'chatOverlay';
+    chatOverlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 9999;
+      background: white;
+    `;
+    
+    const iframe = document.createElement('iframe');
+    iframe.src = '/chat.html';
+    iframe.style.cssText = 'width: 100%; height: 100%; border: none;';
+    
+    chatOverlay.appendChild(iframe);
+    document.body.appendChild(chatOverlay);
   } else {
-    console.warn('⚠️ No callData to preserve!');
+    chatOverlay.style.display = 'block';
   }
   
-  // Set background call flags
-  sessionStorage.setItem('hasBackgroundCall', 'true');
-  sessionStorage.setItem('backgroundCallMode', 'true');
-  sessionStorage.setItem('returningFromCall', 'true');
-  sessionStorage.setItem('backgroundCallId', callData.callId);
+  console.log('✅ Chat shown - call connections remain active');
+}
+
+function hideChat() {
+  const chatOverlay = document.getElementById('chatOverlay');
+  if (chatOverlay) {
+    chatOverlay.style.display = 'none';
+  }
   
-  console.log('✅ Background call flags set');
-  console.log(`   PeerConnections: ${peerConnections.size} (will remain connected)`);
-  console.log(`   LocalStream: ${localStream?.getTracks().length} tracks (will remain active)`);
-  console.log(`   Call ID: ${callData.callId}`);
+  // Show call UI
+  const header = document.querySelector('header');
+  const main = document.querySelector('main');
+  const footer = document.querySelector('footer');
   
-  // Navigate to chat page
-  console.log('🔄 Navigating to chat page with background call...');
-  window.location.href = '/chat.html';
+  if (header) header.style.display = '';
+  if (main) main.style.display = '';
+  if (footer) footer.style.display = '';
   
-  console.log('💬 ========================================\n');
+  console.log('✅ Returned to call - connections never disconnected');
 }
 
 function hideChat() {
