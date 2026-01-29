@@ -173,8 +173,8 @@ function validateCallState(call, operation) {
 // ============================================
 
 async function generateCloudTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || '726fccae33334279a71e962da3d8e01c';
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || 'a074b71f6fa5853f4daff0fafb57c9bee54faae54f4012fab0b55720910440cf';
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - operating with STUN only');
@@ -328,14 +328,25 @@ const roomCleanupTimers = new Map(); // roomId -> timeout
 const ROOM_EXPIRY_TIME = 900000 // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
 
-// WebRTC metrics
+// WebRTC metrics - use atomic increment functions to prevent race conditions
 const webrtcMetrics = {
-  totalCalls: 0,
-  successfulConnections: 0,
-  failedConnections: 0,
-  turnUsage: 0,
-  stunUsage: 0,
-  directConnections: 0
+  _data: {
+    totalCalls: 0,
+    successfulConnections: 0,
+    failedConnections: 0,
+    turnUsage: 0,
+    stunUsage: 0,
+    directConnections: 0
+  },
+  increment(metric) {
+    return ++this._data[metric];
+  },
+  get(metric) {
+    return this._data[metric];
+  },
+  getAll() {
+    return { ...this._data };
+  }
 };
 
 
@@ -463,7 +474,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     activeRooms: matchmaking.getActiveRooms().length,
     activeCalls: activeCalls.size,
-    webrtcMetrics,
+    webrtcMetrics: webrtcMetrics.getAll(),
     turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
     server: 'running'
   });
@@ -1136,8 +1147,14 @@ socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId,
     console.error('❌ Attachment response error:', error);
   }
 });
-  
-  
+
+// CRITICAL FIX: Handle file transfer completion cleanup
+socket.on('file_transfer_complete', ({ fileId }) => {
+  if (activeFileTransfers.has(fileId)) {
+    activeFileTransfers.delete(fileId);
+    console.log(`✅ File transfer ${fileId} completed and cleaned up`);
+  }
+});
   
   socket.on('validate_cached_call', async ({ callId, roomId }) => {
     try {
@@ -2069,7 +2086,7 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
 
     activeCalls.set(callId, call);
     userCalls.set(user.userId, callId);
-    webrtcMetrics.totalCalls++;
+    webrtcMetrics.increment('totalCalls');
 
     room.setActiveCall(true);
 
@@ -2292,14 +2309,6 @@ callUsers.forEach(roomUser => {
       // CRITICAL FIX: Single broadcast instead of duplicate
       broadcastCallStateUpdate(callId);
     });
-
-      io.to(roomId).emit('call_state_update', {
-        callId: callId,
-        isActive: true,
-        participantCount: call.participants.length,
-        callType: call.callType
-      });
-      console.log(`📢 Broadcasted call_state_update: active=true, count=${call.participants.length}`);
     
     
     
@@ -2358,19 +2367,19 @@ socket.on('connection_established', ({ callId, connectionType, localType, remote
   console.log(`   Local: ${localType}, Remote: ${remoteType}`);
   console.log(`   Protocol: ${protocol}`);
 
-  // Track metrics
+  // Track metrics using atomic operations
   if (connectionType === 'TURN_RELAY') {
-    webrtcMetrics.turnUsage++;
-    console.warn(`⚠️ [METRICS] TURN usage: ${webrtcMetrics.turnUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.turnUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('turnUsage');
+    console.warn(`⚠️ [METRICS] TURN usage: ${webrtcMetrics.get('turnUsage')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('turnUsage') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   } else if (connectionType === 'STUN_REFLEXIVE') {
-    webrtcMetrics.stunUsage++;
-    console.log(`✅ [METRICS] STUN usage: ${webrtcMetrics.stunUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.stunUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('stunUsage');
+    console.log(`✅ [METRICS] STUN usage: ${webrtcMetrics.get('stunUsage')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('stunUsage') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   } else if (connectionType === 'DIRECT_HOST') {
-    webrtcMetrics.directConnections++;
-    console.log(`✅ [METRICS] Direct: ${webrtcMetrics.directConnections} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.directConnections / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('directConnections');
+    console.log(`✅ [METRICS] Direct: ${webrtcMetrics.get('directConnections')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('directConnections') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   }
 
-  webrtcMetrics.successfulConnections++;
+  webrtcMetrics.increment('successfulConnections');
 });
 
 
@@ -3040,23 +3049,6 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
 });
 
 
-// server.js - add after line 1647
-socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
-  const user = socketUsers.get(socket.id);
-  if (!user) return;
-
-  console.log(`📊 [METRICS] Connection established for ${user.username}`);
-  console.log(`   Type: ${connectionType}`);
-  
-  // Track in database or external analytics
-  if (connectionType === 'TURN_RELAY') {
-    // Send alert - unexpected TURN usage
-    console.error(`🚨 ALERT: TURN relay used when direct connection should work`);
-  } else {
-    console.log(`✅ Optimal connection: ${connectionType}`);
-  }
-});
-
 socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
   try {
     const user = socketUsers.get(socket.id);
@@ -3101,18 +3093,6 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
   }
 });
 
-
-let expiredSignaling = 0;
-for (const [userId, limit] of signalingRateLimiter.entries()) {
-  if (Date.now() > limit.resetTime) {
-    signalingRateLimiter.delete(userId);
-    expiredSignaling++;
-  }
-}
-if (expiredSignaling > 0) {
-  console.log(`🗑️ Cleaned up ${expiredSignaling} expired signaling rate limit entries`);
-}
-
   socket.on('connection_state_update', ({ callId, state, candidateType }) => {
     const user = socketUsers.get(socket.id);
     if (!user) return;
@@ -3121,25 +3101,25 @@ if (expiredSignaling > 0) {
     if (candidateType) {
       console.log(`   Using candidate type: ${candidateType}`);
       
-      // Track metrics based on candidate type
+      // Track metrics based on candidate type using atomic operations
       if (candidateType === 'relay') {
-        webrtcMetrics.turnUsage++;
+        webrtcMetrics.increment('turnUsage');
         console.log('   📊 TURN relay connection established');
       } else if (candidateType === 'srflx') {
-        webrtcMetrics.stunUsage++;
+        webrtcMetrics.increment('stunUsage');
         console.log('   📊 STUN server-reflexive connection established');
       } else if (candidateType === 'host') {
-        webrtcMetrics.directConnections++;
+        webrtcMetrics.increment('directConnections');
         console.log('   📊 Direct host connection established');
       }
     }
 
     if (state === 'connected') {
-      webrtcMetrics.successfulConnections++;
-      console.log(`   ✅ Total successful connections: ${webrtcMetrics.successfulConnections}`);
+      webrtcMetrics.increment('successfulConnections');
+      console.log(`   ✅ Total successful connections: ${webrtcMetrics.get('successfulConnections')}`);
     } else if (state === 'failed') {
-      webrtcMetrics.failedConnections++;
-      console.log(`   ❌ Total failed connections: ${webrtcMetrics.failedConnections}`);
+      webrtcMetrics.increment('failedConnections');
+      console.log(`   ❌ Total failed connections: ${webrtcMetrics.get('failedConnections')}`);
     }
   });
 
@@ -3561,6 +3541,30 @@ setInterval(() => {
     console.log(`🗑️ Cleaned up ${orphanedMutexes.length} orphaned call mutexes`);
   }
   
+  // CRITICAL FIX: Clean up expired signaling rate limit entries
+  let expiredSignaling = 0;
+  for (const [userId, limit] of signalingRateLimiter.entries()) {
+    if (now > limit.resetTime) {
+      signalingRateLimiter.delete(userId);
+      expiredSignaling++;
+    }
+  }
+  if (expiredSignaling > 0) {
+    console.log(`🗑️ Cleaned up ${expiredSignaling} expired signaling rate limit entries`);
+  }
+  
+  // CRITICAL FIX: Clean up stale file transfers (older than MAX_TRANSFER_TIME)
+  let staleTransfers = 0;
+  for (const [fileId, transfer] of activeFileTransfers.entries()) {
+    if (now - transfer.startTime > MAX_TRANSFER_TIME) {
+      activeFileTransfers.delete(fileId);
+      staleTransfers++;
+    }
+  }
+  if (staleTransfers > 0) {
+    console.log(`🗑️ Cleaned up ${staleTransfers} stale file transfers`);
+  }
+  
   // Log memory stats
   console.log(`📊 Memory stats:
     - Active sockets: ${socketUsers.size}
@@ -3571,9 +3575,12 @@ setInterval(() => {
     - Call mutexes: ${callMutexes.size}
     - Join debounce: ${joinCallDebounce.size}
     - Room join states: ${roomJoinState.size}
-    - User-to-socket index: ${userToSocketId.size}`);
+    - User-to-socket index: ${userToSocketId.size}
+    - Signaling rate limiter: ${signalingRateLimiter.size}
+    - File chunk rate limiter: ${fileChunkRateLimiter.size}
+    - Active file transfers: ${activeFileTransfers.size}`);
     
-}, 60000);;
+}, 60000);
 
 
 // CRITICAL: Add graceful shutdown handler
@@ -3700,6 +3707,7 @@ async function startServer() {
       
       await db.collection('notes').createIndex({ createdAt: -1 }); // For pagination
       await db.collection('notes').createIndex({ userId: 1 }); // For user lookup
+      await db.collection('notes').createIndex({ userId: 1, createdAt: -1 }); // Compound for user+pagination queries
       
       console.log('✅ Database indexes created');
     } catch (indexError) {
@@ -3759,8 +3767,8 @@ async function startServer() {
       console.log(`   Room Expiry: ${ROOM_EXPIRY_TIME / 60000} minutes`);
       
       const hasTurn = !!(
-        process.env.CLOUDFLARE_TURN_TOKEN_ID || 
-        '726fccae33334279a71e962da3d8e01c'
+        process.env.CLOUDFLARE_TURN_TOKEN_ID && 
+        process.env.CLOUDFLARE_TURN_API_TOKEN
       );
       
       if (hasTurn) {
