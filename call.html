@@ -249,6 +249,163 @@ let makingOffer = new Map();
 let ICE_SERVERS = null;
 let useTurnFallback = false; // Global flag for TURN fallback
 
+
+
+
+ function waitForTabManager() {
+  return new Promise((resolve, reject) => {
+    // Check if tab is already blocked
+    const overlay = document.getElementById('blocked-tab-overlay');
+    if (overlay) {
+      console.error('❌ [Auth] Tab is BLOCKED - authentication aborted');
+      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+      return;
+    }
+    
+    // ✅ FIX: Only check if tabManager exists and has a tabId
+    // Don't check isActive - that won't be set until tab comes to foreground
+    if (window.tabManager && window.tabManager.tabId) {
+      console.log('✅ [Auth] TabManager ready:', window.tabManager.tabId);
+      resolve(window.tabManager);
+      return;
+    }
+    
+    console.log('⏳ [Auth] Waiting for TabManager to initialize...');
+    
+    // Listen for blocking event
+    const blockHandler = () => {
+      console.error('❌ [Auth] Tab was BLOCKED during authentication');
+      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+    };
+    
+    window.addEventListener('tab_blocked', blockHandler, { once: true });
+    
+    // Poll for TabManager with reasonable timeout
+    let attempts = 0;
+    const maxAttempts = 50; // 5 seconds max wait (reduced from 15s)
+    
+    const interval = setInterval(() => {
+      attempts++;
+      
+      // Check if blocked during wait
+      const overlay = document.getElementById('blocked-tab-overlay');
+      if (overlay) {
+        clearInterval(interval);
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.error('❌ [Auth] Tab BLOCKED during wait');
+        reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+        return;
+      }
+      
+      // ✅ FIX: Only check for tabManager.tabId, NOT isActive
+      if (window.tabManager && window.tabManager.tabId) {
+        clearInterval(interval);
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+        resolve(window.tabManager);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        window.removeEventListener('tab_blocked', blockHandler);
+        console.error('❌ [Auth] TabManager timeout after 5s');
+        reject(new Error('TabManager initialization timeout'));
+      }
+    }, 100); // Check every 100ms
+  });
+}
+
+async function authenticateSocket(socket, userId) {
+  try {
+    console.log('🔐 ========================================');
+    console.log('🔐 AUTHENTICATING SOCKET');
+    console.log('🔐 ========================================');
+    console.log(`   Socket ID: ${socket.id}`);
+    console.log(`   User ID: ${userId}`);
+    
+    // 1. Get Firebase token
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      throw new Error('Not authenticated with Firebase');
+    }
+    
+    const token = await firebaseUser.getIdToken();
+    console.log('✅ Firebase token retrieved');
+    
+    // 2. Get TabId from TabManager (if available, otherwise use fallback)
+    const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
+    console.log(`✅ TabId: ${tabId}`);
+    
+    // 3. Send authentication event
+    console.log('📤 Sending authenticate event to server...');
+    
+    socket.emit('authenticate', {
+      token: token,
+      userId: userId,
+      tabId: tabId
+    });
+    
+    // 4. Wait for authentication response
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        console.error('❌ Authentication timeout (15s)');
+        reject(new Error('Authentication timeout (15s)'));
+      }, 15000);
+      
+      const onAuthenticated = (data) => {
+        clearTimeout(timeout);
+        socket.off('auth_error', onAuthError); // Clean up other listener
+        console.log('✅ Socket authenticated successfully:', data);
+        console.log('🔐 ========================================\n');
+        resolve(data);
+      };
+      
+      const onAuthError = (error) => {
+        clearTimeout(timeout);
+        socket.off('authenticated', onAuthenticated); // Clean up other listener
+        console.error('❌ Authentication failed:', error);
+        console.error('🔐 ========================================\n');
+        reject(new Error(error.message || 'Authentication failed'));
+      };
+      
+      socket.once('authenticated', onAuthenticated);
+      socket.once('auth_error', onAuthError);
+    });
+    
+  } catch (error) {
+    console.error('❌ ========================================');
+    console.error('❌ SOCKET AUTHENTICATION ERROR');
+    console.error('❌ ========================================');
+    console.error('   Error:', error.message);
+    console.error('   Stack:', error.stack);
+    console.error('❌ ========================================\n');
+    throw error;
+  }
+}
+
+  console.log('✅ Socket authentication ready');
+
+/**
+ * Setup session replacement handler
+ */
+function setupSessionReplacementHandler(socket) {
+  socket.on('session_replaced', (data) => {
+    console.log('⚠️ [Session] Tab replaced by server:', data);
+    
+    // Force block this tab
+    if (window.tabManager) {
+      window.tabManager.blockTab();
+    }
+  });
+  
+  console.log('✅ [Session] Replacement handler registered');
+}
+
+console.log('✅ Socket authentication helpers loaded');
+ 
+
+
+
+
+
 async function fetchIceServers() {
   try {
     // ✅ Request STUN-only by default, TURN only if fallback enabled
@@ -2355,10 +2512,46 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
             auth: { token }
           });
           
-          socketInstance.on('connect', () => {
-            console.log(`🔌 Connected: ${socketInstance.id}`);
-            socketInstance.emit('authenticate', { token, userId: currentUser.userId });
-          });
+          // socketInstance.on('connect', () => {
+          //   console.log(`🔌 Connected: ${socketInstance.id}`);
+          //   socketInstance.emit('authenticate', { token, userId: currentUser.userId });
+          // });
+          
+          
+          socketInstance.on('connect', async () => {
+  console.log('🔌 ========================================');
+  console.log('🔌 SOCKET CONNECTED');
+  console.log('🔌 ========================================');
+  console.log(`   Socket ID: ${socketInstance.id}`);
+  console.log(`   User: ${currentUser?.username || 'unknown'}`);
+  
+  // CRITICAL: Reset auth state on new connection
+  setAuthenticationState(false);
+  
+  try {
+    console.log('🔐 Starting authentication process...');
+    
+    // Get Firebase token
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      throw new Error('No Firebase user found');
+    }
+    
+    const idToken = await firebaseUser.getIdToken();
+    console.log('✅ Firebase token retrieved');
+    
+    // Authenticate socket
+    await authenticateSocket(socketInstance, currentUser.userId);
+    console.log('✅ Socket authentication complete');
+    
+  } catch (error) {
+    console.error('❌ Socket connection/authentication error:', error);
+    toast('Connection failed. Please refresh.', 'error');
+  }
+  
+  console.log('🔌 ========================================\n');
+});
+          
           
           // Inside initCall() function, replace the 'authenticated' handler:
 
