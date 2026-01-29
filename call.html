@@ -497,21 +497,27 @@ console.log('✅ Message listener added for iframe communication');
   
 window.addEventListener('popstate', (event) => {
   console.log('⬅️ ========================================');
-  console.log('⬅️ BACK BUTTON PRESSED');
+  console.log('⬅️ BACK BUTTON PRESSED ON CALL PAGE');
   console.log('⬅️ ========================================');
   
-  // CRITICAL: Since we're using direct navigation, back button on call page
-  // should go to chat page with background call mode
+  // Prevent default back navigation
+  event.preventDefault();
   
   console.log('💬 Navigating to chat with background call...');
+  console.log(`   Call ID: ${callData?.callId || 'unknown'}`);
+  console.log(`   Active peer connections: ${peerConnections.size}`);
+  console.log(`   Local stream tracks: ${localStream?.getTracks().length || 0}`);
   
-  // Set flags for background call
+  // CRITICAL: Keep activeCall in localStorage
+  if (callData && callData.callId) {
+    console.log(`✅ activeCall preserved: ${callData.callId}`);
+  }
+  
+  // Set background call flags
   sessionStorage.setItem('hasBackgroundCall', 'true');
   sessionStorage.setItem('backgroundCallMode', 'true');
   sessionStorage.setItem('returningFromCall', 'true');
-  
-  console.log(`   Active peer connections: ${peerConnections.size}`);
-  console.log(`   Local stream tracks: ${localStream?.getTracks().length || 0}`);
+  sessionStorage.setItem('backgroundCallId', callData.callId);
   
   // Navigate to chat
   window.location.href = '/chat.html';
@@ -522,20 +528,29 @@ window.addEventListener('popstate', (event) => {
 
 function showChat() {
   console.log('💬 ========================================');
-  console.log('💬 SHOWING CHAT OVERLAY');
+  console.log('💬 SHOWING CHAT - BACKGROUND CALL MODE');
   console.log('💬 ========================================');
   
-  // CRITICAL: Don't use iframe - it creates tab conflicts
-  // Instead, mark that we're in background mode and navigate
+  // CRITICAL: Keep activeCall in localStorage so chat page knows call is active
+  if (callData && callData.callId) {
+    console.log(`✅ Preserving activeCall in localStorage: ${callData.callId}`);
+    // Don't remove activeCall - chat page needs it!
+  } else {
+    console.warn('⚠️ No callData to preserve!');
+  }
+  
+  // Set background call flags
   sessionStorage.setItem('hasBackgroundCall', 'true');
   sessionStorage.setItem('backgroundCallMode', 'true');
   sessionStorage.setItem('returningFromCall', 'true');
+  sessionStorage.setItem('backgroundCallId', callData.callId);
   
   console.log('✅ Background call flags set');
   console.log(`   PeerConnections: ${peerConnections.size} (will remain connected)`);
   console.log(`   LocalStream: ${localStream?.getTracks().length} tracks (will remain active)`);
+  console.log(`   Call ID: ${callData.callId}`);
   
-  // Navigate to actual chat page (not iframe)
+  // Navigate to chat page
   console.log('🔄 Navigating to chat page with background call...');
   window.location.href = '/chat.html';
   
@@ -782,18 +797,19 @@ function setupCallCleanup() {
     console.log('🚪 CALL PAGE BEFOREUNLOAD');
     console.log('🚪 ========================================');
     
-    // Check if chat is showing (means we're not actually leaving)
-    const chatOverlay = document.getElementById('chatOverlayContainer');
-    const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
+    // Check if we're navigating to chat (background mode)
+    const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+    const backgroundMode = sessionStorage.getItem('backgroundCallMode') === 'true';
     
-    if (isShowingChat) {
-      console.log('🔒 Chat overlay active - NOT cleaning up');
-      console.log('   This should not happen - preventing navigation');
+    if (hasBackgroundCall || backgroundMode) {
+      console.log('🔒 Background call mode - NOT cleaning up');
+      console.log('   Preserving activeCall in localStorage');
+      console.log('   Call will remain active in background');
       console.log('🚪 ========================================\n');
-      return;
+      return; // Don't cleanup - call continues in background
     }
     
-    console.log('🗑️ Performing full cleanup');
+    console.log('🗑️ Performing full cleanup (user leaving call)');
     
     // Stop timer
     if (durationInterval) {
