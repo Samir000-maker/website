@@ -1,4 +1,3 @@
-
 // ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
 // Features:
 // 1. Persistent call state with grace periods
@@ -29,7 +28,7 @@ const __dirname = path.dirname(__filename);
 const callMutexes = new Map();
 const socketUserCleanup = new Map();
 const roomJoinState = new Map();
-const userToSocketId = new Map()
+const userToSocketId = new Map();
 const socketUsers = new Map();
 // Add at top with other Maps
 const joinCallDebounce = new Map(); // userId -> timestamp
@@ -3946,7 +3945,7 @@ socket.on('disconnect', () => {
     socketUsers.delete(socket.id);
   }
 });
-
+});
 // ============================================
 // PERIODIC CLEANUP
 // ============================================
@@ -4498,7 +4497,9 @@ const mongoClient = db.client || db.s?.client;
       console.log('');
     });
 
-
+    // ============================================
+    // GRACEFUL SHUTDOWN HANDLERS
+    // ============================================
     
     async function gracefulShutdown() {
       console.log('');
@@ -4589,11 +4590,8 @@ const mongoClient = db.client || db.s?.client;
       
       process.exit(0);
     }
-
-
-    // ============================================
-    // GRACEFUL SHUTDOWN HANDLERS
-    // ============================================
+    
+    // Register shutdown handlers
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
 
