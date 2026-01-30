@@ -39,8 +39,8 @@ const roomCallInitLocks = new Map(); // roomId -> Promise
 const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
 const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
-const MAX_CONCURRENT_TRANSFERS = 20; // ✅ Global limit
-const MAX_MEMORY_FOR_TRANSFERS = 500 * 1024 * 1024; // ✅ 500MB total cap
+const MAX_CONCURRENT_TRANSFERS = 20000; // ✅ Global limit
+const MAX_MEMORY_FOR_TRANSFERS = 1000 * 1024 * 1024; // ✅ 500MB total cap
 
 const answerDebounce = new Map(); // userId:targetUserId -> timestamp
 const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
