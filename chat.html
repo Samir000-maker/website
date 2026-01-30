@@ -3684,39 +3684,66 @@ function showConfirmationDialog() {
   // ============================================
   
 function setupBackButtonHandler() {
+  let dialogOpen = false;
+  
+  // Push initial state
   history.pushState({ page: 'chat' }, '', window.location.href);
   
-  let dialogOpen = false; // Track dialog state
-  
   window.addEventListener('popstate', async (event) => {
-    if (backButtonHandled) return;
+    // Always push state back immediately to prevent navigation
+    history.pushState({ page: 'chat' }, '', window.location.href);
     
-    // CRITICAL: If dialog is already open, just push state and ignore
-    if (dialogOpen) {
-      console.log('⚠️ Dialog already open - ignoring back button');
-      history.pushState({ page: 'chat' }, '', window.location.href);
+    // If already handled or dialog is open, do nothing
+    if (backButtonHandled || dialogOpen) {
+      console.log('⚠️ Back button blocked (handled or dialog open)');
       return;
     }
     
-    console.log('⬅️ Back button pressed');
-    history.pushState({ page: 'chat' }, '', window.location.href);
+    console.log('⬅️ Back button pressed - showing dialog');
     
-    dialogOpen = true; // Mark dialog as open
+    dialogOpen = true;
     const shouldLeave = await showConfirmationDialog();
-    dialogOpen = false; // Mark dialog as closed
+    dialogOpen = false;
     
     if (shouldLeave) {
-      console.log('✅ User confirmed leaving');
+      console.log('✅ User confirmed leaving - cleaning up and navigating to mood.html');
       backButtonHandled = true;
       
-      if (socketInstance?.connected) {
-        socketInstance.emit('leave_room');
+      // Complete cleanup before navigation
+      stopCachedCallMonitoring();
+      
+      // Clean up active call if exists
+      const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+      if (activeCallStr) {
+        try {
+          const callData = JSON.parse(activeCallStr);
+          if (socketInstance?.connected) {
+            socketInstance.emit('leave_call', { callId: callData.callId });
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+          localStorage.removeItem(ACTIVE_CALL_KEY);
+          sessionStorage.removeItem('hasBackgroundCall');
+          sessionStorage.removeItem('returningFromCall');
+          sessionStorage.removeItem('backgroundCallMode');
+          sessionStorage.removeItem('returningToBackgroundCall');
+        } catch (e) {
+          console.error('Error cleaning up call:', e);
+        }
       }
       
+      // Leave room
+      if (socketInstance?.connected) {
+        socketInstance.emit('leave_room');
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
+      // Clear chat state
       clearChatState(true);
+      
+      // Navigate to mood.html
       window.location.href = '/mood.html';
     } else {
-      console.log('❌ User staying in chat');
+      console.log('❌ User chose to stay in chat');
     }
   });
 }
