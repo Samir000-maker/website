@@ -1,3 +1,4 @@
+
 // ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
 // Features:
 // 1. Persistent call state with grace periods
@@ -4497,9 +4498,7 @@ const mongoClient = db.client || db.s?.client;
       console.log('');
     });
 
-    // ============================================
-    // GRACEFUL SHUTDOWN HANDLERS
-    // ============================================
+
     
     async function gracefulShutdown() {
       console.log('');
@@ -4590,8 +4589,11 @@ const mongoClient = db.client || db.s?.client;
       
       process.exit(0);
     }
-    
-    // Register shutdown handlers
+
+
+    // ============================================
+    // GRACEFUL SHUTDOWN HANDLERS
+    // ============================================
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
 
