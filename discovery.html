@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html class="dark" lang="en">
+<html class="light" lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,32 +20,28 @@
       theme: {
         extend: {
           colors: {
-            "primary": "#00E0FF",
-            "primary-dark": "#00B2CC",
-            "accent": "#FF2E93",
-            "background-dark": "#0B0C10",
-            "surface-dark": "#15161C",
-            "glow-blue": "rgba(0, 224, 255, 0.6)",
-            "glass-border": "rgba(255, 255, 255, 0.08)",
+            "primary": "#367d7d",
+            "primary-dark": "#2a6262",
+            "background-light": "#fafaf9",
+            "background-dark": "#17191c",
+            "surface-light": "#ffffff",
+            "surface-dark": "#22252a",
+            "accent": "#FF9F80",
           },
           fontFamily: {
             "display": ["Manrope", "sans-serif"],
             "body": ["Manrope", "sans-serif"],
           },
           borderRadius: {
+            "DEFAULT": "0.5rem",
+            "lg": "0.75rem",
             "xl": "1rem",
             "2xl": "1.5rem",
-            "3xl": "2rem",
             "full": "9999px"
           },
-          backgroundImage: {
-            'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-            'futuristic-grid': 'linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)'
-          },
-          animation: {
-            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-            'radar-ping': 'ping 3s cubic-bezier(0, 0, 0.2, 1) infinite',
-            'radar-spin': 'spin 15s linear infinite',
+          boxShadow: {
+            "ambient": "0 10px 30px -10px rgba(54, 125, 125, 0.15)",
+            "ambient-hover": "0 15px 40px -10px rgba(54, 125, 125, 0.25)",
           }
         },
       },
@@ -60,30 +56,114 @@
       background: transparent;
     }
     ::-webkit-scrollbar-thumb {
-      background-color: #333;
+      background-color: #d1d5db;
       border-radius: 20px;
     }
-    .glass-panel {
-      background: rgba(21, 22, 28, 0.7);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    .dark ::-webkit-scrollbar-thumb {
+      background-color: #4b5563;
     }
-    .glass-card {
-      background: rgba(255, 255, 255, 0.03);
+    .glass-panel {
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     }
-    .radar-scan {
-      background: conic-gradient(from 0deg at 50% 50%, transparent 0deg, rgba(0, 224, 255, 0.1) 60deg, transparent 80deg);
+    .radar-bg {
+      background: radial-gradient(circle, rgba(54, 125, 125, 0.05) 0%, rgba(54, 125, 125, 0.02) 40%, transparent 70%);
     }
-    .glow-text {
-      text-shadow: 0 0 20px rgba(0, 224, 255, 0.5);
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
-    body {
-      background-color: #0B0C10;
+    .animate-fade-in-up {
+      animation: fadeInUp 0.6s ease-out;
+    }
+    
+    /* Confirmation Dialog Styles */
+    .confirmation-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      opacity: 0;
+      animation: fadeIn 0.2s ease-out forwards;
+    }
+    
+    .confirmation-dialog {
+      background: white;
+      border-radius: 1.5rem;
+      padding: 2rem;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      transform: scale(0.9) translateY(20px);
+      animation: slideUp 0.3s ease-out forwards;
+    }
+    
+    .dark .confirmation-dialog {
+      background: #22252a;
+      border: 1px solid #374151;
+    }
+    
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+    
+    @keyframes slideUp {
+      to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    .confirmation-buttons {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    
+    .confirmation-buttons button {
+      flex: 1;
+      padding: 0.875rem 1.5rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+      border: none;
+      cursor: pointer;
+    }
+    
+    .btn-stay {
+      background: #367d7d;
+      color: white;
+    }
+    
+    .btn-stay:active {
+      transform: scale(0.97);
+    }
+    
+    .btn-leave {
+      background: #f3f4f6;
+      color: #374151;
+    }
+    
+    .dark .btn-leave {
+      background: #374151;
+      color: #e5e7eb;
+    }
+    
+    .btn-leave:active {
+      transform: scale(0.97);
     }
 
     /* Professional Radar Dot Animation */
@@ -158,121 +238,111 @@
       }
     }
   </style>
+<base target="_blank">
 </head>
 
-<body class="font-display bg-background-dark text-slate-100 antialiased min-h-screen flex flex-col">
+<body class="font-display bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-100 antialiased selection:bg-primary/20">
 
-<!-- Header -->
-<header class="sticky top-0 z-50 w-full glass-panel">
-  <div class="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-12">
-    <div class="flex items-center gap-3">
-      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-dark to-primary text-black shadow-[0_0_15px_rgba(0,224,255,0.4)]">
-        <span class="material-symbols-outlined text-[24px]">spa</span>
+<div class="relative flex min-h-screen w-full flex-col overflow-x-hidden">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 w-full border-b border-slate-200/60 dark:border-slate-800/60 bg-background-light/80 dark:bg-background-dark/80 glass-panel">
+    <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center gap-2">
+        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
+          <span class="material-symbols-outlined text-[20px]">spa</span>
+        </div>
+        <h2 class="text-lg font-bold tracking-tight text-slate-900 dark:text-white">MoodJournal</h2>
       </div>
-      <h2 class="text-xl font-bold tracking-tight text-white glow-text">MoodJournal</h2>
-    </div>
-    <nav class="hidden md:flex items-center gap-10">
-      <a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">Daily Check-in</a>
-      <a class="text-sm font-bold text-primary drop-shadow-[0_0_8px_rgba(0,224,255,0.5)]" href="#">Discovery</a>
-      <a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">My Trends</a>
-    </nav>
-    <div class="flex items-center gap-6">
-      <button class="relative rounded-full p-2 text-slate-400 hover:text-white transition-colors">
-        <span class="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent animate-pulse"></span>
-        <span class="material-symbols-outlined">notifications</span>
-      </button>
-      <div class="h-10 w-10 overflow-hidden rounded-full ring-2 ring-white/10 ring-offset-2 ring-offset-[#0B0C10]">
-        <div class="h-full w-full bg-cover bg-center" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCpUYlayBN1FXeNySzIbhoZPhjp003WIZBv_gT4opAlL6q5EcB-XBwBNUZIY9hkv3_lm0-9vQkGbzUI7g7kQanxveNRPScdcLs8aD38mUwoxWhqJSZE0g3gNYwu1cyTjy80RLc2vqs0z4hta0IIIxihQaxLZbXrPFTHDNSXVpWO4tzRGAB3Zc5JpsFK4PyJj1LSnfsv8AABIMBjkieqHlRe7yz0SGO6aQp_QibiPBXFfpkXIoK5FcfsARdofm53e3boRWL7NFkP-mnN");'></div>
-      </div>
-    </div>
-  </div>
-</header>
-
-<!-- Main Content -->
-<main class="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 py-10 flex flex-col items-center justify-center relative">
-  
-  <!-- Background Gradient Blurs -->
-  <div class="absolute inset-0 overflow-hidden pointer-events-none z-0">
-    <div class="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px]"></div>
-    <div class="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-accent/5 rounded-full blur-[120px]"></div>
-  </div>
-
-  <!-- Title Section -->
-  <div class="text-center mb-12 space-y-3 z-10 relative">
-    <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-primary-dark to-white">
-      Discovery Mode
-    </h1>
-    <p class="text-lg text-slate-400 font-light tracking-wide">
-      Scanning quantum frequencies for mood resonance...
-    </p>
-  </div>
-
-  <!-- Radar Container -->
-  <div class="relative w-full max-w-4xl aspect-square md:aspect-[16/9] lg:aspect-[2/1] rounded-[3rem] bg-[#0F1116] border border-white/5 shadow-2xl overflow-hidden group">
-    
-    <!-- Grid Background -->
-    <div class="absolute inset-0 bg-[size:40px_40px] bg-futuristic-grid opacity-10"></div>
-
-    <!-- Radar Rings -->
-    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-      <div class="w-[200px] h-[200px] rounded-full border border-primary/20 shadow-[0_0_30px_rgba(0,224,255,0.05)] animate-pulse-slow"></div>
-      <div class="absolute w-[400px] h-[400px] rounded-full border border-primary/10"></div>
-      <div class="absolute w-[600px] h-[600px] rounded-full border border-dashed border-primary/10 opacity-50"></div>
-      <div class="absolute w-[900px] h-[900px] rounded-full border border-primary/5"></div>
-      <div class="absolute w-[1200px] h-[1200px] rounded-full border border-primary/5 opacity-30"></div>
-      
-      <!-- Rotating Radar Scan -->
-      <div class="absolute w-[900px] h-[900px] rounded-full animate-radar-spin opacity-20">
-        <div class="w-full h-full radar-scan rounded-full"></div>
-      </div>
-    </div>
-
-    <!-- Center User Avatar -->
-    <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center justify-center">
-      <div class="absolute inset-0 bg-primary/20 rounded-full blur-3xl scale-150 animate-pulse"></div>
-      <div class="glass-card p-6 rounded-3xl flex flex-col items-center backdrop-blur-xl border-t border-l border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.4)]">
-        <div class="relative">
-          <div class="absolute inset-0 rounded-full border border-primary animate-radar-ping opacity-75"></div>
-          <div class="absolute inset-0 rounded-full border border-primary animate-radar-ping animation-delay-1000 opacity-50"></div>
-          <div class="h-28 w-28 rounded-full border-[3px] border-white/80 shadow-[0_0_40px_rgba(0,224,255,0.3)] overflow-hidden relative z-10">
-            <div class="h-full w-full bg-cover bg-center" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCpUYlayBN1FXeNySzIbhoZPhjp003WIZBv_gT4opAlL6q5EcB-XBwBNUZIY9hkv3_lm0-9vQkGbzUI7g7kQanxveNRPScdcLs8aD38mUwoxWhqJSZE0g3gNYwu1cyTjy80RLc2vqs0z4hta0IIIxihQaxLZbXrPFTHDNSXVpWO4tzRGAB3Zc5JpsFK4PyJj1LSnfsv8AABIMBjkieqHlRe7yz0SGO6aQp_QibiPBXFfpkXIoK5FcfsARdofm53e3boRWL7NFkP-mnN");'></div>
-          </div>
-          <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 flex items-center justify-center z-20">
-            <div class="bg-black/80 backdrop-blur-md px-3 py-1 rounded-full border border-primary/30 flex items-center gap-2 shadow-lg">
-              <span class="relative flex h-2 w-2">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-              </span>
-              <span class="text-[10px] font-bold tracking-widest uppercase text-primary">Searching</span>
-            </div>
-          </div>
+      <nav class="hidden md:flex items-center gap-8">
+        <a class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors" href="#">Daily Check-in</a>
+        <a class="text-sm font-semibold text-primary" href="#">Community</a>
+        <a class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors" href="#">My Trends</a>
+      </nav>
+      <div class="flex items-center gap-4">
+        <button class="rounded-full p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <span class="material-symbols-outlined">notifications</span>
+        </button>
+        <div id="headerAvatar" class="h-8 w-8 overflow-hidden rounded-full border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
+          <div class="h-full w-full bg-primary text-white flex items-center justify-center text-sm font-bold">U</div>
         </div>
       </div>
     </div>
+  </header>
 
-    <!-- Radar Dots Container (replaces user profiles) -->
-    <div id="radarDotsContainer" class="absolute inset-0 pointer-events-none z-20"></div>
+  <!-- Main Content -->
+  <main class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col h-[calc(100vh-4rem)]">
+    
+    <!-- Title Section -->
+    <div class="text-center mb-8 space-y-2 animate-fade-in-up">
+      <h1 class="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+        Discovery Mode
+      </h1>
+      <p id="statusText" class="text-lg text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
+        Broadcasting your mood to find connections nearby...
+      </p>
+    </div>
 
-  </div>
+    <!-- Radar Container -->
+    <div class="flex-1 relative w-full rounded-[2.5rem] bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden transition-all duration-700">
+      
+      <!-- Background gradient -->
+      <div class="absolute inset-0 radar-bg"></div>
 
-  <!-- Cancel Button -->
-  <div class="flex justify-center mt-10 w-full">
-    <button class="group relative flex items-center gap-3 px-8 py-3 rounded-full bg-[#15161C] border border-white/10 hover:border-red-500/50 hover:bg-red-500/5 text-slate-400 hover:text-red-400 font-semibold text-sm transition-all duration-300 shadow-lg hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]">
-      <div class="absolute inset-0 rounded-full ring-1 ring-white/5 group-hover:ring-red-500/30"></div>
-      <span class="material-symbols-outlined text-[20px] group-hover:rotate-90 transition-transform duration-300">close</span>
-      <span class="tracking-wide uppercase text-xs">Cancel Search</span>
-    </button>
-  </div>
+      <!-- Crosshair lines -->
+      <div class="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
+        <div class="w-full h-px bg-slate-400"></div>
+        <div class="h-full w-px bg-slate-400 absolute"></div>
+      </div>
 
-</main>
+      <!-- Radar rings -->
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="w-[250px] h-[250px] rounded-full border border-primary/30 dark:border-primary/20 shadow-[0_0_30px_rgba(54,125,125,0.1)]"></div>
+        <div class="absolute w-[450px] h-[450px] rounded-full border border-dashed border-primary/20 dark:border-primary/10"></div>
+        <div class="absolute w-[650px] h-[650px] rounded-full border border-primary/10 dark:border-primary/5"></div>
+        <div class="absolute w-[900px] h-[900px] rounded-full border border-slate-200/50 dark:border-slate-800/50"></div>
+      </div>
 
-<!-- Footer -->
-<footer class="mt-auto border-t border-white/5 py-8 bg-[#0B0C10]">
-  <div class="max-w-5xl mx-auto px-4 text-center">
-    <p class="text-slate-600 text-xs font-mono tracking-widest uppercase">© 2023 MoodJournal. Quantum System Active.</p>
-  </div>
-</footer>
+      <!-- Center User Avatar -->
+      <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center justify-center">
+        <div class="absolute inset-0 bg-primary/20 dark:bg-primary/10 rounded-full blur-2xl scale-150"></div>
+        <div class="relative">
+          <div id="userAvatar" class="h-24 w-24 rounded-full border-4 border-white dark:border-surface-dark shadow-2xl overflow-hidden ring-4 ring-primary/10 ring-offset-2 dark:ring-offset-surface-dark bg-slate-100 dark:bg-slate-800">
+            <div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">U</div>
+          </div>
+          <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark py-1 px-3 rounded-full shadow-lg border border-slate-100 dark:border-slate-700 flex items-center gap-1.5 whitespace-nowrap z-40">
+            <span class="relative flex h-2.5 w-2.5">
+              <span class="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping"></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
+            </span>
+            <span class="text-xs font-bold text-slate-700 dark:text-slate-300">Searching</span>
+          </div>
+        </div>
+      </div>
 
+      <!-- Radar Dots Container (replaces user profiles) -->
+      <div id="radarDotsContainer" class="absolute inset-0 pointer-events-none z-20"></div>
+
+    </div>
+
+    <!-- Cancel Button -->
+    <div class="flex justify-center mt-6 gap-4">
+      <button id="cancelBtn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-sm transition-all shadow-sm">
+        <span class="material-symbols-outlined text-[20px]">close</span>
+        Cancel Search
+      </button>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 py-8 bg-background-light dark:bg-background-dark">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <p class="text-slate-400 text-sm">© 2023 MoodJournal. Prioritize your peace.</p>
+    </div>
+  </footer>
+
+</div>
 
 <!-- Confirmation Dialog (hidden by default) -->
 <div id="confirmationOverlay" style="display: none;"></div>
@@ -304,27 +374,35 @@
 <!-- App Core -->
 <script src="app.js"></script>
 
-<!-- Page Logic with State Preservation -->
+<!-- Radar Dot Animation System -->
 <script>
-  
-    (function() {
+  // Professional Radar Dot Animation System
+  (function() {
     const container = document.getElementById('radarDotsContainer');
     if (!container) return;
 
-    const containerRect = container.getBoundingClientRect();
-    const centerX = containerRect.width / 2;
-    const centerY = containerRect.height / 2;
+    function getContainerDimensions() {
+      const rect = container.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        centerX: rect.width / 2,
+        centerY: rect.height / 2
+      };
+    }
+
+    let dimensions = getContainerDimensions();
 
     // Configuration
     const config = {
       minDots: 8,
       maxDots: 15,
-      minRadius: 150,  // Min distance from center
-      maxRadius: Math.min(containerRect.width, containerRect.height) * 0.45,
-      dotLifetime: 4000, // Match animation duration
-      spawnInterval: 600, // Time between new dots
-      minOpacity: 0.6,
-      maxOpacity: 1
+      minRadius: 150,
+      get maxRadius() {
+        return Math.min(dimensions.width, dimensions.height) * 0.45;
+      },
+      dotLifetime: 4000,
+      spawnInterval: 600,
     };
 
     let activeDots = 0;
@@ -336,8 +414,8 @@
       const radius = config.minRadius + Math.random() * (config.maxRadius - config.minRadius);
       
       return {
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius
+        x: dimensions.centerX + Math.cos(angle) * radius,
+        y: dimensions.centerY + Math.sin(angle) * radius
       };
     }
 
@@ -355,12 +433,10 @@
       container.appendChild(dot);
       activeDots++;
 
-      // Trigger animation
       requestAnimationFrame(() => {
         dot.classList.add('active');
       });
 
-      // Remove after animation completes
       setTimeout(() => {
         dot.remove();
         activeDots--;
@@ -371,13 +447,11 @@
     function spawnDots() {
       if (!animationRunning) return;
       
-      // Initial burst
       const initialCount = Math.floor(config.minDots + Math.random() * (config.maxDots - config.minDots) / 2);
       for (let i = 0; i < initialCount; i++) {
         setTimeout(() => createRadarDot(), i * 200);
       }
 
-      // Continuous spawning
       setInterval(() => {
         if (animationRunning && activeDots < config.maxDots) {
           createRadarDot();
@@ -393,15 +467,22 @@
       }
     });
 
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      dimensions = getContainerDimensions();
+    });
+
     // Start the animation
     spawnDots();
 
-    // Cleanup on page unload
     window.addEventListener('beforeunload', () => {
       animationRunning = false;
     });
   })();
-  
+</script>
+
+<!-- Page Logic with State Preservation -->
+<script>
 (async () => {
   const MoodApp = window.MoodApp || {};
   const _Auth = MoodApp.Auth;
@@ -414,88 +495,68 @@
     console[t==='error'?'error':'log'](m); 
   };
 
-  // ============================================
-  // STATE PRESERVATION SYSTEM
-  // ============================================
-  
   const STATE_KEY = 'discovery_state';
   const STATE_TIMESTAMP_KEY = 'discovery_state_timestamp';
-  const STATE_EXPIRY = 15 * 60 * 1000; // 15 minutes
+  const STATE_EXPIRY = 15 * 60 * 1000;
 
-/**
- * Wait for TabManager to be ready
- * ✅ FIX: Don't check isActive - just verify tabId exists
- */
-function waitForTabManager() {
-  return new Promise((resolve, reject) => {
-    // Check if tab is already blocked
-    const overlay = document.getElementById('blocked-tab-overlay');
-    if (overlay) {
-      console.error('❌ [Auth] Tab is BLOCKED - authentication aborted');
-      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
-      return;
-    }
-    
-    // ✅ FIX: Only check if tabManager exists and has a tabId
-    // Don't check isActive - that won't be set until tab comes to foreground
-    if (window.tabManager && window.tabManager.tabId) {
-      console.log('✅ [Auth] TabManager ready:', window.tabManager.tabId);
-      resolve(window.tabManager);
-      return;
-    }
-    
-    console.log('⏳ [Auth] Waiting for TabManager to initialize...');
-    
-    // Listen for blocking event
-    const blockHandler = () => {
-      console.error('❌ [Auth] Tab was BLOCKED during authentication');
-      reject(new Error('This tab is blocked. Please close it and use the active tab.'));
-    };
-    
-    window.addEventListener('tab_blocked', blockHandler, { once: true });
-    
-    // Poll for TabManager with reasonable timeout
-    let attempts = 0;
-    const maxAttempts = 50; // 5 seconds max wait (reduced from 15s)
-    
-    const interval = setInterval(() => {
-      attempts++;
-      
-      // Check if blocked during wait
+  function waitForTabManager() {
+    return new Promise((resolve, reject) => {
       const overlay = document.getElementById('blocked-tab-overlay');
       if (overlay) {
-        clearInterval(interval);
-        window.removeEventListener('tab_blocked', blockHandler);
-        console.error('❌ [Auth] Tab BLOCKED during wait');
+        console.error('❌ [Auth] Tab is BLOCKED - authentication aborted');
         reject(new Error('This tab is blocked. Please close it and use the active tab.'));
         return;
       }
       
-      // ✅ FIX: Only check for tabManager.tabId, NOT isActive
       if (window.tabManager && window.tabManager.tabId) {
-        clearInterval(interval);
-        window.removeEventListener('tab_blocked', blockHandler);
-        console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+        console.log('✅ [Auth] TabManager ready:', window.tabManager.tabId);
         resolve(window.tabManager);
-      } else if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        window.removeEventListener('tab_blocked', blockHandler);
-        console.error('❌ [Auth] TabManager timeout after 5s');
-        reject(new Error('TabManager initialization timeout'));
+        return;
       }
-    }, 100); // Check every 100ms
-  });
-}
+      
+      console.log('⏳ [Auth] Waiting for TabManager to initialize...');
+      
+      const blockHandler = () => {
+        console.error('❌ [Auth] Tab was BLOCKED during authentication');
+        reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+      };
+      
+      window.addEventListener('tab_blocked', blockHandler, { once: true });
+      
+      let attempts = 0;
+      const maxAttempts = 50;
+      
+      const interval = setInterval(() => {
+        attempts++;
+        
+        const overlay = document.getElementById('blocked-tab-overlay');
+        if (overlay) {
+          clearInterval(interval);
+          window.removeEventListener('tab_blocked', blockHandler);
+          console.error('❌ [Auth] Tab BLOCKED during wait');
+          reject(new Error('This tab is blocked. Please close it and use the active tab.'));
+          return;
+        }
+        
+        if (window.tabManager && window.tabManager.tabId) {
+          clearInterval(interval);
+          window.removeEventListener('tab_blocked', blockHandler);
+          console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+          resolve(window.tabManager);
+        } else if (attempts >= maxAttempts) {
+          clearInterval(interval);
+          window.removeEventListener('tab_blocked', blockHandler);
+          console.error('❌ [Auth] TabManager timeout after 5s');
+          reject(new Error('TabManager initialization timeout'));
+        }
+      }, 100);
+    });
+  }
 
-/**
- * Authenticate socket with tab management
- * ✅ Works even when page is backgrounded
- */
   async function authenticateSocket(socket, userId) {
     try {
       console.log('🔐 [Auth] Starting socket authentication...');
       
-      // 1. Get Firebase token
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
         throw new Error('Not authenticated with Firebase');
@@ -504,11 +565,9 @@ function waitForTabManager() {
       const token = await firebaseUser.getIdToken();
       console.log('✅ [Auth] Firebase token retrieved');
       
-      // 2. Get TabId from TabManager (if available, otherwise use fallback)
       const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
       console.log('✅ [Auth] TabId:', tabId);
       
-      // 3. Send authentication event
       console.log('📤 [Auth] Sending authenticate event');
       
       socket.emit('authenticate', {
@@ -517,7 +576,6 @@ function waitForTabManager() {
         tabId: tabId
       });
       
-      // 4. Wait for authentication response
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Authentication timeout (15s)'));
@@ -542,29 +600,18 @@ function waitForTabManager() {
     }
   }
 
-  console.log('✅ Socket authentication ready');
-
-/**
- * Setup session replacement handler
- */
-function setupSessionReplacementHandler(socket) {
-  socket.on('session_replaced', (data) => {
-    console.log('⚠️ [Session] Tab replaced by server:', data);
+  function setupSessionReplacementHandler(socket) {
+    socket.on('session_replaced', (data) => {
+      console.log('⚠️ [Session] Tab replaced by server:', data);
+      
+      if (window.tabManager) {
+        window.tabManager.blockTab();
+      }
+    });
     
-    // Force block this tab
-    if (window.tabManager) {
-      window.tabManager.blockTab();
-    }
-  });
-  
-  console.log('✅ [Session] Replacement handler registered');
-}
+    console.log('✅ [Session] Replacement handler registered');
+  }
 
-console.log('✅ Socket authentication helpers loaded');
-
-  
-
-  
   function saveState(state) {
     try {
       localStorage.setItem(STATE_KEY, JSON.stringify(state));
@@ -604,10 +651,6 @@ console.log('✅ Socket authentication helpers loaded');
     console.log('🗑️ Discovery state cleared');
   }
 
-  // ============================================
-  // BACK BUTTON CONFIRMATION DIALOG
-  // ============================================
-  
   function showConfirmationDialog() {
     return new Promise((resolve) => {
       const overlay = document.getElementById('confirmationOverlay');
@@ -640,24 +683,19 @@ console.log('✅ Socket authentication helpers loaded');
       
       btnStay.addEventListener('click', () => {
         overlay.style.display = 'none';
-        resolve(false); // User wants to stay
+        resolve(false);
       });
       
       btnLeave.addEventListener('click', () => {
         overlay.style.display = 'none';
-        resolve(true); // User wants to leave
+        resolve(true);
       });
     });
   }
 
-  // ============================================
-  // BACK BUTTON HANDLING
-  // ============================================
-  
   let backButtonHandled = false;
   
   function setupBackButtonHandler() {
-    // Push a state to history so we can intercept back button
     history.pushState({ page: 'discovery' }, '', window.location.href);
     
     window.addEventListener('popstate', async (event) => {
@@ -665,7 +703,6 @@ console.log('✅ Socket authentication helpers loaded');
       
       console.log('⬅️ Back button pressed on discovery page');
       
-      // Push state back so we stay on the page while showing dialog
       history.pushState({ page: 'discovery' }, '', window.location.href);
       
       const shouldLeave = await showConfirmationDialog();
@@ -674,15 +711,12 @@ console.log('✅ Socket authentication helpers loaded');
         console.log('✅ User confirmed leaving discovery');
         backButtonHandled = true;
         
-        // Cancel matchmaking
         if (socketInstance && socketInstance.connected) {
           socketInstance.emit('cancel_matchmaking');
         }
         
-        // Clear state
         clearState();
         
-        // Navigate to mood page
         window.location.href = '/mood.html';
       } else {
         console.log('❌ User chose to stay on discovery');
@@ -690,10 +724,6 @@ console.log('✅ Socket authentication helpers loaded');
     });
   }
 
-  // ============================================
-  // PROFILE PICTURE HELPER
-  // ============================================
-  
   function displayProfilePicture(element, pfpUrl, username) {
     if (!element) return;
     
@@ -706,18 +736,12 @@ console.log('✅ Socket authentication helpers loaded');
     }
   }
 
-  // ============================================
-  // MAIN INITIALIZATION
-  // ============================================
-  
-  // Check if we're restoring state
   const restoredState = loadState();
   
   if (restoredState && restoredState.inMatchmaking) {
     console.log('🔄 Restoring discovery state from background');
   }
 
-  // Auth check
   try {
     await _Auth.requireAuth();
   } catch (err) {
@@ -730,7 +754,6 @@ console.log('✅ Socket authentication helpers loaded');
     return;
   }
 
-  // Get selected mood
   const mood = localStorage.getItem('selectedMood');
   if (!mood) {
     console.error('No mood selected');
@@ -751,11 +774,7 @@ console.log('✅ Socket authentication helpers loaded');
   let currentUser = null;
   let isInMatchmaking = false;
 
-  // ============================================
-  // SOCKET CONNECTION & MATCHMAKING
-  // ============================================
-  
-async function initializeSocket() {
+  async function initializeSocket() {
     try {
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
@@ -773,11 +792,9 @@ async function initializeSocket() {
 
       console.log('✅ User loaded:', currentUser);
 
-      // Update avatars
       displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
       displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-      // Connect socket
       const socketUrl = window.location.origin;
       socketInstance = io(socketUrl, {
         transports: ['websocket', 'polling'],
@@ -802,7 +819,6 @@ async function initializeSocket() {
           console.log('🔌 Socket connected:', socketInstance.id);
           
           try {
-            // ✅ Simple authentication - no TabManager waiting
             await authenticateSocket(socketInstance, currentUser.userId);
             
             resolved = true;
@@ -868,17 +884,14 @@ async function initializeSocket() {
       
       isInMatchmaking = false;
       
-      // Store room data
       try {
         localStorage.setItem('currentRoom', JSON.stringify(data));
       } catch (e) {
         console.warn('Could not save room data:', e);
       }
 
-      // Clear discovery state
       clearState();
 
-      // Navigate to chat - WORKS EVEN IN BACKGROUND
       console.log('🚀 Navigating to chat.html');
       window.location.href = '/chat.html';
     });
@@ -900,42 +913,36 @@ async function initializeSocket() {
     });
   }
 
-  // ============================================
-  // CANCEL MATCHMAKING
-  // ============================================
-  
-  function cancelMatchmaking() {
-    console.log('❌ User cancelled matchmaking');
+  async function cancelMatchmaking() {
+    console.log('❌ Cancel button clicked');
     
-    isInMatchmaking = false;
-    clearState();
+    const shouldLeave = await showConfirmationDialog();
     
-    if (socketInstance && socketInstance.connected) {
-      socketInstance.emit('cancel_matchmaking');
+    if (shouldLeave) {
+      console.log('✅ User confirmed cancelling matchmaking');
+      
+      isInMatchmaking = false;
+      clearState();
+      
+      if (socketInstance && socketInstance.connected) {
+        socketInstance.emit('cancel_matchmaking');
+      } else {
+        window.location.href = '/mood.html';
+      }
     } else {
-      window.location.href = '/mood.html';
+      console.log('❌ User chose to stay in discovery');
     }
   }
 
-  // ============================================
-  // EVENT LISTENERS
-  // ============================================
-  
   if (cancelBtn) {
     cancelBtn.addEventListener('click', cancelMatchmaking);
   }
 
-  // Setup back button handler
   setupBackButtonHandler();
 
-  // ============================================
-  // PAGE VISIBILITY HANDLING (Android Home Button)
-  // ============================================
-  
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       console.log('📱 Page hidden (app backgrounded)');
-      // Save state - matchmaking continues in background
       if (isInMatchmaking) {
         saveState({ 
           inMatchmaking: true, 
@@ -945,14 +952,9 @@ async function initializeSocket() {
       }
     } else {
       console.log('📱 Page visible (app foregrounded)');
-      // State is automatically preserved
     }
   });
 
-  // ============================================
-  // INITIALIZATION
-  // ============================================
-  
   try {
     console.log('🚀 Initializing discovery mode...');
     
@@ -972,12 +974,7 @@ async function initializeSocket() {
     }, 2000);
   }
 
-  // ============================================
-  // CLEANUP ON NAVIGATION
-  // ============================================
-  
   window.addEventListener('beforeunload', () => {
-    // Only clear state if explicitly leaving (not backgrounding)
     if (!document.hidden && isInMatchmaking) {
       console.log('🚪 Page unloading while in matchmaking - preserving state');
       saveState({ 
