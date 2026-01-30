@@ -55,6 +55,15 @@ const connectionsByIP = new Map(); // ip -> { count, connections: Set }
 const connectionRateLimiter = new Map(); // ip -> { count, resetTime }
 const MAX_CONNECTIONS_GLOBAL = 1000; // Maximum total connections
 
+
+function getCurrentTransferMemory() {
+  let total = 0;
+  for (const transfer of activeFileTransfers.values()) {
+    total += transfer.bytesTransferred || 0;
+  }
+  return total;
+}
+
 // Add helper function at top
 function validateRoomAccess(roomId, userId) {
   const room = matchmaking.getRoom(roomId);
@@ -1206,15 +1215,6 @@ io.on('connection', (socket) => {
 // CHUNKED FILE TRANSMISSION RELAY
 // ============================================
 
-
-
-function getCurrentTransferMemory() {
-  let total = 0;
-  for (const transfer of activeFileTransfers.values()) {
-    total += transfer.bytesTransferred || 0;
-  }
-  return total;
-}
 
 socket.on('file_chunk', (data) => {
   try {
