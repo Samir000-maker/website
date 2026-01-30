@@ -35,6 +35,26 @@ const joinCallDebounce = new Map(); // userId -> timestamp
 
 const roomCallInitLocks = new Map(); // roomId -> Promise
 
+
+const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
+const MAX_CONCURRENT_TRANSFERS = 20; // ✅ Global limit
+const MAX_MEMORY_FOR_TRANSFERS = 500 * 1024 * 1024; // ✅ 500MB total cap
+
+const answerDebounce = new Map(); // userId:targetUserId -> timestamp
+const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
+
+
+const MAX_SDP_SIZE = 100 * 1024; // 100KB max for SDP (offers/answers)
+const MAX_ICE_CANDIDATE_SIZE = 5 * 1024; // 5KB max for ICE candidate
+const MAX_SIGNALING_RATE = 50; // Max 50 signaling messages per 10 seconds per user
+const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
+
+const connectionsByIP = new Map(); // ip -> { count, connections: Set }
+const connectionRateLimiter = new Map(); // ip -> { count, resetTime }
+const MAX_CONNECTIONS_GLOBAL = 1000; // Maximum total connections
+
 // Add helper function at top
 function validateRoomAccess(roomId, userId) {
   const room = matchmaking.getRoom(roomId);
@@ -1186,11 +1206,7 @@ io.on('connection', (socket) => {
 // CHUNKED FILE TRANSMISSION RELAY
 // ============================================
 
-const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
-const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
-const MAX_CONCURRENT_TRANSFERS = 20; // ✅ Global limit
-const MAX_MEMORY_FOR_TRANSFERS = 500 * 1024 * 1024; // ✅ 500MB total cap
+
 
 function getCurrentTransferMemory() {
   let total = 0;
@@ -3312,16 +3328,11 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     });
   }
 });
-const answerDebounce = new Map(); // userId:targetUserId -> timestamp
-const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
 
 
 
 
-const MAX_SDP_SIZE = 100 * 1024; // 100KB max for SDP (offers/answers)
-const MAX_ICE_CANDIDATE_SIZE = 5 * 1024; // 5KB max for ICE candidate
-const MAX_SIGNALING_RATE = 50; // Max 50 signaling messages per 10 seconds per user
-const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
+
 
 function checkSignalingRateLimit(userId) {
   const now = Date.now();
