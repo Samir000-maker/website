@@ -4606,5 +4606,4 @@ const mongoClient = db.client || db.s?.client;
     process.exit(1);
   }
 }
-
 startServer();
