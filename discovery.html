@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html class="light" lang="en">
+<html class="dark" lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,29 +20,22 @@
       theme: {
         extend: {
           colors: {
-            "primary": "#367d7d",
-            "primary-dark": "#2a6262",
-            "background-light": "#fafaf9",
-            "background-dark": "#17191c",
-            "surface-light": "#ffffff",
-            "surface-dark": "#22252a",
-            "accent": "#FF9F80",
+            "primary": "#00E0FF",
+            "primary-dark": "#00B2CC",
+            "accent": "#FF2E93",
+            "background-dark": "#0B0C10",
+            "surface-dark": "#15161C",
           },
           fontFamily: {
             "display": ["Manrope", "sans-serif"],
             "body": ["Manrope", "sans-serif"],
           },
           borderRadius: {
-            "DEFAULT": "0.5rem",
-            "lg": "0.75rem",
             "xl": "1rem",
             "2xl": "1.5rem",
+            "3xl": "2rem",
             "full": "9999px"
           },
-          boxShadow: {
-            "ambient": "0 10px 30px -10px rgba(54, 125, 125, 0.15)",
-            "ambient-hover": "0 15px 40px -10px rgba(54, 125, 125, 0.25)",
-          }
         },
       },
     }
@@ -56,117 +49,92 @@
       background: transparent;
     }
     ::-webkit-scrollbar-thumb {
-      background-color: #d1d5db;
+      background-color: #333;
       border-radius: 20px;
     }
-    .dark ::-webkit-scrollbar-thumb {
-      background-color: #4b5563;
+    
+    body {
+      background-color: #0B0C10;
     }
+    
     .glass-panel {
+      background: rgba(21, 22, 28, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    
+    .glass-card {
+      background: rgba(255, 255, 255, 0.03);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     }
-    .radar-bg {
-      background: radial-gradient(circle, rgba(54, 125, 125, 0.05) 0%, rgba(54, 125, 125, 0.02) 40%, transparent 70%);
+    
+    .glow-text {
+      text-shadow: 0 0 20px rgba(0, 224, 255, 0.5);
     }
-    @keyframes fadeInUp {
-      from {
+    
+    /* Circular Wave Frequency Animation */
+    @keyframes wave-pulse {
+      0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.8;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(2.5);
         opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-    .animate-fade-in-up {
-      animation: fadeInUp 0.6s ease-out;
-    }
-    
-    /* Confirmation Dialog Styles */
-    .confirmation-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      z-index: 9999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-      opacity: 0;
-      animation: fadeIn 0.2s ease-out forwards;
-    }
-    
-    .confirmation-dialog {
-      background: white;
-      border-radius: 1.5rem;
-      padding: 2rem;
-      max-width: 400px;
-      width: 100%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      transform: scale(0.9) translateY(20px);
-      animation: slideUp 0.3s ease-out forwards;
-    }
-    
-    .dark .confirmation-dialog {
-      background: #22252a;
-      border: 1px solid #374151;
-    }
-    
-    @keyframes fadeIn {
-      to { opacity: 1; }
-    }
-    
-    @keyframes slideUp {
-      to {
-        transform: scale(1) translateY(0);
-        opacity: 1;
       }
     }
     
-    .confirmation-buttons {
-      display: flex;
-      gap: 0.75rem;
-      margin-top: 1.5rem;
+    .wave-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border: 2px solid rgba(0, 224, 255, 0.6);
+      border-radius: 50%;
+      animation: wave-pulse 3s ease-out infinite;
     }
     
-    .confirmation-buttons button {
-      flex: 1;
-      padding: 0.875rem 1.5rem;
-      border-radius: 0.75rem;
-      font-weight: 600;
-      font-size: 0.95rem;
-      transition: all 0.2s ease;
-      border: none;
-      cursor: pointer;
+    .wave-ring:nth-child(1) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 0s;
     }
     
-    .btn-stay {
-      background: #367d7d;
-      color: white;
+    .wave-ring:nth-child(2) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 0.5s;
     }
     
-    .btn-stay:active {
-      transform: scale(0.97);
+    .wave-ring:nth-child(3) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 1s;
     }
     
-    .btn-leave {
-      background: #f3f4f6;
-      color: #374151;
+    .wave-ring:nth-child(4) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 1.5s;
     }
     
-    .dark .btn-leave {
-      background: #374151;
-      color: #e5e7eb;
+    .wave-ring:nth-child(5) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 2s;
     }
     
-    .btn-leave:active {
-      transform: scale(0.97);
+    .wave-ring:nth-child(6) {
+      width: 140px;
+      height: 140px;
+      animation-delay: 2.5s;
     }
-
-    /* Professional Radar Dot Animation */
+    
+    /* Radar Dot Animation */
     .radar-dot {
       position: absolute;
       width: 10px;
@@ -208,7 +176,6 @@
       animation: radarDotPulse 4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     }
 
-    /* Subtle ripple effect */
     .radar-dot::before {
       content: '';
       position: absolute;
@@ -237,114 +204,202 @@
         opacity: 0;
       }
     }
+    
+    /* Confirmation Dialog Styles */
+    .confirmation-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      opacity: 0;
+      animation: fadeIn 0.2s ease-out forwards;
+    }
+    
+    .confirmation-dialog {
+      background: #22252a;
+      border: 1px solid #374151;
+      border-radius: 1.5rem;
+      padding: 2rem;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      transform: scale(0.9) translateY(20px);
+      animation: slideUp 0.3s ease-out forwards;
+    }
+    
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+    
+    @keyframes slideUp {
+      to {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    .confirmation-buttons {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    
+    .confirmation-buttons button {
+      flex: 1;
+      padding: 0.875rem 1.5rem;
+      border-radius: 0.75rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s ease;
+      border: none;
+      cursor: pointer;
+    }
+    
+    .btn-stay {
+      background: #00E0FF;
+      color: #000;
+    }
+    
+    .btn-stay:active {
+      transform: scale(0.97);
+    }
+    
+    .btn-leave {
+      background: #374151;
+      color: #e5e7eb;
+    }
+    
+    .btn-leave:active {
+      transform: scale(0.97);
+    }
   </style>
-<base target="_blank">
+  <base target="_blank">
 </head>
 
-<body class="font-display bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-100 antialiased selection:bg-primary/20">
+<body class="font-display bg-background-dark text-slate-100 antialiased min-h-screen flex flex-col">
 
-<div class="relative flex min-h-screen w-full flex-col overflow-x-hidden">
-
-  <!-- Header -->
-  <header class="sticky top-0 z-50 w-full border-b border-slate-200/60 dark:border-slate-800/60 bg-background-light/80 dark:bg-background-dark/80 glass-panel">
-    <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center gap-2">
-        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
-          <span class="material-symbols-outlined text-[20px]">spa</span>
-        </div>
-        <h2 class="text-lg font-bold tracking-tight text-slate-900 dark:text-white">MoodJournal</h2>
+<!-- Header -->
+<header class="sticky top-0 z-50 w-full glass-panel">
+  <div class="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 lg:px-12">
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary-dark to-primary text-black shadow-[0_0_15px_rgba(0,224,255,0.4)]">
+        <span class="material-symbols-outlined text-[24px]">spa</span>
       </div>
-      <nav class="hidden md:flex items-center gap-8">
-        <a class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors" href="#">Daily Check-in</a>
-        <a class="text-sm font-semibold text-primary" href="#">Community</a>
-        <a class="text-sm font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors" href="#">My Trends</a>
-      </nav>
-      <div class="flex items-center gap-4">
-        <button class="rounded-full p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-          <span class="material-symbols-outlined">notifications</span>
-        </button>
-        <div id="headerAvatar" class="h-8 w-8 overflow-hidden rounded-full border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
-          <div class="h-full w-full bg-primary text-white flex items-center justify-center text-sm font-bold">U</div>
-        </div>
-      </div>
+      <h2 class="text-xl font-bold tracking-tight text-white glow-text">MoodJournal</h2>
     </div>
-  </header>
-
-  <!-- Main Content -->
-  <main class="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col h-[calc(100vh-4rem)]">
-    
-    <!-- Title Section -->
-    <div class="text-center mb-8 space-y-2 animate-fade-in-up">
-      <h1 class="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-        Discovery Mode
-      </h1>
-      <p id="statusText" class="text-lg text-slate-500 dark:text-slate-400 max-w-lg mx-auto">
-        Broadcasting your mood to find connections nearby...
-      </p>
-    </div>
-
-    <!-- Radar Container -->
-    <div class="flex-1 relative w-full rounded-[2.5rem] bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-slate-800 shadow-xl overflow-hidden transition-all duration-700">
-      
-      <!-- Background gradient -->
-      <div class="absolute inset-0 radar-bg"></div>
-
-      <!-- Crosshair lines -->
-      <div class="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
-        <div class="w-full h-px bg-slate-400"></div>
-        <div class="h-full w-px bg-slate-400 absolute"></div>
-      </div>
-
-      <!-- Radar rings -->
-      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div class="w-[250px] h-[250px] rounded-full border border-primary/30 dark:border-primary/20 shadow-[0_0_30px_rgba(54,125,125,0.1)]"></div>
-        <div class="absolute w-[450px] h-[450px] rounded-full border border-dashed border-primary/20 dark:border-primary/10"></div>
-        <div class="absolute w-[650px] h-[650px] rounded-full border border-primary/10 dark:border-primary/5"></div>
-        <div class="absolute w-[900px] h-[900px] rounded-full border border-slate-200/50 dark:border-slate-800/50"></div>
-      </div>
-
-      <!-- Center User Avatar -->
-      <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center justify-center">
-        <div class="absolute inset-0 bg-primary/20 dark:bg-primary/10 rounded-full blur-2xl scale-150"></div>
-        <div class="relative">
-          <div id="userAvatar" class="h-24 w-24 rounded-full border-4 border-white dark:border-surface-dark shadow-2xl overflow-hidden ring-4 ring-primary/10 ring-offset-2 dark:ring-offset-surface-dark bg-slate-100 dark:bg-slate-800">
-            <div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">U</div>
-          </div>
-          <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-surface-light dark:bg-surface-dark py-1 px-3 rounded-full shadow-lg border border-slate-100 dark:border-slate-700 flex items-center gap-1.5 whitespace-nowrap z-40">
-            <span class="relative flex h-2.5 w-2.5">
-              <span class="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping"></span>
-              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
-            </span>
-            <span class="text-xs font-bold text-slate-700 dark:text-slate-300">Searching</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Radar Dots Container (replaces user profiles) -->
-      <div id="radarDotsContainer" class="absolute inset-0 pointer-events-none z-20"></div>
-
-    </div>
-
-    <!-- Cancel Button -->
-    <div class="flex justify-center mt-6 gap-4">
-      <button id="cancelBtn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-sm transition-all shadow-sm">
-        <span class="material-symbols-outlined text-[20px]">close</span>
-        Cancel Search
+    <nav class="hidden md:flex items-center gap-10">
+      <a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">Daily Check-in</a>
+      <a class="text-sm font-bold text-primary drop-shadow-[0_0_8px_rgba(0,224,255,0.5)]" href="#">Discovery</a>
+      <a class="text-sm font-medium text-slate-400 hover:text-white transition-colors" href="#">My Trends</a>
+    </nav>
+    <div class="flex items-center gap-6">
+      <button class="relative rounded-full p-2 text-slate-400 hover:text-white transition-colors">
+        <span class="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent animate-pulse"></span>
+        <span class="material-symbols-outlined">notifications</span>
       </button>
+      <div id="headerAvatar" class="h-10 w-10 overflow-hidden rounded-full ring-2 ring-white/10 ring-offset-2 ring-offset-[#0B0C10] bg-slate-800">
+        <div class="h-full w-full bg-primary text-black flex items-center justify-center text-sm font-bold">U</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Main Content -->
+<main class="flex-1 w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 py-10 flex flex-col items-center justify-center relative">
+  
+  <!-- Background Gradient Blurs -->
+  <div class="absolute inset-0 overflow-hidden pointer-events-none z-0">
+    <div class="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px]"></div>
+    <div class="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-accent/5 rounded-full blur-[120px]"></div>
+  </div>
+
+  <!-- Title Section -->
+  <div class="text-center mb-12 space-y-3 z-10 relative">
+    <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-primary-dark to-white">
+      Discovery Mode
+    </h1>
+    <p id="statusText" class="text-lg text-slate-400 font-light tracking-wide">
+      Scanning quantum frequencies for mood resonance...
+    </p>
+  </div>
+
+  <!-- Radar Container -->
+  <div class="relative w-full max-w-4xl aspect-square md:aspect-[16/9] lg:aspect-[2/1] rounded-[3rem] bg-[#0F1116] border border-white/5 shadow-2xl overflow-hidden">
+    
+    <!-- Grid Background -->
+    <div class="absolute inset-0 opacity-5" style="background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px); background-size: 40px 40px;"></div>
+
+    <!-- Radar Rings -->
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div class="w-[200px] h-[200px] rounded-full border border-primary/20 shadow-[0_0_30px_rgba(0,224,255,0.05)] animate-pulse"></div>
+      <div class="absolute w-[400px] h-[400px] rounded-full border border-primary/10"></div>
+      <div class="absolute w-[600px] h-[600px] rounded-full border border-dashed border-primary/10 opacity-50"></div>
+      <div class="absolute w-[900px] h-[900px] rounded-full border border-primary/5"></div>
+      <div class="absolute w-[1200px] h-[1200px] rounded-full border border-primary/5 opacity-30"></div>
     </div>
 
-  </main>
-
-  <!-- Footer -->
-  <footer class="mt-auto border-t border-slate-200 dark:border-slate-800 py-8 bg-background-light dark:bg-background-dark">
-    <div class="max-w-5xl mx-auto px-4 text-center">
-      <p class="text-slate-400 text-sm">© 2023 MoodJournal. Prioritize your peace.</p>
+    <!-- Center User Avatar with Wave Frequency -->
+    <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center justify-center">
+      
+      <!-- Wave Frequency Rings -->
+      <div class="absolute inset-0 pointer-events-none">
+        <div class="wave-ring"></div>
+        <div class="wave-ring"></div>
+        <div class="wave-ring"></div>
+        <div class="wave-ring"></div>
+        <div class="wave-ring"></div>
+        <div class="wave-ring"></div>
+      </div>
+      
+      <!-- Avatar Card -->
+      <div class="glass-card p-6 rounded-3xl flex flex-col items-center backdrop-blur-xl border-t border-l border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.4)]">
+        <div class="relative">
+          <div id="userAvatar" class="h-28 w-28 rounded-full border-[3px] border-white/80 shadow-[0_0_40px_rgba(0,224,255,0.3)] overflow-hidden relative z-10 bg-slate-800">
+            <div class="h-full w-full bg-primary text-black flex items-center justify-center text-2xl font-bold">U</div>
+          </div>
+          <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 flex items-center justify-center z-20">
+            <div class="bg-black/80 backdrop-blur-md px-3 py-1 rounded-full border border-primary/30 flex items-center gap-2 shadow-lg">
+              <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+              </span>
+              <span class="text-[10px] font-bold tracking-widest uppercase text-primary">Searching</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-  </footer>
 
-</div>
+    <!-- Radar Dots Container -->
+    <div id="radarDotsContainer" class="absolute inset-0 pointer-events-none z-20"></div>
 
-<!-- Confirmation Dialog (hidden by default) -->
+  </div>
+
+  <!-- Cancel Button -->
+  <div class="flex justify-center mt-10 w-full">
+    <button id="cancelBtn" class="group relative flex items-center gap-3 px-8 py-3 rounded-full bg-[#15161C] border border-white/10 hover:border-red-500/50 hover:bg-red-500/5 text-slate-400 hover:text-red-400 font-semibold text-sm transition-all duration-300 shadow-lg hover:shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+      <div class="absolute inset-0 rounded-full ring-1 ring-white/5 group-hover:ring-red-500/30"></div>
+      <span class="material-symbols-outlined text-[20px] group-hover:rotate-90 transition-transform duration-300">close</span>
+      <span class="tracking-wide uppercase text-xs">Cancel Search</span>
+    </button>
+  </div>
+
+</main>
+
+<!-- Footer -->
+<footer class="mt-auto border-t border-white/5 py-8 bg-[#0B0C10]">
+  <div class="max-w-5xl mx-auto px-4 text-center">
+    <p class="text-slate-600 text-xs font-mono tracking-widest uppercase">© 2023 MoodJournal. Quantum System Active.</p>
+  </div>
+</footer>
+
+<!-- Confirmation Dialog -->
 <div id="confirmationOverlay" style="display: none;"></div>
 
 <!-- Firebase -->
@@ -376,7 +431,6 @@
 
 <!-- Radar Dot Animation System -->
 <script>
-  // Professional Radar Dot Animation System
   (function() {
     const container = document.getElementById('radarDotsContainer');
     if (!container) return;
@@ -393,7 +447,6 @@
 
     let dimensions = getContainerDimensions();
 
-    // Configuration
     const config = {
       minDots: 8,
       maxDots: 15,
@@ -408,7 +461,6 @@
     let activeDots = 0;
     let animationRunning = true;
 
-    // Generate random position in annular region
     function getRandomPosition() {
       const angle = Math.random() * Math.PI * 2;
       const radius = config.minRadius + Math.random() * (config.maxRadius - config.minRadius);
@@ -419,7 +471,6 @@
       };
     }
 
-    // Create and animate a single radar dot
     function createRadarDot() {
       if (activeDots >= config.maxDots || !animationRunning) return;
 
@@ -443,7 +494,6 @@
       }, config.dotLifetime);
     }
 
-    // Spawn dots continuously
     function spawnDots() {
       if (!animationRunning) return;
       
@@ -459,7 +509,6 @@
       }, config.spawnInterval);
     }
 
-    // Handle visibility changes
     document.addEventListener('visibilitychange', () => {
       animationRunning = !document.hidden;
       if (animationRunning && activeDots < config.minDots) {
@@ -467,12 +516,10 @@
       }
     });
 
-    // Handle window resize
     window.addEventListener('resize', () => {
       dimensions = getContainerDimensions();
     });
 
-    // Start the animation
     spawnDots();
 
     window.addEventListener('beforeunload', () => {
@@ -481,14 +528,13 @@
   })();
 </script>
 
-<!-- Page Logic with State Preservation -->
+<!-- Page Logic -->
 <script>
 (async () => {
   const MoodApp = window.MoodApp || {};
   const _Auth = MoodApp.Auth;
   const _API = MoodApp.API;
   const _Toast = MoodApp.Toast;
-  const _PageTransition = MoodApp.PageTransition;
 
   const toast = (m, t='success') => { 
     if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
@@ -499,148 +545,56 @@
   const STATE_TIMESTAMP_KEY = 'discovery_state_timestamp';
   const STATE_EXPIRY = 15 * 60 * 1000;
 
-  function waitForTabManager() {
-    return new Promise((resolve, reject) => {
-      const overlay = document.getElementById('blocked-tab-overlay');
-      if (overlay) {
-        console.error('❌ [Auth] Tab is BLOCKED - authentication aborted');
-        reject(new Error('This tab is blocked. Please close it and use the active tab.'));
-        return;
-      }
-      
-      if (window.tabManager && window.tabManager.tabId) {
-        console.log('✅ [Auth] TabManager ready:', window.tabManager.tabId);
-        resolve(window.tabManager);
-        return;
-      }
-      
-      console.log('⏳ [Auth] Waiting for TabManager to initialize...');
-      
-      const blockHandler = () => {
-        console.error('❌ [Auth] Tab was BLOCKED during authentication');
-        reject(new Error('This tab is blocked. Please close it and use the active tab.'));
-      };
-      
-      window.addEventListener('tab_blocked', blockHandler, { once: true });
-      
-      let attempts = 0;
-      const maxAttempts = 50;
-      
-      const interval = setInterval(() => {
-        attempts++;
-        
-        const overlay = document.getElementById('blocked-tab-overlay');
-        if (overlay) {
-          clearInterval(interval);
-          window.removeEventListener('tab_blocked', blockHandler);
-          console.error('❌ [Auth] Tab BLOCKED during wait');
-          reject(new Error('This tab is blocked. Please close it and use the active tab.'));
-          return;
-        }
-        
-        if (window.tabManager && window.tabManager.tabId) {
-          clearInterval(interval);
-          window.removeEventListener('tab_blocked', blockHandler);
-          console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
-          resolve(window.tabManager);
-        } else if (attempts >= maxAttempts) {
-          clearInterval(interval);
-          window.removeEventListener('tab_blocked', blockHandler);
-          console.error('❌ [Auth] TabManager timeout after 5s');
-          reject(new Error('TabManager initialization timeout'));
-        }
-      }, 100);
-    });
-  }
-
   async function authenticateSocket(socket, userId) {
     try {
-      console.log('🔐 [Auth] Starting socket authentication...');
+      console.log('🔐 Authenticating...');
       
       const firebaseUser = firebase.auth().currentUser;
-      if (!firebaseUser) {
-        throw new Error('Not authenticated with Firebase');
-      }
+      if (!firebaseUser) throw new Error('Not authenticated');
       
       const token = await firebaseUser.getIdToken();
-      console.log('✅ [Auth] Firebase token retrieved');
-      
       const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
-      console.log('✅ [Auth] TabId:', tabId);
       
-      console.log('📤 [Auth] Sending authenticate event');
-      
-      socket.emit('authenticate', {
-        token: token,
-        userId: userId,
-        tabId: tabId
-      });
+      socket.emit('authenticate', { token, userId, tabId });
       
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Authentication timeout (15s)'));
-        }, 15000);
+        const timeout = setTimeout(() => reject(new Error('Auth timeout')), 15000);
         
         socket.once('authenticated', (data) => {
           clearTimeout(timeout);
-          console.log('✅ [Auth] Socket authenticated:', data);
+          console.log('✅ Authenticated');
           resolve(data);
         });
         
         socket.once('auth_error', (error) => {
           clearTimeout(timeout);
-          console.error('❌ [Auth] Authentication failed:', error);
-          reject(new Error(error.message || 'Authentication failed'));
+          reject(new Error(error.message || 'Auth failed'));
         });
       });
-      
     } catch (error) {
-      console.error('❌ [Auth] Socket authentication error:', error);
+      console.error('❌ Auth error:', error);
       throw error;
     }
-  }
-
-  function setupSessionReplacementHandler(socket) {
-    socket.on('session_replaced', (data) => {
-      console.log('⚠️ [Session] Tab replaced by server:', data);
-      
-      if (window.tabManager) {
-        window.tabManager.blockTab();
-      }
-    });
-    
-    console.log('✅ [Session] Replacement handler registered');
   }
 
   function saveState(state) {
     try {
       localStorage.setItem(STATE_KEY, JSON.stringify(state));
       localStorage.setItem(STATE_TIMESTAMP_KEY, Date.now().toString());
-      console.log('✅ Discovery state saved:', state);
-    } catch (e) {
-      console.warn('Failed to save discovery state:', e);
-    }
+    } catch (e) {}
   }
   
   function loadState() {
     try {
       const stateStr = localStorage.getItem(STATE_KEY);
       const timestamp = localStorage.getItem(STATE_TIMESTAMP_KEY);
-      
       if (!stateStr || !timestamp) return null;
-      
-      const age = Date.now() - parseInt(timestamp);
-      if (age > STATE_EXPIRY) {
-        console.log('⏰ Discovery state expired, clearing');
+      if (Date.now() - parseInt(timestamp) > STATE_EXPIRY) {
         clearState();
         return null;
       }
-      
-      const state = JSON.parse(stateStr);
-      console.log('✅ Discovery state loaded:', state);
-      return state;
+      return JSON.parse(stateStr);
     } catch (e) {
-      console.warn('Failed to load discovery state:', e);
       return null;
     }
   }
@@ -648,22 +602,21 @@
   function clearState() {
     localStorage.removeItem(STATE_KEY);
     localStorage.removeItem(STATE_TIMESTAMP_KEY);
-    console.log('🗑️ Discovery state cleared');
   }
 
   function showConfirmationDialog() {
     return new Promise((resolve) => {
       const overlay = document.getElementById('confirmationOverlay');
       
-      const dialogHTML = `
+      overlay.innerHTML = `
         <div class="confirmation-overlay">
           <div class="confirmation-dialog">
             <div style="text-align: center; margin-bottom: 1rem;">
-              <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #fef2f2; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+              <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: #374151; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                 <span class="material-symbols-outlined" style="font-size: 32px; color: #dc2626;">warning</span>
               </div>
-              <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #1f2937;">Leave Discovery?</h3>
-              <p style="color: #6b7280; font-size: 0.95rem; line-height: 1.5;">
+              <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem; color: #f3f4f6;">Leave Discovery?</h3>
+              <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.5;">
                 You're currently searching for matches. If you leave now, your search will be cancelled.
               </p>
             </div>
@@ -675,18 +628,14 @@
         </div>
       `;
       
-      overlay.innerHTML = dialogHTML;
       overlay.style.display = 'flex';
       
-      const btnStay = document.getElementById('btnStay');
-      const btnLeave = document.getElementById('btnLeave');
-      
-      btnStay.addEventListener('click', () => {
+      document.getElementById('btnStay').addEventListener('click', () => {
         overlay.style.display = 'none';
         resolve(false);
       });
       
-      btnLeave.addEventListener('click', () => {
+      document.getElementById('btnLeave').addEventListener('click', () => {
         overlay.style.display = 'none';
         resolve(true);
       });
@@ -698,72 +647,46 @@
   function setupBackButtonHandler() {
     history.pushState({ page: 'discovery' }, '', window.location.href);
     
-    window.addEventListener('popstate', async (event) => {
+    window.addEventListener('popstate', async () => {
       if (backButtonHandled) return;
-      
-      console.log('⬅️ Back button pressed on discovery page');
-      
       history.pushState({ page: 'discovery' }, '', window.location.href);
       
-      const shouldLeave = await showConfirmationDialog();
-      
-      if (shouldLeave) {
-        console.log('✅ User confirmed leaving discovery');
+      if (await showConfirmationDialog()) {
         backButtonHandled = true;
-        
-        if (socketInstance && socketInstance.connected) {
-          socketInstance.emit('cancel_matchmaking');
-        }
-        
+        if (socketInstance?.connected) socketInstance.emit('cancel_matchmaking');
         clearState();
-        
         window.location.href = '/mood.html';
-      } else {
-        console.log('❌ User chose to stay on discovery');
       }
     });
   }
 
   function displayProfilePicture(element, pfpUrl, username) {
     if (!element) return;
-    
     const initial = username ? username.charAt(0).toUpperCase() : 'U';
     
     if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
-      element.innerHTML = `<img src="${pfpUrl}" alt="${username}" class="h-full w-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold\\'>${initial}</div>'">`;
+      element.innerHTML = `<img src="${pfpUrl}" alt="${username}" class="h-full w-full object-cover" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'h-full w-full bg-primary text-black flex items-center justify-center text-2xl font-bold\\'>${initial}</div>'">`;
     } else {
-      element.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center text-2xl font-bold">${initial}</div>`;
+      element.innerHTML = `<div class="h-full w-full bg-primary text-black flex items-center justify-center text-2xl font-bold">${initial}</div>`;
     }
-  }
-
-  const restoredState = loadState();
-  
-  if (restoredState && restoredState.inMatchmaking) {
-    console.log('🔄 Restoring discovery state from background');
   }
 
   try {
     await _Auth.requireAuth();
   } catch (err) {
-    console.error('Auth required failed:', err);
     toast('Please log in first', 'error');
     clearState();
-    setTimeout(() => {
-      window.location.href = '/login.html';
-    }, 1500);
+    setTimeout(() => window.location.href = '/login.html', 1500);
     return;
   }
 
   const mood = localStorage.getItem('selectedMood');
   if (!mood) {
-    console.error('No mood selected');
     toast('Please select a mood first', 'error');
     clearState();
     window.location.href = '/mood.html';
     return;
   }
-
-  console.log('🎮 Discovery mode - Selected mood:', mood);
 
   const statusText = document.getElementById('statusText');
   const cancelBtn = document.getElementById('cancelBtn');
@@ -777,12 +700,9 @@
   async function initializeSocket() {
     try {
       const firebaseUser = firebase.auth().currentUser;
-      if (!firebaseUser) {
-        throw new Error('Not authenticated');
-      }
+      if (!firebaseUser) throw new Error('Not authenticated');
 
       const userData = await _API.get('/api/users/me');
-      
       currentUser = {
         userId: userData._id,
         username: userData.username,
@@ -790,13 +710,10 @@
         email: userData.email
       };
 
-      console.log('✅ User loaded:', currentUser);
-
       displayProfilePicture(userAvatar, currentUser.pfpUrl, currentUser.username);
       displayProfilePicture(headerAvatar, currentUser.pfpUrl, currentUser.username);
 
-      const socketUrl = window.location.origin;
-      socketInstance = io(socketUrl, {
+      socketInstance = io(window.location.origin, {
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: 10,
@@ -806,182 +723,106 @@
 
       return new Promise((resolve, reject) => {
         let resolved = false;
-        
         const timeout = setTimeout(() => {
-          if (!resolved) {
-            console.error('❌ [Socket] Connection timeout');
-            reject(new Error('Socket connection timeout'));
-          }
+          if (!resolved) reject(new Error('Socket timeout'));
         }, 15000);
 
         socketInstance.on('connect', async () => {
           if (resolved) return;
-          console.log('🔌 Socket connected:', socketInstance.id);
-          
           try {
             await authenticateSocket(socketInstance, currentUser.userId);
-            
             resolved = true;
             clearTimeout(timeout);
-            console.log('✅ Socket authenticated and ready');
             resolve(socketInstance);
-            
           } catch (error) {
             if (resolved) return;
             resolved = true;
             clearTimeout(timeout);
-            console.error('❌ Authentication failed:', error);
             reject(error);
           }
         });
 
         socketInstance.on('connect_error', (error) => {
           if (resolved) return;
-          console.error('🔌 Connection error:', error);
           resolved = true;
           clearTimeout(timeout);
           reject(error);
         });
       });
-      
     } catch (error) {
-      console.error('❌ Socket initialization error:', error);
       throw error;
     }
   }
 
   async function joinMatchmaking() {
-    if (!socketInstance || !socketInstance.connected) {
-      throw new Error('Socket not connected');
-    }
+    if (!socketInstance?.connected) throw new Error('Socket not connected');
 
-    console.log('🎮 Emitting join_matchmaking event with mood:', mood);
-    
     isInMatchmaking = true;
     saveState({ inMatchmaking: true, mood, userId: currentUser.userId });
-
     socketInstance.emit('join_matchmaking', { mood });
 
     socketInstance.on('queued', (data) => {
-      console.log('📊 Queued:', data);
-      const position = data.position || 0;
-      const total = 2;
       if (statusText) {
-        statusText.textContent = `Waiting for others (${position}/${total})...`;
+        statusText.textContent = `Waiting for others (${data.position || 0}/2)...`;
       }
-      
-      saveState({ 
-        inMatchmaking: true, 
-        mood, 
-        userId: currentUser.userId,
-        position 
-      });
+      saveState({ inMatchmaking: true, mood, userId: currentUser.userId, position: data.position });
     });
 
     socketInstance.on('match_found', (data) => {
-      console.log('🎉 Match found:', data);
       toast('Match found!', 'success');
-      
       isInMatchmaking = false;
-      
       try {
         localStorage.setItem('currentRoom', JSON.stringify(data));
-      } catch (e) {
-        console.warn('Could not save room data:', e);
-      }
-
+      } catch (e) {}
       clearState();
-
-      console.log('🚀 Navigating to chat.html');
       window.location.href = '/chat.html';
     });
 
     socketInstance.on('matchmaking_cancelled', () => {
-      console.log('❌ Matchmaking cancelled');
       isInMatchmaking = false;
       clearState();
       toast('Search cancelled', 'success');
-      
-      setTimeout(() => {
-        window.location.href = '/mood.html';
-      }, 1000);
+      setTimeout(() => window.location.href = '/mood.html', 1000);
     });
 
     socketInstance.on('error', (data) => {
-      console.error('❌ Socket error:', data);
       toast(data.message || 'An error occurred', 'error');
     });
   }
 
   async function cancelMatchmaking() {
-    console.log('❌ Cancel button clicked');
-    
-    const shouldLeave = await showConfirmationDialog();
-    
-    if (shouldLeave) {
-      console.log('✅ User confirmed cancelling matchmaking');
-      
+    if (await showConfirmationDialog()) {
       isInMatchmaking = false;
       clearState();
-      
-      if (socketInstance && socketInstance.connected) {
+      if (socketInstance?.connected) {
         socketInstance.emit('cancel_matchmaking');
       } else {
         window.location.href = '/mood.html';
       }
-    } else {
-      console.log('❌ User chose to stay in discovery');
     }
   }
 
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', cancelMatchmaking);
-  }
-
+  if (cancelBtn) cancelBtn.addEventListener('click', cancelMatchmaking);
   setupBackButtonHandler();
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      console.log('📱 Page hidden (app backgrounded)');
-      if (isInMatchmaking) {
-        saveState({ 
-          inMatchmaking: true, 
-          mood, 
-          userId: currentUser?.userId 
-        });
-      }
-    } else {
-      console.log('📱 Page visible (app foregrounded)');
+    if (document.hidden && isInMatchmaking) {
+      saveState({ inMatchmaking: true, mood, userId: currentUser?.userId });
     }
   });
 
   try {
-    console.log('🚀 Initializing discovery mode...');
-    
     await initializeSocket();
-    console.log('✅ Socket initialized');
-
     await joinMatchmaking();
-    console.log('✅ Matchmaking started');
-
   } catch (error) {
-    console.error('❌ Discovery initialization error:', error);
-    toast(error.message || 'Failed to connect. Please try again.', 'error');
+    toast(error.message || 'Failed to connect', 'error');
     clearState();
-    
-    setTimeout(() => {
-      window.location.href = '/mood.html';
-    }, 2000);
+    setTimeout(() => window.location.href = '/mood.html', 2000);
   }
 
   window.addEventListener('beforeunload', () => {
     if (!document.hidden && isInMatchmaking) {
-      console.log('🚪 Page unloading while in matchmaking - preserving state');
-      saveState({ 
-        inMatchmaking: true, 
-        mood, 
-        userId: currentUser?.userId 
-      });
+      saveState({ inMatchmaking: true, mood, userId: currentUser?.userId });
     }
   });
 })();
