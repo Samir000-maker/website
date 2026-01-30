@@ -772,6 +772,23 @@ if (window.StateManager) {
     // ============================================
     
     
+    function preventBackNavigation() {
+  // Push a dummy state to history
+  history.pushState(null, null, location.href);
+  
+  // Listen for popstate (back button)
+  window.addEventListener('popstate', function(event) {
+    // Push state again to prevent navigation
+    history.pushState(null, null, location.href);
+    
+    // Optional: Show a toast message
+    if (_Toast && typeof _Toast.warning === 'function') {
+      _Toast.warning('Please use logout to exit');
+    }
+  });
+}
+    
+    
 function waitForTabManager() {
   return new Promise((resolve, reject) => {
     // Check if already available
@@ -1313,26 +1330,29 @@ function attachListeners() {
     // ============================================
     // INITIALIZATION
     // ============================================
-    async function initPage() {
-      // Require authentication
-      try {
-        if (_Auth && typeof _Auth.requireAuth === 'function') {
-          await _Auth.requireAuth();
-        }
-      } catch (err) {
-        console.error('Error running requireAuth():', err);
-        return;
-      }
-
-      // Initialize Socket.IO
-      console.log('🔌 Initializing socket connection...');
-      socketInstance = await initializeSocket();
-
-      // Render UI
-      renderMoods();
-      attachListeners();
-      loadNotes(0);
+async function initPage() {
+  // Require authentication
+  try {
+    if (_Auth && typeof _Auth.requireAuth === 'function') {
+      await _Auth.requireAuth();
     }
+  } catch (err) {
+    console.error('Error running requireAuth():', err);
+    return;
+  }
+
+  // Prevent back navigation
+  preventBackNavigation();  // ← ADD THIS LINE
+
+  // Initialize Socket.IO
+  console.log('🔌 Initializing socket connection...');
+  socketInstance = await initializeSocket();
+
+  // Render UI
+  renderMoods();
+  attachListeners();
+  loadNotes(0);
+}
 
     // Start the page
     initPage();
