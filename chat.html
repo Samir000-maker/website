@@ -3683,32 +3683,43 @@ function showConfirmationDialog() {
   // BACK BUTTON HANDLER
   // ============================================
   
-  function setupBackButtonHandler() {
+function setupBackButtonHandler() {
+  history.pushState({ page: 'chat' }, '', window.location.href);
+  
+  let dialogOpen = false; // Track dialog state
+  
+  window.addEventListener('popstate', async (event) => {
+    if (backButtonHandled) return;
+    
+    // CRITICAL: If dialog is already open, just push state and ignore
+    if (dialogOpen) {
+      console.log('⚠️ Dialog already open - ignoring back button');
+      history.pushState({ page: 'chat' }, '', window.location.href);
+      return;
+    }
+    
+    console.log('⬅️ Back button pressed');
     history.pushState({ page: 'chat' }, '', window.location.href);
     
-    window.addEventListener('popstate', async (event) => {
-      if (backButtonHandled) return;
+    dialogOpen = true; // Mark dialog as open
+    const shouldLeave = await showConfirmationDialog();
+    dialogOpen = false; // Mark dialog as closed
+    
+    if (shouldLeave) {
+      console.log('✅ User confirmed leaving');
+      backButtonHandled = true;
       
-      console.log('⬅️ Back button pressed');
-      history.pushState({ page: 'chat' }, '', window.location.href);
-      
-      const shouldLeave = await showConfirmationDialog();
-      
-      if (shouldLeave) {
-        console.log('✅ User confirmed leaving');
-        backButtonHandled = true;
-        
-        if (socketInstance?.connected) {
-          socketInstance.emit('leave_room');
-        }
-        
-        clearChatState(true);
-        window.location.href = '/mood.html';
-      } else {
-        console.log('❌ User staying in chat');
+      if (socketInstance?.connected) {
+        socketInstance.emit('leave_room');
       }
-    });
-  }
+      
+      clearChatState(true);
+      window.location.href = '/mood.html';
+    } else {
+      console.log('❌ User staying in chat');
+    }
+  });
+}
 
   const updateTimer = () => {
     if (!serverExpiresAt) {
