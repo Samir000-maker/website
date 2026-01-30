@@ -1,4 +1,3 @@
-
 // ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
 // Features:
 // 1. Persistent call state with grace periods
@@ -34,7 +33,7 @@ const socketUsers = new Map();
 // Add at top with other Maps
 const joinCallDebounce = new Map(); // userId -> timestamp
 
-
+const roomCallInitLocks = new Map(); // roomId -> Promise
 
 // Add helper function at top
 function validateRoomAccess(roomId, userId) {
@@ -169,12 +168,46 @@ function validateCallState(call, operation) {
 
 
 // ============================================
+// ROOM MESSAGE RATE LIMITING
+// ============================================
+const roomMessageRateLimiter = new Map(); // roomId -> { count, resetTime, lastWarning }
+const ROOM_MESSAGE_RATE_LIMIT = 30; // Max 30 messages per 10 seconds per room
+const ROOM_RATE_WINDOW = 10000; // 10 seconds
+
+function checkRoomMessageRateLimit(roomId) {
+  const now = Date.now();
+  const roomLimit = roomMessageRateLimiter.get(roomId);
+  
+  if (!roomLimit || now > roomLimit.resetTime) {
+    roomMessageRateLimiter.set(roomId, {
+      count: 1,
+      resetTime: now + ROOM_RATE_WINDOW,
+      lastWarning: 0
+    });
+    return { allowed: true, count: 1 };
+  }
+  
+  if (roomLimit.count >= ROOM_MESSAGE_RATE_LIMIT) {
+    // Only warn once per window to avoid log spam
+    if (now - roomLimit.lastWarning > 5000) {
+      console.warn(`⚠️ Room ${roomId} rate limit exceeded: ${roomLimit.count} messages in ${ROOM_RATE_WINDOW/1000}s`);
+      roomLimit.lastWarning = now;
+    }
+    return { allowed: false, count: roomLimit.count };
+  }
+  
+  roomLimit.count++;
+  return { allowed: true, count: roomLimit.count };
+}
+
+
+// ============================================
 // CLOUDFLARE TURN SERVER CONFIGURATION
 // ============================================
 
 async function generateCloudTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || '726fccae33334279a71e962da3d8e01c';
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || 'a074b71f6fa5853f4daff0fafb57c9bee54faae54f4012fab0b55720910440cf';
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - operating with STUN only');
@@ -328,14 +361,25 @@ const roomCleanupTimers = new Map(); // roomId -> timeout
 const ROOM_EXPIRY_TIME = 900000 // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
 
-// WebRTC metrics
+// WebRTC metrics - use atomic increment functions to prevent race conditions
 const webrtcMetrics = {
-  totalCalls: 0,
-  successfulConnections: 0,
-  failedConnections: 0,
-  turnUsage: 0,
-  stunUsage: 0,
-  directConnections: 0
+  _data: {
+    totalCalls: 0,
+    successfulConnections: 0,
+    failedConnections: 0,
+    turnUsage: 0,
+    stunUsage: 0,
+    directConnections: 0
+  },
+  increment(metric) {
+    return ++this._data[metric];
+  },
+  get(metric) {
+    return this._data[metric];
+  },
+  getAll() {
+    return { ...this._data };
+  }
 };
 
 
@@ -374,7 +418,7 @@ function scheduleRoomCleanup(roomId, expiresAt) {
   roomCleanupTimers.set(roomId, timer);
 }
 
-function performRoomCleanup(roomId) {
+async function performRoomCleanup(roomId) {
   const room = matchmaking.getRoom(roomId);
   
   if (!room) {
@@ -407,29 +451,67 @@ function performRoomCleanup(roomId) {
       userSocket.emit('room_expired', {
         roomId,
         message: 'Chat room has expired',
-        cleanupFiles: true // Signal to delete IndexedDB files
+        cleanupFiles: true
       });
       userSocket.leave(roomId);
     }
   });
 
-  // Clean up any active calls in this room
+  // ✅ FIX: Clean up calls with mutex protection
+  const callsToCleanup = [];
   activeCalls.forEach((call, callId) => {
     if (call.roomId === roomId) {
-      console.log(`🗑️ Cleaning up call ${callId} in expired room`);
-      
-      call.participants.forEach(userId => {
-        userCalls.delete(userId);
+      callsToCleanup.push(callId);
+    }
+  });
+
+  console.log(`🗑️ Found ${callsToCleanup.length} call(s) to clean up in expired room`);
+
+  // ✅ Clean up each call with mutex to prevent race with join/leave
+  for (const callId of callsToCleanup) {
+    try {
+      await withCallMutex(callId, async () => {
+        const call = activeCalls.get(callId);
+        
+        if (!call) {
+          console.log(`ℹ️ Call ${callId} already cleaned up`);
+          return;
+        }
+        
+        console.log(`🗑️ Cleaning up call ${callId} in expired room (inside mutex)`);
+        console.log(`   Participants: [${call.participants.join(', ')}]`);
+        
+        // Notify participants that call ended due to room expiry
+        call.participants.forEach(userId => {
+          const userSocket = findActiveSocketForUser(userId);
+          if (userSocket) {
+            userSocket.emit('call_ended', {
+              callId,
+              reason: 'Room expired'
+            });
+            userSocket.leave(`call-${callId}`);
+          }
+          userCalls.delete(userId);
+        });
+        
+        // Delete call state
+        activeCalls.delete(callId);
+        call.userMediaStates.clear();
+        
+        console.log(`✅ Call ${callId} cleaned up safely (mutex protected)`);
       });
       
-      activeCalls.delete(callId);
-      
+      // Clear grace period if exists
       if (callGracePeriod.has(callId)) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
       }
+      
+    } catch (error) {
+      console.error(`❌ Error cleaning up call ${callId}:`, error);
+      // Continue with other calls
     }
-  });
+  }
 
   // Remove the room from matchmaking
   matchmaking.destroyRoom(roomId);
@@ -463,7 +545,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     activeRooms: matchmaking.getActiveRooms().length,
     activeCalls: activeCalls.size,
-    webrtcMetrics,
+    webrtcMetrics: webrtcMetrics.getAll(),
     turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
     server: 'running'
   });
@@ -543,9 +625,14 @@ app.post('/api/check-username', async (req, res) => {
     }
 
     const db = getDB();
+    
+    // ✅ FIX: Add maxTimeMS timeout
     const existingUser = await db.collection('users').findOne(
       { username: trimmedUsername },
-      { projection: { _id: 1 } }
+      { 
+        projection: { _id: 1 },
+        maxTimeMS: 3000
+      }
     );
 
     if (existingUser) {
@@ -553,9 +640,14 @@ app.post('/api/check-username', async (req, res) => {
       for (let i = 0; i < 3; i++) {
         const suffix = Math.floor(Math.random() * 999) + 1;
         const suggestion = `${trimmedUsername}_${suffix}`;
+        
+        // ✅ FIX: Add maxTimeMS timeout
         const suggestionExists = await db.collection('users').findOne(
           { username: suggestion },
-          { projection: { _id: 1 } }
+          { 
+            projection: { _id: 1 },
+            maxTimeMS: 2000
+          }
         );
         if (!suggestionExists) {
           suggestions.push(suggestion);
@@ -566,6 +658,16 @@ app.post('/api/check-username', async (req, res) => {
 
     res.json({ available: true });
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in check-username:', error.message);
+      return res.status(503).json({
+        available: false,
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('Check username error:', error);
     res.status(500).json({ 
       available: false,
@@ -575,27 +677,27 @@ app.post('/api/check-username', async (req, res) => {
 });
 
 
-// NEW ENDPOINT: Check if user profile exists and has username
 app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    // Find user in database by email
+    // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
       { email: firebaseUser.email },
-      { projection: { username: 1, pfpUrl: 1, _id: 1 } }
+      { 
+        projection: { username: 1, pfpUrl: 1, _id: 1 },
+        maxTimeMS: 3000 // ✅ 3-second timeout
+      }
     );
 
     if (!user) {
-      // User doesn't exist in database yet
       return res.json({
         exists: false,
         hasUsername: false
       });
     }
 
-    // Check if user has username
     const hasUsername = !!(user.username && user.username.trim());
 
     return res.json({
@@ -606,6 +708,15 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
     });
 
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in check-profile:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('Check profile error:', error);
     return res.status(500).json({
       error: 'Server Error',
@@ -639,24 +750,29 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
 
     const db = getDB();
     
-    // Check if user already exists by email
-    const existingUser = await db.collection('users').findOne({ 
-      email: firebaseUser.email 
-    });
+    // ✅ FIX: Add maxTimeMS timeout
+    const existingUser = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      { maxTimeMS: 3000 }
+    );
 
     // Check if username is taken by someone else
     if (existingUser && existingUser.username !== trimmedUsername) {
-      const usernameExists = await db.collection('users').findOne({
-        username: trimmedUsername
-      });
+      // ✅ FIX: Add maxTimeMS timeout
+      const usernameExists = await db.collection('users').findOne(
+        { username: trimmedUsername },
+        { maxTimeMS: 3000 }
+      );
       if (usernameExists) {
         return res.status(400).json({ error: 'Username already taken' });
       }
     } else if (!existingUser) {
       // New user - check if username is available
-      const usernameExists = await db.collection('users').findOne({
-        username: trimmedUsername
-      });
+      // ✅ FIX: Add maxTimeMS timeout
+      const usernameExists = await db.collection('users').findOne(
+        { username: trimmedUsername },
+        { maxTimeMS: 3000 }
+      );
       if (usernameExists) {
         return res.status(400).json({ error: 'Username already taken' });
       }
@@ -671,10 +787,11 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     };
 
     if (existingUser) {
-      // Update existing user
+      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: existingUser._id },
-        { $set: userData }
+        { $set: userData },
+        { maxTimeMS: 5000 } // ✅ Write operations can take longer
       );
       await invalidateUserProfileCache(existingUser._id.toString());
       res.json({ 
@@ -685,7 +802,10 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     } else {
       // Create new user
       userData.createdAt = new Date();
-      const result = await db.collection('users').insertOne(userData);
+      // ✅ FIX: Add maxTimeMS timeout
+      const result = await db.collection('users').insertOne(userData, {
+        maxTimeMS: 5000
+      });
       res.json({ 
         success: true, 
         userId: result.insertedId.toString(),
@@ -693,6 +813,15 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
       });
     }
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in profile update:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Username already taken' });
     }
@@ -712,19 +841,21 @@ app.post('/api/users/upload-pfp',
 
       const firebaseUser = req.firebaseUser;
       const db = getDB();
-const user = await db.collection('users').findOne(
-  { email: firebaseUser.email },
-  { 
-    projection: { 
-      _id: 1, 
-      username: 1, 
-      pfpUrl: 1, 
-      email: 1,
-      firebaseUid: 1 
-      // Exclude unused fields
-    } 
-  }
-);
+      
+      // ✅ FIX: Add maxTimeMS timeout
+      const user = await db.collection('users').findOne(
+        { email: firebaseUser.email },
+        { 
+          projection: { 
+            _id: 1, 
+            username: 1, 
+            pfpUrl: 1, 
+            email: 1,
+            firebaseUid: 1 
+          },
+          maxTimeMS: 3000 // ✅ 3-second timeout
+        }
+      );
 
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
@@ -736,9 +867,11 @@ const user = await db.collection('users').findOne(
         user._id.toString()
       );
 
+      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: user._id },
-        { $set: { pfpUrl, updatedAt: new Date() } }
+        { $set: { pfpUrl, updatedAt: new Date() } },
+        { maxTimeMS: 5000 }
       );
 
       const updatedUser = { ...user, pfpUrl };
@@ -746,6 +879,15 @@ const user = await db.collection('users').findOne(
 
       res.json({ success: true, pfpUrl });
     } catch (error) {
+      // ✅ FIX: Handle timeout errors
+      if (error.code === 50) {
+        console.error('❌ Database timeout in upload-pfp:', error.message);
+        return res.status(503).json({
+          error: 'Database temporarily slow. Please try again.',
+          retryable: true
+        });
+      }
+      
       console.error('Upload PFP error:', error);
       res.status(500).json({ error: 'Failed to upload profile picture' });
     }
@@ -756,9 +898,14 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
+    
+    // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
       { email: firebaseUser.email },
-      { projection: { password: 0 } }
+      { 
+        projection: { password: 0 },
+        maxTimeMS: 3000
+      }
     );
 
     if (!user) {
@@ -767,6 +914,15 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
     res.json(user);
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in get profile:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -793,11 +949,22 @@ app.get('/api/attachments/:fileId', authenticateFirebase, async (req, res) => {
     // Verify user is/was in this room
     const room = matchmaking.getRoom(roomId);
     if (!room) {
-      // Room expired - check if user was recently in it (from DB/cache)
       console.log(`⚠️ Room ${roomId} expired, but allowing attachment fetch`);
     } else {
       const db = getDB();
-      const user = await db.collection('users').findOne({ email: firebaseUser.email });
+      
+      // ✅ FIX: Add maxTimeMS timeout
+      const user = await db.collection('users').findOne(
+        { email: firebaseUser.email },
+        { 
+          projection: { _id: 1 },
+          maxTimeMS: 3000
+        }
+      );
+      
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
       
       if (!room.hasUser(user._id.toString())) {
         return res.status(403).json({ error: 'Access denied to this room\'s files' });
@@ -813,6 +980,15 @@ app.get('/api/attachments/:fileId', authenticateFirebase, async (req, res) => {
     });
     
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in attachment fetch:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('Attachment fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch attachment' });
   }
@@ -831,9 +1007,12 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-    const user = await db.collection('users').findOne({ 
-      email: firebaseUser.email 
-    });
+    
+    // ✅ FIX: Add maxTimeMS timeout
+    const user = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      { maxTimeMS: 3000 }
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -848,9 +1027,22 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
       createdAt: new Date()
     };
 
-    const result = await db.collection('notes').insertOne(note);
+    // ✅ FIX: Add maxTimeMS timeout
+    const result = await db.collection('notes').insertOne(note, {
+      maxTimeMS: 5000
+    });
+    
     res.json({ success: true, noteId: result.insertedId });
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
+    if (error.code === 50) {
+      console.error('❌ Database timeout in post note:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('Post note error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -868,54 +1060,68 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
     
     const db = getDB();
     
-const notes = await db.collection('notes')
-  .find({})
-  .sort({ createdAt: -1 })
-  .skip(page * limit)
-  .limit(limit)
-  .toArray();
+    // ✅ FIX: Add maxTimeMS to prevent event loop blocking
+    const notes = await db.collection('notes')
+      .find({})
+      .sort({ createdAt: -1 })
+      .skip(page * limit)
+      .limit(limit)
+      .maxTimeMS(5000) // ✅ 5-second timeout
+      .toArray();
 
-console.log(`✅ Fetched ${notes.length} notes from database`);
+    console.log(`✅ Fetched ${notes.length} notes from database`);
 
-// CRITICAL: Batch user lookup to prevent N+1
-const userIds = [...new Set(notes.map(note => note.userId))];
-const users = await db.collection('users')
-  .find(
-    { _id: { $in: userIds } },
-    { projection: { username: 1, pfpUrl: 1 } }
-  )
-  .toArray();
+    // ✅ FIX: Limit batch size and add timeout
+    const userIds = [...new Set(notes.map(note => note.userId))];
+    
+    // ✅ CRITICAL: Limit batch size to prevent oversized queries
+    const MAX_BATCH_SIZE = 100;
+    if (userIds.length > MAX_BATCH_SIZE) {
+      console.warn(`⚠️ User batch size ${userIds.length} exceeds limit, capping at ${MAX_BATCH_SIZE}`);
+      userIds.length = MAX_BATCH_SIZE; // Truncate array
+    }
+    
+    const users = await db.collection('users')
+      .find(
+        { _id: { $in: userIds } },
+        { 
+          projection: { username: 1, pfpUrl: 1 },
+          maxTimeMS: 3000 // ✅ 3-second timeout
+        }
+      )
+      .toArray();
 
-// Create lookup map
-const userMap = new Map(users.map(u => [u._id.toString(), u]));
+    // Create lookup map
+    const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-// Enrich notes using map (O(1) lookup per note)
-const enrichedNotes = notes.map(note => {
-  const user = userMap.get(note.userId.toString());
-  
-  if (!user) {
-    console.warn(`⚠️ User not found for note ${note._id}`);
-    return {
-      _id: note._id,
-      username: 'Anonymous',
-      pfpUrl: null,
-      text: note.text,
-      mood: note.mood,
-      createdAt: note.createdAt
-    };
-  }
+    // Enrich notes using map (O(1) lookup per note)
+    const enrichedNotes = notes.map(note => {
+      const user = userMap.get(note.userId.toString());
+      
+      if (!user) {
+        console.warn(`⚠️ User not found for note ${note._id}`);
+        return {
+          _id: note._id,
+          username: 'Anonymous',
+          pfpUrl: null,
+          text: note.text,
+          mood: note.mood,
+          createdAt: note.createdAt
+        };
+      }
 
-  return {
-    _id: note._id,
-    username: user.username,
-    pfpUrl: user.pfpUrl || null,
-    text: note.text,
-    mood: note.mood,
-    createdAt: note.createdAt
-  };
-});
+      return {
+        _id: note._id,
+        username: user.username,
+        pfpUrl: user.pfpUrl || null,
+        text: note.text,
+        mood: note.mood,
+        createdAt: note.createdAt
+      };
+    });
 
-const total = await db.collection('notes').countDocuments();
+    // ✅ FIX: Add timeout to count query
+    const total = await db.collection('notes').countDocuments({}, { maxTimeMS: 3000 });
 
     console.log(`📤 Sending ${enrichedNotes.length} enriched notes (${total} total)`);
     console.log(`   Page ${page + 1} of ${Math.ceil(total / limit)}`);
@@ -929,6 +1135,15 @@ const total = await db.collection('notes').countDocuments();
       hasMore: (page + 1) * limit < total
     });
   } catch (error) {
+    // ✅ FIX: Handle timeout errors specifically
+    if (error.code === 50) { // MongoDB MaxTimeMSExpired error code
+      console.error('❌ Database query timeout:', error.message);
+      return res.status(503).json({ 
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+    
     console.error('❌ Get notes error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -974,6 +1189,16 @@ io.on('connection', (socket) => {
 const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
 const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
+const MAX_CONCURRENT_TRANSFERS = 20; // ✅ Global limit
+const MAX_MEMORY_FOR_TRANSFERS = 500 * 1024 * 1024; // ✅ 500MB total cap
+
+function getCurrentTransferMemory() {
+  let total = 0;
+  for (const transfer of activeFileTransfers.values()) {
+    total += transfer.bytesTransferred || 0;
+  }
+  return total;
+}
 
 socket.on('file_chunk', (data) => {
   try {
@@ -984,7 +1209,7 @@ socket.on('file_chunk', (data) => {
       return;
     }
     
-    // ✅ CRITICAL FIX: Rate limit check
+    // ✅ Rate limit check
     if (!checkChunkRateLimit(user.userId)) {
       console.warn(`⚠️ Rate limit exceeded for ${user.username} on file chunks`);
       socket.emit('file_transmission_failed', { 
@@ -997,7 +1222,7 @@ socket.on('file_chunk', (data) => {
     
     const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
     
-    // CRITICAL: Validate chunk data exists
+    // CRITICAL: Validate chunk data exists and is a string
     if (!chunkData || typeof chunkData !== 'string') {
       console.error(`❌ Invalid chunk data at index ${chunkIndex}`);
       socket.emit('file_transmission_failed', { 
@@ -1008,9 +1233,161 @@ socket.on('file_chunk', (data) => {
       return;
     }
     
-    // ... rest of existing file_chunk code remains unchanged
+    // ✅ FIX: Validate chunk data size matches claimed chunkSize
+    // Base64 encoding increases size by ~33%, so base64 length should be ~1.33x binary size
+    const expectedBase64Length = Math.ceil(chunkSize * 1.37); // 37% overhead for padding
+    const maxAllowedLength = expectedBase64Length * 1.1; // Allow 10% variance for padding
+    
+    if (chunkData.length > maxAllowedLength) {
+      console.error(`❌ Chunk data size mismatch for ${fileId} chunk ${chunkIndex}`);
+      console.error(`   Claimed size: ${chunkSize} bytes`);
+      console.error(`   Expected base64 length: ~${expectedBase64Length}`);
+      console.error(`   Actual length: ${chunkData.length}`);
+      console.error(`   Difference: ${chunkData.length - expectedBase64Length} characters`);
+      
+      socket.emit('file_transmission_failed', { 
+        fileId,
+        fileName,
+        reason: 'Chunk data size exceeds claimed size. Possible malicious upload.'
+      });
+      
+      // Clean up this transfer
+      activeFileTransfers.delete(fileId);
+      return;
+    }
+    
+    // ✅ FIX: Additional validation - chunk data should be valid base64
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(chunkData)) {
+      console.error(`❌ Invalid base64 data in chunk ${chunkIndex} of ${fileId}`);
+      socket.emit('file_transmission_failed', { 
+        fileId,
+        fileName,
+        reason: 'Invalid file data encoding'
+      });
+      activeFileTransfers.delete(fileId);
+      return;
+    }
+    
+    // ✅ FIX: Use actual chunkData.length for memory tracking (not claimed chunkSize)
+    const actualChunkSize = Math.floor(chunkData.length * 0.75); // Approximate binary size from base64
+    
+    // Check global concurrent transfer limit
+    if (!activeFileTransfers.has(fileId)) {
+      if (activeFileTransfers.size >= MAX_CONCURRENT_TRANSFERS) {
+        console.warn(`⚠️ Max concurrent transfers (${MAX_CONCURRENT_TRANSFERS}) reached`);
+        socket.emit('file_transmission_failed', { 
+          fileId,
+          fileName,
+          reason: 'Server at capacity. Please try again in a moment.'
+        });
+        return;
+      }
+      
+      // Check global memory limit
+      const currentMemory = getCurrentTransferMemory();
+      if (currentMemory >= MAX_MEMORY_FOR_TRANSFERS) {
+        console.warn(`⚠️ Transfer memory limit reached: ${(currentMemory / 1024 / 1024).toFixed(2)}MB`);
+        socket.emit('file_transmission_failed', { 
+          fileId,
+          fileName,
+          reason: 'Server memory at capacity. Please try again shortly.'
+        });
+        return;
+      }
+      
+      // Initialize transfer tracking
+      activeFileTransfers.set(fileId, {
+        roomId,
+        userId: user.userId,
+        bytesTransferred: 0,
+        startTime: Date.now()
+      });
+      
+      console.log(`📦 New file transfer started: ${fileName} (${fileId})`);
+      console.log(`   Active transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
+      console.log(`   Memory in use: ${(currentMemory / 1024 / 1024).toFixed(2)}MB/${(MAX_MEMORY_FOR_TRANSFERS / 1024 / 1024).toFixed(2)}MB`);
+    }
+    
+    // Update bytes transferred with ACTUAL size
+    const transfer = activeFileTransfers.get(fileId);
+    if (transfer) {
+      transfer.bytesTransferred += actualChunkSize;
+      
+      // Check if individual file exceeds limit
+      if (transfer.bytesTransferred > MAX_FILE_SIZE) {
+        console.error(`❌ File ${fileId} exceeded size limit: ${(transfer.bytesTransferred / 1024 / 1024).toFixed(2)}MB`);
+        activeFileTransfers.delete(fileId);
+        socket.emit('file_transmission_failed', { 
+          fileId,
+          fileName,
+          reason: 'File size limit exceeded'
+        });
+        return;
+      }
+    }
+    
+    // Validate room access
+    const room = matchmaking.getRoom(roomId);
+    if (!room) {
+      console.error(`❌ Room ${roomId} not found for file chunk`);
+      activeFileTransfers.delete(fileId);
+      socket.emit('file_transmission_failed', { 
+        fileId,
+        fileName,
+        reason: 'Room not found or expired'
+      });
+      return;
+    }
+    
+    if (!room.hasUser(user.userId)) {
+      console.error(`❌ User ${user.username} not in room ${roomId}`);
+      activeFileTransfers.delete(fileId);
+      socket.emit('file_transmission_failed', { 
+        fileId,
+        fileName,
+        reason: 'You are not in this room'
+      });
+      return;
+    }
+    
+    // Relay chunk to all OTHER users in room
+    socket.to(roomId).emit('file_chunk', {
+      fileId,
+      fileName,
+      senderId: user.userId,
+      senderUsername: user.username,
+      chunkIndex,
+      totalChunks,
+      chunkSize: actualChunkSize, // ✅ Send validated size
+      chunkData
+    });
+    
+    // Log progress for large files
+    if (totalChunks > 10 && chunkIndex % Math.floor(totalChunks / 10) === 0) {
+      const progress = ((chunkIndex / totalChunks) * 100).toFixed(1);
+      console.log(`📦 File ${fileName} progress: ${progress}% (chunk ${chunkIndex}/${totalChunks})`);
+    }
+    
   } catch (error) {
     console.error('❌ File chunk relay error:', error);
+    if (data?.fileId) {
+      activeFileTransfers.delete(data.fileId);
+    }
+  }
+});
+
+// ✅ FIX: Enhanced cleanup on transfer complete
+socket.on('file_transfer_complete', ({ fileId }) => {
+  if (activeFileTransfers.has(fileId)) {
+    const transfer = activeFileTransfers.get(fileId);
+    const transferTime = Date.now() - transfer.startTime;
+    const sizeMB = (transfer.bytesTransferred / 1024 / 1024).toFixed(2);
+    
+    activeFileTransfers.delete(fileId);
+    
+    console.log(`✅ File transfer ${fileId} completed`);
+    console.log(`   Size: ${sizeMB}MB, Time: ${(transferTime / 1000).toFixed(1)}s`);
+    console.log(`   Active transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
   }
 });
 
@@ -1136,8 +1513,14 @@ socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId,
     console.error('❌ Attachment response error:', error);
   }
 });
-  
-  
+
+// CRITICAL FIX: Handle file transfer completion cleanup
+socket.on('file_transfer_complete', ({ fileId }) => {
+  if (activeFileTransfers.has(fileId)) {
+    activeFileTransfers.delete(fileId);
+    console.log(`✅ File transfer ${fileId} completed and cleaned up`);
+  }
+});
   
   socket.on('validate_cached_call', async ({ callId, roomId }) => {
     try {
@@ -1803,13 +2186,39 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       return;
     }
 
+    // ✅ FIX: Validate message text size BEFORE rate limiting (to prevent memory allocation)
+    const MAX_MESSAGE_LENGTH = 10000; // 10KB max for text messages
+    
+    if (message && typeof message === 'string' && message.length > MAX_MESSAGE_LENGTH) {
+      console.warn(`⚠️ Oversized message from ${user.username}: ${message.length} chars`);
+      socket.emit('error', { 
+        message: `Message too long. Maximum ${MAX_MESSAGE_LENGTH} characters.`,
+        code: 'MESSAGE_TOO_LONG',
+        maxLength: MAX_MESSAGE_LENGTH
+      });
+      return;
+    }
+
+    // Room-level rate limiting
+    const rateLimitCheck = checkRoomMessageRateLimit(roomId);
+    if (!rateLimitCheck.allowed) {
+      console.warn(`⚠️ Rate limit exceeded for room ${roomId} (${rateLimitCheck.count} messages)`);
+      socket.emit('error', { 
+        message: 'Room message limit reached. Please slow down.',
+        code: 'ROOM_RATE_LIMIT',
+        retryAfter: 5000
+      });
+      return;
+    }
+
     console.log('💬 ========================================');
     console.log('💬 CHAT MESSAGE RECEIVED FROM CLIENT');
     console.log('💬 ========================================');
     console.log(`   From: ${user.username} (${user.userId})`);
     console.log(`   Room: ${roomId}`);
-    console.log(`   Message: ${message ? message.substring(0, 50) : '[no text]'}`);
+    console.log(`   Message length: ${message ? message.length : 0} chars`);
     console.log(`   Has attachment: ${!!attachment}`);
+    console.log(`   Room rate: ${rateLimitCheck.count}/${ROOM_MESSAGE_RATE_LIMIT}`);
 
     // Validate room access
     const validation = validateRoomAccess(roomId, user.userId);
@@ -1835,9 +2244,6 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       messageData.replyTo = replyTo;
     }
 
-    // ============================================
-    // CRITICAL FIX: Handle CHUNKED vs LEGACY attachments
-    // ============================================
     if (attachment) {
       console.log('📎 Processing attachment...');
       console.log(`   File: ${attachment.name}`);
@@ -1845,14 +2251,21 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
       console.log(`   Chunked: ${!!attachment.chunked}`);
       
+      // Validate attachment size before broadcasting
+      const maxAttachmentSize = 10 * 1024 * 1024; // 10MB
+      if (attachment.size > maxAttachmentSize) {
+        console.error(`❌ Attachment too large: ${(attachment.size / 1024 / 1024).toFixed(2)}MB`);
+        socket.emit('error', { 
+          message: 'Attachment too large. Maximum size is 10MB.',
+          code: 'ATTACHMENT_TOO_LARGE'
+        });
+        return;
+      }
+      
       if (attachment.chunked) {
-        // ============================================
-        // CHUNKED ATTACHMENT: Data will arrive via file_chunk events
-        // ============================================
         console.log(`📦 Chunked attachment detected - data will arrive separately`);
         console.log(`   Total chunks expected: ${attachment.totalChunks}`);
         
-        // Validate metadata only
         if (!attachment.fileId || !attachment.name || !attachment.type || !attachment.size) {
           console.error('❌ Chunked attachment missing required metadata!');
           socket.emit('error', { 
@@ -1862,7 +2275,6 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
           return;
         }
         
-        // Include metadata WITHOUT data for broadcast
         messageData.attachment = {
           fileId: attachment.fileId,
           name: attachment.name,
@@ -1870,15 +2282,11 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
           size: attachment.size,
           chunked: true,
           totalChunks: attachment.totalChunks
-          // NO data field - will be transmitted via file_chunk events
         };
         
         console.log('✅ Chunked attachment metadata validated');
         
       } else {
-        // ============================================
-        // LEGACY ATTACHMENT: Single base64 payload
-        // ============================================
         console.log(`📎 Legacy attachment format detected`);
         
         if (!attachment.data) {
@@ -1890,27 +2298,22 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
           return;
         }
         
-        // Validate file size
-        const maxSize = attachment.type.startsWith('image/') ? 10 * 1024 * 1024 : 
-                        attachment.type.startsWith('video/') ? 50 * 1024 * 1024 : 
-                        20 * 1024 * 1024;
-        
-        if (attachment.size > maxSize) {
-          console.error(`❌ File too large: ${(attachment.size / 1024 / 1024).toFixed(2)} MB`);
+        // ✅ FIX: Validate legacy attachment data size
+        if (attachment.data.length > maxAttachmentSize * 1.5) {
+          console.error(`❌ Legacy attachment data too large: ${(attachment.data.length / 1024 / 1024).toFixed(2)}MB`);
           socket.emit('error', { 
-            message: 'File too large',
-            code: 'FILE_TOO_LARGE'
+            message: 'Attachment data too large',
+            code: 'ATTACHMENT_TOO_LARGE'
           });
           return;
         }
         
-        // Include attachment WITH data for broadcast (legacy format)
         messageData.attachment = {
           fileId: attachment.fileId,
           name: attachment.name,
           type: attachment.type,
           size: attachment.size,
-          data: attachment.data // CRITICAL: Keep for legacy broadcast
+          data: attachment.data
         };
         
         console.log('✅ Legacy attachment validated and ready for broadcast');
@@ -1938,7 +2341,6 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
         type: messageData.attachment.type,
         size: messageData.attachment.size,
         chunked: messageData.attachment.chunked || false
-        // NO data field - saves memory
       };
       
       if (messageData.attachment.totalChunks) {
@@ -1950,9 +2352,6 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     room.addMessage(storedMessage);
     console.log(`💾 Message stored to room history`);
     
-    // ============================================
-    // BROADCAST TO ALL USERS
-    // ============================================
     console.log('📡 ========================================');
     console.log('📡 BROADCASTING MESSAGE TO ROOM');
     console.log('📡 ========================================');
@@ -2021,105 +2420,141 @@ socket.on('initiate_call', async ({ roomId, callType }) => {
       return;
     }
 
-    // Check for existing active calls in this room
-    let existingCallId = null;
-    let existingCall = null;
-    activeCalls.forEach((call, callId) => {
-      if (call.roomId === roomId && call.participants.length > 0) {
-        existingCallId = callId;
-        existingCall = call;
+    // ✅ FIX: Room-level lock to prevent duplicate call creation
+    // Wait for any pending initiate_call on this room
+    while (roomCallInitLocks.has(roomId)) {
+      try {
+        await roomCallInitLocks.get(roomId);
+      } catch (err) {
+        // Previous initiation failed, continue
       }
-    });
-
-    if (existingCallId) {
-      console.log(`📞 Call already active in room ${roomId}: ${existingCallId}`);
-      console.log(`   Participants: ${existingCall.participants.length}`);
-      console.log(`   Suggesting user join instead of creating new call`);
-      
-      socket.emit('error', { 
-        message: 'A call is already in progress',
-        code: 'CALL_ALREADY_ACTIVE',
-        callId: existingCallId,
-        callType: existingCall.callType,
-        participantCount: existingCall.participants.length
-      });
-      return;
     }
-
-    // ... rest of initiate_call handler remains the same
-    // Create new call
-    const callId = uuidv4();
     
-    const call = {
-      callId,
-      roomId,
-      callType,
-      participants: [user.userId],
-      status: 'active',
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      initiator: user.userId,
-      userMediaStates: new Map()
-    };
-
-    call.userMediaStates.set(user.userId, {
-      videoEnabled: callType === 'video',
-      audioEnabled: true
+    // Create new lock
+    let resolve, reject;
+    const lockPromise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
-
-    activeCalls.set(callId, call);
-    userCalls.set(user.userId, callId);
-    webrtcMetrics.totalCalls++;
-
-    room.setActiveCall(true);
-
-    console.log(`✅ Call created: ${callId}`);
-    console.log(`   Status: ${call.status} (active immediately)`);
-    console.log(`   Participants: [${user.userId}]`);
-    console.log(`   Room marked as having active call`);
-
-    socket.emit('call_created', {
-      callId,
-      callType,
-      isInitiator: true,
-      participants: [{
-        userId: user.userId,
-        username: user.username,
-        pfpUrl: user.pfpUrl,
-        videoEnabled: callType === 'video',
-        audioEnabled: true
-      }]
-    });
-    console.log(`📤 Sent call_created to initiator ${user.username} - they will navigate`);
-
-    io.to(roomId).emit('call_state_update', {
-      callId: callId,
-      isActive: true,
-      participantCount: 1,
-      callType: callType
-    });
-    console.log(`📢 Broadcasted call_state_update to room ${roomId}`);
-
-    room.users.forEach(roomUser => {
-      if (roomUser.userId !== user.userId) {
-        const targetSocket = findActiveSocketForUser(roomUser.userId);
-        if (targetSocket) {
-          targetSocket.emit('incoming_call', {
-            callId,
-            callType,
-            callerUserId: user.userId,
-            callerUsername: user.username,
-            callerPfp: user.pfpUrl,
-            roomId
-          });
-          console.log(`📤 Sent incoming_call notification to ${roomUser.username}`);
+    
+    roomCallInitLocks.set(roomId, lockPromise);
+    
+    try {
+      // ✅ ATOMIC CHECK: Look for existing call inside lock
+      let existingCallId = null;
+      let existingCall = null;
+      
+      for (const [callId, call] of activeCalls.entries()) {
+        if (call.roomId === roomId && call.participants.length > 0) {
+          existingCallId = callId;
+          existingCall = call;
+          break;
         }
       }
-    });
 
-    console.log('✅ ========================================');
-    console.log('✅ CALL INITIATION COMPLETE');
-    console.log('✅ ========================================\n');
+      if (existingCallId) {
+        console.log(`📞 Call already active in room ${roomId}: ${existingCallId}`);
+        console.log(`   Participants: ${existingCall.participants.length}`);
+        
+        socket.emit('error', { 
+          message: 'A call is already in progress',
+          code: 'CALL_ALREADY_ACTIVE',
+          callId: existingCallId,
+          callType: existingCall.callType,
+          participantCount: existingCall.participants.length
+        });
+        
+        resolve(); // Release lock
+        return;
+      }
+
+      // Create new call (still inside lock)
+      const callId = uuidv4();
+      
+      const call = {
+        callId,
+        roomId,
+        callType,
+        participants: [user.userId],
+        status: 'active',
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        initiator: user.userId,
+        userMediaStates: new Map()
+      };
+
+      call.userMediaStates.set(user.userId, {
+        videoEnabled: callType === 'video',
+        audioEnabled: true
+      });
+
+      activeCalls.set(callId, call);
+      userCalls.set(user.userId, callId);
+      webrtcMetrics.increment('totalCalls');
+
+      room.setActiveCall(true);
+
+      console.log(`✅ Call created: ${callId}`);
+      console.log(`   Status: ${call.status} (active immediately)`);
+      console.log(`   Participants: [${user.userId}]`);
+      console.log(`   Room marked as having active call`);
+
+      socket.emit('call_created', {
+        callId,
+        callType,
+        isInitiator: true,
+        participants: [{
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl,
+          videoEnabled: callType === 'video',
+          audioEnabled: true
+        }]
+      });
+      console.log(`📤 Sent call_created to initiator ${user.username}`);
+
+      io.to(roomId).emit('call_state_update', {
+        callId: callId,
+        isActive: true,
+        participantCount: 1,
+        callType: callType
+      });
+      console.log(`📢 Broadcasted call_state_update to room ${roomId}`);
+
+      // Send incoming_call to other users
+      room.users.forEach(roomUser => {
+        if (roomUser.userId !== user.userId) {
+          const targetSocket = findActiveSocketForUser(roomUser.userId);
+          if (targetSocket) {
+            targetSocket.emit('incoming_call', {
+              callId,
+              callType,
+              callerUserId: user.userId,
+              callerUsername: user.username,
+              callerPfp: user.pfpUrl,
+              roomId
+            });
+            console.log(`📤 Sent incoming_call notification to ${roomUser.username}`);
+          }
+        }
+      });
+
+      console.log('✅ ========================================');
+      console.log('✅ CALL INITIATION COMPLETE');
+      console.log('✅ ========================================\n');
+      
+      resolve(); // Release lock
+      
+    } catch (error) {
+      console.error('❌ Call initiation error:', error);
+      reject(error);
+      socket.emit('error', { message: 'Failed to initiate call' });
+    } finally {
+      // Clean up lock
+      setImmediate(() => {
+        roomCallInitLocks.delete(roomId);
+      });
+    }
 
   } catch (error) {
     console.error('❌ Initiate call error:', error);
@@ -2292,14 +2727,6 @@ callUsers.forEach(roomUser => {
       // CRITICAL FIX: Single broadcast instead of duplicate
       broadcastCallStateUpdate(callId);
     });
-
-      io.to(roomId).emit('call_state_update', {
-        callId: callId,
-        isActive: true,
-        participantCount: call.participants.length,
-        callType: call.callType
-      });
-      console.log(`📢 Broadcasted call_state_update: active=true, count=${call.participants.length}`);
     
     
     
@@ -2310,15 +2737,17 @@ callUsers.forEach(roomUser => {
   }
 });
 
-  socket.on('decline_call', ({ callId, roomId }) => {
-    try {
-      const user = socketUsers.get(socket.id);
-      
-      if (!user) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
+socket.on('decline_call', async ({ callId, roomId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    
+    if (!user) {
+      socket.emit('error', { message: 'Not authenticated' });
+      return;
+    }
 
+    // ✅ FIX: Use mutex to prevent race with accept_call/join_call
+    await withCallMutex(callId, async () => {
       const call = activeCalls.get(callId);
       
       if (!call) {
@@ -2327,6 +2756,7 @@ callUsers.forEach(roomUser => {
       }
 
       console.log(`❌ User ${user.username} declined call ${callId}`);
+      console.log(`   Current participants: [${call.participants.join(', ')}]`);
 
       const initiatorSocket = findActiveSocketForUser(call.initiator);
       if (initiatorSocket) {
@@ -2335,18 +2765,31 @@ callUsers.forEach(roomUser => {
           userId: user.userId,
           username: user.username
         });
+        console.log(`📤 Sent call_declined to initiator`);
       }
 
-      if (call.participants.length === 1) {
+      // ✅ Clean up call if only initiator remains
+      if (call.participants.length === 1 && call.participants[0] === call.initiator) {
+        console.log(`🗑️ Cleaning up declined call ${callId} (only initiator remained)`);
         activeCalls.delete(callId);
         userCalls.delete(call.initiator);
+        
+        // Mark room as call-free
+        const room = matchmaking.getRoom(call.roomId);
+        if (room) {
+          room.setActiveCall(false);
+          console.log(`📞 Room ${call.roomId} marked as call-free`);
+        }
+      } else {
+        console.log(`ℹ️ Call ${callId} not cleaned up - ${call.participants.length} participants remain`);
       }
+    });
 
-    } catch (error) {
-      console.error('Decline call error:', error);
-      socket.emit('error', { message: 'Failed to decline call' });
-    }
-  });
+  } catch (error) {
+    console.error('❌ Decline call error:', error);
+    socket.emit('error', { message: 'Failed to decline call' });
+  }
+});
 
 
 socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
@@ -2358,19 +2801,19 @@ socket.on('connection_established', ({ callId, connectionType, localType, remote
   console.log(`   Local: ${localType}, Remote: ${remoteType}`);
   console.log(`   Protocol: ${protocol}`);
 
-  // Track metrics
+  // Track metrics using atomic operations
   if (connectionType === 'TURN_RELAY') {
-    webrtcMetrics.turnUsage++;
-    console.warn(`⚠️ [METRICS] TURN usage: ${webrtcMetrics.turnUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.turnUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('turnUsage');
+    console.warn(`⚠️ [METRICS] TURN usage: ${webrtcMetrics.get('turnUsage')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('turnUsage') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   } else if (connectionType === 'STUN_REFLEXIVE') {
-    webrtcMetrics.stunUsage++;
-    console.log(`✅ [METRICS] STUN usage: ${webrtcMetrics.stunUsage} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.stunUsage / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('stunUsage');
+    console.log(`✅ [METRICS] STUN usage: ${webrtcMetrics.get('stunUsage')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('stunUsage') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   } else if (connectionType === 'DIRECT_HOST') {
-    webrtcMetrics.directConnections++;
-    console.log(`✅ [METRICS] Direct: ${webrtcMetrics.directConnections} / ${webrtcMetrics.totalCalls} calls (${((webrtcMetrics.directConnections / webrtcMetrics.totalCalls) * 100).toFixed(1)}%)`);
+    webrtcMetrics.increment('directConnections');
+    console.log(`✅ [METRICS] Direct: ${webrtcMetrics.get('directConnections')} / ${webrtcMetrics.get('totalCalls')} calls (${((webrtcMetrics.get('directConnections') / webrtcMetrics.get('totalCalls')) * 100).toFixed(1)}%)`);
   }
 
-  webrtcMetrics.successfulConnections++;
+  webrtcMetrics.increment('successfulConnections');
 });
 
 
@@ -2383,14 +2826,48 @@ socket.on('join_call', async ({ callId }) => {
       return;
     }
 
-    // CRITICAL FIX: Debounce rapid join_call requests
-    const lastJoinTime = joinCallDebounce.get(user.userId);
+    // ✅ FIX: Enhanced debounce with call state check
+    const debounceKey = `${user.userId}:${callId}`;
+    const lastJoinTime = joinCallDebounce.get(debounceKey);
     const now = Date.now();
+    
     if (lastJoinTime && now - lastJoinTime < 2000) {
       console.warn(`⚠️ Ignoring duplicate join_call from ${user.username} (${now - lastJoinTime}ms since last)`);
+      
+      // ✅ Still send success if already in call (idempotent)
+      const call = activeCalls.get(callId);
+      if (call && call.participants.includes(user.userId)) {
+        const room = matchmaking.getRoom(call.roomId);
+        if (room) {
+          const participantsWithMediaStates = call.participants.map(participantId => {
+            const roomUser = room.users.find(u => u.userId === participantId);
+            if (!roomUser) return null;
+            
+            const mediaState = call.userMediaStates.get(participantId) || {
+              videoEnabled: call.callType === 'video',
+              audioEnabled: true
+            };
+            
+            return {
+              userId: roomUser.userId,
+              username: roomUser.username,
+              pfpUrl: roomUser.pfpUrl,
+              videoEnabled: mediaState.videoEnabled,
+              audioEnabled: mediaState.audioEnabled
+            };
+          }).filter(p => p !== null);
+          
+          socket.emit('call_joined', {
+            callId,
+            callType: call.callType,
+            participants: participantsWithMediaStates
+          });
+        }
+      }
       return;
     }
-    joinCallDebounce.set(user.userId, now);
+    
+    joinCallDebounce.set(debounceKey, now);
 
     await withCallMutex(callId, async () => {
       const call = activeCalls.get(callId);
@@ -2398,11 +2875,11 @@ socket.on('join_call', async ({ callId }) => {
       const validation = validateCallState(call, 'join_call');
       if (!validation.valid) {
         socket.emit('error', { message: validation.error });
-        joinCallDebounce.delete(user.userId);
+        joinCallDebounce.delete(debounceKey);
         return;
       }
 
-      // CRITICAL FIX: Validate room exists and user is in it
+      // Validate room exists and user is in it
       const room = matchmaking.getRoom(call.roomId);
       if (!room) {
         console.error(`❌ Room ${call.roomId} not found when ${user.username} tried to join call ${callId}`);
@@ -2410,7 +2887,7 @@ socket.on('join_call', async ({ callId }) => {
           message: 'Room not found or has expired',
           code: 'ROOM_NOT_FOUND'
         });
-        joinCallDebounce.delete(user.userId);
+        joinCallDebounce.delete(debounceKey);
         return;
       }
 
@@ -2420,25 +2897,24 @@ socket.on('join_call', async ({ callId }) => {
           message: 'You are not in this room',
           code: 'NOT_IN_ROOM'
         });
-        joinCallDebounce.delete(user.userId);
+        joinCallDebounce.delete(debounceKey);
         return;
       }
 
-      // ============================================
-      // CRITICAL FIX FOR JOIN BUTTON ISSUE
-      // ============================================
-      // Add user to participants if not already there
-      // This allows the "Join" button to work even if user dismissed the incoming call popup
-      if (!call.participants.includes(user.userId)) {
-        console.log(`➕ [JOIN_BUTTON_FIX] Adding ${user.username} to call ${callId} participants`);
-        console.log(`   Participants before: [${call.participants.join(', ')}]`);
-        call.participants.push(user.userId);
+      // ✅ FIX: Atomic check-and-add with Set for deduplication
+      const participantSet = new Set(call.participants);
+      const wasAlreadyInCall = participantSet.has(user.userId);
+      
+      if (!wasAlreadyInCall) {
+        participantSet.add(user.userId);
+        call.participants = Array.from(participantSet); // ✅ Guaranteed unique
         userCalls.set(user.userId, callId);
-        console.log(`   Participants after: [${call.participants.join(', ')}]`);
+        
+        console.log(`➕ Added ${user.username} to call ${callId} participants`);
+        console.log(`   Participants: [${call.participants.join(', ')}] (${call.participants.length} total)`);
       } else {
         console.log(`ℹ️ User ${user.username} already in call ${callId} participants (re-joining)`);
       }
-      // ============================================
 
       call.lastActivity = Date.now();
       
@@ -2492,7 +2968,15 @@ socket.on('join_call', async ({ callId }) => {
           message: 'Unable to load all participants. Please refresh and try again.',
           code: 'PARTICIPANT_RESOLUTION_FAILED'
         });
-        joinCallDebounce.delete(user.userId);
+        
+        // ✅ FIX: Rollback if validation fails
+        if (!wasAlreadyInCall) {
+          call.participants = call.participants.filter(p => p !== user.userId);
+          userCalls.delete(user.userId);
+          call.userMediaStates.delete(user.userId);
+        }
+        
+        joinCallDebounce.delete(debounceKey);
         return;
       }
 
@@ -2508,34 +2992,39 @@ socket.on('join_call', async ({ callId }) => {
       // Get current user's media state
       const userMediaState = call.userMediaStates.get(user.userId);
 
-      // Broadcast to OTHER users that this user joined
-      socket.to(`call-${callId}`).emit('user_joined_call', {
-        user: {
-          userId: user.userId,
-          username: user.username,
-          pfpUrl: user.pfpUrl,
-          videoEnabled: userMediaState.videoEnabled,
-          audioEnabled: userMediaState.audioEnabled
-        }
-      });
+      // ✅ FIX: Only broadcast if this is a NEW join (not re-join)
+      if (!wasAlreadyInCall) {
+        socket.to(`call-${callId}`).emit('user_joined_call', {
+          user: {
+            userId: user.userId,
+            username: user.username,
+            pfpUrl: user.pfpUrl,
+            videoEnabled: userMediaState.videoEnabled,
+            audioEnabled: userMediaState.audioEnabled
+          }
+        });
+        console.log(`📢 Broadcasted user_joined_call to other participants`);
+      }
 
       console.log(`✅ ${user.username} successfully joined call ${callId} with ${call.participants.length} total participants`);
-      
-      // Clear debounce after successful join
-      setTimeout(() => {
-        joinCallDebounce.delete(user.userId);
-      }, 2000);
     });
+    
+    // Clear debounce after successful join
+    setTimeout(() => {
+      joinCallDebounce.delete(debounceKey);
+    }, 2000);
 
   } catch (error) {
     console.error('❌ Join call error:', error);
     socket.emit('error', { message: 'Failed to join call' });
-    joinCallDebounce.delete(user.userId);
+    
+    const debounceKey = `${socketUsers.get(socket.id)?.userId}:${callId}`;
+    joinCallDebounce.delete(debounceKey);
   }
 });
 
 
-socket.on('leave_call', ({ callId }) => {
+socket.on('leave_call', async ({ callId }) => {
   try {
     const user = socketUsers.get(socket.id);
     
@@ -2544,106 +3033,109 @@ socket.on('leave_call', ({ callId }) => {
       return;
     }
 
-    const call = activeCalls.get(callId);
-    
-    if (!call) {
-      console.warn(`⚠️ Call ${callId} not found when ${user.username} tried to leave`);
+    // ✅ FIX: Use mutex to prevent race condition with join_call
+    await withCallMutex(callId, async () => {
+      const call = activeCalls.get(callId);
+      
+      if (!call) {
+        console.warn(`⚠️ Call ${callId} not found when ${user.username} tried to leave`);
+        socket.leave(`call-${callId}`);
+        return;
+      }
+
+      // Check if user is actually in the call before removing
+      const participantIndex = call.participants.indexOf(user.userId);
+      if (participantIndex === -1) {
+        console.warn(`⚠️ User ${user.username} not in call ${callId} participants, ignoring leave`);
+        socket.leave(`call-${callId}`);
+        return;
+      }
+
+      // ✅ Atomic removal inside mutex - prevents race conditions
+      call.participants.splice(participantIndex, 1);
+      userCalls.delete(user.userId);
+      call.userMediaStates.delete(user.userId);
+
+      console.log(`📵 User ${user.username} left call ${callId}`);
+      console.log(`📊 Remaining participants: [${call.participants.join(', ')}] (${call.participants.length} total)`);
+
       socket.leave(`call-${callId}`);
-      return;
-    }
 
-    // CRITICAL FIX: Check if user is actually in the call before removing
-    const participantIndex = call.participants.indexOf(user.userId);
-    if (participantIndex === -1) {
-      console.warn(`⚠️ User ${user.username} not in call ${callId} participants, ignoring leave`);
-      socket.leave(`call-${callId}`);
-      return;
-    }
-
-    // CRITICAL FIX: Atomic removal - prevent race conditions with multiple leave events
-    call.participants.splice(participantIndex, 1);
-    userCalls.delete(user.userId);
-    call.userMediaStates.delete(user.userId);
-
-    console.log(`📵 User ${user.username} left call ${callId}`);
-    console.log(`📊 Remaining participants: [${call.participants.join(', ')}] (${call.participants.length} total)`);
-
-    socket.leave(`call-${callId}`);
-
-    // Notify others that user left
-    io.to(`call-${callId}`).emit('user_left_call', {
-      userId: user.userId,
-      username: user.username
-    });
-    console.log(`📢 Notified others in call-${callId} that ${user.username} left`);
-
-    const room = matchmaking.getRoom(call.roomId);
-    if (room) {
-      io.to(call.roomId).emit('call_state_update', {
-        callId: callId,
-        isActive: call.participants.length > 0,
-        participantCount: call.participants.length
+      // Notify others that user left
+      io.to(`call-${callId}`).emit('user_left_call', {
+        userId: user.userId,
+        username: user.username
       });
-      console.log(`📢 Broadcasted call_state_update to room ${call.roomId}: active=${call.participants.length > 0}, count=${call.participants.length}`);
-    } else {
-      console.warn(`⚠️ Room ${call.roomId} not found when broadcasting call state update`);
-    }
+      console.log(`📢 Notified others in call-${callId} that ${user.username} left`);
 
-    if (call.participants.length === 0) {
-      console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
-      
+      const room = matchmaking.getRoom(call.roomId);
       if (room) {
-        room.setActiveCall(false);
-        console.log(`📞 Room ${call.roomId} marked as call-free`);
+        io.to(call.roomId).emit('call_state_update', {
+          callId: callId,
+          isActive: call.participants.length > 0,
+          participantCount: call.participants.length
+        });
+        console.log(`📢 Broadcasted call_state_update to room ${call.roomId}: active=${call.participants.length > 0}, count=${call.participants.length}`);
+      } else {
+        console.warn(`⚠️ Room ${call.roomId} not found when broadcasting call state update`);
       }
-      
-      // CRITICAL FIX: Clear any existing grace period before setting new one
-      if (callGracePeriod.has(callId)) {
-        clearTimeout(callGracePeriod.get(callId));
-        console.log(`⏰ Cleared existing grace period for call ${callId}`);
-      }
-      
-      const graceTimeout = setTimeout(() => {
-        const currentCall = activeCalls.get(callId);
+
+      if (call.participants.length === 0) {
+        console.log(`🕐 Call ${callId} has 0 participants - starting 5s grace period for cleanup`);
         
-        if (!currentCall) {
-          console.log(`ℹ️ Call ${callId} already cleaned up`);
-          callGracePeriod.delete(callId);
-          return;
+        if (room) {
+          room.setActiveCall(false);
+          console.log(`📞 Room ${call.roomId} marked as call-free`);
         }
         
-        if (currentCall.participants.length === 0) {
-          console.log(`🗑️ Call ${callId} still empty after grace period - cleaning up`);
-          activeCalls.delete(callId);
-          callGracePeriod.delete(callId);
-          
-          if (room) {
-            io.to(currentCall.roomId).emit('call_ended_notification', {
-              callId: callId
-            });
-            console.log(`📢 Call ${callId} fully ended, notified room ${currentCall.roomId}`);
-          }
-        } else {
-          console.log(`✅ Call ${callId} has ${currentCall.participants.length} participant(s) again - cleanup cancelled`);
-          callGracePeriod.delete(callId);
-          
-          if (room) {
-            room.setActiveCall(true);
-            console.log(`📞 Room ${call.roomId} marked as having active call again`);
-          }
+        // Clear any existing grace period before setting new one
+        if (callGracePeriod.has(callId)) {
+          clearTimeout(callGracePeriod.get(callId));
+          console.log(`⏰ Cleared existing grace period for call ${callId}`);
         }
-      }, 5000);
-      
-      callGracePeriod.set(callId, graceTimeout);
-      
-    } else {
-      console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
-      
-      if (room && !room.hasActiveCall) {
-        room.setActiveCall(true);
-        console.log(`📞 Room ${call.roomId} re-marked as having active call`);
+        
+        const graceTimeout = setTimeout(() => {
+          const currentCall = activeCalls.get(callId);
+          
+          if (!currentCall) {
+            console.log(`ℹ️ Call ${callId} already cleaned up`);
+            callGracePeriod.delete(callId);
+            return;
+          }
+          
+          if (currentCall.participants.length === 0) {
+            console.log(`🗑️ Call ${callId} still empty after grace period - cleaning up`);
+            activeCalls.delete(callId);
+            callGracePeriod.delete(callId);
+            
+            if (room) {
+              io.to(currentCall.roomId).emit('call_ended_notification', {
+                callId: callId
+              });
+              console.log(`📢 Call ${callId} fully ended, notified room ${currentCall.roomId}`);
+            }
+          } else {
+            console.log(`✅ Call ${callId} has ${currentCall.participants.length} participant(s) again - cleanup cancelled`);
+            callGracePeriod.delete(callId);
+            
+            if (room) {
+              room.setActiveCall(true);
+              console.log(`📞 Room ${call.roomId} marked as having active call again`);
+            }
+          }
+        }, 5000);
+        
+        callGracePeriod.set(callId, graceTimeout);
+        
+      } else {
+        console.log(`✅ Call ${callId} still active with ${call.participants.length} participant(s)`);
+        
+        if (room && !room.hasActiveCall) {
+          room.setActiveCall(true);
+          console.log(`📞 Room ${call.roomId} re-marked as having active call`);
+        }
       }
-    }
+    }); // ✅ Mutex released here
 
   } catch (error) {
     console.error('❌ Leave call error:', error);
@@ -2820,14 +3312,104 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
     });
   }
 });
+const answerDebounce = new Map(); // userId:targetUserId -> timestamp
+const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
 
 
-  // WebRTC Signaling
+
+
+const MAX_SDP_SIZE = 100 * 1024; // 100KB max for SDP (offers/answers)
+const MAX_ICE_CANDIDATE_SIZE = 5 * 1024; // 5KB max for ICE candidate
+const MAX_SIGNALING_RATE = 50; // Max 50 signaling messages per 10 seconds per user
+const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
+
+function checkSignalingRateLimit(userId) {
+  const now = Date.now();
+  const userLimit = signalingRateLimiter.get(userId);
+  
+  if (!userLimit || now > userLimit.resetTime) {
+    signalingRateLimiter.set(userId, {
+      count: 1,
+      resetTime: now + 10000 // 10 seconds
+    });
+    return true;
+  }
+  
+  if (userLimit.count >= MAX_SIGNALING_RATE) {
+    return false;
+  }
+  
+  userLimit.count++;
+  return true;
+}
+
+function validateSDP(sdp, maxSize = MAX_SDP_SIZE) {
+  if (!sdp || typeof sdp !== 'string') {
+    return { valid: false, error: 'SDP must be a string' };
+  }
+  
+  if (sdp.length > maxSize) {
+    return { valid: false, error: `SDP exceeds maximum size of ${maxSize} bytes` };
+  }
+  
+  // Basic structure validation
+  if (!sdp.includes('v=0') || !sdp.includes('m=')) {
+    return { valid: false, error: 'Invalid SDP structure' };
+  }
+  
+  return { valid: true };
+}
+
+function validateICECandidate(candidate) {
+  if (candidate === null || candidate === undefined) {
+    return { valid: true }; // End-of-candidates signal
+  }
+  
+  if (typeof candidate !== 'object') {
+    return { valid: false, error: 'ICE candidate must be an object' };
+  }
+  
+  const candidateStr = JSON.stringify(candidate);
+  if (candidateStr.length > MAX_ICE_CANDIDATE_SIZE) {
+    return { valid: false, error: `ICE candidate exceeds ${MAX_ICE_CANDIDATE_SIZE} bytes` };
+  }
+  
+  return { valid: true };
+}
+
+// Replace webrtc_offer handler (line 2826)
 socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
+
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      socket.emit('error', { 
+        message: 'Too many signaling messages. Please slow down.',
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+      return;
+    }
+
+    // ✅ FIX: Validate offer structure
+    if (!offer || typeof offer !== 'object') {
+      console.error(`❌ Invalid offer structure from ${user.username}`);
+      return;
+    }
+
+    // ✅ FIX: Validate SDP size and structure
+    const sdpValidation = validateSDP(offer.sdp);
+    if (!sdpValidation.valid) {
+      console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
+      socket.emit('error', { 
+        message: 'Invalid WebRTC offer',
+        code: 'INVALID_OFFER'
+      });
+      return;
+    }
 
     const offerKey = `${callId}:${user.userId}:${targetUserId}`;
     const now = Date.now();
@@ -2845,14 +3427,17 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     activeOffers.set(offerKey, now);
     
     console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
-    console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
+    console.log(`   Offer SDP length: ${offer.sdp.length} bytes (validated)`);
 
     const targetSocket = findActiveSocketForUser(targetUserId);
     
     if (targetSocket) {
       targetSocket.emit('webrtc_offer', {
         fromUserId: user.userId,
-        offer
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        }
       });
       console.log(`✅ Offer forwarded to ${targetUserId}`);
     } else {
@@ -2869,17 +3454,41 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
   }
 });
 
-const answerDebounce = new Map(); // userId:targetUserId -> timestamp
-const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
-
-// Replace existing webrtc_answer handler
+// Replace webrtc_answer handler (line 2876)
 socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
 
-    // ✅ DEDUPLICATION: Prevent duplicate answers
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      socket.emit('error', { 
+        message: 'Too many signaling messages. Please slow down.',
+        code: 'RATE_LIMIT_EXCEEDED'
+      });
+      return;
+    }
+
+    // ✅ FIX: Validate answer structure
+    if (!answer || typeof answer !== 'object') {
+      console.error(`❌ Invalid answer structure from ${user.username}`);
+      return;
+    }
+
+    // ✅ FIX: Validate SDP size and structure
+    const sdpValidation = validateSDP(answer.sdp);
+    if (!sdpValidation.valid) {
+      console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
+      socket.emit('error', { 
+        message: 'Invalid WebRTC answer',
+        code: 'INVALID_ANSWER'
+      });
+      return;
+    }
+
+    // Deduplication
     const answerKey = `${user.userId}:${targetUserId}`;
     const now = Date.now();
     
@@ -2895,14 +3504,17 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
     answerDebounce.set(answerKey, now);
     
     console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
-    console.log(`   Answer SDP length: ${answer.sdp?.length || 0} bytes`);
+    console.log(`   Answer SDP length: ${answer.sdp.length} bytes (validated)`);
 
     const targetSocket = findActiveSocketForUser(targetUserId);
     
     if (targetSocket) {
       targetSocket.emit('webrtc_answer', {
         fromUserId: user.userId,
-        answer
+        answer: {
+          type: answer.type,
+          sdp: answer.sdp
+        }
       });
       console.log(`✅ Answer forwarded to ${targetUserId}`);
     } else {
@@ -2920,28 +3532,24 @@ socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
 });
 
 
-// server.js - add after line 1647
-socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
-  const user = socketUsers.get(socket.id);
-  if (!user) return;
-
-  console.log(`📊 [METRICS] Connection established for ${user.username}`);
-  console.log(`   Type: ${connectionType}`);
-  
-  // Track in database or external analytics
-  if (connectionType === 'TURN_RELAY') {
-    // Send alert - unexpected TURN usage
-    console.error(`🚨 ALERT: TURN relay used when direct connection should work`);
-  } else {
-    console.log(`✅ Optimal connection: ${connectionType}`);
-  }
-});
-
 socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
+
+    // ✅ FIX: Rate limiting
+    if (!checkSignalingRateLimit(user.userId)) {
+      console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
+      return; // Silently drop ICE candidates on rate limit
+    }
+
+    // ✅ FIX: Validate ICE candidate
+    const validation = validateICECandidate(candidate);
+    if (!validation.valid) {
+      console.error(`❌ Invalid ICE candidate from ${user.username}: ${validation.error}`);
+      return;
+    }
 
     // Log candidate details
     if (candidate) {
@@ -2956,7 +3564,7 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     if (targetSocket) {
       targetSocket.emit('ice_candidate', {
         fromUserId: user.userId,
-        candidate
+        candidate: candidate
       });
       console.log(`✅ [ICE] Candidate forwarded to ${targetUserId}`);
     } else {
@@ -2976,25 +3584,25 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     if (candidateType) {
       console.log(`   Using candidate type: ${candidateType}`);
       
-      // Track metrics based on candidate type
+      // Track metrics based on candidate type using atomic operations
       if (candidateType === 'relay') {
-        webrtcMetrics.turnUsage++;
+        webrtcMetrics.increment('turnUsage');
         console.log('   📊 TURN relay connection established');
       } else if (candidateType === 'srflx') {
-        webrtcMetrics.stunUsage++;
+        webrtcMetrics.increment('stunUsage');
         console.log('   📊 STUN server-reflexive connection established');
       } else if (candidateType === 'host') {
-        webrtcMetrics.directConnections++;
+        webrtcMetrics.increment('directConnections');
         console.log('   📊 Direct host connection established');
       }
     }
 
     if (state === 'connected') {
-      webrtcMetrics.successfulConnections++;
-      console.log(`   ✅ Total successful connections: ${webrtcMetrics.successfulConnections}`);
+      webrtcMetrics.increment('successfulConnections');
+      console.log(`   ✅ Total successful connections: ${webrtcMetrics.get('successfulConnections')}`);
     } else if (state === 'failed') {
-      webrtcMetrics.failedConnections++;
-      console.log(`   ❌ Total failed connections: ${webrtcMetrics.failedConnections}`);
+      webrtcMetrics.increment('failedConnections');
+      console.log(`   ❌ Total failed connections: ${webrtcMetrics.get('failedConnections')}`);
     }
   });
 
@@ -3138,14 +3746,13 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
-  
-    if (user?.userId) {
+  if (user?.userId) {
     joinCallDebounce.delete(user.userId);
     userToSocketId.delete(user.userId);
     console.log(`🗑️ Cleaned up joinCallDebounce for ${user.username}`);
   }
   
-    const offersToDelete = [];
+  const offersToDelete = [];
   for (const [key, _] of activeOffers.entries()) {
     if (key.includes(user?.userId)) {
       offersToDelete.push(key);
@@ -3160,11 +3767,38 @@ socket.on('disconnect', () => {
   
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
+    
+    // ✅ FIX: Clean up active file transfers for this user
+    const userFileTransfers = [];
     for (const [fileId, transfer] of activeFileTransfers.entries()) {
       if (transfer.userId === user.userId) {
-        activeFileTransfers.delete(fileId);
-        console.log(`🗑️ Cleaned up incomplete file transfer ${fileId} for ${user.username}`);
+        userFileTransfers.push(fileId);
+        
+        // Notify room that transfer was cancelled
+        const room = matchmaking.getRoom(transfer.roomId);
+        if (room) {
+          io.to(transfer.roomId).emit('file_transfer_cancelled', {
+            fileId,
+            reason: 'Sender disconnected',
+            userId: user.userId
+          });
+          console.log(`📦 Notified room ${transfer.roomId} that file ${fileId} transfer cancelled`);
+        }
       }
+    }
+    
+    // Remove all transfers for this user
+    userFileTransfers.forEach(fileId => {
+      const transfer = activeFileTransfers.get(fileId);
+      const sizeMB = transfer ? (transfer.bytesTransferred / 1024 / 1024).toFixed(2) : 0;
+      activeFileTransfers.delete(fileId);
+      console.log(`🗑️ Cleaned up incomplete file transfer ${fileId} (${sizeMB}MB transferred)`);
+    });
+    
+    if (userFileTransfers.length > 0) {
+      console.log(`🗑️ Cleaned up ${userFileTransfers.length} file transfer(s) for ${user.username}`);
+      console.log(`   Active transfers remaining: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
+      console.log(`   Memory freed: ~${userFileTransfers.length * 10}MB (estimated)`);
     }
 
     // CRITICAL FIX: Schedule immediate socketUsers cleanup with grace period
@@ -3186,6 +3820,9 @@ socket.on('disconnect', () => {
     
     socketUserCleanup.set(socket.id, cleanupTimeout);
 
+    // ============================================
+    // CALL STATE CLEANUP
+    // ============================================
     const callId = userCalls.get(user.userId);
     if (callId) {
       const call = activeCalls.get(callId);
@@ -3241,8 +3878,14 @@ socket.on('disconnect', () => {
       }
     }
     
+    // ============================================
+    // MATCHMAKING CLEANUP
+    // ============================================
     matchmaking.cancelMatchmaking(user.userId);
     
+    // ============================================
+    // ROOM CLEANUP
+    // ============================================
     const roomId = matchmaking.getRoomIdByUser(user.userId);
     
     if (roomId) {
@@ -3302,7 +3945,6 @@ socket.on('disconnect', () => {
     socketUsers.delete(socket.id);
   }
 });
-});
 
 // ============================================
 // PERIODIC CLEANUP
@@ -3350,85 +3992,270 @@ setInterval(() => {
 
 
 
+// ============================================
+// ASYNC PERIODIC CLEANUP (NON-BLOCKING)
+// ============================================
 
-// Replace existing periodic cleanup with improved version
-setInterval(() => {
-  const now = Date.now();
-  const rooms = matchmaking.getActiveRooms();
+async function performPeriodicCleanup() {
+  const startTime = Date.now();
+  console.log(`🧹 Starting periodic cleanup...`);
   
-  console.log(`🧹 Periodic cleanup check: ${rooms.length} active rooms`);
-  
-  rooms.forEach(room => {
-    if (room.expiresAt <= now) {
-      console.log(`🕐 Periodic cleanup: Room ${room.id} has expired (${((now - room.expiresAt) / 1000).toFixed(1)}s ago)`);
-      performRoomCleanup(room.id);
+  try {
+    const now = Date.now();
+    
+    // ✅ FIX: Process in batches to yield to event loop
+    const BATCH_SIZE = 50;
+    
+    // Clean up expired rooms
+    const rooms = matchmaking.getActiveRooms();
+    console.log(`🧹 Checking ${rooms.length} active rooms`);
+    
+    for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
+      const batch = rooms.slice(i, i + BATCH_SIZE);
+      
+      for (const room of batch) {
+        if (room.expiresAt <= now) {
+          console.log(`🕐 Room ${room.id} has expired (${((now - room.expiresAt) / 1000).toFixed(1)}s ago)`);
+          await performRoomCleanup(room.id); // ✅ AWAIT since performRoomCleanup is now async (Fix #16)
+        }
+      }
+      
+      // ✅ Yield to event loop after each batch
+      if (i + BATCH_SIZE < rooms.length) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
     }
-  });
-  
-  // CRITICAL FIX: Clean up orphaned call grace periods
-  const orphanedGracePeriods = [];
-  callGracePeriod.forEach((timeout, callId) => {
-    if (!activeCalls.has(callId)) {
-      orphanedGracePeriods.push(callId);
-      clearTimeout(timeout);
+    
+    // Clean up orphaned call grace periods
+    const orphanedGracePeriods = [];
+    for (const [callId, timeout] of callGracePeriod.entries()) {
+      if (!activeCalls.has(callId)) {
+        orphanedGracePeriods.push(callId);
+        clearTimeout(timeout);
+      }
     }
-  });
-  if (orphanedGracePeriods.length > 0) {
-    orphanedGracePeriods.forEach(id => callGracePeriod.delete(id));
-    console.log(`🗑️ Cleaned up ${orphanedGracePeriods.length} orphaned call grace periods`);
-  }
-  
-  // CRITICAL FIX: Clean up orphaned room cleanup timers
-  const orphanedRoomTimers = [];
-  roomCleanupTimers.forEach((timeout, roomId) => {
-    if (!matchmaking.getRoom(roomId)) {
-      orphanedRoomTimers.push(roomId);
-      clearTimeout(timeout);
+    if (orphanedGracePeriods.length > 0) {
+      orphanedGracePeriods.forEach(id => callGracePeriod.delete(id));
+      console.log(`🗑️ Cleaned up ${orphanedGracePeriods.length} orphaned call grace periods`);
     }
-  });
-  if (orphanedRoomTimers.length > 0) {
-    orphanedRoomTimers.forEach(id => roomCleanupTimers.delete(id));
-    console.log(`🗑️ Cleaned up ${orphanedRoomTimers.length} orphaned room timers`);
-  }
-  
-  // CRITICAL FIX: Clean up stale socketUserCleanup entries
-  const staleCleanups = [];
-  socketUserCleanup.forEach((timeout, socketId) => {
-    if (!socketUsers.has(socketId) && !io.sockets.sockets.has(socketId)) {
-      staleCleanups.push(socketId);
-      clearTimeout(timeout);
+    
+    // ✅ Yield to event loop
+    await new Promise(resolve => setImmediate(resolve));
+    
+    // Clean up orphaned room cleanup timers
+    const orphanedRoomTimers = [];
+    for (const [roomId, timeout] of roomCleanupTimers.entries()) {
+      if (!matchmaking.getRoom(roomId)) {
+        orphanedRoomTimers.push(roomId);
+        clearTimeout(timeout);
+      }
     }
-  });
-  if (staleCleanups.length > 0) {
-    staleCleanups.forEach(id => socketUserCleanup.delete(id));
-    console.log(`🗑️ Cleaned up ${staleCleanups.length} stale socket cleanup entries`);
-  }
-  
-  // CRITICAL FIX: Clean up orphaned mutex entries (should never happen but safety net)
-  const orphanedMutexes = [];
-  callMutexes.forEach((promise, callId) => {
-    if (!activeCalls.has(callId)) {
-      orphanedMutexes.push(callId);
+    if (orphanedRoomTimers.length > 0) {
+      orphanedRoomTimers.forEach(id => roomCleanupTimers.delete(id));
+      console.log(`🗑️ Cleaned up ${orphanedRoomTimers.length} orphaned room timers`);
     }
-  });
-  if (orphanedMutexes.length > 0) {
-    orphanedMutexes.forEach(id => callMutexes.delete(id));
-    console.log(`🗑️ Cleaned up ${orphanedMutexes.length} orphaned call mutexes`);
-  }
-  
-  // Log memory stats
-  console.log(`📊 Memory stats:
+    
+    // ✅ Yield to event loop
+    await new Promise(resolve => setImmediate(resolve));
+    
+    // Clean up stale socketUserCleanup entries
+    const staleCleanups = [];
+    for (const [socketId, timeout] of socketUserCleanup.entries()) {
+      if (!socketUsers.has(socketId) && !io.sockets.sockets.has(socketId)) {
+        staleCleanups.push(socketId);
+        clearTimeout(timeout);
+      }
+    }
+    if (staleCleanups.length > 0) {
+      staleCleanups.forEach(id => socketUserCleanup.delete(id));
+      console.log(`🗑️ Cleaned up ${staleCleanups.length} stale socket cleanup entries`);
+    }
+    
+    // ✅ Yield to event loop
+    await new Promise(resolve => setImmediate(resolve));
+    
+    // Clean up orphaned mutex entries
+    const orphanedMutexes = [];
+    for (const [callId] of callMutexes.entries()) {
+      if (!activeCalls.has(callId)) {
+        orphanedMutexes.push(callId);
+      }
+    }
+    if (orphanedMutexes.length > 0) {
+      orphanedMutexes.forEach(id => callMutexes.delete(id));
+      console.log(`🗑️ Cleaned up ${orphanedMutexes.length} orphaned call mutexes`);
+    }
+    
+    // ✅ FIX #16: Clean up orphaned room call init locks
+    let orphanedRoomLocks = 0;
+    for (const roomId of roomCallInitLocks.keys()) {
+      if (!matchmaking.getRoom(roomId)) {
+        roomCallInitLocks.delete(roomId);
+        orphanedRoomLocks++;
+      }
+    }
+    if (orphanedRoomLocks > 0) {
+      console.log(`🗑️ Cleaned up ${orphanedRoomLocks} orphaned room call init locks`);
+    }
+    
+    // Clean up expired signaling rate limit entries
+    let expiredSignaling = 0;
+    for (const [userId, limit] of signalingRateLimiter.entries()) {
+      if (now > limit.resetTime) {
+        signalingRateLimiter.delete(userId);
+        expiredSignaling++;
+      }
+    }
+    if (expiredSignaling > 0) {
+      console.log(`🗑️ Cleaned up ${expiredSignaling} expired signaling rate limit entries`);
+    }
+    
+    // ✅ Yield to event loop
+    await new Promise(resolve => setImmediate(resolve));
+    
+    // Clean up stale file transfers
+    let staleTransfers = 0;
+    for (const [fileId, transfer] of activeFileTransfers.entries()) {
+      if (now - transfer.startTime > MAX_TRANSFER_TIME) {
+        activeFileTransfers.delete(fileId);
+        staleTransfers++;
+      }
+    }
+    if (staleTransfers > 0) {
+      console.log(`🗑️ Cleaned up ${staleTransfers} stale file transfers`);
+    }
+    
+    // Clean up expired offers
+    let expiredOffers = 0;
+    for (const [key, timestamp] of activeOffers.entries()) {
+      if (now - timestamp > 5000) {
+        activeOffers.delete(key);
+        expiredOffers++;
+      }
+    }
+    if (expiredOffers > 0) {
+      console.log(`🗑️ Cleaned up ${expiredOffers} expired offers`);
+    }
+    
+    // Clean up expired answer debounce
+    let expiredAnswers = 0;
+    for (const [key, timestamp] of answerDebounce.entries()) {
+      if (now - timestamp > 5000) {
+        answerDebounce.delete(key);
+        expiredAnswers++;
+      }
+    }
+    if (expiredAnswers > 0) {
+      console.log(`🗑️ Cleaned up ${expiredAnswers} expired answer debounce entries`);
+    }
+    
+    // Clean up expired join debounce
+    let expiredJoins = 0;
+    for (const [key, timestamp] of joinCallDebounce.entries()) {
+      if (now - timestamp > 5000) {
+        joinCallDebounce.delete(key);
+        expiredJoins++;
+      }
+    }
+    if (expiredJoins > 0) {
+      console.log(`🗑️ Cleaned up ${expiredJoins} expired join debounce entries`);
+    }
+    
+    // Clean up expired room join states
+    let expiredRoomJoins = 0;
+    for (const [key, data] of roomJoinState.entries()) {
+      if (now - data.timestamp > 15000) {
+        roomJoinState.delete(key);
+        expiredRoomJoins++;
+      }
+    }
+    if (expiredRoomJoins > 0) {
+      console.log(`🗑️ Cleaned up ${expiredRoomJoins} expired room join states`);
+    }
+    
+    // ✅ Clean up room message rate limiter
+    let expiredRoomRates = 0;
+    for (const [roomId, limit] of roomMessageRateLimiter.entries()) {
+      if (now > limit.resetTime) {
+        roomMessageRateLimiter.delete(roomId);
+        expiredRoomRates++;
+      }
+    }
+    if (expiredRoomRates > 0) {
+      console.log(`🗑️ Cleaned up ${expiredRoomRates} expired room rate limit entries`);
+    }
+    
+    // ✅ FIX #10: Verify connectionsByIP accuracy
+    let orphanedIPs = 0;
+    for (const [ip, ipData] of connectionsByIP.entries()) {
+      const validConnections = new Set();
+      for (const socketId of ipData.connections) {
+        if (io.sockets.sockets.has(socketId)) {
+          validConnections.add(socketId);
+        }
+      }
+      
+      if (validConnections.size !== ipData.connections.size) {
+        console.log(`🔧 Fixed connection count for IP ${ip}: ${ipData.connections.size} → ${validConnections.size}`);
+        ipData.connections = validConnections;
+        ipData.count = validConnections.size;
+        
+        if (ipData.count === 0) {
+          connectionsByIP.delete(ip);
+          orphanedIPs++;
+        }
+      }
+    }
+    if (orphanedIPs > 0) {
+      console.log(`🗑️ Removed ${orphanedIPs} orphaned IP entries`);
+    }
+    
+    // ✅ FIX #10: Clean up expired connection rate limiters
+    let cleanedRateLimiters = 0;
+    for (const [ip, limiter] of connectionRateLimiter.entries()) {
+      if (now > limiter.resetTime) {
+        connectionRateLimiter.delete(ip);
+        cleanedRateLimiters++;
+      }
+    }
+    if (cleanedRateLimiters > 0) {
+      console.log(`🗑️ Cleaned up ${cleanedRateLimiters} expired connection rate limiters`);
+    }
+    
+    // Log memory stats
+    const cleanupDuration = Date.now() - startTime;
+    console.log(`📊 Periodic cleanup completed in ${cleanupDuration}ms`);
+    console.log(`📊 Memory stats:
     - Active sockets: ${socketUsers.size}
+    - Global connections: ${io.engine.clientsCount}/${MAX_CONNECTIONS_GLOBAL}
+    - Unique IPs connected: ${connectionsByIP.size}
+    - Connection rate limiters: ${connectionRateLimiter.size}
     - Active calls: ${activeCalls.size}
     - Call grace periods: ${callGracePeriod.size}
     - Room cleanup timers: ${roomCleanupTimers.size}
+    - Room call init locks: ${roomCallInitLocks.size}
     - Active offers: ${activeOffers.size}
     - Call mutexes: ${callMutexes.size}
     - Join debounce: ${joinCallDebounce.size}
     - Room join states: ${roomJoinState.size}
-    - User-to-socket index: ${userToSocketId.size}`);
+    - User-to-socket index: ${userToSocketId.size}
+    - Signaling rate limiter: ${signalingRateLimiter.size}
+    - File chunk rate limiter: ${fileChunkRateLimiter.size}
+    - Room message rate limiter: ${roomMessageRateLimiter.size}
+    - Active file transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}
+    - File transfer memory: ${(getCurrentTransferMemory() / 1024 / 1024).toFixed(2)}MB/${(MAX_MEMORY_FOR_TRANSFERS / 1024 / 1024).toFixed(2)}MB`);
     
-}, 60000);;
+  } catch (error) {
+    console.error('❌ Periodic cleanup error:', error);
+  }
+}
+
+// ✅ FIX: Run cleanup as async function (non-blocking)
+setInterval(() => {
+  performPeriodicCleanup().catch(error => {
+    console.error('💥 Periodic cleanup fatal error:', error);
+  });
+}, 60000); // Every 60 seconds
 
 
 // CRITICAL: Add graceful shutdown handler
@@ -3555,6 +4382,7 @@ async function startServer() {
       
       await db.collection('notes').createIndex({ createdAt: -1 }); // For pagination
       await db.collection('notes').createIndex({ userId: 1 }); // For user lookup
+      await db.collection('notes').createIndex({ userId: 1, createdAt: -1 }); // Compound for user+pagination queries
       
       console.log('✅ Database indexes created');
     } catch (indexError) {
@@ -3567,24 +4395,62 @@ async function startServer() {
     // ============================================
     // MONGODB CONNECTION MONITORING
     // ============================================
-    const mongoClient = db.client || db.s?.client;
+const mongoClient = db.client || db.s?.client;
     
     if (mongoClient) {
-      mongoClient.on('error', (error) => {
+      let reconnectAttempts = 0;
+      const MAX_RECONNECT_ATTEMPTS = 5;
+      const RECONNECT_INTERVAL = 5000; // 5 seconds
+      
+      mongoClient.on('error', async (error) => {
         console.error('💥 MongoDB connection error:', error);
-        // TODO: Implement reconnection logic or alert monitoring system
+        
+        // ✅ FIX: Attempt automatic reconnection
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttempts++;
+          console.log(`🔄 Attempting MongoDB reconnection (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+          
+          setTimeout(async () => {
+            try {
+              await connectDB();
+              console.log('✅ MongoDB reconnected successfully');
+              reconnectAttempts = 0; // Reset counter on success
+            } catch (reconnectError) {
+              console.error(`❌ MongoDB reconnection attempt ${reconnectAttempts} failed:`, reconnectError.message);
+              
+              if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                console.error('💥 CRITICAL: MongoDB reconnection failed after maximum attempts');
+                console.error('💥 Server requires manual intervention or restart');
+                // TODO: Alert monitoring system (PagerDuty, Sentry, etc.)
+              }
+            }
+          }, RECONNECT_INTERVAL * reconnectAttempts); // Exponential backoff
+        }
       });
       
       mongoClient.on('close', () => {
         console.error('💥 MongoDB connection closed unexpectedly');
-        // TODO: Alert monitoring system (Sentry, PagerDuty, etc.)
+        console.log('🔄 Connection will be restored automatically if possible');
+        // TODO: Alert monitoring system
       });
       
       mongoClient.on('reconnect', () => {
         console.log('✅ MongoDB reconnected successfully');
+        reconnectAttempts = 0; // Reset on successful reconnect
       });
       
-      console.log('✅ MongoDB connection monitoring enabled');
+      mongoClient.on('serverHeartbeatFailed', (event) => {
+        console.warn(`⚠️ MongoDB heartbeat failed to ${event.connectionId}`);
+      });
+      
+      mongoClient.on('serverHeartbeatSucceeded', (event) => {
+        // Only log first success after failure to avoid spam
+        if (reconnectAttempts > 0) {
+          console.log(`✅ MongoDB heartbeat restored to ${event.connectionId}`);
+        }
+      });
+      
+      console.log('✅ MongoDB connection monitoring enabled with auto-reconnect');
     } else {
       console.warn('⚠️ Could not attach MongoDB connection event listeners');
     }
@@ -3614,8 +4480,8 @@ async function startServer() {
       console.log(`   Room Expiry: ${ROOM_EXPIRY_TIME / 60000} minutes`);
       
       const hasTurn = !!(
-        process.env.CLOUDFLARE_TURN_TOKEN_ID || 
-        '726fccae33334279a71e962da3d8e01c'
+        process.env.CLOUDFLARE_TURN_TOKEN_ID && 
+        process.env.CLOUDFLARE_TURN_API_TOKEN
       );
       
       if (hasTurn) {
@@ -3634,8 +4500,6 @@ async function startServer() {
     // ============================================
     // GRACEFUL SHUTDOWN HANDLERS
     // ============================================
-    process.on('SIGTERM', gracefulShutdown);
-    process.on('SIGINT', gracefulShutdown);
     
     async function gracefulShutdown() {
       console.log('');
@@ -3648,16 +4512,44 @@ async function startServer() {
         console.log('✅ HTTP server closed');
       });
       
-      // Notify all connected clients
-      io.emit('server_shutdown', { 
-        message: 'Server is shutting down for maintenance',
-        reconnectIn: 10000 
-      });
+      // ✅ FIX: Wait for client acknowledgments before forcing shutdown
+      const shutdownPromises = [];
+      let ackCount = 0;
       
-      console.log(`📢 Notified ${socketUsers.size} connected clients`);
+      // Notify all connected clients and wait for acknowledgments
+      for (const [socketId, user] of socketUsers.entries()) {
+        const clientSocket = io.sockets.sockets.get(socketId);
+        if (clientSocket && clientSocket.connected) {
+          const ackPromise = new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              console.log(`⚠️ Shutdown ack timeout for ${user.username}`);
+              resolve();
+            }, 8000); // 8-second timeout per client
+            
+            clientSocket.emit('server_shutdown', { 
+              message: 'Server is shutting down for maintenance',
+              reconnectIn: 10000 
+            }, () => {
+              clearTimeout(timeout);
+              ackCount++;
+              console.log(`✅ Shutdown ack received from ${user.username}`);
+              resolve();
+            });
+          });
+          
+          shutdownPromises.push(ackPromise);
+        }
+      }
       
-      // Give clients time to save state
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log(`📢 Notified ${socketUsers.size} connected clients, waiting for acknowledgments...`);
+      
+      // ✅ FIX: Wait for all clients or 10-second timeout (whichever comes first)
+      await Promise.race([
+        Promise.all(shutdownPromises),
+        new Promise(resolve => setTimeout(resolve, 10000))
+      ]);
+      
+      console.log(`✅ Received ${ackCount}/${socketUsers.size} client acknowledgments`);
       
       // Clean up all timers
       let timerCount = 0;
@@ -3698,6 +4590,10 @@ async function startServer() {
       
       process.exit(0);
     }
+    
+    // Register shutdown handlers
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
 
   } catch (error) {
     console.error('');
