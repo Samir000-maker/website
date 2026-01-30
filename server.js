@@ -53,7 +53,7 @@ const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
 
 const connectionsByIP = new Map(); // ip -> { count, connections: Set }
 const connectionRateLimiter = new Map(); // ip -> { count, resetTime }
-const MAX_CONNECTIONS_GLOBAL = 1000; // Maximum total connections
+const MAX_CONNECTIONS_GLOBAL = 10000; // Maximum total connections
 
 
 function getCurrentTransferMemory() {
