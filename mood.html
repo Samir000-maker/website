@@ -771,22 +771,62 @@ if (window.StateManager) {
     // SOCKET.IO CONNECTION
     // ============================================
     
-    
-    function preventBackNavigation() {
-  // Push a dummy state to history
-  history.pushState(null, null, location.href);
+const BackNavigationBlocker = (function() {
+  let isActive = false;
+  let popstateHandler = null;
+  let beforeunloadHandler = null;
   
-  // Listen for popstate (back button)
-  window.addEventListener('popstate', function(event) {
-    // Push state again to prevent navigation
-    history.pushState(null, null, location.href);
+  function handlePopState(event) {
+    window.history.pushState(
+      { moodPageLock: true, timestamp: Date.now() },
+      '',
+      window.location.href
+    );
     
-    // Optional: Show a toast message
     if (_Toast && typeof _Toast.warning === 'function') {
       _Toast.warning('Please use logout to exit');
     }
-  });
-}
+  }
+  
+  function cleanup() {
+    if (popstateHandler) {
+      window.removeEventListener('popstate', popstateHandler);
+      popstateHandler = null;
+    }
+    if (beforeunloadHandler) {
+      window.removeEventListener('beforeunload', beforeunloadHandler);
+      beforeunloadHandler = null;
+    }
+    isActive = false;
+  }
+  
+  function init() {
+    if (isActive) return;
+    
+    window.history.replaceState(
+      { moodPageLock: true, timestamp: Date.now() },
+      '',
+      window.location.href
+    );
+    
+    window.history.pushState(
+      { moodPageLock: true, timestamp: Date.now() },
+      '',
+      window.location.href
+    );
+    
+    popstateHandler = handlePopState;
+    beforeunloadHandler = cleanup;
+    
+    window.addEventListener('popstate', popstateHandler);
+    window.addEventListener('beforeunload', beforeunloadHandler);
+    
+    isActive = true;
+    console.log('🔒 Back navigation disabled');
+  }
+  
+  return { init: init };
+})();
     
     
 function waitForTabManager() {
@@ -1342,7 +1382,7 @@ async function initPage() {
   }
 
   // Prevent back navigation
-  preventBackNavigation();  // ← ADD THIS LINE
+  BackNavigationBlocker.init();  // ← ADD THIS LINE
 
   // Initialize Socket.IO
   console.log('🔌 Initializing socket connection...');
