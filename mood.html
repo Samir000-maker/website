@@ -771,7 +771,8 @@ if (window.StateManager) {
     // SOCKET.IO CONNECTION
     // ============================================
     
-(function() {
+    
+    (function() {
   'use strict';
   
   console.log('====================================');
@@ -841,7 +842,6 @@ if (window.StateManager) {
     document.addEventListener('DOMContentLoaded', initBackButtonBlocker);
   } else {
     initBackButtonBlocker();
-    alternativeBackButtonBlocker();
   }
   
   // Expose for manual testing
@@ -860,19 +860,6 @@ if (window.StateManager) {
   
 })();
     
-    
-    function alternativeBackButtonBlocker() {
-  console.log('🔄 Using alternative method: history.go(1)');
-  
-  history.pushState(null, document.title, location.href);
-  
-  window.addEventListener('popstate', function(event) {
-    console.log('🚨 BACK PRESSED - Using history.go(1) to block');
-    history.go(1);
-  });
-  
-  console.log('✅ Alternative blocker active');
-}
     
 function waitForTabManager() {
   return new Promise((resolve, reject) => {
