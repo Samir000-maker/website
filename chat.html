@@ -3686,18 +3686,24 @@ function showConfirmationDialog() {
 function setupBackButtonHandler() {
   console.log('🔧 ========================================');
   console.log('🔧 SETTING UP BACK BUTTON HANDLER');
+  console.log('🔧 (Using History Guard Pattern)');
   console.log('🔧 ========================================');
   
   let dialogOpen = false;
   let isLeaving = false;
+  let historyGuardActive = true;
   
-  // Push initial state to establish history entry
-  history.pushState({ page: 'chat', initial: true }, '', window.location.href);
-  console.log('✅ Initial history state pushed');
+  // CRITICAL: Push TWO states to create history guard
+  // This ensures first back press keeps us on the same page
+  history.pushState({ page: 'chat', guard: 1 }, '');
+  history.pushState({ page: 'chat', guard: 2 }, '');
+  
+  console.log('✅ History guard established');
+  console.log('   Stack: [previous, chat(g:1), chat(g:2)] <- current');
   
   /**
    * Execute complete leave sequence
-   * Used by both "Leave" button and second back press
+   * Used by both "Leave" button click and second back press
    */
   async function executeLeaveSequence() {
     if (isLeaving) {
@@ -3711,6 +3717,7 @@ function setupBackButtonHandler() {
     
     isLeaving = true;
     backButtonHandled = true;
+    historyGuardActive = false; // Disable guard to allow actual navigation
     
     try {
       // Stop cached call monitoring
@@ -3749,13 +3756,13 @@ function setupBackButtonHandler() {
       }
       
       // Clear chat state
-      clearChatState(true);
+      await clearChatState(true);
       console.log('✅ Chat state cleared');
       
       console.log('🔄 Navigating to mood.html');
       console.log('🚪 ========================================\n');
       
-      // Navigate
+      // Navigate directly to mood.html
       window.location.href = '/mood.html';
       
     } catch (error) {
@@ -3765,18 +3772,36 @@ function setupBackButtonHandler() {
     }
   }
   
+  /**
+   * Popstate event handler
+   * Fires when user presses back button (after navigation has occurred)
+   */
   window.addEventListener('popstate', async (event) => {
     console.log('⬅️ ========================================');
-    console.log('⬅️ BACK BUTTON PRESSED');
+    console.log('⬅️ POPSTATE EVENT FIRED');
     console.log('⬅️ ========================================');
+    console.log(`   Guard active: ${historyGuardActive}`);
     console.log(`   Dialog open: ${dialogOpen}`);
-    console.log(`   Already handled: ${backButtonHandled}`);
     console.log(`   Is leaving: ${isLeaving}`);
     
-    // CRITICAL: If dialog is already open, treat as "Leave" confirmation
-    if (dialogOpen) {
-      console.log('⚡ SECOND BACK PRESS DETECTED - EXECUTING LEAVE');
+    // If we're leaving or guard is disabled, don't interfere
+    if (isLeaving || !historyGuardActive) {
+      console.log('   ℹ️ Guard inactive or leaving - allowing navigation');
       console.log('⬅️ ========================================\n');
+      return;
+    }
+    
+    // CRITICAL: Immediately re-push state to cancel the back navigation
+    // This MUST happen before any async operations
+    // This keeps us on the chat page
+    history.pushState({ page: 'chat', guard: Date.now() }, '');
+    console.log('   ✅ Re-pushed guard state (canceled back navigation)');
+    console.log('   User is still on chat page');
+    
+    // SECOND BACK PRESS - Dialog is already open
+    if (dialogOpen) {
+      console.log('   🔴 SECOND BACK PRESS DETECTED');
+      console.log('   This mimics clicking the "Leave" button');
       
       // Close dialog immediately
       const overlay = document.getElementById('confirmationOverlay');
@@ -3785,29 +3810,22 @@ function setupBackButtonHandler() {
       }
       dialogOpen = false;
       
-      // Execute leave sequence
+      console.log('⬅️ ========================================\n');
+      
+      // Execute leave sequence (identical to clicking "Leave" button)
       await executeLeaveSequence();
       return;
     }
     
-    // If already handled or leaving, do nothing
-    if (backButtonHandled || isLeaving) {
-      console.log('⚠️ Already handled or leaving - ignoring');
-      console.log('⬅️ ========================================\n');
-      // Push state back to prevent navigation
-      history.pushState({ page: 'chat' }, '', window.location.href);
-      return;
-    }
-    
-    // First back press - show dialog
-    console.log('📋 First back press - showing confirmation dialog');
-    
-    // Push state back to prevent navigation
-    history.pushState({ page: 'chat' }, '', window.location.href);
-    
-    dialogOpen = true;
+    // FIRST BACK PRESS - Show confirmation dialog
+    console.log('   🟡 FIRST BACK PRESS DETECTED');
+    console.log('   Showing confirmation dialog');
     console.log('⬅️ ========================================\n');
     
+    // Mark dialog as open
+    dialogOpen = true;
+    
+    // Show dialog and wait for user decision
     const shouldLeave = await showConfirmationDialog();
     
     console.log('📋 ========================================');
@@ -3815,15 +3833,19 @@ function setupBackButtonHandler() {
     console.log('📋 ========================================');
     console.log(`   User choice: ${shouldLeave ? 'LEAVE' : 'STAY'}`);
     
+    // Reset dialog state
     dialogOpen = false;
     
     if (shouldLeave) {
-      console.log('✅ User confirmed - executing leave sequence');
+      console.log('   ✅ User clicked "Leave"');
+      console.log('   Executing leave sequence');
       console.log('📋 ========================================\n');
       await executeLeaveSequence();
     } else {
-      console.log('❌ User cancelled - staying in chat');
+      console.log('   ❌ User clicked "Stay"');
+      console.log('   Remaining in chat room');
       console.log('📋 ========================================\n');
+      // User stays in chat - guard state already re-pushed above
     }
   });
   
