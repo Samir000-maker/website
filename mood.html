@@ -771,63 +771,108 @@ if (window.StateManager) {
     // SOCKET.IO CONNECTION
     // ============================================
     
-const BackNavigationBlocker = (function() {
-  let isActive = false;
-  let popstateHandler = null;
-  let beforeunloadHandler = null;
+(function() {
+  'use strict';
   
-  function handlePopState(event) {
-    window.history.pushState(
-      { moodPageLock: true, timestamp: Date.now() },
-      '',
-      window.location.href
-    );
+  console.log('====================================');
+  console.log('🔒 BACK BUTTON BLOCKER LOADING...');
+  console.log('====================================');
+  
+  let initialized = false;
+  let popstateAttached = false;
+  
+  // Main initialization function
+  function initBackButtonBlocker() {
     
-    if (_Toast && typeof _Toast.warning === 'function') {
-      _Toast.warning('Please use logout to exit');
+    if (initialized) {
+      console.warn('⚠️  Back button blocker already initialized, skipping...');
+      return;
     }
+    
+    console.log('📍 Step 1: Pushing initial history state...');
+    
+    // Push a state to create history entry
+    history.pushState(null, '', location.href);
+    
+    console.log('✅ Step 1 Complete: History state pushed');
+    console.log('   Current URL:', location.href);
+    console.log('   History length:', history.length);
+    
+    // Attach popstate listener
+    console.log('📍 Step 2: Attaching popstate event listener...');
+    
+    window.addEventListener('popstate', function(event) {
+      
+      console.log('');
+      console.log('🚨🚨🚨 BACK BUTTON PRESSED! 🚨🚨🚨');
+      console.log('Event state:', event.state);
+      console.log('Current URL:', location.href);
+      console.log('Action: Pushing forward to block navigation...');
+      
+      // Immediately push forward to cancel back navigation
+      history.pushState(null, '', location.href);
+      
+      console.log('✅ Navigation blocked - staying on current page');
+      console.log('   New history length:', history.length);
+      console.log('');
+      
+      // Optional: Show toast to user
+      if (window.MoodApp && window.MoodApp.Toast && typeof window.MoodApp.Toast.warning === 'function') {
+        window.MoodApp.Toast.warning('Please use logout to exit');
+      }
+      
+    });
+    
+    popstateAttached = true;
+    console.log('✅ Step 2 Complete: Event listener attached');
+    
+    initialized = true;
+    
+    console.log('');
+    console.log('====================================');
+    console.log('✅ BACK BUTTON BLOCKER ACTIVE');
+    console.log('====================================');
+    console.log('Try pressing the back button now...');
+    console.log('');
   }
   
-  function cleanup() {
-    if (popstateHandler) {
-      window.removeEventListener('popstate', popstateHandler);
-      popstateHandler = null;
-    }
-    if (beforeunloadHandler) {
-      window.removeEventListener('beforeunload', beforeunloadHandler);
-      beforeunloadHandler = null;
-    }
-    isActive = false;
+  // Auto-run on page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initBackButtonBlocker);
+  } else {
+    initBackButtonBlocker();
+    alternativeBackButtonBlocker();
   }
   
-  function init() {
-    if (isActive) return;
-    
-    window.history.replaceState(
-      { moodPageLock: true, timestamp: Date.now() },
-      '',
-      window.location.href
-    );
-    
-    window.history.pushState(
-      { moodPageLock: true, timestamp: Date.now() },
-      '',
-      window.location.href
-    );
-    
-    popstateHandler = handlePopState;
-    beforeunloadHandler = cleanup;
-    
-    window.addEventListener('popstate', popstateHandler);
-    window.addEventListener('beforeunload', beforeunloadHandler);
-    
-    isActive = true;
-    console.log('🔒 Back navigation disabled');
-  }
+  // Expose for manual testing
+  window.testBackButtonBlocker = function() {
+    console.log('');
+    console.log('=== MANUAL TEST ===');
+    console.log('Simulating back button press...');
+    history.back();
+    setTimeout(() => {
+      console.log('Test complete. Check if page navigated or stayed.');
+      console.log('Current URL:', location.href);
+    }, 100);
+  };
   
-  return { init: init };
+  console.log('💡 TIP: You can test manually by typing: testBackButtonBlocker()');
+  
 })();
     
+    
+    function alternativeBackButtonBlocker() {
+  console.log('🔄 Using alternative method: history.go(1)');
+  
+  history.pushState(null, document.title, location.href);
+  
+  window.addEventListener('popstate', function(event) {
+    console.log('🚨 BACK PRESSED - Using history.go(1) to block');
+    history.go(1);
+  });
+  
+  console.log('✅ Alternative blocker active');
+}
     
 function waitForTabManager() {
   return new Promise((resolve, reject) => {
@@ -1382,7 +1427,7 @@ async function initPage() {
   }
 
   // Prevent back navigation
-  BackNavigationBlocker.init();  // ← ADD THIS LINE
+  initBackButtonBlocker();  // ← ADD THIS LINE
 
   // Initialize Socket.IO
   console.log('🔌 Initializing socket connection...');
