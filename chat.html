@@ -6032,7 +6032,7 @@ leaveBtn?.addEventListener('click', async () => {
       }
     });
 
-// REPLACE LINES 4656-4703 WITH:
+
 
 window.addEventListener('beforeunload', (e) => {
   console.log('🚪 ========================================');
@@ -6046,6 +6046,7 @@ window.addEventListener('beforeunload', (e) => {
     console.log('🔒 Back button already executed cleanup - skipping');
     console.log('🚪 ========================================\n');
     return;
+    }
   
   stopCachedCallMonitoring();
   
@@ -6161,8 +6162,11 @@ window.addEventListener('beforeunload', (e) => {
   }
   
   console.log('🚪 ========================================\n');
-});
-  }
+  
+    });
+  
+}
+
 
   // ============================================
   // INITIALIZATION
