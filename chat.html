@@ -4960,79 +4960,21 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-  console.log('👋 ========================================');
-  console.log('👋 USER_LEFT EVENT RECEIVED');
-  console.log('👋 ========================================');
-  console.log(`   User: ${data.username || 'Unknown'}`);
-  console.log(`   UserID: ${data.userId || 'Unknown'}`);
-  console.log(`   Remaining: ${data.remainingUsers}`);
-  
-  // Add system message to chat
-  const msgEl = document.createElement('div');
-  msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-  msgEl.textContent = `${data.username || 'A user'} left the room`;
-  messagesList?.appendChild(msgEl);
-  
-  // Scroll to bottom to show the message
-  if (messagesList) {
-    messagesList.scrollTop = messagesList.scrollHeight;
-  }
-  
-  console.log('✅ System message added to chat');
-  
-  // CRITICAL FIX: Remove user from sidebar list
-  if (usersList && data.userId) {
-    console.log(`🗑️ Removing user ${data.userId} from sidebar...`);
-    
-    // Find and remove the user card
-    const userCards = usersList.querySelectorAll('.user-card');
-    let removed = false;
-    
-    userCards.forEach(card => {
-      // Check if this card belongs to the user who left
-      // We can identify by username in the card content
-      const usernameElement = card.querySelector('div.text-sm');
-      if (usernameElement && usernameElement.textContent === data.username) {
-        console.log(`   Found user card for ${data.username}`);
-        
-        // Add fade-out animation before removing
-        card.style.transition = 'opacity 0.3s ease-out, transform 0.3s ease-out';
-        card.style.opacity = '0';
-        card.style.transform = 'translateX(-20px)';
-        
-        // Remove after animation completes
-        setTimeout(() => {
-          card.remove();
-          console.log(`   ✅ User card removed from DOM`);
-        }, 300);
-        
-        removed = true;
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+      msgEl.textContent = `${data.username || 'A user'} left the room`;
+      messagesList?.appendChild(msgEl);
+
+      if (onlineCount && data.remainingUsers !== undefined) {
+        onlineCount.textContent = `${data.remainingUsers} Online`;
+      }
+
+      if (data.remainingUsers <= 1) {
+        toast('Room closing...', 'warning');
+        clearChatState(true);
+        setTimeout(() => window.location.href = '/mood.html', 2000);
       }
     });
-    
-    if (!removed) {
-      console.warn(`⚠️ Could not find user card for ${data.username}`);
-    }
-  } else {
-    console.warn('⚠️ usersList element not found or userId missing');
-  }
-  
-  // Update online count
-  if (onlineCount && data.remainingUsers !== undefined) {
-    onlineCount.textContent = `${data.remainingUsers} Online`;
-    console.log(`✅ Updated online count: ${data.remainingUsers}`);
-  }
-  
-  console.log('👋 ========================================\n');
-  
-  // Check if room should close
-  if (data.remainingUsers <= 1) {
-    console.log('⚠️ Only 1 user remaining - room will close');
-    toast('Room closing...', 'warning');
-    clearChatState(true);
-    setTimeout(() => window.location.href = '/mood.html', 2000);
-  }
-});
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
