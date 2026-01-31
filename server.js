@@ -34,7 +34,9 @@ const socketUsers = new Map();
 const joinCallDebounce = new Map(); // userId -> timestamp
 
 const roomCallInitLocks = new Map(); // roomId -> Promise
-
+const userActiveRooms = new Map();
+const userSockets = new Map();
+const userOperationLocks = new Map();
 
 
 // ============================================
@@ -87,6 +89,208 @@ function addUserToMood(userId, mood) {
     console.log(`ℹ️ User ${userId} already in ${mood} - no change`);
   }
 }
+
+async function acquireUserLock(userId) {
+  while (userOperationLocks.has(userId)) {
+    await userOperationLocks.get(userId);
+  }
+  
+  let releaseLock;
+  const lockPromise = new Promise(resolve => {
+    releaseLock = resolve;
+  });
+  
+  userOperationLocks.set(userId, lockPromise);
+  
+  return () => {
+    userOperationLocks.delete(userId);
+    releaseLock();
+  };
+}
+
+function getUserActiveRoom(userId) {
+  return userActiveRooms.get(userId) || null;
+}
+
+function setUserActiveRoom(userId, roomId, mood) {
+  const roomData = {
+    roomId,
+    joinedAt: Date.now(),
+    mood
+  };
+  
+  userActiveRooms.set(userId, roomData);
+  console.log(`🔐 [UID: ${userId}] Set active room: ${roomId} (mood: ${mood})`);
+  
+  return roomData;
+}
+
+function clearUserActiveRoom(userId) {
+  const activeRoom = userActiveRooms.get(userId);
+  if (activeRoom) {
+    userActiveRooms.delete(userId);
+    console.log(`🔓 [UID: ${userId}] Cleared active room: ${activeRoom.roomId}`);
+  }
+  return activeRoom;
+}
+
+function registerSocketForUser(userId, socketId) {
+  if (!userSockets.has(userId)) {
+    userSockets.set(userId, new Set());
+  }
+  
+  userSockets.get(userId).add(socketId);
+  console.log(`📱 [UID: ${userId}] Registered socket ${socketId} (total devices: ${userSockets.get(userId).size})`);
+}
+
+function unregisterSocketForUser(userId, socketId) {
+  const sockets = userSockets.get(userId);
+  if (sockets) {
+    sockets.delete(socketId);
+    console.log(`📱 [UID: ${userId}] Unregistered socket ${socketId} (remaining devices: ${sockets.size})`);
+    
+    if (sockets.size === 0) {
+      userSockets.delete(userId);
+      console.log(`📱 [UID: ${userId}] All devices disconnected`);
+    }
+  }
+}
+
+
+function getUserSocketIds(userId) {
+  return Array.from(userSockets.get(userId) || []);
+}
+
+
+function emitToUserAllDevices(userId, event, data) {
+  const socketIds = getUserSocketIds(userId);
+  socketIds.forEach(socketId => {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket && socket.connected) {
+      socket.emit(event, data);
+    }
+  });
+  
+  if (socketIds.length > 0) {
+    console.log(`📢 [UID: ${userId}] Emitted '${event}' to ${socketIds.length} device(s)`);
+  }
+}
+
+
+
+async function validateMoodSelection(userId) {
+  const releaseLock = await acquireUserLock(userId);
+  
+  try {
+    // Check if user already in active room
+    const activeRoom = getUserActiveRoom(userId);
+    
+    if (activeRoom) {
+      // Verify room still exists and is valid
+      const room = matchmaking.getRoom(activeRoom.roomId);
+      
+      if (room && !room.isExpired && room.hasUser(userId)) {
+        console.log(`❌ [UID: ${userId}] Blocked mood selection - already in room ${activeRoom.roomId}`);
+        return {
+          allowed: false,
+          reason: 'You are already in an active room. Please leave your current room first.',
+          existingRoom: {
+            roomId: activeRoom.roomId,
+            mood: activeRoom.mood,
+            joinedAt: activeRoom.joinedAt
+          }
+        };
+      } else {
+        // Room is invalid/expired - clean up stale state
+        console.log(`⚠️ [UID: ${userId}] Cleaning up stale room reference: ${activeRoom.roomId}`);
+        clearUserActiveRoom(userId);
+      }
+    }
+    
+    return { allowed: true };
+  } finally {
+    releaseLock();
+  }
+}
+
+
+
+async function restoreExistingRoom(socket, userId, existingRoom) {
+  console.log(`🔄 [UID: ${userId}] [Socket: ${socket.id}] Restoring room ${existingRoom.roomId}`);
+  
+  const room = matchmaking.getRoom(existingRoom.roomId);
+  
+  if (!room || room.isExpired) {
+    console.error(`❌ [UID: ${userId}] Cannot restore - room ${existingRoom.roomId} not found or expired`);
+    // Clean up stale state
+    clearUserActiveRoom(userId);
+    return {
+      success: false,
+      error: 'Your previous room has expired'
+    };
+  }
+  
+  if (!room.hasUser(userId)) {
+    console.error(`❌ [UID: ${userId}] Cannot restore - not a member of room ${existingRoom.roomId}`);
+    clearUserActiveRoom(userId);
+    return {
+      success: false,
+      error: 'You are no longer a member of this room'
+    };
+  }
+  
+  // Join socket to room
+  socket.join(existingRoom.roomId);
+  console.log(`✅ [UID: ${userId}] [Socket: ${socket.id}] Joined room ${existingRoom.roomId}`);
+  
+  // Get partner info
+  const partner = room.users.find(u => u.userId !== userId);
+  const partnerProfile = partner ? await getUserProfile(partner.userId) : null;
+  
+  // Prepare room data with full history
+  const roomData = {
+    roomId: room.roomId,
+    mood: room.mood,
+    users: room.users.map(u => ({
+      userId: u.userId,
+      username: u.username,
+      profilePictureUrl: u.profilePictureUrl,
+      status: u.status
+    })),
+    partner: partner ? {
+      userId: partner.userId,
+      username: partner.username,
+      profilePictureUrl: partner.profilePictureUrl,
+      bio: partnerProfile?.bio || '',
+      status: partner.status
+    } : null,
+    createdAt: room.createdAt,
+    expiresAt: room.expiresAt,
+    chatHistory: room.chatHistory || [], // CRITICAL: Include all cached messages
+    isRestored: true // Flag to indicate this is a restoration
+  };
+  
+  // Emit room restoration to this socket
+  socket.emit('room_restored', roomData);
+  
+  // Also emit to all other devices of this user
+  const otherSocketIds = getUserSocketIds(userId).filter(sid => sid !== socket.id);
+  otherSocketIds.forEach(socketId => {
+    const otherSocket = io.sockets.sockets.get(socketId);
+    if (otherSocket && otherSocket.connected) {
+      otherSocket.emit('room_state_sync', roomData);
+    }
+  });
+  
+  console.log(`✅ [UID: ${userId}] Room ${existingRoom.roomId} restored with ${roomData.chatHistory.length} messages`);
+  
+  return {
+    success: true,
+    room: roomData
+  };
+}
+
+
 
 /**
  * Remove user from mood tracking (idempotent)
@@ -1318,6 +1522,163 @@ io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
   
   
+  
+  socket.on('send_message', async (data, callback) => {
+  if (!currentUser) {
+    return callback?.({ success: false, error: 'Not authenticated' });
+  }
+  
+  const { roomId, message, type = 'text' } = data;
+  const userId = currentUser.userId;
+  
+  // Validate room access
+  const validation = validateRoomAccess(roomId, userId);
+  if (!validation.valid) {
+    return callback?.({ success: false, error: validation.error });
+  }
+  
+  const room = validation.room;
+  
+  // Create message object
+  const messageObj = {
+    id: uuidv4(),
+    userId,
+    username: currentUser.username,
+    message,
+    type,
+    timestamp: Date.now()
+  };
+  
+  // CRITICAL: Add to room's chat history for persistence
+  room.addMessage(messageObj);
+  
+  // Broadcast to room (all devices of both users)
+  io.to(roomId).emit('new_message', messageObj);
+  
+  console.log(`💬 [UID: ${userId}] [Room: ${roomId}] Message sent (synced to all devices)`);
+  
+  callback?.({ success: true, message: messageObj });
+});
+  
+  
+  socket.on('select_mood', async (data, callback) => {
+    if (!currentUser) {
+      return callback?.({ success: false, error: 'Not authenticated' });
+    }
+    
+    const { mood } = data;
+    const userId = currentUser.userId;
+    
+    console.log(`🎭 [UID: ${userId}] [Socket: ${socket.id}] Attempting to select mood: ${mood}`);
+    
+    try {
+      // CRITICAL: Validate if user can select mood
+      const validation = await validateMoodSelection(userId);
+      
+      if (!validation.allowed) {
+        console.log(`🚫 [UID: ${userId}] Mood selection blocked: ${validation.reason}`);
+        
+        // Attempt to restore existing room
+        const restoration = await restoreExistingRoom(socket, userId, validation.existingRoom);
+        
+        return callback?.({
+          success: false,
+          error: validation.reason,
+          existingRoom: validation.existingRoom,
+          restored: restoration.success,
+          room: restoration.room
+        });
+      }
+      
+      // User is allowed to select mood - proceed with matchmaking
+      console.log(`✅ [UID: ${userId}] Mood selection allowed`);
+      
+      // Add to mood registry (deduplicated by UID)
+      addUserToMood(userId, mood);
+      
+      // Join matchmaking queue
+      const result = await matchmaking.joinQueue(userId, mood, currentUser);
+      
+      if (result.matched) {
+        // Match found - register active room
+        setUserActiveRoom(userId, result.roomId, mood);
+        
+        // Join socket to room
+        socket.join(result.roomId);
+        
+        console.log(`🎯 [UID: ${userId}] Matched! Room: ${result.roomId}`);
+        
+        // Get partner info
+        const room = matchmaking.getRoom(result.roomId);
+        const partner = room.users.find(u => u.userId !== userId);
+        const partnerProfile = partner ? await getUserProfile(partner.userId) : null;
+        
+        const roomData = {
+          roomId: result.roomId,
+          mood: room.mood,
+          partner: partner ? {
+            userId: partner.userId,
+            username: partner.username,
+            profilePictureUrl: partner.profilePictureUrl,
+            bio: partnerProfile?.bio || ''
+          } : null,
+          expiresAt: room.expiresAt,
+          chatHistory: room.chatHistory || []
+        };
+        
+        // Emit to all devices of this user
+        emitToUserAllDevices(userId, 'match_found', roomData);
+        
+        // Also emit to partner's all devices
+        if (partner) {
+          emitToUserAllDevices(partner.userId, 'match_found', {
+            ...roomData,
+            partner: {
+              userId,
+              username: currentUser.username,
+              profilePictureUrl: currentUser.profilePictureUrl,
+              bio: (await getUserProfile(userId))?.bio || ''
+            }
+          });
+        }
+        
+        callback?.({ success: true, matched: true, room: roomData });
+        
+      } else {
+        // Waiting in queue
+        console.log(`⏳ [UID: ${userId}] Waiting in queue for mood: ${mood}`);
+        callback?.({ success: true, matched: false, queuePosition: result.queuePosition });
+      }
+      
+    } catch (error) {
+      console.error(`❌ [UID: ${userId}] Mood selection error:`, error);
+      callback?.({ success: false, error: error.message });
+    }
+  });
+  
+  // ============================================
+  // MANUAL ROOM RESTORATION
+  // ============================================
+  
+  socket.on('restore_room', async (callback) => {
+    if (!currentUser) {
+      return callback?.({ success: false, error: 'Not authenticated' });
+    }
+    
+    const userId = currentUser.userId;
+    const activeRoom = getUserActiveRoom(userId);
+    
+    if (!activeRoom) {
+      return callback?.({ success: false, error: 'No active room to restore' });
+    }
+    
+    console.log(`🔄 [UID: ${userId}] Manual room restoration requested`);
+    
+    const result = await restoreExistingRoom(socket, userId, activeRoom);
+    callback?.(result);
+  });
+  
+  
     socket.on('error', (error) => {
     console.error(`❌ Socket error [${socket.id}]:`, error);
     const user = socketUsers.get(socket.id);
@@ -1947,40 +2308,33 @@ socket.on('authenticate', async ({ token, userId }) => {
     }
 
     // ============================================
-    // HANDLE EXISTING SOCKET FOR SAME USER
+    // MULTI-DEVICE: REGISTER SOCKET FOR UID
     // ============================================
-    const oldSocketId = userToSocketId.get(user._id.toString());
+    const firebaseUid = decodedToken.uid;
+    const mongoUserId = user._id.toString();
+    
+    // Register this socket under Firebase UID for multi-device tracking
+    registerSocketForUser(firebaseUid, socket.id);
+    
+    console.log(`📱 [UID: ${firebaseUid}] Registered socket ${socket.id}`);
+    console.log(`📱 [UID: ${firebaseUid}] Total active devices: ${getUserSocketIds(firebaseUid).length}`);
+
+    // ============================================
+    // HANDLE EXISTING SOCKET FOR SAME USER (LEGACY)
+    // ============================================
+    // Note: With multi-device support, we DON'T disconnect old sockets
+    // Instead, we allow multiple concurrent sessions
+    const oldSocketId = userToSocketId.get(mongoUserId);
     
     if (oldSocketId && oldSocketId !== socket.id) {
-      console.log(`🔄 User ${user.username} reconnected from new socket`);
-      console.log(`   Old socket: ${oldSocketId}`);
+      console.log(`🔄 User ${user.username} has multiple active sessions`);
+      console.log(`   Previous socket: ${oldSocketId}`);
       console.log(`   New socket: ${socket.id}`);
       
-      // Clean up old socket mapping
+      // Clean up old socket mapping from legacy tracking
       const oldSocketData = socketUsers.get(oldSocketId);
       if (oldSocketData) {
-        console.log(`🗑️ Removing old socket data for ${user.username}`);
-        socketUsers.delete(oldSocketId);
-      }
-      
-      // Gracefully disconnect old socket if still connected
-      const oldSocket = io.sockets.sockets.get(oldSocketId);
-      if (oldSocket && oldSocket.connected) {
-        console.log(`🔌 Disconnecting old socket ${oldSocketId}`);
-        
-        // Notify old client they've been replaced
-        oldSocket.emit('session_replaced', {
-          message: 'You have been logged in from another device',
-          newSocketId: socket.id
-        });
-        
-        // Force disconnect with small delay
-        setTimeout(() => {
-          if (oldSocket.connected) {
-            oldSocket.disconnect(true);
-            console.log(`✅ Old socket ${oldSocketId} disconnected`);
-          }
-        }, 100);
+        console.log(`ℹ️ Updating socket tracking for ${user.username}`);
       }
       
       // Clean up any pending socket cleanup timers
@@ -1995,7 +2349,8 @@ socket.on('authenticate', async ({ token, userId }) => {
     // REGISTER NEW SOCKET
     // ============================================
     const userSocketData = {
-      userId: user._id.toString(),
+      userId: mongoUserId,
+      firebaseUid: firebaseUid,
       username: user.username,
       pfpUrl: user.pfpUrl,
       email: user.email,
@@ -2004,40 +2359,62 @@ socket.on('authenticate', async ({ token, userId }) => {
 
     // Store in both directions for O(1) lookups
     socketUsers.set(socket.id, userSocketData);
-    userToSocketId.set(user._id.toString(), socket.id);
+    userToSocketId.set(mongoUserId, socket.id); // Update to latest socket
 
     console.log('✅ Socket authenticated successfully');
-    console.log(`   User: ${user.username} (${user._id.toString()})`);
+    console.log(`   User: ${user.username} (${mongoUserId})`);
+    console.log(`   Firebase UID: ${firebaseUid}`);
     console.log(`   Socket: ${socket.id}`);
     console.log(`   Active sockets: ${socketUsers.size}`);
 
     // ============================================
+    // CHECK FOR ACTIVE ROOM (MULTI-DEVICE AWARE)
+    // ============================================
+    const activeRoom = getUserActiveRoom(firebaseUid);
+    
+    if (activeRoom) {
+      console.log(`ℹ️ [UID: ${firebaseUid}] User has active room: ${activeRoom.roomId}`);
+    }
+
+    // ============================================
     // SEND SUCCESS RESPONSE
     // ============================================
-socket.emit('authenticated', { 
-  success: true, 
-  user: {
-    userId: user._id.toString(),
-    username: user.username,
-    pfpUrl: user.pfpUrl
-  },
-  socketId: socket.id,
-  timestamp: Date.now()
-});
+    socket.emit('authenticated', { 
+      success: true, 
+      user: {
+        userId: mongoUserId,
+        firebaseUid: firebaseUid,
+        username: user.username,
+        pfpUrl: user.pfpUrl
+      },
+      socketId: socket.id,
+      timestamp: Date.now(),
+      // MULTI-DEVICE: Include active room info
+      hasActiveRoom: !!activeRoom,
+      activeRoom: activeRoom ? {
+        roomId: activeRoom.roomId,
+        mood: activeRoom.mood,
+        joinedAt: activeRoom.joinedAt
+      } : null
+    });
 
-// ✅ SEND INITIAL MOOD COUNTS
-socket.emit('mood_counts_initial', getAllMoodCounts());
+    // ✅ SEND INITIAL MOOD COUNTS
+    socket.emit('mood_counts_initial', getAllMoodCounts());
 
     // ============================================
-    // OPTIONAL: RESTORE USER STATE
+    // RESTORE USER STATE (LEGACY FALLBACK)
     // ============================================
-    // If user was in a room before disconnect, rejoin them
-    const roomId = matchmaking.getRoomIdByUser(user._id.toString());
-    if (roomId) {
-      const room = matchmaking.getRoom(roomId);
+    // Check legacy room tracking (for backwards compatibility)
+    const legacyRoomId = matchmaking.getRoomIdByUser(mongoUserId);
+    if (legacyRoomId && !activeRoom) {
+      const room = matchmaking.getRoom(legacyRoomId);
       if (room && !room.isExpired) {
-        console.log(`🔄 User ${user.username} was in room ${roomId}, auto-rejoining`);
-        socket.join(roomId);
+        console.log(`🔄 [Legacy] User ${user.username} was in room ${legacyRoomId}, registering in new system`);
+        
+        // Register in new system
+        setUserActiveRoom(firebaseUid, legacyRoomId, room.mood);
+        
+        socket.join(legacyRoomId);
         
         // Notify user they can resume
         socket.emit('room_reconnected', {
@@ -2047,23 +2424,54 @@ socket.emit('mood_counts_initial', getAllMoodCounts());
         });
         
         // Notify other users in room
-        socket.to(roomId).emit('user_reconnected', {
-          userId: user._id.toString(),
+        socket.to(legacyRoomId).emit('user_reconnected', {
+          userId: mongoUserId,
           username: user.username,
           pfpUrl: user.pfpUrl
         });
       } else {
         // Room expired while user was disconnected
-        console.log(`⚠️ User ${user.username} was in expired room ${roomId}`);
-        matchmaking.leaveRoom(user._id.toString());
+        console.log(`⚠️ User ${user.username} was in expired room ${legacyRoomId}`);
+        matchmaking.leaveRoom(mongoUserId);
+      }
+    } else if (activeRoom) {
+      // User has active room in new system - auto-join socket to room
+      const room = matchmaking.getRoom(activeRoom.roomId);
+      if (room && !room.isExpired) {
+        console.log(`🔄 [Multi-Device] Auto-joining socket ${socket.id} to existing room ${activeRoom.roomId}`);
+        
+        socket.join(activeRoom.roomId);
+        
+        // Notify this socket about the room (without full restoration)
+        socket.emit('room_reconnected', {
+          roomId: room.id,
+          expiresAt: room.expiresAt,
+          timeRemaining: room.getTimeUntilExpiration(),
+          isMultiDevice: true
+        });
+        
+        // Notify other users in room about this device joining
+        socket.to(activeRoom.roomId).emit('user_reconnected', {
+          userId: mongoUserId,
+          username: user.username,
+          pfpUrl: user.pfpUrl,
+          isMultiDevice: true
+        });
+      } else {
+        // Room expired - clean up stale state
+        console.log(`⚠️ [UID: ${firebaseUid}] Active room ${activeRoom.roomId} is expired, cleaning up`);
+        clearUserActiveRoom(firebaseUid);
       }
     }
 
+    // ============================================
+    // RESTORE CALL STATE
+    // ============================================
     // Check if user was in an active call
-    const activeCallId = userCalls.get(user._id.toString());
+    const activeCallId = userCalls.get(mongoUserId);
     if (activeCallId) {
       const call = activeCalls.get(activeCallId);
-      if (call && call.status === 'active' && call.participants.includes(user._id.toString())) {
+      if (call && call.status === 'active' && call.participants.includes(mongoUserId)) {
         console.log(`📞 User ${user.username} was in call ${activeCallId}, notifying of reconnection opportunity`);
         
         socket.emit('call_reconnect_available', {
@@ -2075,9 +2483,16 @@ socket.emit('mood_counts_initial', getAllMoodCounts());
       } else {
         // Call ended while user was disconnected
         console.log(`⚠️ User ${user.username} was in ended call ${activeCallId}`);
-        userCalls.delete(user._id.toString());
+        userCalls.delete(mongoUserId);
       }
     }
+
+    // ============================================
+    // OPTIONAL: AUTO-RESTORE ROOM ON RECONNECT
+    // ============================================
+    // If client wants automatic room restoration on auth, they can listen for
+    // the 'authenticated' event and check hasActiveRoom, then call restore_room
+    // This gives the client control over when to show the room UI
 
   } catch (error) {
     console.error(`❌ [authenticate] Unexpected error for user ${userId}:`, error);
@@ -3982,243 +4397,135 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 
 
 
-socket.on('leave_room', () => {
-  const user = socketUsers.get(socket.id);
-  
-  if (!user) return;
-
-  const result = matchmaking.leaveRoom(user.userId);
-  
-  if (result.roomId) {
-    socket.leave(result.roomId);
-
-    // ✅ REMOVE USER FROM MOOD TRACKING
-    removeUserFromAllMoods(user.userId);
-
-    if (!result.destroyed) {
-      io.to(result.roomId).emit('user_left', {
-        userId: user.userId,
-        username: user.username,
-        remainingUsers: result.remainingUsers
+socket.on('leave_room', async (data, callback) => {
+    if (!currentUser) {
+      return callback?.({ success: false, error: 'Not authenticated' });
+    }
+    
+    const { roomId } = data;
+    const userId = currentUser.userId;
+    
+    console.log(`🚪 [UID: ${userId}] Leaving room ${roomId}`);
+    
+    const releaseLock = await acquireUserLock(userId);
+    
+    try {
+      // Validate room access
+      const validation = validateRoomAccess(roomId, userId);
+      if (!validation.valid) {
+        return callback?.({ success: false, error: validation.error });
+      }
+      
+      const room = validation.room;
+      
+      // Remove user from room
+      room.removeUser(userId);
+      
+      // CRITICAL: Clear active room state
+      clearUserActiveRoom(userId);
+      
+      // Remove from mood tracking
+      removeUserFromMood(userId, room.mood);
+      
+      // Leave socket room on ALL devices
+      const allSocketIds = getUserSocketIds(userId);
+      allSocketIds.forEach(socketId => {
+        const userSocket = io.sockets.sockets.get(socketId);
+        if (userSocket) {
+          userSocket.leave(roomId);
+        }
       });
+      
+      // Notify partner
+      const partner = room.users.find(u => u.userId !== userId);
+      if (partner) {
+        // Emit to all partner's devices
+        emitToUserAllDevices(partner.userId, 'partner_left', {
+          roomId,
+          userId,
+          username: currentUser.username
+        });
+      }
+      
+      // Notify all user's devices
+      emitToUserAllDevices(userId, 'room_left', { roomId });
+      
+      console.log(`✅ [UID: ${userId}] Left room ${roomId} - can now join new rooms`);
+      
+      callback?.({ success: true });
+      
+    } catch (error) {
+      console.error(`❌ [UID: ${userId}] Leave room error:`, error);
+      callback?.({ success: false, error: error.message });
+    } finally {
+      releaseLock();
     }
-
-    if (result.destroyed) {
-      console.log(`🗑️ Room ${result.roomId} destroyed by user leaving`);
-      cancelRoomCleanup(result.roomId);
-      performRoomCleanup(result.roomId);
-    }
-
-    socket.emit('left_room', { roomId: result.roomId });
-    console.log(`👋 ${user.username} left room ${result.roomId}`);
-  }
-});
-
-socket.on('disconnect', () => {
-  const user = socketUsers.get(socket.id);
-  
-  if (user?.userId) {
-    joinCallDebounce.delete(user.userId);
-    userToSocketId.delete(user.userId);
-    console.log(`🗑️ Cleaned up joinCallDebounce for ${user.username}`);
-  }
-  
-  const offersToDelete = [];
-  for (const [key, _] of activeOffers.entries()) {
-    if (key.includes(user?.userId)) {
-      offersToDelete.push(key);
-    }
-  }
-  offersToDelete.forEach(key => {
-    activeOffers.delete(key);
   });
-  if (offersToDelete.length > 0) {
-    console.log(`🗑️ Cleaned up ${offersToDelete.length} pending offers for ${user?.username || socket.id}`);
-  }
-  
-  if (user) {
-    console.log(`🔌 User ${user.username} disconnected`);
-    
-removeUserFromAllMoods(user.userId);
-    
-    // ✅ FIX: Clean up active file transfers for this user
-    const userFileTransfers = [];
-    for (const [fileId, transfer] of activeFileTransfers.entries()) {
-      if (transfer.userId === user.userId) {
-        userFileTransfers.push(fileId);
-        
-        // Notify room that transfer was cancelled
-        const room = matchmaking.getRoom(transfer.roomId);
-        if (room) {
-          io.to(transfer.roomId).emit('file_transfer_cancelled', {
-            fileId,
-            reason: 'Sender disconnected',
-            userId: user.userId
-          });
-          console.log(`📦 Notified room ${transfer.roomId} that file ${fileId} transfer cancelled`);
-        }
-      }
-    }
-    
-    // Remove all transfers for this user
-    userFileTransfers.forEach(fileId => {
-      const transfer = activeFileTransfers.get(fileId);
-      const sizeMB = transfer ? (transfer.bytesTransferred / 1024 / 1024).toFixed(2) : 0;
-      activeFileTransfers.delete(fileId);
-      console.log(`🗑️ Cleaned up incomplete file transfer ${fileId} (${sizeMB}MB transferred)`);
-    });
-    
-    if (userFileTransfers.length > 0) {
-      console.log(`🗑️ Cleaned up ${userFileTransfers.length} file transfer(s) for ${user.username}`);
-      console.log(`   Active transfers remaining: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
-      console.log(`   Memory freed: ~${userFileTransfers.length * 10}MB (estimated)`);
-    }
 
-    // CRITICAL FIX: Schedule immediate socketUsers cleanup with grace period
-    const cleanupTimeout = setTimeout(() => {
-      // Check if user reconnected with different socket
-      const hasOtherSocket = Array.from(socketUsers.entries()).some(
-        ([sid, u]) => sid !== socket.id && u.userId === user.userId
-      );
-      
-      if (!hasOtherSocket) {
-        console.log(`🗑️ Cleaning up socketUsers entry for ${user.username} (${socket.id})`);
-        socketUsers.delete(socket.id);
-      } else {
-        console.log(`✅ User ${user.username} has active connection, keeping old socket entry`);
-      }
-      
-      socketUserCleanup.delete(socket.id);
-    }, 15000); // 15s grace period
+socket.on('disconnect', async (reason) => {
+    console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
     
-    socketUserCleanup.set(socket.id, cleanupTimeout);
-
-    // ============================================
-    // CALL STATE CLEANUP
-    // ============================================
-    const callId = userCalls.get(user.userId);
-    if (callId) {
-      const call = activeCalls.get(callId);
-      if (call && call.status === 'active') {
-        console.log(`⏱️ User ${user.username} in active call ${callId} - grace period for reconnection`);
-        
-        const graceTimeout = setTimeout(() => {
-          console.log(`⏱️ Grace period expired for ${user.username} in call ${callId}`);
-          
-          const reconnected = Array.from(socketUsers.values()).some(u => u.userId === user.userId);
-          
-          if (!reconnected) {
-            console.log(`❌ User ${user.username} did not rejoin call - removing from call`);
-            
-            call.participants = call.participants.filter(p => p !== user.userId);
-            userCalls.delete(user.userId);
-            call.userMediaStates.delete(user.userId);
-
-            io.to(`call-${callId}`).emit('user_left_call', {
-              userId: user.userId,
-              username: user.username
-            });
-
-            if (call.participants.length === 0) {
-              console.log(`🕐 Call ${callId} empty - scheduling cleanup`);
-              
-              const room = matchmaking.getRoom(call.roomId);
-              if (room) {
-                room.setActiveCall(false);
-              }
-              
-              setTimeout(() => {
-                const currentCall = activeCalls.get(callId);
-                if (currentCall && currentCall.participants.length === 0) {
-                  activeCalls.delete(callId);
-                  console.log(`🗑️ Call ${callId} fully cleaned up`);
-                  
-                  if (room) {
-                    io.to(call.roomId).emit('call_ended_notification', {
-                      callId: callId
-                    });
-                    console.log(`📢 Call ${callId} ended, room ${call.roomId} still active`);
-                  }
-                }
-              }, 5000);
-            }
-          } else {
-            console.log(`✅ User ${user.username} rejoined call`);
-          }
-        }, 10000);
-        
-        callGracePeriod.set(callId, graceTimeout);
-      }
-    }
+    if (!currentUser) return;
     
-    // ============================================
-    // MATCHMAKING CLEANUP
-    // ============================================
-    matchmaking.cancelMatchmaking(user.userId);
-    clearMatchmakingTimeout(user.userId);
+    const userId = currentUser.userId;
     
-    // ============================================
-    // ROOM CLEANUP
-    // ============================================
-    const roomId = matchmaking.getRoomIdByUser(user.userId);
+    // Unregister this socket
+    unregisterSocketForUser(userId, socket.id);
     
-    if (roomId) {
-      const room = matchmaking.getRoom(roomId);
-      
-      let hasActiveCall = false;
-      activeCalls.forEach((call) => {
-        if (call.roomId === roomId && call.participants.length > 0) {
-          hasActiveCall = true;
-          console.log(`🛡️ Room ${roomId} has active call ${call.callId}`);
-        }
-      });
-      
-      if (hasActiveCall) {
-        console.log(`🛡️ User ${user.username} disconnected - room ${roomId} PRESERVED (active call)`);
-      } else {
-        console.log(`⏳ User ${user.username} disconnected - grace period for room ${roomId}`);
-        
-        setTimeout(() => {
-          const stillDisconnected = !Array.from(socketUsers.values()).some(u => u.userId === user.userId);
-          
-          if (stillDisconnected) {
-            console.log(`👋 User ${user.username} did not reconnect, removing from room ${roomId}`);
-            
-            let stillHasActiveCall = false;
-            activeCalls.forEach((call) => {
-              if (call.roomId === roomId && call.participants.length > 0) {
-                stillHasActiveCall = true;
-              }
-            });
-            
-            const result = matchmaking.leaveRoom(user.userId, stillHasActiveCall);
-            
-            if (result.roomId && !result.destroyed) {
-              io.to(result.roomId).emit('user_left', {
-                userId: user.userId,
-                username: user.username,
-                remainingUsers: result.remainingUsers
-              });
-            }
-            
-            if (result.destroyed) {
-              console.log(`🗑️ Room ${result.roomId} destroyed after user disconnect`);
-              cancelRoomCleanup(result.roomId);
-              performRoomCleanup(result.roomId);
-            }
-          } else {
-            console.log(`✅ User ${user.username} reconnected, keeping in room ${roomId}`);
-          }
-        }, 5000);
-      }
-    }
-
-  } else {
-    console.log('🔌 Unauthenticated client disconnected:', socket.id);
-    // CRITICAL: Still need to clean up socketUsers entry
+    // Clean up socket user data
     socketUsers.delete(socket.id);
-  }
-});
+    
+    // Check if user has other active devices
+    const remainingDevices = getUserSocketIds(userId).length;
+    
+    if (remainingDevices > 0) {
+      console.log(`📱 [UID: ${userId}] Still has ${remainingDevices} active device(s) - preserving room state`);
+      return; // Don't clean up room - user still connected on other device
+    }
+    
+    console.log(`📱 [UID: ${userId}] Last device disconnected - starting grace period`);
+    
+    // Start grace period timer
+    const cleanup = setTimeout(async () => {
+      console.log(`⏰ [UID: ${userId}] Grace period expired - cleaning up`);
+      
+      // Remove from mood tracking
+      removeUserFromAllMoods(userId);
+      
+      // Get active room
+      const activeRoom = getUserActiveRoom(userId);
+      
+      if (activeRoom) {
+        const room = matchmaking.getRoom(activeRoom.roomId);
+        if (room && !room.isExpired) {
+          // Remove from room
+          room.removeUser(userId);
+          
+          // Notify partner
+          const partner = room.users.find(u => u.userId !== userId);
+          if (partner) {
+            emitToUserAllDevices(partner.userId, 'partner_disconnected', {
+              roomId: activeRoom.roomId,
+              userId,
+              username: currentUser.username
+            });
+          }
+        }
+        
+        // Clear active room state
+        clearUserActiveRoom(userId);
+      }
+      
+      // Final cleanup
+      userToSocketId.delete(userId);
+      socketUserCleanup.delete(userId);
+      
+      console.log(`🧹 [UID: ${userId}] Full cleanup completed`);
+      
+    }, DISCONNECT_GRACE_PERIOD);
+    
+    socketUserCleanup.set(userId, cleanup);
+  });
 });
 // ============================================
 // PERIODIC CLEANUP
