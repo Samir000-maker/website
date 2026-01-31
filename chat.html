@@ -1445,6 +1445,80 @@ function renderEmojiCategories() {
   });
 }
 
+
+function setupAndroidBackButtonHandler() {
+  console.log('📱 Setting up Android back button handler');
+  
+  // Detect if we're in a WebView or mobile browser
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const isInWebView = window.matchMedia('(display-mode: standalone)').matches;
+  
+  if (isAndroid || isInWebView) {
+    console.log('✅ Android/WebView detected - back button handler active');
+    
+    // Push a dummy state to history
+    history.pushState({ page: 'chat' }, '', window.location.href);
+    
+    window.addEventListener('popstate', async (event) => {
+      console.log('🔙 ========================================');
+      console.log('🔙 ANDROID BACK BUTTON PRESSED');
+      console.log('🔙 ========================================');
+      
+      // Prevent default back navigation
+      event.preventDefault();
+      
+      // Show confirmation dialog
+      const shouldLeave = await showConfirmationDialog();
+      
+      if (shouldLeave) {
+        console.log('✅ User confirmed leave via back button');
+        
+        // Execute EXACT same leave sequence as Leave button
+        try {
+          stopCachedCallMonitoring();
+          
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            const callData = JSON.parse(activeCallStr);
+            if (socketInstance?.connected) {
+              socketInstance.emit('leave_call', { callId: callData.callId });
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            sessionStorage.removeItem('hasBackgroundCall');
+            sessionStorage.removeItem('returningFromCall');
+            sessionStorage.removeItem('backgroundCallMode');
+            sessionStorage.removeItem('returningToBackgroundCall');
+          }
+          
+          if (socketInstance?.connected) {
+            socketInstance.emit('leave_room');
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+          
+          await clearChatState(true);
+          
+          console.log('✅ Leave sequence complete - navigating to mood.html');
+          window.location.href = '/mood.html';
+          
+        } catch (error) {
+          console.error('❌ Error in back button leave sequence:', error);
+          window.location.href = '/mood.html';
+        }
+      } else {
+        console.log('❌ User cancelled leave via back button');
+        // Push state again to prevent navigation
+        history.pushState({ page: 'chat' }, '', window.location.href);
+      }
+      
+      console.log('🔙 ========================================\n');
+    });
+  } else {
+    console.log('ℹ️ Not Android/WebView - standard back button behavior');
+  }
+}
+
+
 /**
  * Render emoji grid with current filters
  * Uses virtual scrolling concept by limiting initial render
@@ -4157,6 +4231,96 @@ socketInstance.on('room_joined', async (data) => {
   console.log('✅ ========================================\n');
 });
 
+
+
+socketInstance.on('user_joined', (data) => {
+  console.log('👤 ========================================');
+  console.log('👤 USER_JOINED EVENT RECEIVED');
+  console.log('👤 ========================================');
+  console.log(`   User: ${data.username} (${data.userId})`);
+  console.log(`   Online count: ${data.onlineCount}`);
+  console.log(`   Total users in room: ${data.users?.length || 0}`);
+  
+  // Skip if it's the current user (they already have the UI)
+  if (data.userId === currentUser?.userId) {
+    console.log('ℹ️ User_joined event is for current user - UI already initialized');
+    console.log('👤 ========================================\n');
+    return;
+  }
+  
+  console.log('✅ New user joined - updating UI for all users');
+  
+  // ============================================
+  // UPDATE USER LIST
+  // ============================================
+  if (usersList && data.users) {
+    console.log(`🔄 Rebuilding user list with ${data.users.length} users`);
+    
+    // Clear existing user list
+    usersList.innerHTML = '';
+    
+    // Render all users from server data
+    data.users.forEach(user => {
+      const userCard = document.createElement('div');
+      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+      userCard.dataset.userId = user.userId;
+      
+      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
+      
+      const userInfo = document.createElement('div');
+      userInfo.className = 'flex-1 min-w-0';
+      
+      const nameSpan = document.createElement('div');
+      nameSpan.className = 'text-sm font-semibold truncate';
+      nameSpan.textContent = user.username || 'User';
+      
+      const statusSpan = document.createElement('div');
+      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
+      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
+      
+      userInfo.appendChild(nameSpan);
+      userInfo.appendChild(statusSpan);
+      
+      userCard.appendChild(pfpElement);
+      userCard.appendChild(userInfo);
+      usersList.appendChild(userCard);
+    });
+    
+    // Reattach click handlers for mobile
+    setupUserCardClick();
+    
+    console.log(`✅ User list rebuilt with ${data.users.length} users`);
+  }
+  
+  // ============================================
+  // UPDATE ONLINE COUNT
+  // ============================================
+  if (onlineCount && data.onlineCount !== undefined) {
+    onlineCount.textContent = `${data.onlineCount} Online`;
+    console.log(`✅ Online count updated: ${data.onlineCount}`);
+  }
+  
+  // ============================================
+  // SHOW SYSTEM MESSAGE
+  // ============================================
+  if (messagesList) {
+    const msgEl = document.createElement('div');
+    msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
+    msgEl.textContent = `${data.username} joined`;
+    messagesList.appendChild(msgEl);
+    
+    // Auto-scroll to show new message
+    if (messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+    
+    console.log(`✅ System message displayed: "${data.username} joined"`);
+  }
+  
+  console.log('👤 ========================================\n');
+});
+
+
 // ============================================
 // PEER-TO-PEER FILE TRANSFER HANDLERS
 // ============================================
@@ -5725,16 +5889,12 @@ if (messageForm) {
 leaveBtn?.addEventListener('click', async () => {
   console.log('🚪 Header Leave button clicked');
   
-  // Show dialog first
   const shouldLeave = await showConfirmationDialog();
   
   if (shouldLeave) {
-    // Use THE SAME executeLeaveSequence function
-    // Make sure executeLeaveSequence is accessible in this scope
-    // You may need to move it outside setupBackButtonHandler
-    // OR call it via a global reference
+    // ✅ CORRECT: This is the reference implementation
+    // All other leave paths should match this exactly
     
-    // For now, duplicate the logic:
     if (isLeaving) return;
     isLeaving = true;
     backButtonHandled = true;
@@ -5742,6 +5902,7 @@ leaveBtn?.addEventListener('click', async () => {
     try {
       stopCachedCallMonitoring();
       
+      // 1. Leave active call
       const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
       if (activeCallStr) {
         const callData = JSON.parse(activeCallStr);
@@ -5756,13 +5917,16 @@ leaveBtn?.addEventListener('click', async () => {
         sessionStorage.removeItem('returningToBackgroundCall');
       }
       
+      // 2. Leave room
       if (socketInstance?.connected) {
         socketInstance.emit('leave_room');
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
+      // 3. Clear state and navigate
       await clearChatState(true);
       window.location.href = '/mood.html';
+      
     } catch (error) {
       console.error('Error:', error);
       window.location.href = '/mood.html';
@@ -5780,12 +5944,20 @@ leaveBtn?.addEventListener('click', async () => {
       }
     });
 
+// REPLACE LINES 4656-4703 WITH:
+
 window.addEventListener('beforeunload', (e) => {
-  console.log('🚪 Chat page beforeunload event');
+  console.log('🚪 ========================================');
+  console.log('🚪 CHAT PAGE BEFOREUNLOAD EVENT');
+  console.log('🚪 ========================================');
+  console.log(`   Reason: Page unload/navigation/close`);
+  console.log(`   Background call: ${isInBackgroundCall}`);
+  console.log(`   Navigating to call: ${navigatingToCall}`);
+  
   stopCachedCallMonitoring();
   
-  
-    console.log('🧹 Cleaning up blob URLs...');
+  // Clean up blob URLs
+  console.log('🧹 Cleaning up blob URLs...');
   const images = document.querySelectorAll('img[data-blob-url]');
   images.forEach(img => {
     const blobUrl = img.dataset.blobUrl;
@@ -5795,7 +5967,9 @@ window.addEventListener('beforeunload', (e) => {
   });
   console.log(`✅ Revoked ${images.length} blob URL(s)`);
   
-  // CRITICAL: Check if in background call mode
+  // ============================================
+  // EXCEPTION 1: BACKGROUND CALL MODE
+  // ============================================
   if (isInBackgroundCall) {
     console.log('🔒 Background call active - preserving floating socket');
     saveChatState(roomData.roomId, messagesCache);
@@ -5805,28 +5979,95 @@ window.addEventListener('beforeunload', (e) => {
       console.log('✅ Keeping floating call socket alive');
     }
     
-    // Only disconnect main chat socket
+    // Only disconnect main chat socket (but DON'T leave room)
     if (socketInstance) {
-      socketInstance.emit('leave_room');
       socketInstance.disconnect();
     }
     
+    console.log('🚪 ========================================\n');
     return;
   }
   
+  // ============================================
+  // EXCEPTION 2: NAVIGATING TO CALL PAGE
+  // ============================================
   if (navigatingToCall) {
-    console.log('🔒 Navigating to call - keeping socket');
+    console.log('🔒 Navigating to call - preserving state');
     saveChatState(roomData.roomId, messagesCache);
+    console.log('🚪 ========================================\n');
     return;
   }
   
-  console.log('🗑️ Normal chat exit - cleanup already done in leave handler');
+  // ============================================
+  // CRITICAL FIX: EXECUTE FULL LEAVE SEQUENCE
+  // ============================================
+  console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE (same as Leave button)');
   
-  // Only disconnect sockets - cleanup was already done by leave button handlers
-  if (socketInstance) {
-    socketInstance.disconnect();
+  try {
+    // 1. Leave any active call
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    if (activeCallStr) {
+      try {
+        const callData = JSON.parse(activeCallStr);
+        console.log(`📞 Leaving active call: ${callData.callId}`);
+        
+        if (socketInstance?.connected) {
+          // SYNCHRONOUS emit (beforeunload is synchronous)
+          socketInstance.emit('leave_call', { callId: callData.callId });
+        }
+      } catch (e) {
+        console.error('❌ Error parsing call data:', e);
+      }
+      
+      localStorage.removeItem(ACTIVE_CALL_KEY);
+      sessionStorage.removeItem('hasBackgroundCall');
+      sessionStorage.removeItem('returningFromCall');
+      sessionStorage.removeItem('backgroundCallMode');
+      sessionStorage.removeItem('returningToBackgroundCall');
+      console.log('✅ Call data cleared');
+    }
+    
+    // 2. Leave the room
+    if (socketInstance?.connected) {
+      console.log('🚪 Emitting leave_room to server');
+      // SYNCHRONOUS emit - critical for beforeunload
+      socketInstance.emit('leave_room');
+      console.log('✅ leave_room emitted');
+    }
+    
+    // 3. Clear all chat state
+    clearChatState(true);
+    console.log('✅ Chat state cleared');
+    
+    // 4. Disconnect socket
+    if (socketInstance) {
+      socketInstance.disconnect();
+      console.log('✅ Socket disconnected');
+    }
+    
+    // 5. Clear timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
+    
+  } catch (error) {
+    console.error('❌ Error in beforeunload leave sequence:', error);
+    
+    // Force cleanup even on error
+    try {
+      clearChatState(true);
+      if (socketInstance) socketInstance.disconnect();
+      if (timerInterval) clearInterval(timerInterval);
+    } catch (e) {
+      console.error('❌ Cleanup failed:', e);
+    }
   }
-  if (timerInterval) clearInterval(timerInterval);
+  
+  console.log('🚪 ========================================\n');
 });
   }
 
@@ -6088,6 +6329,7 @@ if (cachedState && cachedState.roomId === roomData.roomId) {
 
   // Setup back button handler
   setupBackButtonHandler();
+  setupAndroidBackButtonHandler();
 
   console.log('✅ Chat initialization complete');
 
