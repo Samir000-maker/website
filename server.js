@@ -2393,6 +2393,40 @@ socket.on('join_room', ({ roomId }) => {
       roomJoinState.delete(joinKey);
     }, 10000);
     
+    // ============================================
+    // CRITICAL FIX: BROADCAST USER JOIN TO ROOM
+    // ============================================
+    console.log(`📢 ========================================`);
+    console.log(`📢 BROADCASTING USER_JOINED TO ROOM`);
+    console.log(`📢 ========================================`);
+    console.log(`   Room: ${roomId}`);
+    console.log(`   New user: ${user.username} (${user.userId})`);
+    console.log(`   Room state before broadcast:`);
+    console.log(`     Users in room: [${room.users.map(u => u.username).join(', ')}]`);
+    console.log(`     Socket.IO members: ${io.sockets.adapter.rooms.get(roomId)?.size || 0}`);
+    
+    // Get updated user list for the room
+    const updatedUserList = room.users.map(u => ({
+      userId: u.userId,
+      username: u.username,
+      pfpUrl: u.pfpUrl
+    }));
+    
+    // Broadcast to ALL users in room (including the joiner for consistency)
+    io.to(roomId).emit('user_joined', {
+      userId: user.userId,
+      username: user.username,
+      pfpUrl: user.pfpUrl,
+      users: updatedUserList,
+      onlineCount: room.users.length
+    });
+    
+    console.log(`✅ Broadcasted user_joined event`);
+    console.log(`   Notified: ${io.sockets.adapter.rooms.get(roomId)?.size || 0} socket(s)`);
+    console.log(`   Updated user list: ${updatedUserList.length} users`);
+    console.log(`   Online count: ${room.users.length}`);
+    console.log(`📢 ========================================\n`);
+    
   } catch (error) {
     console.error('Join room error:', error);
     socket.emit('error', { message: 'Failed to join room' });
