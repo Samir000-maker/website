@@ -3821,15 +3821,6 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
-    if (user) {
-    console.log(`🔌 User ${user.username} disconnected`);
-    
-    // ✅ DECREMENT MOOD COUNT IF IN QUEUE
-    const userInQueue = matchmaking.getUserFromQueue(user.userId);
-    if (userInQueue?.mood) {
-      decrementMoodCount(userInQueue.mood);
-    }
-  
   if (user?.userId) {
     joinCallDebounce.delete(user.userId);
     userToSocketId.delete(user.userId);
@@ -3851,6 +3842,11 @@ socket.on('disconnect', () => {
   
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
+    
+     const userInQueue = matchmaking.getUserFromQueue(user.userId);
+    if (userInQueue?.mood) {
+      decrementMoodCount(userInQueue.mood);
+    }
     
     // ✅ FIX: Clean up active file transfers for this user
     const userFileTransfers = [];
