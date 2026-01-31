@@ -3766,16 +3766,15 @@ function setupBackButtonHandler() {
   console.log('🔧 SETTING UP BACK BUTTON HANDLER');
   console.log('🔧 ========================================');
   
+  // State variables
   let dialogOpen = false;
-  let isLeaving = false;
-  let historyGuardActive = true;
+  let guardActive = true;
   
-  // Push TWO states to create history guard
-  history.pushState({ page: 'chat', guard: 1 }, '');
-  history.pushState({ page: 'chat', guard: 2 }, '');
+  // Push initial state to enable back button detection
+  history.pushState({ page: 'chat' }, '', window.location.href);
   console.log('✅ History guard established');
   
-  // Execute complete leave sequence
+  // Complete leave sequence function
   async function executeLeaveSequence() {
     if (isLeaving) {
       console.log('⚠️ Leave already in progress');
@@ -3783,162 +3782,128 @@ function setupBackButtonHandler() {
     }
     
     console.log('🚪 ========================================');
-    console.log('🚪 EXECUTING LEAVE SEQUENCE');
+    console.log('🚪 EXECUTING LEAVE SEQUENCE VIA BACK BUTTON');
     console.log('🚪 ========================================');
     
     isLeaving = true;
     backButtonHandled = true;
-    historyGuardActive = false;
+    guardActive = false;
     
     try {
       stopCachedCallMonitoring();
       
+      // 1. Leave any active call
       const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
       if (activeCallStr) {
-        const callData = JSON.parse(activeCallStr);
-        if (socketInstance?.connected) {
-          console.log('📤 Emitting leave_call');
-          socketInstance.emit('leave_call', { callId: callData.callId });
-          await new Promise(resolve => setTimeout(resolve, 300));
+        try {
+          const callData = JSON.parse(activeCallStr);
+          console.log(`📞 Leaving active call: ${callData.callId}`);
+          
+          if (socketInstance?.connected) {
+            socketInstance.emit('leave_call', { callId: callData.callId });
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        } catch (e) {
+          console.error('❌ Error parsing call data:', e);
         }
+        
         localStorage.removeItem(ACTIVE_CALL_KEY);
         sessionStorage.removeItem('hasBackgroundCall');
         sessionStorage.removeItem('returningFromCall');
         sessionStorage.removeItem('backgroundCallMode');
         sessionStorage.removeItem('returningToBackgroundCall');
+        console.log('✅ Call data cleared');
       }
       
+      // 2. Leave the room
       if (socketInstance?.connected) {
-        console.log('📤 Emitting leave_room');
+        console.log('🚪 Emitting leave_room to server');
         socketInstance.emit('leave_room');
         await new Promise(resolve => setTimeout(resolve, 300));
+        console.log('✅ leave_room emitted');
       }
       
+      // 3. Clear all chat state
       await clearChatState(true);
+      console.log('✅ Chat state cleared');
       
-      console.log('✅ Cleanup complete');
-      console.log('🔄 Navigating to mood.html');
+      // 4. Disconnect socket
+      if (socketInstance) {
+        socketInstance.disconnect();
+        console.log('✅ Socket disconnected');
+      }
+      
+      // 5. Clear timer
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        console.log('✅ Timer cleared');
+      }
+      
+      console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
+      console.log('🔄 Redirecting to mood.html...');
       console.log('🚪 ========================================\n');
       
-      // Direct navigation - no other functions
+      // CRITICAL: Direct navigation to mood.html
       window.location.href = '/mood.html';
       
     } catch (error) {
       console.error('❌ Error during leave:', error);
+      // Force redirect even on error
       window.location.href = '/mood.html';
     }
   }
   
-window.addEventListener('popstate', async (event) => {
-  console.log('⬅️ ========================================');
-  console.log('⬅️ POPSTATE FIRED');
-  console.log('⬅️ ========================================');
-  console.log(`   Guard active: ${backButtonGuard}`);
-  console.log(`   Dialog open: ${isConfirmationDialogOpen}`);
-  console.log(`   Is leaving: ${isLeaving}`);
-  
-  // Prevent navigation immediately
-  if (backButtonGuard && !isLeaving) {
-    // Push state back to prevent navigation
-    history.pushState({ page: 'chat' }, '', window.location.href);
-    console.log(`   ✅ Canceled back navigation`);
+  // Popstate event handler
+  window.addEventListener('popstate', async (event) => {
+    console.log('⬅️ ========================================');
+    console.log('⬅️ POPSTATE FIRED');
+    console.log('⬅️ ========================================');
+    console.log(`   Guard active: ${guardActive}`);
+    console.log(`   Dialog open: ${dialogOpen}`);
+    console.log(`   Is leaving: ${isLeaving}`);
     
-    // Show confirmation dialog if not already open
-    if (!isConfirmationDialogOpen) {
-      if (isFirstBackPress) {
-        console.log(`   🟡 FIRST BACK PRESS`);
-        console.log('⬅️ ========================================\n');
-        isFirstBackPress = false;
-        
-        // Show confirmation dialog
-        const shouldLeave = await showConfirmationDialog();
-        
-        if (shouldLeave) {
-          console.log('✅ ========================================');
-          console.log('✅ USER CONFIRMED LEAVE VIA BACK BUTTON');
-          console.log('✅ ========================================');
-          
-          // CRITICAL: Set isLeaving BEFORE executing sequence
-          isLeaving = true;
-          backButtonHandled = true;
-          
-          try {
-            // Execute the full leave sequence
-            stopCachedCallMonitoring();
-            
-            // 1. Leave any active call
-            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-            if (activeCallStr) {
-              try {
-                const callData = JSON.parse(activeCallStr);
-                console.log(`📞 Leaving active call: ${callData.callId}`);
-                
-                if (socketInstance?.connected) {
-                  socketInstance.emit('leave_call', { callId: callData.callId });
-                  await new Promise(resolve => setTimeout(resolve, 300));
-                }
-              } catch (e) {
-                console.error('❌ Error parsing call data:', e);
-              }
-              
-              localStorage.removeItem(ACTIVE_CALL_KEY);
-              sessionStorage.removeItem('hasBackgroundCall');
-              sessionStorage.removeItem('returningFromCall');
-              sessionStorage.removeItem('backgroundCallMode');
-              sessionStorage.removeItem('returningToBackgroundCall');
-              console.log('✅ Call data cleared');
-            }
-            
-            // 2. Leave the room
-            if (socketInstance?.connected) {
-              console.log('🚪 Emitting leave_room to server');
-              socketInstance.emit('leave_room');
-              await new Promise(resolve => setTimeout(resolve, 300));
-              console.log('✅ leave_room emitted');
-            }
-            
-            // 3. Clear all chat state
-            await clearChatState(true);
-            console.log('✅ Chat state cleared');
-            
-            // 4. Disconnect socket
-            if (socketInstance) {
-              socketInstance.disconnect();
-              console.log('✅ Socket disconnected');
-            }
-            
-            // 5. Clear timer
-            if (timerInterval) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-              console.log('✅ Timer cleared');
-            }
-            
-            console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
-            console.log('🔄 Redirecting to mood.html...');
-            console.log('✅ ========================================\n');
-            
-            // CRITICAL FIX: Programmatically redirect to mood.html
-            // This prevents browser from using history navigation
-            window.location.href = '/mood.html';
-            
-          } catch (error) {
-            console.error('❌ Error in back button leave sequence:', error);
-            // Force redirect even on error
-            window.location.href = '/mood.html';
-          }
-        } else {
-          console.log('❌ User cancelled leave via back button');
-          console.log('⬅️ ========================================\n');
-          isFirstBackPress = true; // Reset for next back press
-        }
-      }
+    // If already leaving or guard disabled, allow navigation
+    if (isLeaving || !guardActive) {
+      console.log('   ⚠️ Guard inactive - allowing navigation');
+      console.log('⬅️ ========================================\n');
+      return;
     }
-  } else {
-    console.log('⬅️ Guard not active or already leaving');
+    
+    // CRITICAL: Immediately cancel the back navigation
+    history.pushState({ page: 'chat' }, '', window.location.href);
+    console.log('   ✅ Canceled back navigation');
+    
+    // If dialog already open (second back press), execute leave immediately
+    if (dialogOpen) {
+      console.log('   🔴 SECOND BACK PRESS - Forcing leave');
+      console.log('⬅️ ========================================\n');
+      
+      // Hide dialog
+      const overlay = document.getElementById('confirmationOverlay');
+      if (overlay) overlay.style.display = 'none';
+      dialogOpen = false;
+      
+      await executeLeaveSequence();
+      return;
+    }
+    
+    // First back press - show confirmation dialog
+    console.log('   🟡 FIRST BACK PRESS - Showing dialog');
     console.log('⬅️ ========================================\n');
-  }
-});
+    
+    dialogOpen = true;
+    const shouldLeave = await showConfirmationDialog();
+    dialogOpen = false;
+    
+    console.log(`📋 User decision: ${shouldLeave ? 'LEAVE' : 'STAY'}`);
+    
+    if (shouldLeave) {
+      await executeLeaveSequence();
+    } else {
+      console.log('ℹ️ User chose to stay - remaining in chat');
+    }
+  });
   
   console.log('✅ Back button handler installed');
   console.log('🔧 ========================================\n');
@@ -6076,6 +6041,11 @@ window.addEventListener('beforeunload', (e) => {
   console.log(`   Reason: Page unload/navigation/close`);
   console.log(`   Background call: ${isInBackgroundCall}`);
   console.log(`   Navigating to call: ${navigatingToCall}`);
+  
+    if (isLeaving) {
+    console.log('🔒 Back button already executed cleanup - skipping');
+    console.log('🚪 ========================================\n');
+    return;
   
   stopCachedCallMonitoring();
   
