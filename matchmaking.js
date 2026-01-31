@@ -192,26 +192,36 @@ class Room {
   /**
    * Add user to room (for joining existing rooms)
    */
-  addUser(userData) {
-    // Check if user already in room
-    if (this.hasUser(userData.userId)) {
-      console.log(`⚠️ User ${userData.username} already in room ${this.id}`);
-      return false;
-    }
-
-    // Check if room is full
-    if (this.users.length >= this.maxUsers) {
-      console.log(`⚠️ Room ${this.id} is full (${this.users.length}/${this.maxUsers})`);
-      return false;
-    }
-
-    // Add user
-    this.users.push(userData);
-    this.updateActivity();
-    
-    console.log(`✅ User ${userData.username} added to room ${this.id} (${this.users.length}/${this.maxUsers})`);
-    return true;
+addUser(userData) {
+  // Check if user already in room
+  if (this.hasUser(userData.userId)) {
+    console.log(`⚠️ User ${userData.username} already in room ${this.id}`);
+    return false;
   }
+
+  // Check if room is full
+  if (this.users.length >= this.maxUsers) {
+    console.log(`⚠️ Room ${this.id} is full (${this.users.length}/${this.maxUsers})`);
+    return false;
+  }
+
+  // Add user with firebaseUid
+  this.users.push({
+    userId: userData.userId,
+    firebaseUid: userData.firebaseUid, // IMPORTANT: Store firebaseUid
+    username: userData.username,
+    pfpUrl: userData.pfpUrl
+  });
+  
+  this.updateActivity();
+  
+  console.log(`✅ User ${userData.username} added to room ${this.id} (${this.users.length}/${this.maxUsers})`);
+  return true;
+}
+
+get chatHistory() {
+  return this.messages;
+}
 
   /**
    * Check if room has space for more users
@@ -282,14 +292,39 @@ function findAvailableRoom(mood) {
  * Add user to matchmaking queue
  */
 export function addToQueue(userData) {
-  const { mood, userId, username } = userData;
+  const { mood, userId, username, firebaseUid } = userData;
 
   if (!mood || !userId || !username) {
-    console.error('Invalid user data provided to addToQueue:', userData);
+    console.error('❌ Invalid user data provided to addToQueue:', userData);
     return null;
   }
 
-  // First, check if there's an existing non-full room for this mood
+  console.log(`🎮 User ${username} joining matchmaking for mood: ${mood}`);
+
+  // CRITICAL CHECK: Is user already in this room?
+  const existingRoomId = userRoomMap.get(userId);
+  if (existingRoomId) {
+    const existingRoom = activeRooms.get(existingRoomId);
+    
+    if (existingRoom && existingRoom.mood === mood && !existingRoom.isExpired) {
+      console.log(`⚠️ User ${username} already in room ${existingRoomId}`);
+      
+      // User is already in this room - don't queue them again
+      // Just return the existing room so they can be redirected
+      return existingRoom;
+    } else if (existingRoom && existingRoom.mood !== mood) {
+      console.log(`⚠️ User ${username} trying to join ${mood} but already in ${existingRoom.mood} room`);
+      console.log(`   This should have been blocked by validateMoodSelection`);
+      // Don't allow cross-mood matching
+      return null;
+    } else {
+      // Room expired or doesn't exist - clean up and proceed
+      console.log(`🧹 Cleaning up stale room reference for ${username}`);
+      userRoomMap.delete(userId);
+    }
+  }
+
+  // Check if there's an existing non-full room for this mood
   const availableRoom = findAvailableRoom(mood);
   
   if (availableRoom) {
@@ -334,20 +369,28 @@ export function addToQueue(userData) {
  * Create a new room
  */
 function createRoom(mood, users) {
-  const room = new Room(mood, users);
+  // Ensure all users have firebaseUid stored
+  const enhancedUsers = users.map(u => ({
+    userId: u.userId,
+    firebaseUid: u.firebaseUid || u.userId, // Fallback to userId if no firebaseUid
+    username: u.username,
+    pfpUrl: u.pfpUrl
+  }));
+
+  const room = new Room(mood, enhancedUsers);
 
   // Store room
   activeRooms.set(room.id, room);
 
   // Map users to room
-  users.forEach(user => {
+  enhancedUsers.forEach(user => {
     userRoomMap.set(user.userId, room.id);
   });
 
   // Track activity
   roomActivity.set(room.id, room.lastActivity);
 
-  const usernames = users.map(u => u.username).join(', ');
+  const usernames = enhancedUsers.map(u => u.username).join(', ');
   console.log(`🎉 Room ${room.id} created with users: ${usernames}`);
   console.log(`   ⏰ Timer will start when first user joins room`);
 
