@@ -3690,6 +3690,7 @@ function setupBackButtonHandler() {
   
   let dialogOpen = false;
   let isLeaving = false;
+  let popstateListenerActive = true; // CRITICAL: Track if we should handle popstate
   
   // Push initial state to establish history entry
   history.pushState({ page: 'chat', initial: true }, '', window.location.href);
@@ -3711,6 +3712,7 @@ function setupBackButtonHandler() {
     
     isLeaving = true;
     backButtonHandled = true;
+    popstateListenerActive = false; // CRITICAL: Disable further popstate handling
     
     try {
       // Stop cached call monitoring
@@ -3766,16 +3768,24 @@ function setupBackButtonHandler() {
   }
   
   window.addEventListener('popstate', async (event) => {
+    // CRITICAL: Ignore popstate if we're already leaving or listener is disabled
+    if (!popstateListenerActive) {
+      console.log('⚠️ Popstate listener disabled - navigation in progress');
+      return;
+    }
+    
     console.log('⬅️ ========================================');
     console.log('⬅️ BACK BUTTON PRESSED');
     console.log('⬅️ ========================================');
     console.log(`   Dialog open: ${dialogOpen}`);
     console.log(`   Already handled: ${backButtonHandled}`);
     console.log(`   Is leaving: ${isLeaving}`);
+    console.log(`   Listener active: ${popstateListenerActive}`);
     
     // CRITICAL: If dialog is already open, treat as "Leave" confirmation
     if (dialogOpen) {
       console.log('⚡ SECOND BACK PRESS DETECTED - EXECUTING LEAVE');
+      console.log('   This mimics clicking the "Leave" button exactly');
       console.log('⬅️ ========================================\n');
       
       // Close dialog immediately
@@ -3785,14 +3795,17 @@ function setupBackButtonHandler() {
       }
       dialogOpen = false;
       
-      // Execute leave sequence
+      // CRITICAL: Do NOT push state back - allow the leave sequence to proceed
+      // This prevents browser from navigating to random pages
+      
+      // Execute leave sequence (same as "Leave" button)
       await executeLeaveSequence();
       return;
     }
     
-    // If already handled or leaving, do nothing
+    // If already handled or leaving, block navigation
     if (backButtonHandled || isLeaving) {
-      console.log('⚠️ Already handled or leaving - ignoring');
+      console.log('⚠️ Already handled or leaving - blocking navigation');
       console.log('⬅️ ========================================\n');
       // Push state back to prevent navigation
       history.pushState({ page: 'chat' }, '', window.location.href);
@@ -3802,9 +3815,11 @@ function setupBackButtonHandler() {
     // First back press - show dialog
     console.log('📋 First back press - showing confirmation dialog');
     
-    // Push state back to prevent navigation
+    // CRITICAL: Push state BEFORE setting dialogOpen to ensure state is ready
+    // This prevents the browser from navigating when the dialog appears
     history.pushState({ page: 'chat' }, '', window.location.href);
     
+    // Mark dialog as open BEFORE showing it (prevents race condition)
     dialogOpen = true;
     console.log('⬅️ ========================================\n');
     
@@ -3815,6 +3830,7 @@ function setupBackButtonHandler() {
     console.log('📋 ========================================');
     console.log(`   User choice: ${shouldLeave ? 'LEAVE' : 'STAY'}`);
     
+    // Reset dialog state
     dialogOpen = false;
     
     if (shouldLeave) {
@@ -3824,6 +3840,9 @@ function setupBackButtonHandler() {
     } else {
       console.log('❌ User cancelled - staying in chat');
       console.log('📋 ========================================\n');
+      // CRITICAL: Push state back to maintain history position
+      // This ensures we stay on the chat page
+      history.pushState({ page: 'chat' }, '', window.location.href);
     }
   });
   
