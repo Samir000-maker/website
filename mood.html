@@ -919,102 +919,96 @@ console.log('✅ Socket authentication helpers loaded');
     
     
     async function initializeSocket() {
-      try {
-        // Get current Firebase user
-        const firebaseUser = firebase.auth().currentUser;
-        if (!firebaseUser) {
-          console.error('No Firebase user found');
-          return null;
-        }
-
-        // Get fresh ID token
-        const idToken = await firebaseUser.getIdToken();
-
-        // Get user profile from API
-        if (!_API || typeof _API.get !== 'function') {
-          console.error('API helper not available');
-          return null;
-        }
-
-        const userData = await _API.get('/api/users/me');
-        currentUser = {
-          userId: userData._id,
-          username: userData.username,
-          pfpUrl: userData.pfpUrl,
-          email: userData.email
-        };
-
-        console.log('✅ Current user loaded:', currentUser);
-
-        // Connect Socket.IO to backend server
-        // Always connect to localhost:3000 regardless of where frontend is served
-        const socketUrl = 'https://website-hdem.onrender.com';
-        socketInstance = io(socketUrl, {
-          transports: ['websocket', 'polling'],
-          reconnection: true,
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000,
-          auth: {
-            token: idToken
-          }
-        });
-
-socket.on('connect', async () => {
-  console.log('🔌 Socket connected:', socket.id);
-  
   try {
-    // ✅ Authenticate with tab management (now waits for TabManager)
-    await authenticateSocketWithTabManagement(socket, currentUser.userId);
-    
-    // ✅ Setup session replacement handler
-    setupSessionReplacementHandler(socket);
-    
-    console.log('✅ Socket authenticated and ready');
-    
-  } catch (error) {
-    console.error('❌ Authentication failed:', error);
-    // Handle error appropriately
-    MoodApp.Toast.error('Connection failed. Please refresh the page.');
-  }
-});
-
-
-socketInstance.on('mood_counts_initial', (counts) => {
-  console.log('📊 Received initial mood counts:', counts);
-  Object.entries(counts).forEach(([mood, count]) => {
-    updateMoodCount(mood, count);
-  });
-});
-
-// Listen for real-time updates
-socketInstance.on('mood_count_update', ({ mood, count }) => {
-  console.log(`📊 Mood count update: ${mood} = ${count}`);
-  updateMoodCount(mood, count);
-});
-
-        socketInstance.on('authenticated', (data) => {
-          console.log('✅ Socket authenticated:', data);
-        });
-
-        socketInstance.on('auth_error', (data) => {
-          console.error('❌ Socket auth error:', data);
-          toast('Authentication failed. Please refresh the page.', 'error');
-        });
-
-        socketInstance.on('connect_error', (error) => {
-          console.error('🔌 Socket connection error:', error);
-        });
-
-        socketInstance.on('disconnect', (reason) => {
-          console.log('🔌 Socket disconnected:', reason);
-        });
-
-        return socketInstance;
-      } catch (error) {
-        console.error('Socket initialization error:', error);
-        return null;
-      }
+    // Get current Firebase user
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) {
+      console.error('No Firebase user found');
+      return null;
     }
+
+    // Get fresh ID token
+    const idToken = await firebaseUser.getIdToken();
+
+    // Get user profile from API
+    if (!_API || typeof _API.get !== 'function') {
+      console.error('API helper not available');
+      return null;
+    }
+
+    const userData = await _API.get('/api/users/me');
+    currentUser = {
+      userId: userData._id,
+      username: userData.username,
+      pfpUrl: userData.pfpUrl,
+      email: userData.email
+    };
+
+    console.log('✅ Current user loaded:', currentUser);
+
+    // Connect Socket.IO to backend server
+    const socketUrl = 'https://website-hdem.onrender.com';
+    const socket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      auth: {
+        token: idToken
+      }
+    });
+
+    // ✅ CRITICAL: Setup mood count listeners BEFORE authentication
+    // This ensures we catch 'mood_counts_initial' event
+    socket.on('mood_counts_initial', (counts) => {
+      console.log('📊 Received initial mood counts:', counts);
+      Object.entries(counts).forEach(([mood, count]) => {
+        updateMoodCount(mood, count);
+      });
+    });
+
+    socket.on('mood_count_update', ({ mood, count }) => {
+      console.log(`📊 Mood count update: ${mood} = ${count}`);
+      updateMoodCount(mood, count);
+    });
+
+    socket.on('connect', async () => {
+      console.log('🔌 Socket connected:', socket.id);
+      
+      try {
+        await authenticateSocketWithTabManagement(socket, currentUser.userId);
+        setupSessionReplacementHandler(socket);
+        console.log('✅ Socket authenticated and ready');
+      } catch (error) {
+        console.error('❌ Authentication failed:', error);
+        MoodApp.Toast.error('Connection failed. Please refresh the page.');
+      }
+    });
+
+    socket.on('authenticated', (data) => {
+      console.log('✅ Socket authenticated:', data);
+      // Note: mood_counts_initial will be sent by server after this event
+    });
+
+    socket.on('auth_error', (data) => {
+      console.error('❌ Socket auth error:', data);
+      toast('Authentication failed. Please refresh the page.', 'error');
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('🔌 Socket connection error:', error);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('🔌 Socket disconnected:', reason);
+    });
+
+    return socket;
+  } catch (error) {
+    console.error('Socket initialization error:', error);
+    return null;
+  }
+}
 
     // ============================================
     // MOOD SELECTION
@@ -1344,33 +1338,6 @@ function attachListeners() {
   console.log(`✅ Event listeners attached`);
 }
 
-    // ============================================
-    // INITIALIZATION
-    // ============================================
-async function initPage() {
-  // Require authentication
-  try {
-    if (_Auth && typeof _Auth.requireAuth === 'function') {
-      await _Auth.requireAuth();
-    }
-  } catch (err) {
-    console.error('Error running requireAuth():', err);
-    return;
-  }
-
-  // Prevent back navigation
-  preventBackNavigation();  // ← ADD THIS LINE
-
-  // Initialize Socket.IO
-  console.log('🔌 Initializing socket connection...');
-  socketInstance = await initializeSocket();
-
-  // Render UI
-  renderMoods();
-  attachListeners();
-  loadNotes(0);
-}
-
 
 function formatUserCount(count) {
   if (count >= 1000000) {
@@ -1388,6 +1355,49 @@ function updateMoodCount(mood, count) {
     countEl.innerHTML = `<span>${formatUserCount(count)}</span>`;
   }
 }
+
+function setupMoodCountListeners() {
+  console.log('📊 Setting up mood count listeners...');
+  
+  // ✅ CRITICAL: These must be set up BEFORE socket.on('connect')
+  // Otherwise the 'mood_counts_initial' event will be missed
+  
+  // We can't attach to socketInstance yet (it doesn't exist)
+  // So we'll attach these in initializeSocket() BEFORE authentication
+}
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+async function initPage() {
+  // Require authentication
+  try {
+    if (_Auth && typeof _Auth.requireAuth === 'function') {
+      await _Auth.requireAuth();
+    }
+  } catch (err) {
+    console.error('Error running requireAuth():', err);
+    return;
+  }
+
+  // Prevent back navigation
+  preventBackNavigation();
+
+  // Render UI first (so DOM elements exist)
+  renderMoods();
+  
+  // ✅ CRITICAL: Setup mood count listeners BEFORE socket connects
+  setupMoodCountListeners();
+
+  // Initialize Socket.IO (will trigger authenticated event → mood_counts_initial)
+  console.log('🔌 Initializing socket connection...');
+  socketInstance = await initializeSocket();
+
+  // Attach other listeners and load notes
+  attachListeners();
+  loadNotes(0);
+}
+
 
     // Start the page
     initPage();
