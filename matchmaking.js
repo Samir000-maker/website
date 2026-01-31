@@ -5,6 +5,8 @@ import config from './config.js';
  * Enhanced Matchmaking System with Room Lifecycle Management
  * 
  * Features:
+ * - Configurable search timeout (default 5 seconds)
+ * - Join existing non-full rooms
  * - 50-second room expiration (configurable)
  * - Automatic cleanup
  * - Ephemeral message storage
@@ -49,6 +51,7 @@ class Room {
     this.hasActiveCall = false; // Track if room has active call
     this.userJoinedRoom = false; // Track if users actually joined
     this.timerStartedAt = null; // Track when timer actually started
+    this.maxUsers = config.MAX_USERS_PER_ROOM; // Maximum capacity
 
     console.log(`🏠 Room ${this.id} created at ${new Date(this.createdAt).toISOString()}`);
     console.log(`   Users: ${users.map(u => u.username).join(', ')}`);
@@ -129,7 +132,7 @@ class Room {
    */
   expire() {
     if (this.isExpired) {
-      console.log(`⏭️ Room ${this.id} already expired, skipping`);
+      console.log(`⭕️ Room ${this.id} already expired, skipping`);
       return;
     }
 
@@ -187,6 +190,37 @@ class Room {
   }
 
   /**
+   * Add user to room (for joining existing rooms)
+   */
+  addUser(userData) {
+    // Check if user already in room
+    if (this.hasUser(userData.userId)) {
+      console.log(`⚠️ User ${userData.username} already in room ${this.id}`);
+      return false;
+    }
+
+    // Check if room is full
+    if (this.users.length >= this.maxUsers) {
+      console.log(`⚠️ Room ${this.id} is full (${this.users.length}/${this.maxUsers})`);
+      return false;
+    }
+
+    // Add user
+    this.users.push(userData);
+    this.updateActivity();
+    
+    console.log(`✅ User ${userData.username} added to room ${this.id} (${this.users.length}/${this.maxUsers})`);
+    return true;
+  }
+
+  /**
+   * Check if room has space for more users
+   */
+  hasSpace() {
+    return this.users.length < this.maxUsers && !this.isExpired;
+  }
+
+  /**
    * Check if user is in room
    */
   hasUser(userId) {
@@ -232,6 +266,19 @@ class Room {
 }
 
 /**
+ * Find an available room for the given mood that has space
+ */
+function findAvailableRoom(mood) {
+  for (const [roomId, room] of activeRooms.entries()) {
+    if (room.mood === mood && room.hasSpace() && !room.isExpired) {
+      console.log(`🔍 Found available room ${roomId} for mood ${mood} (${room.users.length}/${room.maxUsers})`);
+      return room;
+    }
+  }
+  return null;
+}
+
+/**
  * Add user to matchmaking queue
  */
 export function addToQueue(userData) {
@@ -242,6 +289,23 @@ export function addToQueue(userData) {
     return null;
   }
 
+  // First, check if there's an existing non-full room for this mood
+  const availableRoom = findAvailableRoom(mood);
+  
+  if (availableRoom) {
+    // Add user to existing room
+    const added = availableRoom.addUser(userData);
+    
+    if (added) {
+      // Map user to room
+      userRoomMap.set(userId, availableRoom.id);
+      
+      console.log(`🎉 User ${username} joined existing room ${availableRoom.id}`);
+      return availableRoom;
+    }
+  }
+
+  // No available room, proceed with queue logic
   // Remove user from any existing queue
   removeFromAllQueues(userId);
 
@@ -253,11 +317,12 @@ export function addToQueue(userData) {
   const queue = matchmakingQueues.get(mood);
   queue.push(userData);
 
-  console.log(`🎮 User ${username} queued for ${mood} (${queue.length}/${config.MAX_USERS_PER_ROOM})`);
+  console.log(`🎮 User ${username} queued for ${mood} (${queue.length}/${config.MIN_USERS_FOR_ROOM})`);
 
   // Check if we have enough users to create a room
-  if (queue.length >= config.MAX_USERS_PER_ROOM) {
-    const roomUsers = queue.splice(0, config.MAX_USERS_PER_ROOM);
+  if (queue.length >= config.MIN_USERS_FOR_ROOM) {
+    // Take MIN_USERS_FOR_ROOM users from queue (minimum to start a room)
+    const roomUsers = queue.splice(0, config.MIN_USERS_FOR_ROOM);
     const room = createRoom(mood, roomUsers);
     return room;
   }
@@ -440,7 +505,8 @@ export function getActiveRooms() {
       timerStartedAt: room.timerStartedAt,
       expiresAt: room.expiresAt,
       timeRemaining: room.getTimeUntilExpiration(),
-      isExpired: room.isExpired
+      isExpired: room.isExpired,
+      hasSpace: room.hasSpace()
     }));
 }
 
