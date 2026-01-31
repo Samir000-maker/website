@@ -1561,100 +1561,172 @@ io.on('connection', (socket) => {
 });
   
   
-  socket.on('select_mood', async (data, callback) => {
-    if (!currentUser) {
-      return callback?.({ success: false, error: 'Not authenticated' });
-    }
+socket.on('select_mood', async (data, callback) => {
+  // Get user data from socketUsers Map
+  const userData = socketUsers.get(socket.id);
+  
+  if (!userData) {
+    console.error(`❌ [select_mood] Socket ${socket.id} not authenticated`);
+    return callback?.({ 
+      success: false, 
+      error: 'Not authenticated. Please refresh the page.' 
+    });
+  }
+  
+  const { mood } = data;
+  const userId = userData.userId;
+  const firebaseUid = userData.firebaseUid;
+  const username = userData.username;
+  
+  console.log(`🎭 [UID: ${firebaseUid}] [Socket: ${socket.id}] Attempting to select mood: ${mood}`);
+  
+  try {
+    // ============================================
+    // CRITICAL: VALIDATE IF USER CAN SELECT MOOD
+    // ============================================
+    const validation = await validateMoodSelection(firebaseUid);
     
-    const { mood } = data;
-    const userId = currentUser.userId;
-    
-    console.log(`🎭 [UID: ${userId}] [Socket: ${socket.id}] Attempting to select mood: ${mood}`);
-    
-    try {
-      // CRITICAL: Validate if user can select mood
-      const validation = await validateMoodSelection(userId);
+    if (!validation.allowed) {
+      console.log(`🚫 [UID: ${firebaseUid}] Mood selection blocked: ${validation.reason}`);
       
-      if (!validation.allowed) {
-        console.log(`🚫 [UID: ${userId}] Mood selection blocked: ${validation.reason}`);
+      // User already in room - restore it instead of queuing
+      const restoration = await restoreExistingRoom(socket, firebaseUid, validation.existingRoom);
+      
+      if (restoration.success) {
+        console.log(`✅ [UID: ${firebaseUid}] Room restored successfully`);
         
-        // Attempt to restore existing room
-        const restoration = await restoreExistingRoom(socket, userId, validation.existingRoom);
+        // Emit to client that they should redirect to chat
+        socket.emit('match_found', restoration.room);
+        
+        return callback?.({
+          success: true,
+          matched: true,
+          room: restoration.room,
+          restored: true,
+          message: 'Reconnected to your existing room'
+        });
+      } else {
+        console.error(`❌ [UID: ${firebaseUid}] Room restoration failed: ${restoration.error}`);
         
         return callback?.({
           success: false,
-          error: validation.reason,
-          existingRoom: validation.existingRoom,
-          restored: restoration.success,
-          room: restoration.room
+          error: restoration.error || 'Failed to restore your previous room',
+          existingRoom: validation.existingRoom
+        });
+      }
+    }
+    
+    // ============================================
+    // USER ALLOWED TO SELECT MOOD - PROCEED
+    // ============================================
+    console.log(`✅ [UID: ${firebaseUid}] Mood selection allowed - proceeding with matchmaking`);
+    
+    // Add to mood registry (deduplicated by UID)
+    addUserToMood(userId, mood);
+    
+    // ============================================
+    // JOIN MATCHMAKING QUEUE
+    // ============================================
+    const matchResult = matchmaking.addToQueue({
+      userId,
+      firebaseUid,
+      username,
+      pfpUrl: userData.pfpUrl,
+      mood
+    });
+    
+    if (matchResult) {
+      // Match found or joined existing room
+      const room = matchResult;
+      
+      // CRITICAL: Register active room in new system
+      setUserActiveRoom(firebaseUid, room.id, mood);
+      
+      // Join socket to room
+      socket.join(room.id);
+      
+      // Start room lifecycle timers if not started
+      if (!room.timerStartedAt) {
+        console.log(`⏱️ [Room: ${room.id}] Starting lifecycle timers`);
+        room.setupLifecycleTimers();
+      }
+      
+      console.log(`🎯 [UID: ${firebaseUid}] Matched! Room: ${room.id}`);
+      
+      // Get partner info
+      const partner = room.users.find(u => u.userId !== userId);
+      const partnerProfile = partner ? await getUserProfile(partner.userId) : null;
+      
+      const roomData = {
+        roomId: room.id,
+        mood: room.mood,
+        partner: partner ? {
+          userId: partner.userId,
+          username: partner.username,
+          pfpUrl: partner.pfpUrl,
+          bio: partnerProfile?.bio || ''
+        } : null,
+        expiresAt: room.expiresAt,
+        chatHistory: room.messages || []
+      };
+      
+      // Emit to all devices of this user
+      emitToUserAllDevices(firebaseUid, 'match_found', roomData);
+      
+      // Also emit to partner's all devices (if exists)
+      if (partner && partner.firebaseUid) {
+        emitToUserAllDevices(partner.firebaseUid, 'match_found', {
+          ...roomData,
+          partner: {
+            userId,
+            username,
+            pfpUrl: userData.pfpUrl,
+            bio: (await getUserProfile(userId))?.bio || ''
+          }
+        });
+      } else if (partner) {
+        // Fallback: emit to partner via room broadcast
+        socket.to(room.id).emit('match_found', {
+          ...roomData,
+          partner: {
+            userId,
+            username,
+            pfpUrl: userData.pfpUrl,
+            bio: (await getUserProfile(userId))?.bio || ''
+          }
         });
       }
       
-      // User is allowed to select mood - proceed with matchmaking
-      console.log(`✅ [UID: ${userId}] Mood selection allowed`);
+      console.log(`✅ [UID: ${firebaseUid}] Match found event emitted`);
       
-      // Add to mood registry (deduplicated by UID)
-      addUserToMood(userId, mood);
+      return callback?.({ 
+        success: true, 
+        matched: true, 
+        room: roomData 
+      });
       
-      // Join matchmaking queue
-      const result = await matchmaking.joinQueue(userId, mood, currentUser);
+    } else {
+      // Waiting in queue
+      const queuePosition = matchmaking.getQueueStatus(mood);
+      console.log(`⏳ [UID: ${firebaseUid}] Waiting in queue for mood: ${mood} (position: ${queuePosition})`);
       
-      if (result.matched) {
-        // Match found - register active room
-        setUserActiveRoom(userId, result.roomId, mood);
-        
-        // Join socket to room
-        socket.join(result.roomId);
-        
-        console.log(`🎯 [UID: ${userId}] Matched! Room: ${result.roomId}`);
-        
-        // Get partner info
-        const room = matchmaking.getRoom(result.roomId);
-        const partner = room.users.find(u => u.userId !== userId);
-        const partnerProfile = partner ? await getUserProfile(partner.userId) : null;
-        
-        const roomData = {
-          roomId: result.roomId,
-          mood: room.mood,
-          partner: partner ? {
-            userId: partner.userId,
-            username: partner.username,
-            profilePictureUrl: partner.profilePictureUrl,
-            bio: partnerProfile?.bio || ''
-          } : null,
-          expiresAt: room.expiresAt,
-          chatHistory: room.chatHistory || []
-        };
-        
-        // Emit to all devices of this user
-        emitToUserAllDevices(userId, 'match_found', roomData);
-        
-        // Also emit to partner's all devices
-        if (partner) {
-          emitToUserAllDevices(partner.userId, 'match_found', {
-            ...roomData,
-            partner: {
-              userId,
-              username: currentUser.username,
-              profilePictureUrl: currentUser.profilePictureUrl,
-              bio: (await getUserProfile(userId))?.bio || ''
-            }
-          });
-        }
-        
-        callback?.({ success: true, matched: true, room: roomData });
-        
-      } else {
-        // Waiting in queue
-        console.log(`⏳ [UID: ${userId}] Waiting in queue for mood: ${mood}`);
-        callback?.({ success: true, matched: false, queuePosition: result.queuePosition });
-      }
-      
-    } catch (error) {
-      console.error(`❌ [UID: ${userId}] Mood selection error:`, error);
-      callback?.({ success: false, error: error.message });
+      return callback?.({ 
+        success: true, 
+        matched: false, 
+        queuePosition 
+      });
     }
-  });
+    
+  } catch (error) {
+    console.error(`❌ [UID: ${firebaseUid}] Mood selection error:`, error);
+    console.error(error.stack);
+    
+    return callback?.({ 
+      success: false, 
+      error: 'Failed to process mood selection. Please try again.' 
+    });
+  }
+});
   
   // ============================================
   // MANUAL ROOM RESTORATION
@@ -4463,69 +4535,91 @@ socket.on('leave_room', async (data, callback) => {
   });
 
 socket.on('disconnect', async (reason) => {
-    console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
+  console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
+  
+  // CRITICAL FIX: Get user data from socketUsers Map, not from undefined currentUser
+  const userData = socketUsers.get(socket.id);
+  
+  if (!userData) {
+    console.log(`ℹ️ Socket ${socket.id} was not authenticated or already cleaned up`);
+    return;
+  }
+  
+  const userId = userData.userId;
+  const firebaseUid = userData.firebaseUid;
+  const username = userData.username;
+  
+  console.log(`👤 Disconnecting user: ${username} (${userId})`);
+  
+  // Unregister this socket from multi-device tracking
+  if (firebaseUid) {
+    unregisterSocketForUser(firebaseUid, socket.id);
+  }
+  
+  // Clean up socket user data
+  socketUsers.delete(socket.id);
+  
+  // Check if user has other active devices
+  const remainingDevices = firebaseUid ? getUserSocketIds(firebaseUid).length : 0;
+  
+  if (remainingDevices > 0) {
+    console.log(`📱 [UID: ${firebaseUid}] Still has ${remainingDevices} active device(s) - preserving room state`);
+    return; // Don't clean up room - user still connected on other device
+  }
+  
+  console.log(`📱 [UID: ${firebaseUid || userId}] Last device disconnected - starting grace period`);
+  
+  // Start grace period timer
+  const cleanup = setTimeout(async () => {
+    console.log(`⏰ [UID: ${firebaseUid || userId}] Grace period expired - cleaning up`);
     
-    if (!currentUser) return;
+    // Remove from mood tracking
+    removeUserFromAllMoods(userId);
     
-    const userId = currentUser.userId;
+    // Get active room
+    const activeRoom = firebaseUid ? getUserActiveRoom(firebaseUid) : null;
     
-    // Unregister this socket
-    unregisterSocketForUser(userId, socket.id);
-    
-    // Clean up socket user data
-    socketUsers.delete(socket.id);
-    
-    // Check if user has other active devices
-    const remainingDevices = getUserSocketIds(userId).length;
-    
-    if (remainingDevices > 0) {
-      console.log(`📱 [UID: ${userId}] Still has ${remainingDevices} active device(s) - preserving room state`);
-      return; // Don't clean up room - user still connected on other device
-    }
-    
-    console.log(`📱 [UID: ${userId}] Last device disconnected - starting grace period`);
-    
-    // Start grace period timer
-    const cleanup = setTimeout(async () => {
-      console.log(`⏰ [UID: ${userId}] Grace period expired - cleaning up`);
-      
-      // Remove from mood tracking
-      removeUserFromAllMoods(userId);
-      
-      // Get active room
-      const activeRoom = getUserActiveRoom(userId);
-      
-      if (activeRoom) {
-        const room = matchmaking.getRoom(activeRoom.roomId);
-        if (room && !room.isExpired) {
-          // Remove from room
-          room.removeUser(userId);
-          
-          // Notify partner
-          const partner = room.users.find(u => u.userId !== userId);
-          if (partner) {
-            emitToUserAllDevices(partner.userId, 'partner_disconnected', {
-              roomId: activeRoom.roomId,
-              userId,
-              username: currentUser.username
-            });
-          }
-        }
+    if (activeRoom) {
+      const room = matchmaking.getRoom(activeRoom.roomId);
+      if (room && !room.isExpired) {
+        // Remove from room
+        room.removeUser(userId);
         
-        // Clear active room state
-        clearUserActiveRoom(userId);
+        // Notify partner
+        const partner = room.users.find(u => u.userId !== userId);
+        if (partner) {
+          emitToUserAllDevices(partner.userId, 'partner_disconnected', {
+            roomId: activeRoom.roomId,
+            userId,
+            username: username
+          });
+        }
       }
       
-      // Final cleanup
-      userToSocketId.delete(userId);
-      socketUserCleanup.delete(userId);
-      
-      console.log(`🧹 [UID: ${userId}] Full cleanup completed`);
-      
-    }, DISCONNECT_GRACE_PERIOD);
+      // Clear active room state
+      if (firebaseUid) {
+        clearUserActiveRoom(firebaseUid);
+      }
+    }
     
-    socketUserCleanup.set(userId, cleanup);
-  });
+    // Legacy cleanup: check if user in room via old system
+    const legacyRoomId = matchmaking.getRoomIdByUser(userId);
+    if (legacyRoomId) {
+      console.log(`🧹 [Legacy] Cleaning up user ${username} from room ${legacyRoomId}`);
+      matchmaking.leaveRoom(userId);
+    }
+    
+    // Final cleanup
+    userToSocketId.delete(userId);
+    socketUserCleanup.delete(userId);
+    
+    console.log(`🧹 [UID: ${firebaseUid || userId}] Full cleanup completed`);
+    
+  }, DISCONNECT_GRACE_PERIOD);
+  
+  socketUserCleanup.set(userId, cleanup);
+});
+
 });
 // ============================================
 // PERIODIC CLEANUP
