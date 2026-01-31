@@ -979,6 +979,19 @@ socket.on('connect', async () => {
 });
 
 
+socketInstance.on('mood_counts_initial', (counts) => {
+  console.log('📊 Received initial mood counts:', counts);
+  Object.entries(counts).forEach(([mood, count]) => {
+    updateMoodCount(mood, count);
+  });
+});
+
+// Listen for real-time updates
+socketInstance.on('mood_count_update', ({ mood, count }) => {
+  console.log(`📊 Mood count update: ${mood} = ${count}`);
+  updateMoodCount(mood, count);
+});
+
         socketInstance.on('authenticated', (data) => {
           console.log('✅ Socket authenticated:', data);
         });
@@ -1007,19 +1020,23 @@ socket.on('connect', async () => {
     // MOOD SELECTION
     // ============================================
     function renderMoods() {
-      if (!moodsGrid) return;
-      moodsGrid.innerHTML = '';
-      Object.entries(moods).forEach(([id, emoji]) => {
-        const card = document.createElement('div');
-        card.className = 'mood-card';
-        card.innerHTML = `
-          <div class="mood-emoji">${emoji}</div>
-          <div class="mood-label">${id}</div>
-        `;
-        card.addEventListener('click', () => selectMood(id, card));
-        moodsGrid.appendChild(card);
-      });
-    }
+  if (!moodsGrid) return;
+  moodsGrid.innerHTML = '';
+  Object.entries(moods).forEach(([id, emoji]) => {
+    const card = document.createElement('div');
+    card.className = 'mood-card';
+    card.setAttribute('data-mood', id);
+    card.innerHTML = `
+      <div class="mood-emoji">${emoji}</div>
+      <div class="mood-label">${id}</div>
+      <div class="mood-user-count" id="mood-count-${id}" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+        <span>—</span>
+      </div>
+    `;
+    card.addEventListener('click', () => selectMood(id, card));
+    moodsGrid.appendChild(card);
+  });
+}
 
     function selectMood(mood, el) {
       selectedMood = mood;
@@ -1352,6 +1369,24 @@ async function initPage() {
   renderMoods();
   attachListeners();
   loadNotes(0);
+}
+
+
+function formatUserCount(count) {
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1)}M users`;
+  } else if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K users`;
+  } else {
+    return `${count} user${count !== 1 ? 's' : ''}`;
+  }
+}
+
+function updateMoodCount(mood, count) {
+  const countEl = document.getElementById(`mood-count-${mood}`);
+  if (countEl) {
+    countEl.innerHTML = `<span>${formatUserCount(count)}</span>`;
+  }
 }
 
     // Start the page
