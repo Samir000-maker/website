@@ -4960,21 +4960,66 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-      const msgEl = document.createElement('div');
-      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-      msgEl.textContent = `${data.username || 'A user'} left the room`;
-      messagesList?.appendChild(msgEl);
+  console.log('👋 ========================================');
+  console.log('👋 USER LEFT EVENT RECEIVED');
+  console.log('👋 ========================================');
+  console.log(`   User: ${data.username || 'Unknown'}`);
+  console.log(`   UserID: ${data.userId || 'Unknown'}`);
+  console.log(`   Remaining users: ${data.remainingUsers}`);
+  
+  // Show "user left" message in chat
+  const msgEl = document.createElement('div');
+  msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+  msgEl.textContent = `${data.username || 'A user'} left the room`;
+  messagesList?.appendChild(msgEl);
 
-      if (onlineCount && data.remainingUsers !== undefined) {
-        onlineCount.textContent = `${data.remainingUsers} Online`;
-      }
+  // Update online count
+  if (onlineCount && data.remainingUsers !== undefined) {
+    onlineCount.textContent = `${data.remainingUsers} Online`;
+    console.log(`   ✅ Online count updated: ${data.remainingUsers}`);
+  }
 
-      if (data.remainingUsers <= 1) {
-        toast('Room closing...', 'warning');
-        clearChatState(true);
-        setTimeout(() => window.location.href = '/mood.html', 2000);
+  // ============================================
+  // NEW: Remove user from visual sidebar list
+  // ============================================
+  if (usersList && data.userId) {
+    console.log(`   🗑️ Removing user from sidebar list...`);
+    
+    // Find all user cards in the sidebar
+    const userCards = usersList.querySelectorAll('.user-card');
+    
+    userCards.forEach(card => {
+      // Check if this card belongs to the user who left
+      // We'll match by username since cards don't have userId attribute
+      const usernameElement = card.querySelector('.text-sm.font-semibold');
+      
+      if (usernameElement && usernameElement.textContent.trim() === data.username) {
+        console.log(`   ✅ Found user card for "${data.username}" - removing`);
+        
+        // Add fade-out animation before removal
+        card.style.transition = 'opacity 0.3s ease-out';
+        card.style.opacity = '0';
+        
+        // Remove after animation completes
+        setTimeout(() => {
+          card.remove();
+          console.log(`   ✅ User card removed from DOM`);
+        }, 300);
       }
     });
+  } else {
+    console.log(`   ⚠️ Cannot remove user: usersList=${!!usersList}, userId=${!!data.userId}`);
+  }
+  
+  console.log('👋 ========================================\n');
+
+  // Close room if only 1 user remaining
+  if (data.remainingUsers <= 1) {
+    toast('Room closing...', 'warning');
+    clearChatState(true);
+    setTimeout(() => window.location.href = '/mood.html', 2000);
+  }
+});
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
