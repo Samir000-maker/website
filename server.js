@@ -171,7 +171,16 @@ const signalingRateLimiter = new Map(); // userId -> { count, resetTime }
 const connectionsByIP = new Map(); // ip -> { count, connections: Set }
 const connectionRateLimiter = new Map(); // ip -> { count, resetTime }
 const MAX_CONNECTIONS_GLOBAL = 10000; // Maximum total connections
+const matchmakingTimeouts = new Map();
 
+function clearMatchmakingTimeout(userId) {
+  const timeout = matchmakingTimeouts.get(userId);
+  if (timeout) {
+    clearTimeout(timeout);
+    matchmakingTimeouts.delete(userId);
+    console.log(`⏰ Cleared matchmaking timeout for user ${userId}`);
+  }
+}
 
 function getCurrentTransferMemory() {
   let total = 0;
@@ -2104,6 +2113,10 @@ socket.on('join_matchmaking', async ({ mood }) => {
     // ✅ ADD USER TO MOOD (deduplicated)
     addUserToMood(user.userId, mood);
 
+    // Clear any existing timeout for this user
+    clearMatchmakingTimeout(user.userId);
+
+    // Try to add to queue or join existing room
     let room = matchmaking.addToQueue({
       ...user,
       mood,
@@ -2123,6 +2136,9 @@ socket.on('join_matchmaking', async ({ mood }) => {
     }
 
     if (room) {
+      // Match found (either new room or joined existing)
+      clearMatchmakingTimeout(user.userId);
+      
       console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
       const uniqueUsers = new Map();
@@ -2130,6 +2146,9 @@ socket.on('join_matchmaking', async ({ mood }) => {
         uniqueUsers.set(roomUser.userId, roomUser);
       });
       room.users = Array.from(uniqueUsers.values());
+
+      // Check if this is a new user joining existing room
+      const isJoiningExisting = room.users.length > config.MIN_USERS_FOR_ROOM || room.messages.length > 0;
 
       room.users.forEach(roomUser => {
         const userSocket = findActiveSocketForUser(roomUser.userId);
@@ -2140,7 +2159,8 @@ socket.on('join_matchmaking', async ({ mood }) => {
           userSocket.join(room.id);
           console.log(`✅ User ${roomUser.username} joined Socket.IO room ${room.id}`);
           
-          userSocket.emit('match_found', {
+          // Include previous messages for users joining existing room
+          const matchData = {
             roomId: room.id,
             mood: room.mood,
             users: room.users.map(u => ({
@@ -2149,10 +2169,21 @@ socket.on('join_matchmaking', async ({ mood }) => {
               pfpUrl: u.pfpUrl
             })),
             expiresAt: room.expiresAt
-          });
+          };
+
+          // If user is joining existing room, include previous messages
+          if (isJoiningExisting && roomUser.userId === user.userId) {
+            matchData.previousMessages = room.getMessages();
+            console.log(`📨 Sending ${matchData.previousMessages.length} previous messages to ${roomUser.username}`);
+          }
+
+          userSocket.emit('match_found', matchData);
           
           // ✅ Keep user in mood count when moved to room
           addUserToMood(roomUser.userId, room.mood);
+          
+          // Clear matchmaking timeout for this user
+          clearMatchmakingTimeout(roomUser.userId);
           
         } else {
           console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
@@ -2160,13 +2191,75 @@ socket.on('join_matchmaking', async ({ mood }) => {
         }
       });
 
+      // Notify existing room members about new user (if joining existing)
+      if (isJoiningExisting) {
+        io.to(room.id).emit('user_joined_room', {
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl,
+          roomUserCount: room.users.length
+        });
+        console.log(`📢 Notified room ${room.id} about new user ${user.username}`);
+      }
+
     } else {
+      // No match yet, user is in queue
       const queuePosition = matchmaking.getQueueStatus(mood);
       socket.emit('queued', { 
         mood, 
         position: queuePosition 
       });
-      console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MAX_USERS_PER_ROOM})`);
+      console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MIN_USERS_FOR_ROOM})`);
+
+      // ✅ START MATCHMAKING TIMEOUT
+      const timeoutHandle = setTimeout(() => {
+        // Check if user is still in queue
+        const currentQueueStatus = matchmaking.getQueueStatus(mood);
+        
+        console.log(`⏰ Matchmaking timeout for ${user.username} in ${mood} queue`);
+        console.log(`   Queue status: ${currentQueueStatus} users`);
+        
+        // If fewer than MIN_USERS_FOR_ROOM, timeout and redirect
+        if (currentQueueStatus < config.MIN_USERS_FOR_ROOM) {
+          console.log(`❌ Insufficient users (${currentQueueStatus}/${config.MIN_USERS_FOR_ROOM}) - timing out`);
+          
+          // Cancel matchmaking
+          matchmaking.cancelMatchmaking(user.userId);
+          removeUserFromAllMoods(user.userId);
+          clearMatchmakingTimeout(user.userId);
+          
+          // Notify client to redirect
+          const userSocket = findActiveSocketForUser(user.userId);
+          if (userSocket) {
+            userSocket.emit('matchmaking_timeout', {
+              message: 'No matches found. Please try again.',
+              mood: mood,
+              queueStatus: currentQueueStatus,
+              minRequired: config.MIN_USERS_FOR_ROOM
+            });
+          }
+          
+          console.log(`🔄 User ${user.username} timed out, redirecting to mood selection`);
+        } else {
+          // Enough users found, try to create room
+          console.log(`✅ Sufficient users found (${currentQueueStatus}), creating room`);
+          const room = matchmaking.addToQueue({
+            ...user,
+            mood,
+            socketId: socket.id
+          });
+          
+          if (room) {
+            console.log(`🎉 Room ${room.id} created after timeout check`);
+          }
+        }
+        
+        // Clean up timeout
+        matchmakingTimeouts.delete(user.userId);
+      }, config.MATCHMAKING_TIMEOUT);
+
+      matchmakingTimeouts.set(user.userId, timeoutHandle);
+      console.log(`⏰ Started ${config.MATCHMAKING_TIMEOUT / 1000}s timeout for ${user.username}`);
     }
   } catch (error) {
     console.error('Join matchmaking error:', error);
@@ -2309,10 +2402,14 @@ socket.on('join_room', ({ roomId }) => {
 socket.on('cancel_matchmaking', () => {
   const user = socketUsers.get(socket.id);
   if (user) {
+    // Clear matchmaking timeout
+    clearMatchmakingTimeout(user.userId);
+    
     matchmaking.cancelMatchmaking(user.userId);
     
     // ✅ REMOVE USER FROM MOOD TRACKING
     removeUserFromAllMoods(user.userId);
+    clearMatchmakingTimeout(user.userId);
     
     socket.emit('matchmaking_cancelled');
     console.log(`❌ Matchmaking cancelled: ${user.username}`);
@@ -4024,6 +4121,7 @@ removeUserFromAllMoods(user.userId);
     // MATCHMAKING CLEANUP
     // ============================================
     matchmaking.cancelMatchmaking(user.userId);
+    clearMatchmakingTimeout(user.userId);
     
     // ============================================
     // ROOM CLEANUP
