@@ -38,38 +38,103 @@ const roomCallInitLocks = new Map(); // roomId -> Promise
 
 
 // ============================================
-// REAL-TIME MOOD USER COUNTERS
+// REAL-TIME MOOD USER COUNTERS (DEDUPLICATED)
 // ============================================
-const moodUserCounts = new Map(); // mood -> count
+const moodUserRegistry = new Map(); // mood -> Set<userId>
+const moodUserCounts = new Map(); // mood -> count (derived)
 const moodCountBroadcastDebounce = new Map(); // mood -> timeout
+const userCurrentMood = new Map(); // userId -> mood (for cleanup)
 
-// Initialize counters for all moods
+// Initialize registries for all moods
 config.MOODS.forEach(mood => {
+  moodUserRegistry.set(mood.id, new Set());
   moodUserCounts.set(mood.id, 0);
 });
 
-function incrementMoodCount(mood) {
-  const current = moodUserCounts.get(mood) || 0;
-  moodUserCounts.set(mood, current + 1);
-  debouncedBroadcastMoodCount(mood);
-  console.log(`📊 Mood count: ${mood} = ${current + 1}`);
+/**
+ * Add user to mood tracking (idempotent, deduplicated)
+ */
+function addUserToMood(userId, mood) {
+  if (!moodUserRegistry.has(mood)) {
+    console.error(`❌ Invalid mood: ${mood}`);
+    return;
+  }
+  
+  // Remove from old mood if exists
+  const oldMood = userCurrentMood.get(userId);
+  if (oldMood && oldMood !== mood) {
+    removeUserFromMood(userId, oldMood);
+  }
+  
+  const registry = moodUserRegistry.get(mood);
+  const sizeBefore = registry.size;
+  
+  // Add to Set (automatically deduplicates)
+  registry.add(userId);
+  
+  // Update derived count
+  const newCount = registry.size;
+  moodUserCounts.set(mood, newCount);
+  
+  // Track user's current mood
+  userCurrentMood.set(userId, mood);
+  
+  // Only broadcast if count actually changed
+  if (newCount !== sizeBefore) {
+    debouncedBroadcastMoodCount(mood);
+    console.log(`📊 Mood count: ${mood} = ${newCount} (added ${userId})`);
+  } else {
+    console.log(`ℹ️ User ${userId} already in ${mood} - no change`);
+  }
 }
 
-function decrementMoodCount(mood) {
-  const current = moodUserCounts.get(mood) || 0;
-  const newCount = Math.max(0, current - 1); // Never go negative
-  moodUserCounts.set(mood, newCount);
-  debouncedBroadcastMoodCount(mood);
-  console.log(`📊 Mood count: ${mood} = ${newCount}`);
+/**
+ * Remove user from mood tracking (idempotent)
+ */
+function removeUserFromMood(userId, mood) {
+  if (!moodUserRegistry.has(mood)) {
+    console.error(`❌ Invalid mood: ${mood}`);
+    return;
+  }
+  
+  const registry = moodUserRegistry.get(mood);
+  const sizeBefore = registry.size;
+  
+  // Remove from Set
+  const wasPresent = registry.delete(userId);
+  
+  if (wasPresent) {
+    // Update derived count
+    const newCount = registry.size;
+    moodUserCounts.set(mood, newCount);
+    
+    // Clear user's mood tracking
+    if (userCurrentMood.get(userId) === mood) {
+      userCurrentMood.delete(userId);
+    }
+    
+    debouncedBroadcastMoodCount(mood);
+    console.log(`📊 Mood count: ${mood} = ${newCount} (removed ${userId})`);
+  } else {
+    console.log(`ℹ️ User ${userId} was not in ${mood} - no change`);
+  }
+}
+
+/**
+ * Remove user from ALL moods (for disconnect/cleanup)
+ */
+function removeUserFromAllMoods(userId) {
+  const currentMood = userCurrentMood.get(userId);
+  if (currentMood) {
+    removeUserFromMood(userId, currentMood);
+  }
 }
 
 function debouncedBroadcastMoodCount(mood) {
-  // Clear existing timeout
   if (moodCountBroadcastDebounce.has(mood)) {
     clearTimeout(moodCountBroadcastDebounce.get(mood));
   }
   
-  // Set new timeout (broadcast max once per second)
   const timeout = setTimeout(() => {
     const count = moodUserCounts.get(mood) || 0;
     io.emit('mood_count_update', { mood, count });
@@ -2036,8 +2101,8 @@ socket.on('join_matchmaking', async ({ mood }) => {
       return;
     }
 
-    // ✅ INCREMENT MOOD COUNT BEFORE ADDING TO QUEUE
-    incrementMoodCount(mood);
+    // ✅ ADD USER TO MOOD (deduplicated)
+    addUserToMood(user.userId, mood);
 
     let room = matchmaking.addToQueue({
       ...user,
@@ -2085,6 +2150,10 @@ socket.on('join_matchmaking', async ({ mood }) => {
             })),
             expiresAt: room.expiresAt
           });
+          
+          // ✅ Keep user in mood count when moved to room
+          addUserToMood(roomUser.userId, room.mood);
+          
         } else {
           console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
           matchmaking.leaveRoom(roomUser.userId);
@@ -2240,16 +2309,10 @@ socket.on('join_room', ({ roomId }) => {
 socket.on('cancel_matchmaking', () => {
   const user = socketUsers.get(socket.id);
   if (user) {
-    // ✅ GET MOOD BEFORE CANCELLING
-    const userInQueue = matchmaking.getUserFromQueue(user.userId);
-    const mood = userInQueue?.mood;
-    
     matchmaking.cancelMatchmaking(user.userId);
     
-    // ✅ DECREMENT MOOD COUNT
-    if (mood) {
-      decrementMoodCount(mood);
-    }
+    // ✅ REMOVE USER FROM MOOD TRACKING
+    removeUserFromAllMoods(user.userId);
     
     socket.emit('matchmaking_cancelled');
     console.log(`❌ Matchmaking cancelled: ${user.username}`);
@@ -3788,35 +3851,37 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 
 
 
-  socket.on('leave_room', () => {
-    const user = socketUsers.get(socket.id);
-    
-    if (!user) return;
+socket.on('leave_room', () => {
+  const user = socketUsers.get(socket.id);
+  
+  if (!user) return;
 
-    const result = matchmaking.leaveRoom(user.userId);
-    
-    if (result.roomId) {
-      socket.leave(result.roomId);
+  const result = matchmaking.leaveRoom(user.userId);
+  
+  if (result.roomId) {
+    socket.leave(result.roomId);
 
-      if (!result.destroyed) {
-        io.to(result.roomId).emit('user_left', {
-          userId: user.userId,
-          username: user.username,
-          remainingUsers: result.remainingUsers
-        });
-      }
+    // ✅ REMOVE USER FROM MOOD TRACKING
+    removeUserFromAllMoods(user.userId);
 
-      // If room is destroyed, cancel cleanup timer and perform immediate cleanup
-      if (result.destroyed) {
-        console.log(`🗑️ Room ${result.roomId} destroyed by user leaving`);
-        cancelRoomCleanup(result.roomId);
-        performRoomCleanup(result.roomId);
-      }
-
-      socket.emit('left_room', { roomId: result.roomId });
-      console.log(`👋 ${user.username} left room ${result.roomId}`);
+    if (!result.destroyed) {
+      io.to(result.roomId).emit('user_left', {
+        userId: user.userId,
+        username: user.username,
+        remainingUsers: result.remainingUsers
+      });
     }
-  });
+
+    if (result.destroyed) {
+      console.log(`🗑️ Room ${result.roomId} destroyed by user leaving`);
+      cancelRoomCleanup(result.roomId);
+      performRoomCleanup(result.roomId);
+    }
+
+    socket.emit('left_room', { roomId: result.roomId });
+    console.log(`👋 ${user.username} left room ${result.roomId}`);
+  }
+});
 
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
@@ -3843,10 +3908,7 @@ socket.on('disconnect', () => {
   if (user) {
     console.log(`🔌 User ${user.username} disconnected`);
     
-     const userInQueue = matchmaking.getUserFromQueue(user.userId);
-    if (userInQueue?.mood) {
-      decrementMoodCount(userInQueue.mood);
-    }
+removeUserFromAllMoods(user.userId);
     
     // ✅ FIX: Clean up active file transfers for this user
     const userFileTransfers = [];
@@ -4316,6 +4378,67 @@ if (cleanedMoodDebounce > 0) {
     if (cleanedRateLimiters > 0) {
       console.log(`🗑️ Cleaned up ${cleanedRateLimiters} expired connection rate limiters`);
     }
+    
+    
+    // ✅ Audit mood registry for orphaned users
+let orphanedUsers = 0;
+for (const [mood, userSet] of moodUserRegistry.entries()) {
+  const validUsers = new Set();
+  
+  for (const userId of userSet) {
+    // Check if user still has active socket
+    const hasActiveSocket = Array.from(socketUsers.values()).some(u => u.userId === userId);
+    
+    if (hasActiveSocket) {
+      validUsers.add(userId);
+    } else {
+      orphanedUsers++;
+      console.log(`🗑️ Removing orphaned user ${userId} from ${mood}`);
+    }
+  }
+  
+  // Replace with validated set
+  if (validUsers.size !== userSet.size) {
+    moodUserRegistry.set(mood, validUsers);
+    const newCount = validUsers.size;
+    moodUserCounts.set(mood, newCount);
+    debouncedBroadcastMoodCount(mood);
+  }
+}
+
+if (orphanedUsers > 0) {
+  console.log(`🗑️ Cleaned up ${orphanedUsers} orphaned user(s) from mood tracking`);
+}
+
+// Clean up orphaned userCurrentMood entries
+let orphanedMoodMappings = 0;
+for (const [userId] of userCurrentMood.entries()) {
+  const hasActiveSocket = Array.from(socketUsers.values()).some(u => u.userId === userId);
+  
+  if (!hasActiveSocket) {
+    userCurrentMood.delete(userId);
+    orphanedMoodMappings++;
+  }
+}
+
+if (orphanedMoodMappings > 0) {
+  console.log(`🗑️ Cleaned up ${orphanedMoodMappings} orphaned mood mapping(s)`);
+}
+
+// Clean up mood count broadcast debounce timers
+let cleanedMoodDebounce = 0;
+for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
+  const count = moodUserCounts.get(mood) || 0;
+  if (count === 0) {
+    clearTimeout(timeout);
+    moodCountBroadcastDebounce.delete(mood);
+    cleanedMoodDebounce++;
+  }
+}
+if (cleanedMoodDebounce > 0) {
+  console.log(`🗑️ Cleaned up ${cleanedMoodDebounce} mood count debounce timers`);
+}
+    
     
     // Log memory stats
     const cleanupDuration = Date.now() - startTime;
