@@ -36,6 +36,58 @@ const joinCallDebounce = new Map(); // userId -> timestamp
 const roomCallInitLocks = new Map(); // roomId -> Promise
 
 
+
+// ============================================
+// REAL-TIME MOOD USER COUNTERS
+// ============================================
+const moodUserCounts = new Map(); // mood -> count
+const moodCountBroadcastDebounce = new Map(); // mood -> timeout
+
+// Initialize counters for all moods
+config.MOODS.forEach(mood => {
+  moodUserCounts.set(mood.id, 0);
+});
+
+function incrementMoodCount(mood) {
+  const current = moodUserCounts.get(mood) || 0;
+  moodUserCounts.set(mood, current + 1);
+  debouncedBroadcastMoodCount(mood);
+  console.log(`📊 Mood count: ${mood} = ${current + 1}`);
+}
+
+function decrementMoodCount(mood) {
+  const current = moodUserCounts.get(mood) || 0;
+  const newCount = Math.max(0, current - 1); // Never go negative
+  moodUserCounts.set(mood, newCount);
+  debouncedBroadcastMoodCount(mood);
+  console.log(`📊 Mood count: ${mood} = ${newCount}`);
+}
+
+function debouncedBroadcastMoodCount(mood) {
+  // Clear existing timeout
+  if (moodCountBroadcastDebounce.has(mood)) {
+    clearTimeout(moodCountBroadcastDebounce.get(mood));
+  }
+  
+  // Set new timeout (broadcast max once per second)
+  const timeout = setTimeout(() => {
+    const count = moodUserCounts.get(mood) || 0;
+    io.emit('mood_count_update', { mood, count });
+    moodCountBroadcastDebounce.delete(mood);
+  }, 1000);
+  
+  moodCountBroadcastDebounce.set(mood, timeout);
+}
+
+function getAllMoodCounts() {
+  const counts = {};
+  moodUserCounts.forEach((count, mood) => {
+    counts[mood] = count;
+  });
+  return counts;
+}
+
+
 const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
 const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
@@ -1888,16 +1940,19 @@ socket.on('authenticate', async ({ token, userId }) => {
     // ============================================
     // SEND SUCCESS RESPONSE
     // ============================================
-    socket.emit('authenticated', { 
-      success: true, 
-      user: {
-        userId: user._id.toString(),
-        username: user.username,
-        pfpUrl: user.pfpUrl
-      },
-      socketId: socket.id,
-      timestamp: Date.now()
-    });
+socket.emit('authenticated', { 
+  success: true, 
+  user: {
+    userId: user._id.toString(),
+    username: user.username,
+    pfpUrl: user.pfpUrl
+  },
+  socketId: socket.id,
+  timestamp: Date.now()
+});
+
+// ✅ SEND INITIAL MOOD COUNTS
+socket.emit('mood_counts_initial', getAllMoodCounts());
 
     // ============================================
     // OPTIONAL: RESTORE USER STATE
@@ -1981,14 +2036,15 @@ socket.on('join_matchmaking', async ({ mood }) => {
       return;
     }
 
-    // CRITICAL FIX: Atomic matchmaking with immediate retry
+    // ✅ INCREMENT MOOD COUNT BEFORE ADDING TO QUEUE
+    incrementMoodCount(mood);
+
     let room = matchmaking.addToQueue({
       ...user,
       mood,
       socketId: socket.id
     });
 
-    // CRITICAL: If we got queued but queue is now full, try matching again
     if (!room) {
       const queueStatus = matchmaking.getQueueStatus(mood);
       if (queueStatus >= config.MAX_USERS_PER_ROOM) {
@@ -2004,7 +2060,6 @@ socket.on('join_matchmaking', async ({ mood }) => {
     if (room) {
       console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
 
-      // CRITICAL FIX: Deduplicate users in room (prevent double-add race condition)
       const uniqueUsers = new Map();
       room.users.forEach(roomUser => {
         uniqueUsers.set(roomUser.userId, roomUser);
@@ -2032,7 +2087,6 @@ socket.on('join_matchmaking', async ({ mood }) => {
           });
         } else {
           console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
-          // CRITICAL: Remove user from room if socket not found
           matchmaking.leaveRoom(roomUser.userId);
         }
       });
@@ -2183,14 +2237,24 @@ socket.on('join_room', ({ roomId }) => {
   }
 });
 
-  socket.on('cancel_matchmaking', () => {
-    const user = socketUsers.get(socket.id);
-    if (user) {
-      matchmaking.cancelMatchmaking(user.userId);
-      socket.emit('matchmaking_cancelled');
-      console.log(`❌ Matchmaking cancelled: ${user.username}`);
+socket.on('cancel_matchmaking', () => {
+  const user = socketUsers.get(socket.id);
+  if (user) {
+    // ✅ GET MOOD BEFORE CANCELLING
+    const userInQueue = matchmaking.getUserFromQueue(user.userId);
+    const mood = userInQueue?.mood;
+    
+    matchmaking.cancelMatchmaking(user.userId);
+    
+    // ✅ DECREMENT MOOD COUNT
+    if (mood) {
+      decrementMoodCount(mood);
     }
-  });
+    
+    socket.emit('matchmaking_cancelled');
+    console.log(`❌ Matchmaking cancelled: ${user.username}`);
+  }
+});
 
 socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
   try {
@@ -3757,6 +3821,15 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 socket.on('disconnect', () => {
   const user = socketUsers.get(socket.id);
   
+    if (user) {
+    console.log(`🔌 User ${user.username} disconnected`);
+    
+    // ✅ DECREMENT MOOD COUNT IF IN QUEUE
+    const userInQueue = matchmaking.getUserFromQueue(user.userId);
+    if (userInQueue?.mood) {
+      decrementMoodCount(userInQueue.mood);
+    }
+  
   if (user?.userId) {
     joinCallDebounce.delete(user.userId);
     userToSocketId.delete(user.userId);
@@ -4010,6 +4083,21 @@ setInterval(() => {
 async function performPeriodicCleanup() {
   const startTime = Date.now();
   console.log(`🧹 Starting periodic cleanup...`);
+  
+  
+  let cleanedMoodDebounce = 0;
+for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
+  // If no users in this mood, clear the debounce
+  const count = moodUserCounts.get(mood) || 0;
+  if (count === 0) {
+    clearTimeout(timeout);
+    moodCountBroadcastDebounce.delete(mood);
+    cleanedMoodDebounce++;
+  }
+}
+if (cleanedMoodDebounce > 0) {
+  console.log(`🗑️ Cleaned up ${cleanedMoodDebounce} mood count debounce timers`);
+}
   
   try {
     const now = Date.now();
