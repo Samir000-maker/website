@@ -10,8 +10,6 @@ export const config = {
   SECRET_KEY: "6cbc2488a34434653f26399d1644260b50731e7316c97ac4ba7364d66373ff1b",
   
   R2_PUBLIC_URL: "https://pub-b86353e4f63d45f8bf7e94b3143a1d8b.r2.dev",
-
-
   // MongoDB configuration
   MONGO_URI: 'mongodb+srv://samir_:fitara@cluster0.cmatn6k.mongodb.net/appdb?retryWrites=true&w=majority',
   DB_NAME: 'db',
@@ -21,6 +19,10 @@ export const config = {
   MAX_USERS_PER_ROOM: 4, // Changed from 4 to 2 for easier testing
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
+  
+  // Matchmaking configuration
+  MATCHMAKING_TIMEOUT: 5000, // 5 seconds - global configurable search timeout
+  MIN_USERS_FOR_ROOM: 2, // Minimum users required to create a room
   
   // File upload limits
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
@@ -45,5 +47,4 @@ export const config = {
     { id: 'confused', name: 'Confused', emoji: '😕' }
   ]
 };
-
 export default config;
