@@ -4161,22 +4161,11 @@ socketInstance.on('room_joined', async (data) => {
 
   messagesCache = mergedMessages;
 
-  console.log(`🎨 Rendering ${messagesCache.length} total messages (including system messages)`);
+  console.log(`🎨 Rendering ${messagesCache.length} total messages`);
   messagesCache.forEach(msg => {
-    // Check if this is a system message
-    if (msg.isSystem || msg.userId === 'system') {
-      // Render system message
-      const msgEl = document.createElement('div');
-      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-      msgEl.textContent = msg.message;
-      msgEl.dataset.messageId = msg.messageId;
-      messagesList?.appendChild(msgEl);
-    } else {
-      // Render regular message
-      const isCurrentUser = msg.userId === currentUser.userId;
-      const msgEl = createMessageElement(msg, isCurrentUser);
-      messagesList?.appendChild(msgEl);
-    }
+    const isCurrentUser = msg.userId === currentUser.userId;
+    const msgEl = createMessageElement(msg, isCurrentUser);
+    messagesList?.appendChild(msgEl);
   });
 
   if (messagesList && messagesCache.length > 0) {
@@ -4317,8 +4306,7 @@ socketInstance.on('user_joined', (data) => {
   if (messagesList) {
     const msgEl = document.createElement('div');
     msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
-    msgEl.textContent = systemMessage.message;
-    msgEl.dataset.messageId = systemMessage.messageId;
+    msgEl.textContent = `${data.username} joined`;
     messagesList.appendChild(msgEl);
     
     // Auto-scroll to show new message
@@ -4326,14 +4314,8 @@ socketInstance.on('user_joined', (data) => {
       messagesList.scrollTop = messagesList.scrollHeight;
     }
     
-    console.log(`✅ System message displayed: "${systemMessage.message}"`);
+    console.log(`✅ System message displayed: "${data.username} joined"`);
   }
-  
-  // ============================================
-  // SAVE TO CACHE (CRITICAL FOR PERSISTENCE)
-  // ============================================
-  saveChatState(roomData.roomId, messagesCache);
-  console.log('💾 Chat state saved with join message');
   
   console.log('👤 ========================================\n');
 });
@@ -5058,118 +5040,21 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-  console.log('👋 ========================================');
-  console.log('👋 USER_LEFT EVENT RECEIVED');
-  console.log('👋 ========================================');
-  console.log(`   User: ${data.username} (${data.userId})`);
-  console.log(`   Remaining: ${data.remainingUsers}`);
-  console.log(`   Total users in room: ${data.users?.length || 0}`);
-  
-  // ============================================
-  // CREATE PERSISTENT SYSTEM MESSAGE
-  // ============================================
-const systemMessage = {
-    messageId: `system-joined-${data.userId}-${Date.now()}`,
-    userId: 'system',
-    username: 'System',
-    message: `${data.username} joined`,
-    timestamp: Date.now(),
-    isSystem: true
-  };
-  
-  // Add to cache for persistence
-  messagesCache.push(systemMessage);
-  console.log(`✅ System message added to cache (${messagesCache.length} total messages)`);
-  
-  // Render in DOM
-  const msgEl = document.createElement('div');
-  msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
-  msgEl.textContent = systemMessage.message;
-  msgEl.dataset.messageId = systemMessage.messageId;
-  messagesList?.appendChild(msgEl);
-  
-  // Auto-scroll to show new message
-  if (messagesList && messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100) {
-    messagesList.scrollTop = messagesList.scrollHeight;
-  }
-  
-  console.log(`✅ System message displayed in DOM`);
-  
-  // ============================================
-  // UPDATE USER LIST (CRITICAL FIX)
-  // ============================================
-  if (usersList && data.users) {
-    console.log(`🔄 Rebuilding user list with ${data.users.length} users`);
-    
-    // Clear existing user list
-    usersList.innerHTML = '';
-    
-    // Render all remaining users from server data
-    data.users.forEach(user => {
-      const userCard = document.createElement('div');
-      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-      userCard.dataset.userId = user.userId;
-      
-      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-      
-      const userInfo = document.createElement('div');
-      userInfo.className = 'flex-1 min-w-0';
-      
-      const nameSpan = document.createElement('div');
-      nameSpan.className = 'text-sm font-semibold truncate';
-      nameSpan.textContent = user.username || 'User';
-      
-      const statusSpan = document.createElement('div');
-      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-      
-      userInfo.appendChild(nameSpan);
-      userInfo.appendChild(statusSpan);
-      
-      userCard.appendChild(pfpElement);
-      userCard.appendChild(userInfo);
-      usersList.appendChild(userCard);
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+      msgEl.textContent = `${data.username || 'A user'} left the room`;
+      messagesList?.appendChild(msgEl);
+
+      if (onlineCount && data.remainingUsers !== undefined) {
+        onlineCount.textContent = `${data.remainingUsers} Online`;
+      }
+
+      if (data.remainingUsers <= 1) {
+        toast('Room closing...', 'warning');
+        clearChatState(true);
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      }
     });
-    
-    // Reattach click handlers for mobile
-    setupUserCardClick();
-    
-    console.log(`✅ User list rebuilt - removed user no longer visible`);
-  }
-  
-  // ============================================
-  // UPDATE ONLINE COUNT
-  // ============================================
-  if (onlineCount && data.remainingUsers !== undefined) {
-    onlineCount.textContent = `${data.remainingUsers} Online`;
-    console.log(`✅ Online count updated: ${data.remainingUsers}`);
-  }
-  
-  // ============================================
-  // SAVE TO CACHE (CRITICAL FOR PERSISTENCE)
-  // ============================================
-  saveChatState(roomData.roomId, messagesCache);
-  console.log('💾 Chat state saved with leave message');
-  
-  // ============================================
-  // AUTO-CLEANUP: ROOM SELF-DESTRUCT
-  // ============================================
-  if (data.remainingUsers <= 1) {
-    console.log('⚠️ Only 1 user remaining - initiating room cleanup');
-    toast('Room closing...', 'warning');
-    
-    // Clear all state
-    clearChatState(true);
-    
-    // Redirect after delay
-    setTimeout(() => {
-      console.log('🔄 Redirecting to mood selection...');
-      window.location.href = '/mood.html';
-    }, 2000);
-  }
-  
-  console.log('👋 ========================================\n');
-});
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
