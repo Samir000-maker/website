@@ -38,7 +38,6 @@ const userActiveRooms = new Map();
 const userSockets = new Map();
 const userOperationLocks = new Map();
 
-
 // ============================================
 // REAL-TIME MOOD USER COUNTERS (DEDUPLICATED)
 // ============================================
@@ -358,6 +357,8 @@ function getAllMoodCounts() {
 
 
 const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
+const roomFileStore = new Map(); // fileId -> { roomId, chunks: [], totalChunks, name, type, size, senderId, senderUsername, assembledData: null }
+const ROOM_FILE_STORE_MAX = 50; // max files kept per room in memory
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
 const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
 const MAX_CONCURRENT_TRANSFERS = 20000; // ✅ Global limit
@@ -719,6 +720,7 @@ const roomCleanupTimers = new Map(); // roomId -> timeout
 // const ROOM_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
 const ROOM_EXPIRY_TIME = 900000 // 10 minutes
 const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds grace period after expiry
+const DISCONNECT_GRACE_PERIOD = 30000;
 
 // WebRTC metrics - use atomic increment functions to prevent race conditions
 const webrtcMetrics = {
@@ -803,10 +805,37 @@ async function performRoomCleanup(roomId) {
     console.log(`⏰ Canceled room's internal warning timer`);
   }
 
-  // Notify all users to clean up their IndexedDB files
-  room.users.forEach(user => {
+// Notify all users to clean up their IndexedDB files AND clear all server state
+  const usersToClean = [...room.users]; // snapshot before any mutation
+  usersToClean.forEach(user => {
+    // Clear active room state so user is not stuck in ghost room
+    if (user.firebaseUid) {
+      clearUserActiveRoom(user.firebaseUid);
+    }
+
+    // Remove from mood tracking
+    removeUserFromMood(user.userId, room.mood);
+
+    // Leave the user out of matchmaking records
+    matchmaking.leaveRoom(user.userId);
+
+    // Emit expired event and leave socket room on every device
+    const socketIds = user.firebaseUid ? getUserSocketIds(user.firebaseUid) : [];
+    socketIds.forEach(sid => {
+      const s = io.sockets.sockets.get(sid);
+      if (s && s.connected) {
+        s.emit('room_expired', {
+          roomId,
+          message: 'Chat room has expired',
+          cleanupFiles: true
+        });
+        s.leave(roomId);
+      }
+    });
+
+    // Fallback: also try the legacy single-socket lookup
     const userSocket = findActiveSocketForUser(user.userId);
-    if (userSocket) {
+    if (userSocket && userSocket.connected) {
       userSocket.emit('room_expired', {
         roomId,
         message: 'Chat room has expired',
@@ -869,6 +898,13 @@ async function performRoomCleanup(roomId) {
     } catch (error) {
       console.error(`❌ Error cleaning up call ${callId}:`, error);
       // Continue with other calls
+    }
+  }
+
+  // Clean up any stored file data for this room
+  for (const [fileId, fileRecord] of roomFileStore.entries()) {
+    if (fileRecord.roomId === roomId) {
+      roomFileStore.delete(fileId);
     }
   }
 
@@ -1773,7 +1809,6 @@ socket.on('file_chunk', (data) => {
       return;
     }
     
-    // ✅ Rate limit check
     if (!checkChunkRateLimit(user.userId)) {
       console.warn(`⚠️ Rate limit exceeded for ${user.username} on file chunks`);
       socket.emit('file_transmission_failed', { 
@@ -1786,106 +1821,79 @@ socket.on('file_chunk', (data) => {
     
     const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
     
-    // CRITICAL: Validate chunk data exists and is a string
     if (!chunkData || typeof chunkData !== 'string') {
       console.error(`❌ Invalid chunk data at index ${chunkIndex}`);
-      socket.emit('file_transmission_failed', { 
-        fileId, 
-        fileName,
-        reason: 'Invalid chunk data' 
-      });
+      socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid chunk data' });
       return;
     }
     
-    // ✅ FIX: Validate chunk data size matches claimed chunkSize
-    // Base64 encoding increases size by ~33%, so base64 length should be ~1.33x binary size
-    const expectedBase64Length = Math.ceil(chunkSize * 1.37); // 37% overhead for padding
-    const maxAllowedLength = expectedBase64Length * 1.1; // Allow 10% variance for padding
+    const expectedBase64Length = Math.ceil(chunkSize * 1.37);
+    const maxAllowedLength = expectedBase64Length * 1.1;
     
     if (chunkData.length > maxAllowedLength) {
       console.error(`❌ Chunk data size mismatch for ${fileId} chunk ${chunkIndex}`);
-      console.error(`   Claimed size: ${chunkSize} bytes`);
-      console.error(`   Expected base64 length: ~${expectedBase64Length}`);
-      console.error(`   Actual length: ${chunkData.length}`);
-      console.error(`   Difference: ${chunkData.length - expectedBase64Length} characters`);
-      
-      socket.emit('file_transmission_failed', { 
-        fileId,
-        fileName,
-        reason: 'Chunk data size exceeds claimed size. Possible malicious upload.'
-      });
-      
-      // Clean up this transfer
+      socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk data size exceeds claimed size.' });
       activeFileTransfers.delete(fileId);
+      roomFileStore.delete(fileId);
       return;
     }
     
-    // ✅ FIX: Additional validation - chunk data should be valid base64
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(chunkData)) {
       console.error(`❌ Invalid base64 data in chunk ${chunkIndex} of ${fileId}`);
-      socket.emit('file_transmission_failed', { 
-        fileId,
-        fileName,
-        reason: 'Invalid file data encoding'
-      });
+      socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid file data encoding' });
       activeFileTransfers.delete(fileId);
+      roomFileStore.delete(fileId);
       return;
     }
     
-    // ✅ FIX: Use actual chunkData.length for memory tracking (not claimed chunkSize)
-    const actualChunkSize = Math.floor(chunkData.length * 0.75); // Approximate binary size from base64
+    const actualChunkSize = Math.floor(chunkData.length * 0.75);
     
-    // Check global concurrent transfer limit
+    // Initialize transfer tracking if first chunk
     if (!activeFileTransfers.has(fileId)) {
       if (activeFileTransfers.size >= MAX_CONCURRENT_TRANSFERS) {
-        console.warn(`⚠️ Max concurrent transfers (${MAX_CONCURRENT_TRANSFERS}) reached`);
-        socket.emit('file_transmission_failed', { 
-          fileId,
-          fileName,
-          reason: 'Server at capacity. Please try again in a moment.'
-        });
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Server at capacity. Please try again in a moment.' });
         return;
       }
       
-      // Check global memory limit
       const currentMemory = getCurrentTransferMemory();
       if (currentMemory >= MAX_MEMORY_FOR_TRANSFERS) {
-        console.warn(`⚠️ Transfer memory limit reached: ${(currentMemory / 1024 / 1024).toFixed(2)}MB`);
-        socket.emit('file_transmission_failed', { 
-          fileId,
-          fileName,
-          reason: 'Server memory at capacity. Please try again shortly.'
-        });
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Server memory at capacity. Please try again shortly.' });
         return;
       }
       
-      // Initialize transfer tracking
       activeFileTransfers.set(fileId, {
         roomId,
         userId: user.userId,
         bytesTransferred: 0,
         startTime: Date.now()
       });
+
+      // Initialize server-side chunk store for this file
+      roomFileStore.set(fileId, {
+        roomId,
+        chunks: new Array(totalChunks).fill(null),
+        totalChunks,
+        receivedCount: 0,
+        name: fileName,
+        type: null, // will be set from chat_message metadata
+        size: null,
+        senderId: user.userId,
+        senderUsername: user.username,
+        assembledData: null
+      });
       
-      console.log(`📦 New file transfer started: ${fileName} (${fileId})`);
-      console.log(`   Active transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
-      console.log(`   Memory in use: ${(currentMemory / 1024 / 1024).toFixed(2)}MB/${(MAX_MEMORY_FOR_TRANSFERS / 1024 / 1024).toFixed(2)}MB`);
+      console.log(`📦 New file transfer started: ${fileName} (${fileId}), ${totalChunks} chunks`);
     }
     
-    // Update bytes transferred with ACTUAL size
+    // Update transfer tracking
     const transfer = activeFileTransfers.get(fileId);
     if (transfer) {
       transfer.bytesTransferred += actualChunkSize;
-      
-      // Check if individual file exceeds limit
       if (transfer.bytesTransferred > MAX_FILE_SIZE) {
-        console.error(`❌ File ${fileId} exceeded size limit: ${(transfer.bytesTransferred / 1024 / 1024).toFixed(2)}MB`);
+        console.error(`❌ File ${fileId} exceeded size limit`);
         activeFileTransfers.delete(fileId);
-        socket.emit('file_transmission_failed', { 
-          fileId,
-          fileName,
-          reason: 'File size limit exceeded'
-        });
+        roomFileStore.delete(fileId);
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'File size limit exceeded' });
         return;
       }
     }
@@ -1895,26 +1903,27 @@ socket.on('file_chunk', (data) => {
     if (!room) {
       console.error(`❌ Room ${roomId} not found for file chunk`);
       activeFileTransfers.delete(fileId);
-      socket.emit('file_transmission_failed', { 
-        fileId,
-        fileName,
-        reason: 'Room not found or expired'
-      });
+      roomFileStore.delete(fileId);
+      socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Room not found or expired' });
       return;
     }
     
     if (!room.hasUser(user.userId)) {
       console.error(`❌ User ${user.username} not in room ${roomId}`);
       activeFileTransfers.delete(fileId);
-      socket.emit('file_transmission_failed', { 
-        fileId,
-        fileName,
-        reason: 'You are not in this room'
-      });
+      roomFileStore.delete(fileId);
+      socket.emit('file_transmission_failed', { fileId, fileName, reason: 'You are not in this room' });
       return;
     }
     
-    // Relay chunk to all OTHER users in room
+    // Store chunk server-side
+    const fileRecord = roomFileStore.get(fileId);
+    if (fileRecord && fileRecord.chunks[chunkIndex] === null) {
+      fileRecord.chunks[chunkIndex] = chunkData;
+      fileRecord.receivedCount++;
+    }
+
+    // Relay chunk to all OTHER users in room (live receivers)
     socket.to(roomId).emit('file_chunk', {
       fileId,
       fileName,
@@ -1922,25 +1931,36 @@ socket.on('file_chunk', (data) => {
       senderUsername: user.username,
       chunkIndex,
       totalChunks,
-      chunkSize: actualChunkSize, // ✅ Send validated size
+      chunkSize: actualChunkSize,
       chunkData
     });
+
+    // Emit upload progress back to the SENDER so the UI can update from 0%
+    const progressPercent = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
+    socket.emit('file_upload_progress', {
+      fileId,
+      fileName,
+      progress: progressPercent,
+      chunksReceived: fileRecord ? fileRecord.receivedCount : 0,
+      totalChunks
+    });
     
-    // Log progress for large files
-    if (totalChunks > 10 && chunkIndex % Math.floor(totalChunks / 10) === 0) {
-      const progress = ((chunkIndex / totalChunks) * 100).toFixed(1);
-      console.log(`📦 File ${fileName} progress: ${progress}% (chunk ${chunkIndex}/${totalChunks})`);
+    // If all chunks are now stored, assemble the full base64 string
+    if (fileRecord && fileRecord.receivedCount === fileRecord.totalChunks) {
+      fileRecord.assembledData = fileRecord.chunks.join('');
+      fileRecord.chunks = null; // free individual chunk references
+      console.log(`✅ File ${fileName} (${fileId}) fully assembled on server (${fileRecord.assembledData.length} base64 chars)`);
     }
     
   } catch (error) {
     console.error('❌ File chunk relay error:', error);
     if (data?.fileId) {
       activeFileTransfers.delete(data.fileId);
+      roomFileStore.delete(data.fileId);
     }
   }
 });
 
-// ✅ FIX: Enhanced cleanup on transfer complete
 socket.on('file_transfer_complete', ({ fileId }) => {
   if (activeFileTransfers.has(fileId)) {
     const transfer = activeFileTransfers.get(fileId);
@@ -1952,6 +1972,22 @@ socket.on('file_transfer_complete', ({ fileId }) => {
     console.log(`✅ File transfer ${fileId} completed`);
     console.log(`   Size: ${sizeMB}MB, Time: ${(transferTime / 1000).toFixed(1)}s`);
     console.log(`   Active transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
+  }
+
+  // Patch the stored room history message so it includes the full assembled data.
+  // This way any user who joins later gets the full file from chat history.
+  const fileRecord = roomFileStore.get(fileId);
+  if (fileRecord && fileRecord.assembledData) {
+    const room = matchmaking.getRoom(fileRecord.roomId);
+    if (room) {
+      const messages = room.getMessages ? room.getMessages() : (room.messages || []);
+      const msg = messages.find(m => m.attachment && m.attachment.fileId === fileId);
+      if (msg && msg.attachment) {
+        msg.attachment.data = fileRecord.assembledData;
+        msg.attachment.chunked = false; // mark as fully assembled
+        console.log(`📎 Patched room history message for ${fileRecord.name} with assembled data`);
+      }
+    }
   }
 });
 
@@ -2078,13 +2114,6 @@ socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId,
   }
 });
 
-// CRITICAL FIX: Handle file transfer completion cleanup
-socket.on('file_transfer_complete', ({ fileId }) => {
-  if (activeFileTransfers.has(fileId)) {
-    activeFileTransfers.delete(fileId);
-    console.log(`✅ File transfer ${fileId} completed and cleaned up`);
-  }
-});
   
   socket.on('validate_cached_call', async ({ callId, roomId }) => {
     try {
@@ -2820,8 +2849,17 @@ socket.on('join_room', ({ roomId }) => {
       console.log(`   Expires at: ${new Date(room.expiresAt).toISOString()}`);
     }
 
-    // Get chat history from the room
+    // Get chat history from the room, and attach any assembled file data for chunked attachments
     const chatHistory = room.getMessages ? room.getMessages() : [];
+    chatHistory.forEach(msg => {
+      if (msg.attachment && msg.attachment.chunked && msg.attachment.fileId) {
+        const fileRecord = roomFileStore.get(msg.attachment.fileId);
+        if (fileRecord && fileRecord.assembledData) {
+          msg.attachment.data = fileRecord.assembledData;
+          msg.attachment.chunked = false;
+        }
+      }
+    });
     console.log(`📜 Sending ${chatHistory.length} chat messages to ${user.username}`);
 
     // Check for active calls in this room
@@ -3117,8 +3155,17 @@ socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
       }
     }
     
+    if (messageData.attachment && messageData.attachment.chunked) {
+      const fileRecord = roomFileStore.get(messageData.attachment.fileId);
+      if (fileRecord && fileRecord.assembledData) {
+        messageData.attachment.data = fileRecord.assembledData;
+        messageData.attachment.chunked = false;
+      }
+    }
+
     // Emit to ALL users in the room (including sender)
     io.to(roomId).emit('chat_message', messageData);
+    
     
     console.log(`✅ Message broadcast complete to ${roomId}`);
     console.log('📡 ========================================');
@@ -4556,14 +4603,36 @@ socket.on('leave_room', async (data, callback) => {
       if (remainingUsers === 0) {
         console.log(`🗑️ Room ${roomId} is now empty - will be destroyed by expiry system`);
         // Room will be cleaned up by its expiry timer
-      } else if (remainingUsers === 1) {
-        console.log(`⚠️ Only 1 user left in room ${roomId}`);
-        // Notify the last remaining user
+     } else if (remainingUsers === 1) {
+        console.log(`⚠️ Only 1 user left in room ${roomId} — auto-destroying`);
         const lastUser = room.users[0];
-        emitToUserAllDevices(lastUser.firebaseUid, 'last_user_in_room', {
+
+        // Notify last user that room is closing
+        emitToUserAllDevices(lastUser.firebaseUid, 'room_closed', {
           roomId,
-          message: 'Your partner has left. Room will close when you leave.'
+          reason: 'Your partner left the room',
+          redirectTo: '/mood.html'
         });
+
+        // Remove last user from room completely
+        room.removeUser(lastUser.userId);
+        if (lastUser.firebaseUid) {
+          clearUserActiveRoom(lastUser.firebaseUid);
+        }
+        removeUserFromMood(lastUser.userId, room.mood);
+        matchmaking.leaveRoom(lastUser.userId);
+
+        // Leave all sockets of last user out of this room
+        if (lastUser.firebaseUid) {
+          const lastUserSockets = getUserSocketIds(lastUser.firebaseUid);
+          lastUserSockets.forEach(sid => {
+            const s = io.sockets.sockets.get(sid);
+            if (s) s.leave(roomId);
+          });
+        }
+
+        // Destroy room immediately
+        await performRoomCleanup(roomId);
       }
       
       console.log(`✅ [UID: ${firebaseUid}] Successfully left room ${roomId}`);
