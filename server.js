@@ -4470,69 +4470,132 @@ socket.on('video_state_changed', async ({ callId, enabled }) => {
 
 
 socket.on('leave_room', async (data, callback) => {
-    if (!currentUser) {
+    // Get user data from socketUsers Map
+    const userData = socketUsers.get(socket.id);
+    
+    if (!userData) {
+      console.error(`❌ [leave_room] Socket ${socket.id} not authenticated`);
       return callback?.({ success: false, error: 'Not authenticated' });
     }
     
-    const { roomId } = data;
-    const userId = currentUser.userId;
+    const userId = userData.userId;
+    const firebaseUid = userData.firebaseUid;
+    const username = userData.username;
     
-    console.log(`🚪 [UID: ${userId}] Leaving room ${roomId}`);
+    console.log(`🚪 ========================================`);
+    console.log(`🚪 LEAVE_ROOM REQUEST`);
+    console.log(`🚪 ========================================`);
+    console.log(`   User: ${username} (${userId})`);
+    console.log(`   Firebase UID: ${firebaseUid}`);
     
-    const releaseLock = await acquireUserLock(userId);
+    const releaseLock = await acquireUserLock(firebaseUid);
     
     try {
-      // Validate room access
-      const validation = validateRoomAccess(roomId, userId);
-      if (!validation.valid) {
-        return callback?.({ success: false, error: validation.error });
+      // Get active room
+      const activeRoom = getUserActiveRoom(firebaseUid);
+      
+      if (!activeRoom) {
+        console.log(`ℹ️ [UID: ${firebaseUid}] No active room to leave`);
+        return callback?.({ success: true, message: 'No active room' });
       }
       
-      const room = validation.room;
+      const roomId = activeRoom.roomId;
+      console.log(`   Room: ${roomId}`);
       
-      // Remove user from room
+      // Get room from matchmaking
+      const room = matchmaking.getRoom(roomId);
+      
+      if (!room) {
+        console.warn(`⚠️ [UID: ${firebaseUid}] Room ${roomId} not found (already expired/destroyed)`);
+        clearUserActiveRoom(firebaseUid);
+        return callback?.({ success: true, message: 'Room already closed' });
+      }
+      
+      console.log(`   Room users before leave: ${room.users.length}`);
+      console.log(`   Users: [${room.users.map(u => u.username).join(', ')}]`);
+      
+      // CRITICAL: Remove user from room
       room.removeUser(userId);
+      console.log(`✅ User removed from room`);
+      console.log(`   Room users after leave: ${room.users.length}`);
       
       // CRITICAL: Clear active room state
-      clearUserActiveRoom(userId);
+      clearUserActiveRoom(firebaseUid);
       
       // Remove from mood tracking
       removeUserFromMood(userId, room.mood);
+      console.log(`✅ Removed from mood tracking: ${room.mood}`);
       
       // Leave socket room on ALL devices
-      const allSocketIds = getUserSocketIds(userId);
+      const allSocketIds = getUserSocketIds(firebaseUid);
       allSocketIds.forEach(socketId => {
         const userSocket = io.sockets.sockets.get(socketId);
         if (userSocket) {
           userSocket.leave(roomId);
+          console.log(`🔌 Socket ${socketId} left room ${roomId}`);
         }
       });
       
-      // Notify partner
-      const partner = room.users.find(u => u.userId !== userId);
-      if (partner) {
-        // Emit to all partner's devices
-        emitToUserAllDevices(partner.userId, 'partner_left', {
+      // ============================================
+      // CRITICAL: BROADCAST USER LEFT TO ROOM
+      // ============================================
+      console.log(`📢 Broadcasting user_left to room ${roomId}`);
+      
+      const remainingUsers = room.users.length;
+      
+      // Broadcast to all remaining users in the room
+      io.to(roomId).emit('user_left', {
+        userId: userId,
+        username: username,
+        pfpUrl: userData.pfpUrl,
+        remainingUsers: remainingUsers,
+        roomId: roomId
+      });
+      
+      console.log(`✅ Broadcasted user_left event`);
+      console.log(`   Remaining users: ${remainingUsers}`);
+      
+      // ============================================
+      // NOTIFY LEAVING USER'S ALL DEVICES
+      // ============================================
+      emitToUserAllDevices(firebaseUid, 'left_room', { 
+        roomId,
+        success: true 
+      });
+      
+      console.log(`✅ Notified all devices of user ${username}`);
+      
+      // ============================================
+      // CHECK IF ROOM SHOULD BE DESTROYED
+      // ============================================
+      if (remainingUsers === 0) {
+        console.log(`🗑️ Room ${roomId} is now empty - will be destroyed by expiry system`);
+        // Room will be cleaned up by its expiry timer
+      } else if (remainingUsers === 1) {
+        console.log(`⚠️ Only 1 user left in room ${roomId}`);
+        // Notify the last remaining user
+        const lastUser = room.users[0];
+        emitToUserAllDevices(lastUser.firebaseUid, 'last_user_in_room', {
           roomId,
-          userId,
-          username: currentUser.username
+          message: 'Your partner has left. Room will close when you leave.'
         });
       }
       
-      // Notify all user's devices
-      emitToUserAllDevices(userId, 'room_left', { roomId });
-      
-      console.log(`✅ [UID: ${userId}] Left room ${roomId} - can now join new rooms`);
+      console.log(`✅ [UID: ${firebaseUid}] Successfully left room ${roomId}`);
+      console.log(`🚪 ========================================\n`);
       
       callback?.({ success: true });
       
     } catch (error) {
-      console.error(`❌ [UID: ${userId}] Leave room error:`, error);
+      console.error(`❌ [UID: ${firebaseUid}] Leave room error:`, error);
+      console.error(error.stack);
+      console.log(`🚪 ========================================\n`);
       callback?.({ success: false, error: error.message });
     } finally {
       releaseLock();
     }
   });
+
 
 socket.on('disconnect', async (reason) => {
   console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
