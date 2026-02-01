@@ -1123,9 +1123,9 @@
     </div>
   </div>
 </div>
-  
 
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
     <script>
@@ -2844,284 +2844,110 @@ function saveChatState(roomId, messages) {
     console.log('💾 SAVING CHAT STATE');
     console.log('💾 ========================================');
     console.log(`   Room: ${roomId}`);
-    console.log(`   Messages: ${messages.length}`);
+    console.log(`   Messages: ${messages?.length || 0}`);
     
-    // Determine button state
+    // CRITICAL FIX: Validate input data
+    if (!roomId) {
+      console.error('❌ Cannot save state: roomId missing');
+      return;
+    }
+    
+    if (!Array.isArray(messages)) {
+      console.error('❌ Cannot save state: messages not an array');
+      return;
+    }
+    
+    // Validate messages have required fields
+    const validMessages = messages.filter(msg => {
+      const isValid = msg.userId && msg.timestamp && (msg.message || msg.attachment);
+      if (!isValid) {
+        console.warn(`⚠️ Skipping invalid message in cache save:`, msg);
+      }
+      return isValid;
+    });
+    
+    if (validMessages.length < messages.length) {
+      console.warn(`⚠️ Filtered out ${messages.length - validMessages.length} invalid messages`);
+    }
+    
+    // Determine call button state
     let callButtonState = 'none';
-    const hasBackButton = joinCallBtn && joinCallBtn.textContent.includes('Back to Call');
-    const hasJoinButton = joinCallBtn && joinCallBtn.textContent.includes('Join Call') && 
-                          !joinCallBtn.classList.contains('hidden');
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
     
-    if (hasBackButton) {
+    if (userInCall) {
       callButtonState = 'back';
-    } else if (hasJoinButton) {
+    } else if (activeCallInRoom) {
       callButtonState = 'join';
     }
     
-    // Prepare user list (deduplicated by userId)
-    const userMap = new Map();
-    if (usersList && usersList.children) {
-      Array.from(usersList.children).forEach(card => {
-        const username = card.querySelector('.text-sm')?.textContent?.trim();
-        if (username) {
-          const userId = card.dataset?.userId || username;
-          if (!userMap.has(userId)) {
-            userMap.set(userId, {
-              userId,
-              username,
-              pfpUrl: card.querySelector('img')?.src || null,
-              isOnline: card.querySelector('.bg-green-500') !== null
-            });
-          }
-        }
-      });
-    }
+    const callInRoomToSave = activeCallInRoom || null;
     
-    const chatState = {
-      roomId: roomId,
+    const state = {
+      roomId,
+      messages: validMessages, // Use validated messages
       timestamp: Date.now(),
       callButtonState,
-      activeCallInRoom: activeCallInRoom || null,
-      hasBackgroundCall: isInBackgroundCall || false,
-      userList: Array.from(userMap.values()),
-      systemMessages: messages.filter(m => m.type === 'system').map(m => ({
-        type: 'system',
-        text: m.text,
-        timestamp: m.timestamp
-      }))
+      activeCallInRoom: callInRoomToSave,
+      version: 2 // Add version for future migrations
     };
     
-    // Save valid messages
-    const validMessages = messages.filter(m => m && (m.type || m.text));
+    // CRITICAL FIX: Use try-catch for localStorage quota errors
+    try {
+      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+      
+      console.log('✅ Chat state saved successfully:');
+      console.log(`   Valid messages: ${validMessages.length}`);
+      console.log(`   Button state: ${callButtonState}`);
+      console.log(`   Has active call: ${!!callInRoomToSave}`);
+      console.log('💾 ========================================\n');
+      
+    } catch (storageError) {
+      if (storageError.name === 'QuotaExceededError') {
+        console.error('❌ LocalStorage quota exceeded - attempting cleanup');
+        
+        // Emergency cleanup: keep only last 50 messages
+        const trimmedMessages = validMessages.slice(-50);
+        const trimmedState = { ...state, messages: trimmedMessages };
+        
+        try {
+          localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(trimmedState));
+          console.warn(`⚠️ Saved trimmed state (${trimmedMessages.length} messages)`);
+        } catch (retryError) {
+          console.error('❌ Failed to save even trimmed state:', retryError);
+          // Clear old state to free space
+          localStorage.removeItem(CHAT_STATE_KEY);
+          localStorage.removeItem(CHAT_MESSAGES_KEY);
+        }
+      } else {
+        throw storageError; // Re-throw non-quota errors
+      }
+    }
     
-    localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(chatState));
-    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(validMessages));
-    localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-    
-    console.log('✅ Chat state saved successfully:');
-    console.log(`   Valid messages: ${validMessages.length}`);
-    console.log(`   Button state: ${callButtonState}`);
-    console.log(`   Has active call: ${!!activeCallInRoom}`);
-    console.log(`   User list: ${chatState.userList.length} users`);
-    console.log(`   System messages: ${chatState.systemMessages.length}`);
-    console.log('💾 ========================================\n');
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to save chat state:', error);
-    return false;
+  } catch (e) {
+    console.error('❌ ========================================');
+    console.error('❌ FAILED TO SAVE CHAT STATE');
+    console.error('❌ ========================================');
+    console.error('   Error:', e.message);
+    console.error('   Stack:', e.stack);
+    console.error('❌ ========================================\n');
   }
 }
   
-function loadChatState() {
-  try {
-    const stateStr = localStorage.getItem(CHAT_STATE_KEY);
-    if (!stateStr) return null;
-    
-    const state = JSON.parse(stateStr);
-    const timestamp = parseInt(localStorage.getItem(CHAT_TIMESTAMP_KEY) || '0');
-    const now = Date.now();
-    
-    // State expires after 1 hour
-    if (now - timestamp > 3600000) {
-      console.log('⏰ Cached state expired (>1 hour old)');
-      clearChatState(false);
+  function loadChatState() {
+    try {
+      const stateStr = localStorage.getItem(CHAT_STATE_KEY);
+      if (!stateStr) return null;
+      
+      const state = JSON.parse(stateStr);
+      console.log('✅ Chat state loaded:', state.messages?.length || 0, 'messages');
+      return state;
+    } catch (e) {
+      console.warn('⚠️ Failed to load chat state:', e);
       return null;
     }
-    
-    console.log('📦 ========================================');
-    console.log('📦 LOADED CHAT STATE FROM CACHE');
-    console.log('📦 ========================================');
-    console.log(`   Room: ${state.roomId}`);
-    console.log(`   Button state: ${state.callButtonState}`);
-    console.log(`   Active call: ${!!state.activeCallInRoom}`);
-    console.log(`   User list: ${state.userList?.length || 0} users`);
-    console.log(`   System messages: ${state.systemMessages?.length || 0}`);
-    console.log(`   Age: ${Math.round((now - timestamp) / 1000)}s`);
-    console.log('📦 ========================================\n');
-    
-    return state;
-  } catch (error) {
-    console.error('❌ Failed to load chat state:', error);
-    return null;
   }
-}
-
-function restoreUserListFromCache(cachedState) {
-  if (!cachedState || !cachedState.userList || !usersList) {
-    return;
-  }
-  
-  console.log('👥 ========================================');
-  console.log('👥 RESTORING USER LIST FROM CACHE');
-  console.log('👥 ========================================');
-  console.log(`   Users to restore: ${cachedState.userList.length}`);
-  
-  // Clear existing user list
-  usersList.innerHTML = '';
-  
-  // Use Map to deduplicate by userId
-  const userMap = new Map();
-  
-  cachedState.userList.forEach(user => {
-    if (!userMap.has(user.userId)) {
-      userMap.set(user.userId, user);
-    }
-  });
-  
-  // Render deduplicated users
-  userMap.forEach(user => {
-    const userCard = document.createElement('div');
-    userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-    userCard.dataset.userId = user.userId;
-    
-    const pfpElement = createProfilePictureElement(user.pfpUrl || null, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-    
-    const userInfo = document.createElement('div');
-    userInfo.className = 'flex-1 min-w-0';
-    
-    const nameSpan = document.createElement('div');
-    nameSpan.className = 'text-sm font-semibold truncate';
-    nameSpan.textContent = user.username || 'User';
-    
-    const statusSpan = document.createElement('div');
-    statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-    
-    if (user.isOnline) {
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-    } else {
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-gray-400 flex-shrink-0"></span> Offline';
-    }
-    
-    userInfo.appendChild(nameSpan);
-    userInfo.appendChild(statusSpan);
-    
-    userCard.appendChild(pfpElement);
-    userCard.appendChild(userInfo);
-    usersList.appendChild(userCard);
-  });
-  
-  console.log(`✅ Restored ${userMap.size} unique users to list`);
-  console.log('👥 ========================================\n');
-  
-  setupUserCardClick();
-  
-  if (onlineCount) {
-    onlineCount.textContent = `${userMap.size} Online`;
-  }
-}
-
-
-
-function restoreSystemMessagesFromCache(cachedState) {
-  if (!cachedState || !cachedState.systemMessages) {
-    return;
-  }
-  
-  console.log('💬 ========================================');
-  console.log('💬 RESTORING SYSTEM MESSAGES FROM CACHE');
-  console.log('💬 ========================================');
-  console.log(`   System messages to restore: ${cachedState.systemMessages.length}`);
-  
-  cachedState.systemMessages.forEach(msg => {
-    // Add to messagesCache if not already present
-    const exists = messagesCache.some(m => 
-      m.type === 'system' && 
-      m.text === msg.text && 
-      Math.abs((m.timestamp || 0) - (msg.timestamp || 0)) < 1000
-    );
-    
-    if (!exists) {
-      messagesCache.push({
-        type: 'system',
-        text: msg.text,
-        timestamp: msg.timestamp || Date.now()
-      });
-    }
-  });
-  
-  console.log(`✅ Restored ${cachedState.systemMessages.length} system messages`);
-  console.log('💬 ========================================\n');
-}
-
-  
-  
-  function saveChatState() {
-  try {
-    console.log('💾 ========================================');
-    console.log('💾 SAVING CHAT STATE');
-    console.log('💾 ========================================');
-    console.log(`   Room: ${roomData?.roomId}`);
-    console.log(`   Messages: ${messagesCache.length}`);
-    
-    // Determine button state
-    let callButtonState = 'none';
-    const hasBackButton = joinCallBtn && joinCallBtn.textContent.includes('Back to Call');
-    const hasJoinButton = joinCallBtn && joinCallBtn.textContent.includes('Join Call') && 
-                          !joinCallBtn.classList.contains('hidden');
-    
-    if (hasBackButton) {
-      callButtonState = 'back';
-    } else if (hasJoinButton) {
-      callButtonState = 'join';
-    }
-    
-    // Prepare user list (deduplicated by userId)
-    const userMap = new Map();
-    if (usersList && usersList.children) {
-      Array.from(usersList.children).forEach(card => {
-        const username = card.querySelector('.text-sm')?.textContent?.trim();
-        if (username) {
-          // Extract userId from data attribute or generate stable key
-          const userId = card.dataset?.userId || username;
-          if (!userMap.has(userId)) {
-            userMap.set(userId, {
-              userId,
-              username,
-              isOnline: card.querySelector('.bg-green-500') !== null
-            });
-          }
-        }
-      });
-    }
-    
-    const chatState = {
-      roomId: roomData?.roomId,
-      timestamp: Date.now(),
-      callButtonState,
-      activeCallInRoom: activeCallInRoom || null,
-      hasBackgroundCall: isInBackgroundCall || false,
-      backButtonHandled: backButtonHandled || false,
-      userList: Array.from(userMap.values()),
-      systemMessages: messagesCache.filter(m => m.type === 'system').map(m => ({
-        type: 'system',
-        text: m.text,
-        timestamp: m.timestamp
-      }))
-    };
-    
-    // Save valid messages (filter out undefined/null)
-    const validMessages = messagesCache.filter(m => m && (m.type || m.text));
-    
-    localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(chatState));
-    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(validMessages));
-    localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-    
-    console.log('✅ Chat state saved successfully:');
-    console.log(`   Valid messages: ${validMessages.length}`);
-    console.log(`   Button state: ${callButtonState}`);
-    console.log(`   Has active call: ${!!activeCallInRoom}`);
-    console.log(`   User list: ${chatState.userList.length} users`);
-    console.log(`   System messages: ${chatState.systemMessages.length}`);
-    console.log(`   Back button handled: ${backButtonHandled}`);
-    console.log('💾 ========================================\n');
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to save chat state:', error);
-    return false;
-  }
-}
   
 // Replace the existing clearChatState function with this version:
 async function clearChatState(force = false) {
@@ -3161,32 +2987,13 @@ async function clearChatState(force = false) {
 }
 
   function clearAllChatData() {
-  console.log('🧹 ========================================');
-  console.log('🧹 CLEARING ALL CHAT STATE');
-  console.log('🧹 ========================================');
-  
-  // Clear message history
-  messagesCache = [];
-  if (messagesList) {
-    messagesList.innerHTML = '';
-  }
-  
-  // Clear localStorage chat data
-  try {
+    // CRITICAL: Clear ALL chat-related data on entry
     localStorage.removeItem(CHAT_STATE_KEY);
     localStorage.removeItem(CHAT_MESSAGES_KEY);
     localStorage.removeItem(CHAT_TIMESTAMP_KEY);
-    console.log('   ✅ Cleared localStorage chat data');
-  } catch (e) {
-    console.error('   ❌ Failed to clear localStorage:', e);
+    // Don't clear currentRoom or activeCall - those are needed
+    console.log('🧹 All chat state cleared on entry');
   }
-  
-  // DO NOT CLEAR: activeCallInRoom - managed separately
-  // DO NOT CLEAR: currentRoom - needed for room identity
-  
-  console.log('🧹 All chat state cleared on entry');
-  console.log('🧹 ========================================\n');
-}
   
   function escapeHtml(text) {
     if (_Utils && typeof _Utils.escapeHtml === 'function') {
@@ -3903,42 +3710,111 @@ function setupBackButtonHandler() {
   console.log('🔧 SETTING UP BACK BUTTON HANDLER');
   console.log('🔧 ========================================');
   
-  // Add state to history to enable back button detection
-  if (!window.history.state?.chatRoom) {
-    window.history.pushState({ chatRoom: true, roomId: roomData?.roomId }, '');
-    console.log('✅ History guard established');
-  }
+  let dialogOpen = false;
+  let isLeaving = false;
+  let historyGuardActive = true;
   
-  // Listen for back button - ALWAYS show dialog
-  window.addEventListener('popstate', (event) => {
-    console.log('⬅️ ========================================');
-    console.log('⬅️ BACK BUTTON PRESSED');
-    console.log('⬅️ ========================================');
-    console.log('   navigatingToCall:', navigatingToCall);
-    
-    if (navigatingToCall) {
-      console.log('ℹ️ Navigating to call - allowing navigation');
-      console.log('⬅️ ========================================\n');
+  // Push TWO states to create history guard
+  history.pushState({ page: 'chat', guard: 1 }, '');
+  history.pushState({ page: 'chat', guard: 2 }, '');
+  console.log('✅ History guard established');
+  
+  // Execute complete leave sequence
+  async function executeLeaveSequence() {
+    if (isLeaving) {
+      console.log('⚠️ Leave already in progress');
       return;
     }
     
-    // ALWAYS show dialog - no tracking of "handled" state
-    console.log('🚨 Showing leave dialog');
+    console.log('🚪 ========================================');
+    console.log('🚪 EXECUTING LEAVE SEQUENCE');
+    console.log('🚪 ========================================');
     
-    // Restore history state
-    window.history.pushState({ chatRoom: true, roomId: roomData?.roomId }, '');
+    isLeaving = true;
+    backButtonHandled = true;
+    historyGuardActive = false;
     
-    // Show confirmation dialog
-    const shouldLeave = confirm('Are you sure you want to leave this chat?');
+    try {
+      stopCachedCallMonitoring();
+      
+      const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+      if (activeCallStr) {
+        const callData = JSON.parse(activeCallStr);
+        if (socketInstance?.connected) {
+          console.log('📤 Emitting leave_call');
+          socketInstance.emit('leave_call', { callId: callData.callId });
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        localStorage.removeItem(ACTIVE_CALL_KEY);
+        sessionStorage.removeItem('hasBackgroundCall');
+        sessionStorage.removeItem('returningFromCall');
+        sessionStorage.removeItem('backgroundCallMode');
+        sessionStorage.removeItem('returningToBackgroundCall');
+      }
+      
+      if (socketInstance?.connected) {
+        console.log('📤 Emitting leave_room');
+        socketInstance.emit('leave_room');
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
+      await clearChatState(true);
+      
+      console.log('✅ Cleanup complete');
+      console.log('🔄 Navigating to mood.html');
+      console.log('🚪 ========================================\n');
+      
+      // Direct navigation - no other functions
+      window.location.href = '/mood.html';
+      
+    } catch (error) {
+      console.error('❌ Error during leave:', error);
+      window.location.href = '/mood.html';
+    }
+  }
+  
+  // Popstate event handler
+  window.addEventListener('popstate', async (event) => {
+    console.log('⬅️ ========================================');
+    console.log('⬅️ POPSTATE FIRED');
+    console.log('⬅️ ========================================');
+    console.log(`   Guard active: ${historyGuardActive}`);
+    console.log(`   Dialog open: ${dialogOpen}`);
+    console.log(`   Is leaving: ${isLeaving}`);
     
-    if (shouldLeave) {
-      console.log('✅ User confirmed leave');
-      handleLeaveRoom();
-    } else {
-      console.log('❌ User cancelled leave - staying in room');
+    if (isLeaving || !historyGuardActive) {
+      console.log('   Guard inactive - allowing navigation');
+      return;
     }
     
+    // IMMEDIATELY re-push to cancel back navigation
+    history.pushState({ page: 'chat', guard: Date.now() }, '');
+    console.log('   ✅ Canceled back navigation');
+    
+    // SECOND BACK PRESS
+    if (dialogOpen) {
+      console.log('   🔴 SECOND BACK PRESS');
+      const overlay = document.getElementById('confirmationOverlay');
+      if (overlay) overlay.style.display = 'none';
+      dialogOpen = false;
+      console.log('⬅️ ========================================\n');
+      await executeLeaveSequence();
+      return;
+    }
+    
+    // FIRST BACK PRESS
+    console.log('   🟡 FIRST BACK PRESS');
     console.log('⬅️ ========================================\n');
+    
+    dialogOpen = true;
+    const shouldLeave = await showConfirmationDialog();
+    dialogOpen = false;
+    
+    console.log('📋 Dialog response:', shouldLeave ? 'LEAVE' : 'STAY');
+    
+    if (shouldLeave) {
+      await executeLeaveSequence();
+    }
   });
   
   console.log('✅ Back button handler installed');
@@ -4147,174 +4023,213 @@ socketInstance.on('call_created', (data) => {
 });
 
 
-socketInstance.on('room_joined', (data) => {
+socketInstance.on('room_joined', async (data) => {
   console.log('✅ ========================================');
   console.log('✅ ROOM_JOINED EVENT RECEIVED');
   console.log('✅ ========================================');
   console.log(`   roomId: ${data.roomId}`);
   
-  // CRITICAL: Always sync server time first
+  // [Keep existing clock sync code...]
+  const clientNow = Date.now();
+  
   if (data.serverTime) {
-    const clientTime = Date.now();
-    serverClockOffset = new Date(data.serverTime).getTime() - clientTime;
+    serverClockOffset = data.serverTime - clientNow;
     console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
-    console.log(`   Client time: ${new Date(clientTime).toISOString()}`);
+    console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
     console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
     
-    if (Math.abs(serverClockOffset) > 10000) {
+    if (Math.abs(serverClockOffset) > 5000) {
       console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
-      console.warn(`   Timer will be adjusted to compensate`);
     }
+  } else {
+    console.warn('⚠️ No serverTime in room_joined, assuming no clock skew');
+    serverClockOffset = 0;
   }
   
-  // CRITICAL: Store server-provided expiry time
   if (data.expiresAt) {
-    const serverNow = data.serverTime ? new Date(data.serverTime).getTime() : Date.now();
-    const expiresAtTime = new Date(data.expiresAt).getTime();
-    const timeRemaining = (expiresAtTime - serverNow) / 1000;
+    serverExpiresAt = data.expiresAt;
+    
+    const serverNow = clientNow + serverClockOffset;
+    const timeRemaining = data.expiresAt - serverNow;
     
     console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
     console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-    console.log(`   Time remaining (adjusted): ${timeRemaining.toFixed(1)}s`);
+    console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
     
-    serverExpiresAt = expiresAtTime;
-    
-    // Update localStorage with server time
-    if (roomData) {
-      roomData.expiresAt = data.expiresAt;
-      localStorage.setItem('currentRoom', JSON.stringify(roomData));
-      console.log('✅ Updated localStorage with server expiry time');
-    }
-  }
-  
-  // Check if we have cached state to restore
-  const cachedState = loadChatState();
-  const isPageRefresh = performance.navigation?.type === 1 || 
-                        performance.getEntriesByType('navigation')[0]?.type === 'reload';
-  
-  let shouldRestoreFromCache = false;
-  
-  if (cachedState && cachedState.roomId === data.roomId && isPageRefresh) {
-    console.log('🔄 Page refresh detected - restoring from cache');
-    shouldRestoreFromCache = true;
-  }
-  
-  // Merge server history with cached messages
-  const serverMessages = data.messages || [];
-  const cachedMessages = shouldRestoreFromCache ? (JSON.parse(localStorage.getItem(CHAT_MESSAGES_KEY) || '[]')) : [];
-  
-  console.log(`📨 Message sources:`);
-  console.log(`   Server messages: ${serverMessages.length}`);
-  console.log(`   Cached messages: ${cachedMessages.length}`);
-  
-  // Deduplicate and merge
-  const messageMap = new Map();
-  
-  // Add cached messages first (including system messages)
-  cachedMessages.forEach(msg => {
-    if (msg.type === 'system') {
-      // System messages: dedupe by text + rough timestamp (1 minute window)
-      const key = `system_${msg.text}_${Math.floor((msg.timestamp || 0) / 60000)}`;
-      if (!messageMap.has(key)) {
-        messageMap.set(key, msg);
+    const roomStr = localStorage.getItem('currentRoom');
+    if (roomStr) {
+      try {
+        const localRoomData = JSON.parse(roomStr);
+        localRoomData.expiresAt = data.expiresAt;
+        localStorage.setItem('currentRoom', JSON.stringify(localRoomData));
+        console.log('✅ Updated localStorage with server expiry time');
+      } catch (e) {
+        console.error('❌ Failed to update localStorage:', e);
       }
-    } else if (msg._id) {
-      messageMap.set(msg._id, msg);
     }
-  });
+  } else {
+    console.error('❌ No expiresAt in room_joined data!');
+  }
   
-  // Add server messages (will override cache if same _id)
-  serverMessages.forEach(msg => {
-    if (msg._id) {
-      messageMap.set(msg._id, msg);
+  const cachedState = loadChatState();
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  const isInIframe = window.parent && window.parent !== window;
+
+  let shouldUseCache = false;
+
+  if (activeCallStr && isInIframe) {
+    try {
+      const activeCall = JSON.parse(activeCallStr);
+      const roomStr = localStorage.getItem('currentRoom');
+      if (roomStr) {
+        const room = JSON.parse(roomStr);
+        if (activeCall.roomId === room.roomId && cachedState && cachedState.roomId === roomData.roomId) {
+          shouldUseCache = true;
+          console.log('🔄 Active call in iframe detected - will MERGE cache with server');
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to check active call:', e);
     }
-  });
-  
-  messagesCache = Array.from(messageMap.values()).sort((a, b) => {
-    const timeA = a.timestamp || a.createdAt || 0;
-    const timeB = b.timestamp || b.createdAt || 0;
-    return new Date(timeA).getTime() - new Date(timeB).getTime();
-  });
-  
-  if (serverMessages.length === 0 && cachedMessages.length === 0) {
+  }
+
+  let mergedMessages = [];
+
+  if (data.chatHistory?.length > 0) {
+    console.log(`📜 Server provided ${data.chatHistory.length} messages`);
+    
+    mergedMessages = [...data.chatHistory];
+    
+    if (shouldUseCache && cachedState?.messages?.length > 0) {
+      console.log(`📦 Merging ${cachedState.messages.length} cached messages with server data`);
+      
+      const serverMessageIds = new Set(
+        data.chatHistory.map(msg => msg.messageId || `${msg.userId}-${msg.timestamp}`)
+      );
+      
+      const uniqueCachedMessages = cachedState.messages.filter(msg => {
+        const msgId = msg.messageId || `${msg.userId}-${msg.timestamp}`;
+        return !serverMessageIds.has(msgId);
+      });
+      
+      if (uniqueCachedMessages.length > 0) {
+        console.log(`➕ Adding ${uniqueCachedMessages.length} unique cached messages`);
+        mergedMessages = [...mergedMessages, ...uniqueCachedMessages];
+        mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }
+    }
+    
+    // ============================================
+    // CRITICAL FIX: REQUEST MISSING FILE DATA
+    // ============================================
+    console.log('🔍 Checking for attachments that need data...');
+    
+    for (const msg of mergedMessages) {
+      if (msg.attachment && msg.attachment.fileId) {
+        // Check if file exists in local IndexedDB
+        try {
+          const localFile = await getFileFromIndexedDB(msg.attachment.fileId);
+          
+          if (!localFile) {
+            console.log(`📂 File ${msg.attachment.fileId} not in local storage`);
+            
+            // Only request if sent by someone else
+            if (msg.userId !== currentUser.userId) {
+              console.log(`📡 Requesting file data from peer for ${msg.attachment.name}`);
+              
+              // Request file from sender via socket
+              socketInstance.emit('request_attachment_data', {
+                fileId: msg.attachment.fileId,
+                roomId: roomData.roomId
+              });
+            }
+          } else {
+            console.log(`✅ File ${msg.attachment.name} already in local storage`);
+          }
+        } catch (e) {
+          console.error(`❌ Error checking file ${msg.attachment.fileId}:`, e);
+        }
+      }
+    }
+    
+  } else if (shouldUseCache && cachedState?.messages?.length > 0) {
+    console.log(`📦 No server history, using ${cachedState.messages.length} cached messages`);
+    mergedMessages = [...cachedState.messages];
+  } else {
     console.log('ℹ️ No server history and no cache - starting fresh');
   }
-  
+
+  messagesCache = mergedMessages;
+
   console.log(`🎨 Rendering ${messagesCache.length} total messages`);
-  
-  // Render all messages (inline, no separate function)
-  if (messagesList) {
-    messagesList.innerHTML = '';
-    messagesCache.forEach(msg => {
-      const msgEl = createMessageElement(msg);
-      if (msgEl) {
-        messagesList.appendChild(msgEl);
-      }
-    });
-    
-    // Scroll to bottom
-    if (messagesCache.length > 0) {
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
+  messagesCache.forEach(msg => {
+    const isCurrentUser = msg.userId === currentUser.userId;
+    const msgEl = createMessageElement(msg, isCurrentUser);
+    messagesList?.appendChild(msgEl);
+  });
+
+  if (messagesList && messagesCache.length > 0) {
+    messagesList.scrollTop = messagesList.scrollHeight;
+    console.log('✅ Scrolled to latest message');
   }
-  
-  saveChatState(data.roomId, messagesCache);
+
+  saveChatState(roomData.roomId, messagesCache);
   console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
   
-  // Update UI with server data
-  if (data.users && Array.isArray(data.users) && usersList) {
-    // Only update if not restoring from cache
-    if (!shouldRestoreFromCache) {
-      usersList.innerHTML = '';
-      
-      // Deduplicate users by userId
-      const userMap = new Map();
-      data.users.forEach(user => {
-        if (!userMap.has(user.userId || user.username)) {
-          userMap.set(user.userId || user.username, user);
+  // [Rest of room_joined handler...]
+  if (shouldUseCache && cachedState) {
+    console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
+    console.log('   Cached activeCallInRoom:', cachedState.activeCallInRoom);
+    
+    if (cachedState.activeCallInRoom) {
+      activeCallInRoom = cachedState.activeCallInRoom;
+      console.log('💾 Restored activeCallInRoom from cache:', activeCallInRoom);
+    } else if (cachedState.callButtonState === 'back') {
+      const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+      if (activeCallStr) {
+        try {
+          const activeCallData = JSON.parse(activeCallStr);
+          activeCallInRoom = {
+            callId: activeCallData.callId,
+            callType: activeCallData.callType,
+            participantCount: 2
+          };
+          console.log('💾 Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
+        } catch (e) {
+          console.error('Failed to reconstruct activeCallInRoom:', e);
         }
-      });
-      
-      userMap.forEach(user => {
-        const userCard = document.createElement('div');
-        userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-        userCard.dataset.userId = user.userId || user.username;
-        
-        const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-        
-        const userInfo = document.createElement('div');
-        userInfo.className = 'flex-1 min-w-0';
-        
-        const nameSpan = document.createElement('div');
-        nameSpan.className = 'text-sm font-semibold truncate';
-        nameSpan.textContent = user.username || 'User';
-        
-        const statusSpan = document.createElement('div');
-        statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-        statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-        
-        userInfo.appendChild(nameSpan);
-        userInfo.appendChild(statusSpan);
-        
-        userCard.appendChild(pfpElement);
-        userCard.appendChild(userInfo);
-        usersList.appendChild(userCard);
-      });
-      
-      setupUserCardClick();
-      
-      if (onlineCount) {
-        onlineCount.textContent = `${userMap.size} Online`;
       }
+    } else if (cachedState.callButtonState === 'join' && !activeCallInRoom) {
+      console.warn('⚠️ Cache says "join" but no activeCallInRoom - will wait for server update');
     }
+    
+    if (cachedState.callButtonState === 'back') {
+      updateCallButtonState(true, activeCallInRoom || { participantCount: 1 });
+    } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
+      updateCallButtonState(true, activeCallInRoom);
+    } else {
+      updateCallButtonState(false);
+    }
+    
+    console.log('✅ Call button state restored instantly');
   }
   
-  // Start timer updates
+  if (data.activeCall) {
+    console.log('📞 Active call in room detected');
+    
+    activeCallInRoom = {
+      callId: data.activeCall.callId,
+      callType: data.activeCall.callType,
+      participantCount: data.activeCall.participantCount
+    };
+    console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
+  } 
+  
   console.log('⏰ Starting timer updates with server-synced time...');
+  updateTimer();
   
   console.log('✅ ========================================\n');
 });
-
 
 
 
@@ -4324,63 +4239,31 @@ socketInstance.on('user_joined', (data) => {
   console.log('👤 ========================================');
   console.log(`   User: ${data.username} (${data.userId})`);
   console.log(`   Online count: ${data.onlineCount}`);
-  console.log(`   Total users in room: ${data.users?.length || 'N/A'}`);
+  console.log(`   Total users in room: ${data.users?.length || 0}`);
   
+  // Skip if it's the current user (they already have the UI)
   if (data.userId === currentUser?.userId) {
     console.log('ℹ️ User_joined event is for current user - UI already initialized');
     console.log('👤 ========================================\n');
     return;
   }
   
-  // Add system message
-  const joinMessage = {
-    type: 'system',
-    text: `${data.username} joined`,
-    timestamp: Date.now()
-  };
+  console.log('✅ New user joined - updating UI for all users');
   
-  // Check for duplicates before adding
-  const isDuplicate = messagesCache.some(m => 
-    m.type === 'system' && 
-    m.text === joinMessage.text && 
-    Math.abs((m.timestamp || 0) - joinMessage.timestamp) < 5000
-  );
-  
-  if (!isDuplicate) {
-    messagesCache.push(joinMessage);
+  // ============================================
+  // UPDATE USER LIST
+  // ============================================
+  if (usersList && data.users) {
+    console.log(`🔄 Rebuilding user list with ${data.users.length} users`);
     
-    // Render the message
-    if (messagesList) {
-      const msgEl = createMessageElement(joinMessage);
-      if (msgEl) {
-        messagesList.appendChild(msgEl);
-        messagesList.scrollTop = messagesList.scrollHeight;
-      }
-    }
-    
-    saveChatState(roomData.roomId, messagesCache);
-    console.log(`   ✅ Added system message: "${joinMessage.text}"`);
-  } else {
-    console.log(`   ⚠️ Duplicate join message ignored`);
-  }
-  
-  // Update user list
-  if (usersList && data.users && Array.isArray(data.users)) {
+    // Clear existing user list
     usersList.innerHTML = '';
     
-    // Deduplicate by userId
-    const userMap = new Map();
+    // Render all users from server data
     data.users.forEach(user => {
-      const key = user.userId || user.username;
-      if (!userMap.has(key)) {
-        userMap.set(key, user);
-      }
-    });
-    
-    userMap.forEach(user => {
       const userCard = document.createElement('div');
       userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-      userCard.dataset.userId = user.userId || user.username;
+      userCard.dataset.userId = user.userId;
       
       const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
       
@@ -4403,13 +4286,35 @@ socketInstance.on('user_joined', (data) => {
       usersList.appendChild(userCard);
     });
     
+    // Reattach click handlers for mobile
     setupUserCardClick();
     
-    if (onlineCount) {
-      onlineCount.textContent = `${userMap.size} Online`;
+    console.log(`✅ User list rebuilt with ${data.users.length} users`);
+  }
+  
+  // ============================================
+  // UPDATE ONLINE COUNT
+  // ============================================
+  if (onlineCount && data.onlineCount !== undefined) {
+    onlineCount.textContent = `${data.onlineCount} Online`;
+    console.log(`✅ Online count updated: ${data.onlineCount}`);
+  }
+  
+  // ============================================
+  // SHOW SYSTEM MESSAGE
+  // ============================================
+  if (messagesList) {
+    const msgEl = document.createElement('div');
+    msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
+    msgEl.textContent = `${data.username} joined`;
+    messagesList.appendChild(msgEl);
+    
+    // Auto-scroll to show new message
+    if (messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100) {
+      messagesList.scrollTop = messagesList.scrollHeight;
     }
     
-    console.log(`   ✅ Updated user list (${userMap.size} unique users)`);
+    console.log(`✅ System message displayed: "${data.username} joined"`);
   }
   
   console.log('👤 ========================================\n');
@@ -5135,96 +5040,21 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-  console.log('👋 ========================================');
-  console.log('👋 USER_LEFT EVENT RECEIVED');
-  console.log('👋 ========================================');
-  console.log(`   User: ${data.username} (${data.userId})`);
-  console.log(`   Online count: ${data.onlineCount}`);
-  console.log(`   Remaining users: ${data.users?.length || 'N/A'}`);
-  
-  // Add system message
-  const leaveMessage = {
-    type: 'system',
-    text: `${data.username} left`,
-    timestamp: Date.now()
-  };
-  
-  // Check for duplicates before adding
-  const isDuplicate = messagesCache.some(m => 
-    m.type === 'system' && 
-    m.text === leaveMessage.text && 
-    Math.abs((m.timestamp || 0) - leaveMessage.timestamp) < 5000
-  );
-  
-  if (!isDuplicate) {
-    messagesCache.push(leaveMessage);
-    
-    // Render the message
-    if (messagesList) {
-      const msgEl = createMessageElement(leaveMessage);
-      if (msgEl) {
-        messagesList.appendChild(msgEl);
-        messagesList.scrollTop = messagesList.scrollHeight;
-      }
-    }
-    
-    saveChatState(roomData.roomId, messagesCache);
-    console.log(`   ✅ Added system message: "${leaveMessage.text}"`);
-  } else {
-    console.log(`   ⚠️ Duplicate leave message ignored`);
-  }
-  
-  // Update user list
-  if (usersList && data.users && Array.isArray(data.users)) {
-    usersList.innerHTML = '';
-    
-    // Deduplicate by userId
-    const userMap = new Map();
-    data.users.forEach(user => {
-      const key = user.userId || user.username;
-      if (!userMap.has(key)) {
-        userMap.set(key, user);
-      }
-    });
-    
-    userMap.forEach(user => {
-      const userCard = document.createElement('div');
-      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-      userCard.dataset.userId = user.userId || user.username;
-      
-      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-      
-      const userInfo = document.createElement('div');
-      userInfo.className = 'flex-1 min-w-0';
-      
-      const nameSpan = document.createElement('div');
-      nameSpan.className = 'text-sm font-semibold truncate';
-      nameSpan.textContent = user.username || 'User';
-      
-      const statusSpan = document.createElement('div');
-      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-      
-      userInfo.appendChild(nameSpan);
-      userInfo.appendChild(statusSpan);
-      
-      userCard.appendChild(pfpElement);
-      userCard.appendChild(userInfo);
-      usersList.appendChild(userCard);
-    });
-    
-    setupUserCardClick();
-    
-    if (onlineCount) {
-      onlineCount.textContent = `${userMap.size} Online`;
-    }
-    
-    console.log(`   ✅ Updated user list (${userMap.size} unique users)`);
-  }
-  
-  console.log('👋 ========================================\n');
-});
+      const msgEl = document.createElement('div');
+      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+      msgEl.textContent = `${data.username || 'A user'} left the room`;
+      messagesList?.appendChild(msgEl);
 
+      if (onlineCount && data.remainingUsers !== undefined) {
+        onlineCount.textContent = `${data.remainingUsers} Online`;
+      }
+
+      if (data.remainingUsers <= 1) {
+        toast('Room closing...', 'warning');
+        clearChatState(true);
+        setTimeout(() => window.location.href = '/mood.html', 2000);
+      }
+    });
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
@@ -6271,64 +6101,50 @@ window.addEventListener('beforeunload', (e) => {
   
 try {
     // Check if we're returning from a call OR if we're in an iframe (chat overlay)
-const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
-  const isBackgroundCall = sessionStorage.getItem('isBackgroundCall') === 'true';
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  const isInIframe = window.parent && window.parent !== window;
-  
-  // CRITICAL: Check if this is a page refresh (not a new navigation)
-  const isPageRefresh = performance.navigation?.type === 1 || 
-                        performance.getEntriesByType('navigation')[0]?.type === 'reload';
-  
-  // CRITICAL: If there's an active call in this room, we're likely returning from it
-  let shouldPreserveState = returningFromCall || isBackgroundCall || isPageRefresh;
-  
-  if (!shouldPreserveState && activeCallStr && isInIframe) {
-      try {
-          const activeCall = JSON.parse(activeCallStr);
-          const roomStr = localStorage.getItem('currentRoom');
-          if (roomStr) {
-              const room = JSON.parse(roomStr);
-              if (activeCall.roomId === room.roomId) {
-                  console.log('🔍 Active call detected in iframe - treating as return from call');
-                  shouldPreserveState = true;
-              }
-          }
-      } catch (e) {
-          console.warn('Failed to parse call/room data:', e);
-      }
-  }
+    const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
+    const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    const isInIframe = window.parent && window.parent !== window;
+    
+    // CRITICAL: If there's an active call in this room, we're likely returning from it
+    let shouldPreserveState = returningFromCall || isBackgroundCall;
+    
+    if (!shouldPreserveState && activeCallStr && isInIframe) {
+        try {
+            const activeCall = JSON.parse(activeCallStr);
+            const roomStr = localStorage.getItem('currentRoom');
+            if (roomStr) {
+                const room = JSON.parse(roomStr);
+                if (activeCall.roomId === room.roomId) {
+                    console.log('🔍 Active call detected in iframe - treating as return from call');
+                    shouldPreserveState = true;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to parse call/room data:', e);
+        }
+    }
 
-  
-  console.log('🔍 Page load context:', { 
-      returningFromCall, 
-      isBackgroundCall, 
-      isInIframe,
-      isPageRefresh,
-      shouldPreserveState,
-      hasActiveCall: !!activeCallStr
-  });
-  
-  if (!shouldPreserveState) {
-      // Only clear if this is a fresh entry to chat (not returning from call or refresh)
-      console.log('🧹 Fresh chat entry - clearing old state');
-      clearAllChatData();
-  } else {
-      console.log('🔄 Preserving state (returning from call or page refresh)');
-      
-      // Restore state from cache BEFORE trying to use roomData
-      const cachedState = loadChatState();
-      if (cachedState) {
-          // Restore user list
-          restoreUserListFromCache(cachedState);
-          
-          // Restore system messages
-          restoreSystemMessagesFromCache(cachedState);
-      }
-  }
-  
-  // Auth check
-  await _Auth.requireAuth();
+    
+    console.log('🔍 Page load context:', { 
+        returningFromCall, 
+        isBackgroundCall, 
+        isInIframe,
+        shouldPreserveState,
+        hasActiveCall: !!activeCallStr
+    });
+    
+    if (!shouldPreserveState) {
+        // Only clear if this is a fresh entry to chat (not returning from call)
+        console.log('🧹 Fresh chat entry - clearing old state');
+        clearAllChatData();
+    } else {
+        console.log('🔄 Returning from call - preserving chat state');
+        // Don't clear - we want to restore the previous state
+    }
+    
+    // Auth check
+    await _Auth.requireAuth();
   } catch (err) {
     console.error('❌ Auth failed:', err);
     window.location.href = '/login.html';
