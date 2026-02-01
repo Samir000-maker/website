@@ -1935,7 +1935,6 @@ socket.on('file_chunk', (data) => {
       chunkData
     });
 
-    // Emit upload progress back to the SENDER so the UI can update from 0%
     const progressPercent = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
     socket.emit('file_upload_progress', {
       fileId,
@@ -1944,6 +1943,9 @@ socket.on('file_chunk', (data) => {
       chunksReceived: fileRecord ? fileRecord.receivedCount : 0,
       totalChunks
     });
+
+    // Acknowledge this chunk back to sender — sendFileInChunks() waits for this before sending next chunk
+    socket.emit('file_chunk_ack', { fileId, chunkIndex });
     
     // If all chunks are now stored, assemble the full base64 string
     if (fileRecord && fileRecord.receivedCount === fileRecord.totalChunks) {
