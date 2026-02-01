@@ -3537,38 +3537,89 @@ async function loadImageAttachment(fileId, imgElement) {
     const newImg = imgElement.cloneNode(true);
     imgElement.parentNode?.replaceChild(newImg, imgElement);
     
-    newImg.addEventListener('click', async () => {
-      console.log(`🔍 Opening full-size image: ${fileData.name}`);
-      
-      try {
-        const freshBlob = await getFileFromIndexedDB(fileId);
-        if (!freshBlob || !freshBlob.blob) {
-          toast('Failed to open image', 'error');
-          return;
-        }
-        
-        const freshBlobUrl = URL.createObjectURL(freshBlob.blob);
-        const newWindow = window.open(freshBlobUrl, '_blank');
-        
-        console.log(`✅ Opened image in new window`);
-        
-        if (newWindow) {
-          newWindow.addEventListener('load', () => {
-            setTimeout(() => {
-              URL.revokeObjectURL(freshBlobUrl);
-              console.log('🧹 Revoked blob URL from new window');
-            }, 1000);
-          });
-        } else {
-          URL.revokeObjectURL(freshBlobUrl);
-          toast('Please allow popups to view full image', 'warning');
-        }
-        
-      } catch (error) {
-        console.error('❌ Failed to open full-size image:', error);
-        toast('Failed to open image', 'error');
+    // ✅ BEST FIX: In-page lightbox (no popup blockers)
+newImg.addEventListener('click', async () => {
+  console.log(`🔍 Opening image lightbox: ${fileData.name}`);
+  
+  try {
+    const freshBlob = await getFileFromIndexedDB(fileId);
+    if (!freshBlob || !freshBlob.blob) {
+      toast('Failed to open image', 'error');
+      return;
+    }
+    
+    const imageUrl = URL.createObjectURL(freshBlob.blob);
+    
+    // Create lightbox overlay
+    const lightbox = document.createElement('div');
+    lightbox.innerHTML = `
+      <div style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.95);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 99999;
+        cursor: zoom-out;
+      " class="image-lightbox">
+        <button style="
+          position: absolute;
+          top: 20px;
+          right: 20px;
+          background: rgba(255, 255, 255, 0.9);
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 18px;
+          font-weight: bold;
+          z-index: 100000;
+        " class="lightbox-close">✕</button>
+        <img src="${imageUrl}" alt="${escapeHtml(fileData.name)}" style="
+          max-width: 95vw;
+          max-height: 95vh;
+          object-fit: contain;
+          border-radius: 8px;
+          box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        ">
+      </div>
+    `;
+    
+    document.body.appendChild(lightbox);
+    
+    // Close on click
+    const closeLightbox = () => {
+      document.body.removeChild(lightbox);
+      URL.revokeObjectURL(imageUrl);
+      console.log('🧹 Lightbox closed and blob URL revoked');
+    };
+    
+    lightbox.addEventListener('click', closeLightbox);
+    lightbox.querySelector('.lightbox-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeLightbox();
+    });
+    
+    // Close on ESC key
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeLightbox();
+        document.removeEventListener('keydown', escHandler);
       }
-    }, { passive: true });
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    console.log(`✅ Image lightbox opened`);
+    
+  } catch (error) {
+    console.error('❌ Failed to open image lightbox:', error);
+    toast('Failed to open image', 'error');
+  }
+}, { passive: true });
     
   } catch (error) {
     console.error('❌ Error loading image attachment:', error);
