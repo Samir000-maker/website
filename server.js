@@ -1562,7 +1562,6 @@ io.on('connection', (socket) => {
   
   
 socket.on('select_mood', async (data, callback) => {
-  // Get user data from socketUsers Map
   const userData = socketUsers.get(socket.id);
   
   if (!userData) {
@@ -1581,52 +1580,52 @@ socket.on('select_mood', async (data, callback) => {
   console.log(`🎭 [UID: ${firebaseUid}] [Socket: ${socket.id}] Attempting to select mood: ${mood}`);
   
   try {
-    // ============================================
-    // CRITICAL: VALIDATE IF USER CAN SELECT MOOD
-    // ============================================
     const validation = await validateMoodSelection(firebaseUid);
     
     if (!validation.allowed) {
       console.log(`🚫 [UID: ${firebaseUid}] Mood selection blocked: ${validation.reason}`);
       
-      // User already in room - restore it instead of queuing
-      const restoration = await restoreExistingRoom(socket, firebaseUid, validation.existingRoom);
+      // CRITICAL FIX: Clear stale state and allow re-entry
+      const existingRoom = validation.existingRoom;
+      const room = matchmaking.getRoom(existingRoom.roomId);
       
-      if (restoration.success) {
-        console.log(`✅ [UID: ${firebaseUid}] Room restored successfully`);
+      if (!room || room.isExpired) {
+        console.log(`🧹 [UID: ${firebaseUid}] Existing room is expired, clearing state`);
+        clearUserActiveRoom(firebaseUid);
+        matchmaking.leaveRoom(userId);
         
-        // Emit to client that they should redirect to chat
-        socket.emit('match_found', restoration.room);
-        
-        return callback?.({
-          success: true,
-          matched: true,
-          room: restoration.room,
-          restored: true,
-          message: 'Reconnected to your existing room'
-        });
+        // Continue with new mood selection
+        console.log(`✅ [UID: ${firebaseUid}] Stale state cleared, proceeding with mood selection`);
       } else {
-        console.error(`❌ [UID: ${firebaseUid}] Room restoration failed: ${restoration.error}`);
+        // Room still valid, restore it
+        const restoration = await restoreExistingRoom(socket, firebaseUid, existingRoom);
         
-        return callback?.({
-          success: false,
-          error: restoration.error || 'Failed to restore your previous room',
-          existingRoom: validation.existingRoom
-        });
+        if (restoration.success) {
+          console.log(`✅ [UID: ${firebaseUid}] Room restored successfully`);
+          socket.emit('match_found', restoration.room);
+          
+          return callback?.({
+            success: true,
+            matched: true,
+            room: restoration.room,
+            restored: true,
+            message: 'Reconnected to your existing room'
+          });
+        } else {
+          console.error(`❌ [UID: ${firebaseUid}] Room restoration failed: ${restoration.error}`);
+          
+          // Clear failed state and allow re-entry
+          clearUserActiveRoom(firebaseUid);
+          matchmaking.leaveRoom(userId);
+          console.log(`🧹 [UID: ${firebaseUid}] Failed restoration cleaned up, proceeding with new selection`);
+        }
       }
     }
     
-    // ============================================
-    // USER ALLOWED TO SELECT MOOD - PROCEED
-    // ============================================
     console.log(`✅ [UID: ${firebaseUid}] Mood selection allowed - proceeding with matchmaking`);
     
-    // Add to mood registry (deduplicated by UID)
     addUserToMood(userId, mood);
     
-    // ============================================
-    // JOIN MATCHMAKING QUEUE
-    // ============================================
     const matchResult = matchmaking.addToQueue({
       userId,
       firebaseUid,
@@ -1636,16 +1635,11 @@ socket.on('select_mood', async (data, callback) => {
     });
     
     if (matchResult) {
-      // Match found or joined existing room
       const room = matchResult;
       
-      // CRITICAL: Register active room in new system
       setUserActiveRoom(firebaseUid, room.id, mood);
-      
-      // Join socket to room
       socket.join(room.id);
       
-      // Start room lifecycle timers if not started
       if (!room.timerStartedAt) {
         console.log(`⏱️ [Room: ${room.id}] Starting lifecycle timers`);
         room.setupLifecycleTimers();
@@ -1653,7 +1647,6 @@ socket.on('select_mood', async (data, callback) => {
       
       console.log(`🎯 [UID: ${firebaseUid}] Matched! Room: ${room.id}`);
       
-      // Get partner info
       const partner = room.users.find(u => u.userId !== userId);
       const partnerProfile = partner ? await getUserProfile(partner.userId) : null;
       
@@ -1670,10 +1663,8 @@ socket.on('select_mood', async (data, callback) => {
         chatHistory: room.messages || []
       };
       
-      // Emit to all devices of this user
       emitToUserAllDevices(firebaseUid, 'match_found', roomData);
       
-      // Also emit to partner's all devices (if exists)
       if (partner && partner.firebaseUid) {
         emitToUserAllDevices(partner.firebaseUid, 'match_found', {
           ...roomData,
@@ -1685,7 +1676,6 @@ socket.on('select_mood', async (data, callback) => {
           }
         });
       } else if (partner) {
-        // Fallback: emit to partner via room broadcast
         socket.to(room.id).emit('match_found', {
           ...roomData,
           partner: {
@@ -1706,7 +1696,6 @@ socket.on('select_mood', async (data, callback) => {
       });
       
     } else {
-      // Waiting in queue
       const queuePosition = matchmaking.getQueueStatus(mood);
       console.log(`⏳ [UID: ${firebaseUid}] Waiting in queue for mood: ${mood} (position: ${queuePosition})`);
       
@@ -2700,35 +2689,32 @@ socket.on('join_matchmaking', async ({ mood }) => {
 
       // ✅ START MATCHMAKING TIMEOUT
       const timeoutHandle = setTimeout(() => {
-        // Check if user is still in queue
         const currentQueueStatus = matchmaking.getQueueStatus(mood);
         
         console.log(`⏰ Matchmaking timeout for ${user.username} in ${mood} queue`);
         console.log(`   Queue status: ${currentQueueStatus} users`);
         
-        // If fewer than MIN_USERS_FOR_ROOM, timeout and redirect
         if (currentQueueStatus < config.MIN_USERS_FOR_ROOM) {
           console.log(`❌ Insufficient users (${currentQueueStatus}/${config.MIN_USERS_FOR_ROOM}) - timing out`);
           
-          // Cancel matchmaking
           matchmaking.cancelMatchmaking(user.userId);
           removeUserFromAllMoods(user.userId);
           clearMatchmakingTimeout(user.userId);
           
-          // Notify client to redirect
           const userSocket = findActiveSocketForUser(user.userId);
           if (userSocket) {
             userSocket.emit('matchmaking_timeout', {
               message: 'No matches found. Please try again.',
               mood: mood,
               queueStatus: currentQueueStatus,
-              minRequired: config.MIN_USERS_FOR_ROOM
+              minRequired: config.MIN_USERS_FOR_ROOM,
+              redirectTo: '/mood.html'
             });
+            console.log(`📤 Sent matchmaking_timeout with redirect to ${user.username}`);
           }
           
-          console.log(`🔄 User ${user.username} timed out, redirecting to mood selection`);
+          console.log(`🔄 User ${user.username} timed out, should redirect to mood selection`);
         } else {
-          // Enough users found, try to create room
           console.log(`✅ Sufficient users found (${currentQueueStatus}), creating room`);
           const room = matchmaking.addToQueue({
             ...user,
@@ -2741,7 +2727,6 @@ socket.on('join_matchmaking', async ({ mood }) => {
           }
         }
         
-        // Clean up timeout
         matchmakingTimeouts.delete(user.userId);
       }, config.MATCHMAKING_TIMEOUT);
 
