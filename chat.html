@@ -5040,21 +5040,107 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-      const msgEl = document.createElement('div');
-      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-      msgEl.textContent = `${data.username || 'A user'} left the room`;
-      messagesList?.appendChild(msgEl);
-
-      if (onlineCount && data.remainingUsers !== undefined) {
-        onlineCount.textContent = `${data.remainingUsers} Online`;
-      }
-
-      if (data.remainingUsers <= 1) {
-        toast('Room closing...', 'warning');
-        clearChatState(true);
-        setTimeout(() => window.location.href = '/mood.html', 2000);
+  console.log('👋 ========================================');
+  console.log('👋 USER_LEFT EVENT RECEIVED');
+  console.log('👋 ========================================');
+  console.log(`   User: ${data.username} (${data.userId})`);
+  console.log(`   Remaining users: ${data.remainingUsers}`);
+  console.log(`   Room: ${data.roomId}`);
+  
+  // ============================================
+  // UPDATE USER LIST
+  // ============================================
+  if (usersList) {
+    console.log(`🔄 Updating user list - removing ${data.username}`);
+    
+    // Remove the user card from the UI
+    const userCards = usersList.querySelectorAll('.user-card');
+    userCards.forEach(card => {
+      if (card.dataset.userId === data.userId) {
+        card.remove();
+        console.log(`✅ Removed user card for ${data.username}`);
       }
     });
+  }
+  
+  // ============================================
+  // UPDATE ONLINE COUNT
+  // ============================================
+  if (onlineCount && data.remainingUsers !== undefined) {
+    onlineCount.textContent = `${data.remainingUsers} Online`;
+    console.log(`✅ Online count updated: ${data.remainingUsers}`);
+  }
+  
+  // ============================================
+  // SHOW SYSTEM MESSAGE
+  // ============================================
+  if (messagesList) {
+    const msgEl = document.createElement('div');
+    msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
+    msgEl.textContent = `${data.username} left the room`;
+    messagesList.appendChild(msgEl);
+    
+    // Auto-scroll to show new message
+    if (messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+    
+    console.log(`✅ System message displayed: "${data.username} left the room"`);
+  }
+  
+  // ============================================
+  // HANDLE LAST USER SCENARIO
+  // ============================================
+  if (data.remainingUsers === 1) {
+    console.log(`⚠️ You are the last user in room ${data.roomId}`);
+    toast('Your partner has left. You can stay or leave the room.', 'info');
+  } else if (data.remainingUsers === 0) {
+    console.log(`🗑️ Room ${data.roomId} is now empty - closing`);
+    toast('Room is closing...', 'warning');
+    clearChatState(true);
+    setTimeout(() => window.location.href = '/mood.html', 2000);
+  }
+  
+  console.log('👋 ========================================\n');
+});
+
+// ============================================
+// NEW EVENT: LAST_USER_IN_ROOM
+// ============================================
+socketInstance.on('last_user_in_room', (data) => {
+  console.log('⚠️ ========================================');
+  console.log('⚠️ LAST_USER_IN_ROOM EVENT');
+  console.log('⚠️ ========================================');
+  console.log(`   Room: ${data.roomId}`);
+  console.log(`   Message: ${data.message}`);
+  
+  toast(data.message, 'info');
+  
+  console.log('⚠️ ========================================\n');
+});
+
+// ============================================
+// UPDATE EXISTING LEFT_ROOM HANDLER
+// ============================================
+socketInstance.on('left_room', (data) => {
+  console.log('👋 ========================================');
+  console.log('👋 LEFT_ROOM CONFIRMATION RECEIVED');
+  console.log('👋 ========================================');
+  console.log(`   Success: ${data.success}`);
+  console.log(`   Room: ${data.roomId}`);
+  
+  toast('Left room', 'success');
+  
+  // CRITICAL: Don't clear storage here - already done in leave button handler
+  // Just disconnect socket
+  if (socketInstance) {
+    socketInstance.disconnect();
+    console.log('✅ Socket disconnected after leaving room');
+  }
+  
+  console.log('👋 ========================================\n');
+});
+
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
