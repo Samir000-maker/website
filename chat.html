@@ -3876,6 +3876,14 @@ socketInstance.on('file_chunk', async (data) => {
   }
 });
 
+socketInstance.on('file_upload_progress', (data) => {
+  console.log(`📊 Upload progress: ${data.fileName} — ${data.progress}% (${data.chunksReceived}/${data.totalChunks})`);
+  const progressText = document.getElementById('uploadProgressText');
+  if (progressText) {
+    progressText.textContent = `Uploading: ${data.progress}%`;
+  }
+});
+
 socketInstance.on('file_transmission_complete', ({ fileId, fileName }) => {
   console.log(`✅ File transmission complete: ${fileName} (${fileId})`);
   toast(`Received: ${fileName}`, 'success');
