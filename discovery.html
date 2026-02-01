@@ -777,12 +777,40 @@
       clearState();
       window.location.href = '/chat.html';
     });
+    
+    
+    socketInstance.on('room_restored', (data) => {
+      console.log('🔄 Room restored:', data);
+      toast('Reconnected to your room!', 'success');
+      isInMatchmaking = false;
+      try {
+        localStorage.setItem('currentRoom', JSON.stringify(data));
+      } catch (e) {}
+      clearState();
+      window.location.href = '/chat.html';
+    });
 
     socketInstance.on('matchmaking_cancelled', () => {
       isInMatchmaking = false;
       clearState();
       toast('Search cancelled', 'success');
       setTimeout(() => window.location.href = '/mood.html', 1000);
+    });
+    
+    socketInstance.on('matchmaking_timeout', (data) => {
+      console.log('⏰ Matchmaking timeout:', data);
+      isInMatchmaking = false;
+      clearState();
+      
+      if (statusText) {
+        statusText.textContent = data.message || 'No matches found';
+      }
+      
+      toast(data.message || 'No matches found. Please try again.', 'error');
+      
+      setTimeout(() => {
+        window.location.href = data.redirectTo || '/mood.html';
+      }, 2000);
     });
 
     socketInstance.on('error', (data) => {
