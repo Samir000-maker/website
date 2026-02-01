@@ -2844,94 +2844,72 @@ function saveChatState(roomId, messages) {
     console.log('💾 SAVING CHAT STATE');
     console.log('💾 ========================================');
     console.log(`   Room: ${roomId}`);
-    console.log(`   Messages: ${messages?.length || 0}`);
+    console.log(`   Messages: ${messages.length}`);
     
-    // CRITICAL FIX: Validate input data
-    if (!roomId) {
-      console.error('❌ Cannot save state: roomId missing');
-      return;
-    }
-    
-    if (!Array.isArray(messages)) {
-      console.error('❌ Cannot save state: messages not an array');
-      return;
-    }
-    
-    // Validate messages have required fields
-    const validMessages = messages.filter(msg => {
-      const isValid = msg.userId && msg.timestamp && (msg.message || msg.attachment);
-      if (!isValid) {
-        console.warn(`⚠️ Skipping invalid message in cache save:`, msg);
-      }
-      return isValid;
-    });
-    
-    if (validMessages.length < messages.length) {
-      console.warn(`⚠️ Filtered out ${messages.length - validMessages.length} invalid messages`);
-    }
-    
-    // Determine call button state
+    // Determine button state
     let callButtonState = 'none';
-    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-    const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
+    const hasBackButton = joinCallBtn && joinCallBtn.textContent.includes('Back to Call');
+    const hasJoinButton = joinCallBtn && joinCallBtn.textContent.includes('Join Call') && 
+                          !joinCallBtn.classList.contains('hidden');
     
-    if (userInCall) {
+    if (hasBackButton) {
       callButtonState = 'back';
-    } else if (activeCallInRoom) {
+    } else if (hasJoinButton) {
       callButtonState = 'join';
     }
     
-    const callInRoomToSave = activeCallInRoom || null;
-    
-    const state = {
-      roomId,
-      messages: validMessages, // Use validated messages
-      timestamp: Date.now(),
-      callButtonState,
-      activeCallInRoom: callInRoomToSave,
-      version: 2 // Add version for future migrations
-    };
-    
-    // CRITICAL FIX: Use try-catch for localStorage quota errors
-    try {
-      localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
-      localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-      
-      console.log('✅ Chat state saved successfully:');
-      console.log(`   Valid messages: ${validMessages.length}`);
-      console.log(`   Button state: ${callButtonState}`);
-      console.log(`   Has active call: ${!!callInRoomToSave}`);
-      console.log('💾 ========================================\n');
-      
-    } catch (storageError) {
-      if (storageError.name === 'QuotaExceededError') {
-        console.error('❌ LocalStorage quota exceeded - attempting cleanup');
-        
-        // Emergency cleanup: keep only last 50 messages
-        const trimmedMessages = validMessages.slice(-50);
-        const trimmedState = { ...state, messages: trimmedMessages };
-        
-        try {
-          localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(trimmedState));
-          console.warn(`⚠️ Saved trimmed state (${trimmedMessages.length} messages)`);
-        } catch (retryError) {
-          console.error('❌ Failed to save even trimmed state:', retryError);
-          // Clear old state to free space
-          localStorage.removeItem(CHAT_STATE_KEY);
-          localStorage.removeItem(CHAT_MESSAGES_KEY);
+    // Prepare user list (deduplicated by userId)
+    const userMap = new Map();
+    if (usersList && usersList.children) {
+      Array.from(usersList.children).forEach(card => {
+        const username = card.querySelector('.text-sm')?.textContent?.trim();
+        if (username) {
+          const userId = card.dataset?.userId || username;
+          if (!userMap.has(userId)) {
+            userMap.set(userId, {
+              userId,
+              username,
+              pfpUrl: card.querySelector('img')?.src || null,
+              isOnline: card.querySelector('.bg-green-500') !== null
+            });
+          }
         }
-      } else {
-        throw storageError; // Re-throw non-quota errors
-      }
+      });
     }
     
-  } catch (e) {
-    console.error('❌ ========================================');
-    console.error('❌ FAILED TO SAVE CHAT STATE');
-    console.error('❌ ========================================');
-    console.error('   Error:', e.message);
-    console.error('   Stack:', e.stack);
-    console.error('❌ ========================================\n');
+    const chatState = {
+      roomId: roomId,
+      timestamp: Date.now(),
+      callButtonState,
+      activeCallInRoom: activeCallInRoom || null,
+      hasBackgroundCall: isInBackgroundCall || false,
+      userList: Array.from(userMap.values()),
+      systemMessages: messages.filter(m => m.type === 'system').map(m => ({
+        type: 'system',
+        text: m.text,
+        timestamp: m.timestamp
+      }))
+    };
+    
+    // Save valid messages
+    const validMessages = messages.filter(m => m && (m.type || m.text));
+    
+    localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(chatState));
+    localStorage.setItem(CHAT_MESSAGES_KEY, JSON.stringify(validMessages));
+    localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
+    
+    console.log('✅ Chat state saved successfully:');
+    console.log(`   Valid messages: ${validMessages.length}`);
+    console.log(`   Button state: ${callButtonState}`);
+    console.log(`   Has active call: ${!!activeCallInRoom}`);
+    console.log(`   User list: ${chatState.userList.length} users`);
+    console.log(`   System messages: ${chatState.systemMessages.length}`);
+    console.log('💾 ========================================\n');
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to save chat state:', error);
+    return false;
   }
 }
   
@@ -2959,7 +2937,6 @@ function loadChatState() {
     console.log(`   Active call: ${!!state.activeCallInRoom}`);
     console.log(`   User list: ${state.userList?.length || 0} users`);
     console.log(`   System messages: ${state.systemMessages?.length || 0}`);
-    console.log(`   Back button handled: ${state.backButtonHandled}`);
     console.log(`   Age: ${Math.round((now - timestamp) / 1000)}s`);
     console.log('📦 ========================================\n');
     
@@ -3033,6 +3010,7 @@ function restoreUserListFromCache(cachedState) {
     onlineCount.textContent = `${userMap.size} Online`;
   }
 }
+
 
 
 function restoreSystemMessagesFromCache(cachedState) {
@@ -3203,8 +3181,7 @@ async function clearChatState(force = false) {
     console.error('   ❌ Failed to clear localStorage:', e);
   }
   
-  // DO NOT CLEAR: backButtonHandled - this is needed for leave dialog
-  // DO NOT CLEAR: activeCallInRoom - this is managed separately
+  // DO NOT CLEAR: activeCallInRoom - managed separately
   // DO NOT CLEAR: currentRoom - needed for room identity
   
   console.log('🧹 All chat state cleared on entry');
@@ -3926,25 +3903,17 @@ function setupBackButtonHandler() {
   console.log('🔧 SETTING UP BACK BUTTON HANDLER');
   console.log('🔧 ========================================');
   
-  // CRITICAL: Restore backButtonHandled from cache on page load
-  const cachedState = loadChatState();
-  if (cachedState && cachedState.backButtonHandled !== undefined) {
-    backButtonHandled = cachedState.backButtonHandled;
-    console.log(`   🔄 Restored backButtonHandled from cache: ${backButtonHandled}`);
-  }
-  
   // Add state to history to enable back button detection
   if (!window.history.state?.chatRoom) {
     window.history.pushState({ chatRoom: true, roomId: roomData?.roomId }, '');
     console.log('✅ History guard established');
   }
   
-  // Listen for back button
+  // Listen for back button - ALWAYS show dialog
   window.addEventListener('popstate', (event) => {
     console.log('⬅️ ========================================');
     console.log('⬅️ BACK BUTTON PRESSED');
     console.log('⬅️ ========================================');
-    console.log('   backButtonHandled:', backButtonHandled);
     console.log('   navigatingToCall:', navigatingToCall);
     
     if (navigatingToCall) {
@@ -3953,33 +3922,20 @@ function setupBackButtonHandler() {
       return;
     }
     
-    if (!backButtonHandled) {
-      console.log('🚨 First back press - showing leave dialog');
-      
-      // Restore history state
-      window.history.pushState({ chatRoom: true, roomId: roomData?.roomId }, '');
-      
-      // Show confirmation dialog
-      const shouldLeave = confirm('Are you sure you want to leave this chat?');
-      
-      if (shouldLeave) {
-        console.log('✅ User confirmed leave');
-        handleLeaveRoom();
-      } else {
-        console.log('❌ User cancelled leave');
-        backButtonHandled = true;
-        saveChatState(); // Save the flag
-        console.log('🔒 backButtonHandled set to true and saved');
-      }
+    // ALWAYS show dialog - no tracking of "handled" state
+    console.log('🚨 Showing leave dialog');
+    
+    // Restore history state
+    window.history.pushState({ chatRoom: true, roomId: roomData?.roomId }, '');
+    
+    // Show confirmation dialog
+    const shouldLeave = confirm('Are you sure you want to leave this chat?');
+    
+    if (shouldLeave) {
+      console.log('✅ User confirmed leave');
+      handleLeaveRoom();
     } else {
-      console.log('✅ Second back press - navigating away');
-      console.log('🧹 Cleaning up before navigation...');
-      
-      // Clean up before leaving
-      clearChatState(true);
-      
-      // Allow navigation
-      window.location.href = '/mood.html';
+      console.log('❌ User cancelled leave - staying in room');
     }
     
     console.log('⬅️ ========================================\n');
@@ -4257,7 +4213,7 @@ socketInstance.on('room_joined', (data) => {
   // Add cached messages first (including system messages)
   cachedMessages.forEach(msg => {
     if (msg.type === 'system') {
-      // System messages: dedupe by text + rough timestamp
+      // System messages: dedupe by text + rough timestamp (1 minute window)
       const key = `system_${msg.text}_${Math.floor((msg.timestamp || 0) / 60000)}`;
       if (!messageMap.has(key)) {
         messageMap.set(key, msg);
@@ -4285,9 +4241,24 @@ socketInstance.on('room_joined', (data) => {
   }
   
   console.log(`🎨 Rendering ${messagesCache.length} total messages`);
-  renderMessages();
-  saveChatState();
   
+  // Render all messages (inline, no separate function)
+  if (messagesList) {
+    messagesList.innerHTML = '';
+    messagesCache.forEach(msg => {
+      const msgEl = createMessageElement(msg);
+      if (msgEl) {
+        messagesList.appendChild(msgEl);
+      }
+    });
+    
+    // Scroll to bottom
+    if (messagesCache.length > 0) {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    }
+  }
+  
+  saveChatState(data.roomId, messagesCache);
   console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
   
   // Update UI with server data
@@ -4377,8 +4348,17 @@ socketInstance.on('user_joined', (data) => {
   
   if (!isDuplicate) {
     messagesCache.push(joinMessage);
-    renderMessages();
-    saveChatState();
+    
+    // Render the message
+    if (messagesList) {
+      const msgEl = createMessageElement(joinMessage);
+      if (msgEl) {
+        messagesList.appendChild(msgEl);
+        messagesList.scrollTop = messagesList.scrollHeight;
+      }
+    }
+    
+    saveChatState(roomData.roomId, messagesCache);
     console.log(`   ✅ Added system message: "${joinMessage.text}"`);
   } else {
     console.log(`   ⚠️ Duplicate join message ignored`);
@@ -5178,8 +5158,17 @@ socketInstance.on('error', (data) => {
   
   if (!isDuplicate) {
     messagesCache.push(leaveMessage);
-    renderMessages();
-    saveChatState();
+    
+    // Render the message
+    if (messagesList) {
+      const msgEl = createMessageElement(leaveMessage);
+      if (msgEl) {
+        messagesList.appendChild(msgEl);
+        messagesList.scrollTop = messagesList.scrollHeight;
+      }
+    }
+    
+    saveChatState(roomData.roomId, messagesCache);
     console.log(`   ✅ Added system message: "${leaveMessage.text}"`);
   } else {
     console.log(`   ⚠️ Duplicate leave message ignored`);
@@ -6327,15 +6316,9 @@ const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true'
   } else {
       console.log('🔄 Preserving state (returning from call or page refresh)');
       
-      // Restore state from cache
+      // Restore state from cache BEFORE trying to use roomData
       const cachedState = loadChatState();
-      if (cachedState && cachedState.roomId === roomData.roomId) {
-          // Restore backButtonHandled flag
-          if (cachedState.backButtonHandled !== undefined) {
-              backButtonHandled = cachedState.backButtonHandled;
-              console.log(`   ✅ Restored backButtonHandled: ${backButtonHandled}`);
-          }
-          
+      if (cachedState) {
           // Restore user list
           restoreUserListFromCache(cachedState);
           
@@ -6343,9 +6326,9 @@ const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true'
           restoreSystemMessagesFromCache(cachedState);
       }
   }
-    
-    // Auth check
-    await _Auth.requireAuth();
+  
+  // Auth check
+  await _Auth.requireAuth();
   } catch (err) {
     console.error('❌ Auth failed:', err);
     window.location.href = '/login.html';
