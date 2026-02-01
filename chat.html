@@ -4569,7 +4569,7 @@ socketInstance.on('room_joined', async (data) => {
     console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
   } 
   
-  // Initialize users if not refresh or if user list is empty
+  // NEW CODE: Initialize users if not refresh or if user list is empty
   if (!isPageRefresh || roomUserList.size === 0) {
     console.log('🆕 Initializing fresh user list from server');
     roomUserList.clear();
@@ -4583,6 +4583,16 @@ socketInstance.on('room_joined', async (data) => {
   } else {
     console.log('🔄 Using cached user list (refresh detected)');
   }
+  
+  // Mark as joined
+  hasJoinedRoom = true;
+  saveParticipationState(roomData.roomId, true);
+  
+  console.log('⏰ Starting timer updates with server-synced time...');
+  updateTimer();
+  
+  console.log('✅ ========================================\n');
+});
   
   // Mark as joined
   hasJoinedRoom = true;
@@ -6604,20 +6614,7 @@ if (cachedState && cachedState.roomId === roomData.roomId) {
   // No cache - use normal initial state (disabled)
   setInitialCallButtonState();
 }
-  // Initialize users if not refresh or if user list is empty
-  if (!isPageRefresh || roomUserList.size === 0) {
-    console.log('🆕 Initializing fresh user list from server');
-    roomUserList.clear();
-    if (Array.isArray(data.users)) {
-      data.users.forEach(user => {
-        addUserToRoom(user);
-      });
-    }
-    renderUserList();
-    saveUserList(roomData.roomId);
-  } else {
-    console.log('🔄 Using cached user list (refresh detected)');
-  }
+
   
   // Mark as joined
   hasJoinedRoom = true;
