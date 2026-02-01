@@ -4593,16 +4593,6 @@ socketInstance.on('room_joined', async (data) => {
   
   console.log('✅ ========================================\n');
 });
-  
-  // Mark as joined
-  hasJoinedRoom = true;
-  saveParticipationState(roomData.roomId, true);
-  
-  console.log('⏰ Starting timer updates with server-synced time...');
-  updateTimer();
-  
-  console.log('✅ ========================================\n');
-});
 
 
 
@@ -6614,11 +6604,9 @@ if (cachedState && cachedState.roomId === roomData.roomId) {
   // No cache - use normal initial state (disabled)
   setInitialCallButtonState();
 }
-
   
-  // Mark as joined
-  hasJoinedRoom = true;
-  saveParticipationState(roomData.roomId, true);
+
+
 
   console.log('⏰ Starting timer interval (will update when server data arrives)');
   // Start timer interval (will show "--" until server data arrives)
