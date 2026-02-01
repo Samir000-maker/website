@@ -1175,6 +1175,13 @@ const toast = (m, t='success') => {
   const CHAT_TIMESTAMP_KEY = 'chat_timestamp';
   const ACTIVE_CALL_KEY = 'activeCall';
   
+  // NEW: State preservation keys
+const ROOM_USER_LIST_KEY = 'room_user_list';
+const ROOM_SYSTEM_MESSAGES_KEY = 'room_system_messages';
+const ROOM_ALERT_STATE_KEY = 'room_alert_state';
+const ROOM_PARTICIPATION_KEY = 'room_participation';
+const STATE_VERSION = '1.0.0';
+  
   
   const CACHED_CALL_KEY = 'cachedIncomingCall';
 const CALL_CACHE_TIMEOUT = 60000; // 60 seconds max cache time
@@ -1197,6 +1204,14 @@ let pendingAttachment = null;
   let roomData = null;
   let serverClockOffset = 0; // Milliseconds to add to client time to get server time
   let serverExpiresAt = null; // Absolute server timestamp for expiry
+  
+  // NEW: Enhanced state tracking
+let roomUserList = new Map(); // userId -> user object
+let systemMessages = []; // Array of system messages
+let isAlertDialogVisible = false;
+let isPageRefresh = false;
+let hasJoinedRoom = false;
+  
   // ============================================
 // EMOJI PICKER STATE
 // ============================================
@@ -1244,6 +1259,336 @@ let isInBackgroundCall = false;
 let isSocketAuthenticated = false;
 let authenticationPromise = null;
 
+
+// ============================================
+// STATE PERSISTENCE FUNCTIONS
+// ============================================
+
+function serializeState(data) {
+  try {
+    return JSON.stringify(data);
+  } catch (err) {
+    console.error('❌ State serialization failed:', err);
+    return null;
+  }
+}
+
+function deserializeState(str) {
+  if (!str) return null;
+  try {
+    return JSON.parse(str);
+  } catch (err) {
+    console.error('❌ State deserialization failed:', err);
+    return null;
+  }
+}
+
+function saveUserList(roomId) {
+  if (!roomId) return;
+  try {
+    const userArray = Array.from(roomUserList.values());
+    const key = `${ROOM_USER_LIST_KEY}_${roomId}`;
+    const stateData = {
+      version: STATE_VERSION,
+      timestamp: Date.now(),
+      roomId: roomId,
+      users: userArray
+    };
+    localStorage.setItem(key, serializeState(stateData));
+  } catch (err) {
+    console.error('❌ Failed to save user list:', err);
+  }
+}
+
+function loadUserList(roomId) {
+  if (!roomId) return false;
+  try {
+    const key = `${ROOM_USER_LIST_KEY}_${roomId}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return false;
+    
+    const stateData = deserializeState(stored);
+    if (!stateData || stateData.version !== STATE_VERSION || stateData.roomId !== roomId) {
+      return false;
+    }
+    
+    roomUserList.clear();
+    if (Array.isArray(stateData.users)) {
+      stateData.users.forEach(user => {
+        if (user && user.userId) {
+          roomUserList.set(user.userId, user);
+        }
+      });
+    }
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to load user list:', err);
+    return false;
+  }
+}
+
+function saveSystemMessages(roomId) {
+  if (!roomId) return;
+  try {
+    const key = `${ROOM_SYSTEM_MESSAGES_KEY}_${roomId}`;
+    const stateData = {
+      version: STATE_VERSION,
+      timestamp: Date.now(),
+      roomId: roomId,
+      messages: systemMessages
+    };
+    localStorage.setItem(key, serializeState(stateData));
+  } catch (err) {
+    console.error('❌ Failed to save system messages:', err);
+  }
+}
+
+function loadSystemMessages(roomId) {
+  if (!roomId) return false;
+  try {
+    const key = `${ROOM_SYSTEM_MESSAGES_KEY}_${roomId}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return false;
+    
+    const stateData = deserializeState(stored);
+    if (!stateData || stateData.version !== STATE_VERSION || stateData.roomId !== roomId) {
+      return false;
+    }
+    
+    systemMessages = Array.isArray(stateData.messages) ? stateData.messages : [];
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to load system messages:', err);
+    return false;
+  }
+}
+
+function saveAlertState(roomId, isVisible) {
+  if (!roomId) return;
+  try {
+    const key = `${ROOM_ALERT_STATE_KEY}_${roomId}`;
+    const stateData = {
+      version: STATE_VERSION,
+      timestamp: Date.now(),
+      roomId: roomId,
+      isVisible: isVisible
+    };
+    localStorage.setItem(key, serializeState(stateData));
+  } catch (err) {
+    console.error('❌ Failed to save alert state:', err);
+  }
+}
+
+function loadAlertState(roomId) {
+  if (!roomId) return false;
+  try {
+    const key = `${ROOM_ALERT_STATE_KEY}_${roomId}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return false;
+    
+    const stateData = deserializeState(stored);
+    if (!stateData || stateData.version !== STATE_VERSION || stateData.roomId !== roomId) {
+      return false;
+    }
+    return stateData.isVisible === true;
+  } catch (err) {
+    console.error('❌ Failed to load alert state:', err);
+    return false;
+  }
+}
+
+function saveParticipationState(roomId, hasJoined) {
+  if (!roomId) return;
+  try {
+    const key = `${ROOM_PARTICIPATION_KEY}_${roomId}`;
+    const stateData = {
+      version: STATE_VERSION,
+      timestamp: Date.now(),
+      roomId: roomId,
+      hasJoined: hasJoined,
+      userId: currentUser?.userId
+    };
+    sessionStorage.setItem(key, serializeState(stateData));
+  } catch (err) {
+    console.error('❌ Failed to save participation state:', err);
+  }
+}
+
+function loadParticipationState(roomId) {
+  if (!roomId) return false;
+  try {
+    const key = `${ROOM_PARTICIPATION_KEY}_${roomId}`;
+    const stored = sessionStorage.getItem(key);
+    if (!stored) return false;
+    
+    const stateData = deserializeState(stored);
+    if (!stateData || stateData.version !== STATE_VERSION || stateData.roomId !== roomId) {
+      return false;
+    }
+    if (stateData.userId !== currentUser?.userId) {
+      return false;
+    }
+    return stateData.hasJoined === true;
+  } catch (err) {
+    console.error('❌ Failed to load participation state:', err);
+    return false;
+  }
+}
+
+function clearRoomState(roomId) {
+  if (!roomId) return;
+  try {
+    localStorage.removeItem(`${ROOM_USER_LIST_KEY}_${roomId}`);
+    localStorage.removeItem(`${ROOM_SYSTEM_MESSAGES_KEY}_${roomId}`);
+    localStorage.removeItem(`${ROOM_ALERT_STATE_KEY}_${roomId}`);
+    sessionStorage.removeItem(`${ROOM_PARTICIPATION_KEY}_${roomId}`);
+    roomUserList.clear();
+    systemMessages = [];
+    isAlertDialogVisible = false;
+    hasJoinedRoom = false;
+  } catch (err) {
+    console.error('❌ Failed to clear room state:', err);
+  }
+}
+
+function detectPageRefresh() {
+  if (window.performance && window.performance.getEntriesByType) {
+    const navEntries = window.performance.getEntriesByType('navigation');
+    if (navEntries.length > 0 && navEntries[0].type === 'reload') {
+      return true;
+    }
+  }
+  if (window.performance && window.performance.navigation) {
+    const navType = window.performance.navigation.type;
+    if (navType === 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function restoreStateAfterRefresh(roomId) {
+  console.log('🔄 RESTORING STATE AFTER REFRESH');
+  let restored = false;
+  if (loadUserList(roomId)) {
+    restored = true;
+    renderUserList();
+  }
+  if (loadSystemMessages(roomId)) {
+    restored = true;
+    renderSystemMessages();
+  }
+  isAlertDialogVisible = loadAlertState(roomId);
+  hasJoinedRoom = loadParticipationState(roomId);
+  return restored;
+}
+
+function addUserToRoom(user) {
+  if (!user || !user.userId) {
+    return false;
+  }
+  if (roomUserList.has(user.userId)) {
+    return false;
+  }
+  roomUserList.set(user.userId, {
+    userId: user.userId,
+    username: user.username,
+    pfpUrl: user.pfpUrl
+  });
+  return true;
+}
+
+function removeUserFromRoom(userId) {
+  if (!userId) return false;
+  const user = roomUserList.get(userId);
+  if (!user) {
+    return false;
+  }
+  roomUserList.delete(userId);
+  return true;
+}
+
+function addSystemMessage(type, username, timestamp) {
+  const message = {
+    id: `system_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    type: type,
+    username: username,
+    timestamp: timestamp || Date.now(),
+    isSystemMessage: true
+  };
+  systemMessages.push(message);
+  return message;
+}
+
+function renderSystemMessages() {
+  if (!messagesList) return;
+  systemMessages.forEach(msg => {
+    renderSystemMessageInChat(msg);
+  });
+}
+
+function renderSystemMessageInChat(message) {
+  if (!messagesList) return;
+  const existing = messagesList.querySelector(`[data-message-id="${message.id}"]`);
+  if (existing) {
+    return;
+  }
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'system-message text-center text-xs text-gray-500 my-2';
+  messageDiv.dataset.messageId = message.id;
+  messageDiv.dataset.timestamp = message.timestamp;
+  const text = message.type === 'join' ? `${message.username} joined` : `${message.username} left`;
+  messageDiv.textContent = text;
+  
+  const messages = Array.from(messagesList.children);
+  let inserted = false;
+  for (let i = 0; i < messages.length; i++) {
+    const existingTimestamp = parseInt(messages[i].dataset.timestamp || '0');
+    if (message.timestamp < existingTimestamp) {
+      messagesList.insertBefore(messageDiv, messages[i]);
+      inserted = true;
+      break;
+    }
+  }
+  if (!inserted) {
+    messagesList.appendChild(messageDiv);
+  }
+  const shouldScroll = messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100;
+  if (shouldScroll) {
+    messagesList.scrollTop = messagesList.scrollHeight;
+  }
+}
+
+function renderUserList() {
+  if (!usersList) return;
+  usersList.innerHTML = '';
+  const users = Array.from(roomUserList.values()).sort((a, b) => 
+    (a.username || '').localeCompare(b.username || '')
+  );
+  users.forEach(user => {
+    const userCard = document.createElement('div');
+    userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
+    userCard.dataset.userId = user.userId;
+    const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
+    const userInfo = document.createElement('div');
+    userInfo.className = 'flex-1 min-w-0';
+    const nameSpan = document.createElement('div');
+    nameSpan.className = 'text-sm font-semibold truncate';
+    nameSpan.textContent = user.username || 'User';
+    const statusSpan = document.createElement('div');
+    statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
+    statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
+    userInfo.appendChild(nameSpan);
+    userInfo.appendChild(statusSpan);
+    userCard.appendChild(pfpElement);
+    userCard.appendChild(userInfo);
+    usersList.appendChild(userCard);
+  });
+  setupUserCardClick();
+  if (onlineCount) {
+    onlineCount.textContent = `${roomUserList.size} Online`;
+  }
+}
 
 // ============================================
 // EMOJI PICKER FUNCTIONS
@@ -3675,10 +4020,12 @@ function showConfirmationDialog() {
         btnStay.style.backgroundColor = '#1c2128';
         btnStay.style.borderColor = '#30363d';
       });
-      btnStay.addEventListener('click', () => {
+  btnStay.addEventListener('click', () => {
         console.log('❌ User chose to stay');
         overlay.style.display = 'none';
-        resolve(false); // Just return false - no other logic
+        isAlertDialogVisible = false;
+        saveAlertState(roomData?.roomId, false);
+        resolve(false);
       }, { once: true });
     }
     
@@ -3694,7 +4041,9 @@ function showConfirmationDialog() {
       btnLeave.addEventListener('click', () => {
         console.log('✅ User chose to leave');
         overlay.style.display = 'none';
-        resolve(true); // Just return true - no other logic
+        isAlertDialogVisible = true;
+        saveAlertState(roomData?.roomId, true);
+        resolve(true);
       }, { once: true });
     }
   });
@@ -3720,16 +4069,13 @@ function setupBackButtonHandler() {
   console.log('✅ History guard established');
   
   // Execute complete leave sequence
-  async function executeLeaveSequence() {
+async function executeLeaveSequence() {
     if (isLeaving) {
       console.log('⚠️ Leave already in progress');
       return;
     }
     
-    console.log('🚪 ========================================');
     console.log('🚪 EXECUTING LEAVE SEQUENCE');
-    console.log('🚪 ========================================');
-    
     isLeaving = true;
     backButtonHandled = true;
     historyGuardActive = false;
@@ -3741,7 +4087,6 @@ function setupBackButtonHandler() {
       if (activeCallStr) {
         const callData = JSON.parse(activeCallStr);
         if (socketInstance?.connected) {
-          console.log('📤 Emitting leave_call');
           socketInstance.emit('leave_call', { callId: callData.callId });
           await new Promise(resolve => setTimeout(resolve, 300));
         }
@@ -3753,18 +4098,17 @@ function setupBackButtonHandler() {
       }
       
       if (socketInstance?.connected) {
-        console.log('📤 Emitting leave_room');
         socketInstance.emit('leave_room');
         await new Promise(resolve => setTimeout(resolve, 300));
       }
       
+      // Clear room-specific state
+      if (roomData?.roomId) {
+        clearRoomState(roomData.roomId);
+      }
+      
       await clearChatState(true);
       
-      console.log('✅ Cleanup complete');
-      console.log('🔄 Navigating to mood.html');
-      console.log('🚪 ========================================\n');
-      
-      // Direct navigation - no other functions
       window.location.href = '/mood.html';
       
     } catch (error) {
@@ -4225,6 +4569,25 @@ socketInstance.on('room_joined', async (data) => {
     console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
   } 
   
+  // Initialize users if not refresh or if user list is empty
+  if (!isPageRefresh || roomUserList.size === 0) {
+    console.log('🆕 Initializing fresh user list from server');
+    roomUserList.clear();
+    if (Array.isArray(data.users)) {
+      data.users.forEach(user => {
+        addUserToRoom(user);
+      });
+    }
+    renderUserList();
+    saveUserList(roomData.roomId);
+  } else {
+    console.log('🔄 Using cached user list (refresh detected)');
+  }
+  
+  // Mark as joined
+  hasJoinedRoom = true;
+  saveParticipationState(roomData.roomId, true);
+  
   console.log('⏰ Starting timer updates with server-synced time...');
   updateTimer();
   
@@ -4239,83 +4602,33 @@ socketInstance.on('user_joined', (data) => {
   console.log('👤 ========================================');
   console.log(`   User: ${data.username} (${data.userId})`);
   console.log(`   Online count: ${data.onlineCount}`);
-  console.log(`   Total users in room: ${data.users?.length || 0}`);
+  console.log(`   Is refresh: ${isPageRefresh}`);
+  console.log(`   Current user: ${currentUser?.userId}`);
   
-  // Skip if it's the current user (they already have the UI)
-  if (data.userId === currentUser?.userId) {
-    console.log('ℹ️ User_joined event is for current user - UI already initialized');
+  // CRITICAL: Don't process if this is the current user on page refresh
+  if (isPageRefresh && data.userId === currentUser?.userId) {
+    console.log('ℹ️ Skipping user_joined for current user on refresh');
     console.log('👤 ========================================\n');
     return;
   }
   
-  console.log('✅ New user joined - updating UI for all users');
+  // Add user to room (with automatic deduplication)
+  const wasAdded = addUserToRoom({
+    userId: data.userId,
+    username: data.username,
+    pfpUrl: data.pfpUrl
+  });
   
-  // ============================================
-  // UPDATE USER LIST
-  // ============================================
-  if (usersList && data.users) {
-    console.log(`🔄 Rebuilding user list with ${data.users.length} users`);
-    
-    // Clear existing user list
-    usersList.innerHTML = '';
-    
-    // Render all users from server data
-    data.users.forEach(user => {
-      const userCard = document.createElement('div');
-      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-      userCard.dataset.userId = user.userId;
-      
-      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-      
-      const userInfo = document.createElement('div');
-      userInfo.className = 'flex-1 min-w-0';
-      
-      const nameSpan = document.createElement('div');
-      nameSpan.className = 'text-sm font-semibold truncate';
-      nameSpan.textContent = user.username || 'User';
-      
-      const statusSpan = document.createElement('div');
-      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-      
-      userInfo.appendChild(nameSpan);
-      userInfo.appendChild(statusSpan);
-      
-      userCard.appendChild(pfpElement);
-      userCard.appendChild(userInfo);
-      usersList.appendChild(userCard);
-    });
-    
-    // Reattach click handlers for mobile
-    setupUserCardClick();
-    
-    console.log(`✅ User list rebuilt with ${data.users.length} users`);
+  // Only show system message if user was actually added (not duplicate)
+  if (wasAdded && data.userId !== currentUser?.userId) {
+    const sysMsg = addSystemMessage('join', data.username, Date.now());
+    renderSystemMessageInChat(sysMsg);
+    saveSystemMessages(roomData?.roomId);
   }
   
-  // ============================================
-  // UPDATE ONLINE COUNT
-  // ============================================
-  if (onlineCount && data.onlineCount !== undefined) {
-    onlineCount.textContent = `${data.onlineCount} Online`;
-    console.log(`✅ Online count updated: ${data.onlineCount}`);
-  }
-  
-  // ============================================
-  // SHOW SYSTEM MESSAGE
-  // ============================================
-  if (messagesList) {
-    const msgEl = document.createElement('div');
-    msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2 animate-fade-in-up';
-    msgEl.textContent = `${data.username} joined`;
-    messagesList.appendChild(msgEl);
-    
-    // Auto-scroll to show new message
-    if (messagesList.scrollHeight - messagesList.scrollTop <= messagesList.clientHeight + 100) {
-      messagesList.scrollTop = messagesList.scrollHeight;
-    }
-    
-    console.log(`✅ System message displayed: "${data.username} joined"`);
-  }
+  // Update UI
+  renderUserList();
+  saveUserList(roomData?.roomId);
   
   console.log('👤 ========================================\n');
 });
@@ -5040,21 +5353,40 @@ socketInstance.on('error', (data) => {
 });
 
     socketInstance.on('user_left', (data) => {
-      const msgEl = document.createElement('div');
-      msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-      msgEl.textContent = `${data.username || 'A user'} left the room`;
-      messagesList?.appendChild(msgEl);
-
-      if (onlineCount && data.remainingUsers !== undefined) {
-        onlineCount.textContent = `${data.remainingUsers} Online`;
-      }
-
-      if (data.remainingUsers <= 1) {
-        toast('Room closing...', 'warning');
-        clearChatState(true);
-        setTimeout(() => window.location.href = '/mood.html', 2000);
-      }
-    });
+  console.log('👋 ========================================');
+  console.log('👋 USER_LEFT EVENT RECEIVED');
+  console.log('👋 ========================================');
+  console.log(`   User: ${data.username} (${data.userId})`);
+  
+  // Remove user from room
+  const wasRemoved = removeUserFromRoom(data.userId);
+  
+  // Only show system message if user was actually removed
+  if (wasRemoved) {
+    const sysMsg = addSystemMessage('leave', data.username, Date.now());
+    renderSystemMessageInChat(sysMsg);
+    saveSystemMessages(roomData?.roomId);
+  }
+  
+  // Update UI
+  renderUserList();
+  saveUserList(roomData?.roomId);
+  
+  if (onlineCount && data.remainingUsers !== undefined) {
+    onlineCount.textContent = `${data.remainingUsers} Online`;
+  }
+  
+  if (data.remainingUsers <= 1) {
+    toast('Room closing...', 'warning');
+    if (roomData?.roomId) {
+      clearRoomState(roomData.roomId);
+    }
+    clearChatState(true);
+    setTimeout(() => window.location.href = '/mood.html', 2000);
+  }
+  
+  console.log('👋 ========================================\n');
+});
 
 socketInstance.on('left_room', (data) => {
   console.log('👋 Received left_room confirmation from server');
@@ -6100,6 +6432,9 @@ window.addEventListener('beforeunload', (e) => {
 }
   
 try {
+
+ isPageRefresh = detectPageRefresh();
+  console.log('🔍 Page load type:', isPageRefresh ? 'REFRESH' : 'NAVIGATION');
     // Check if we're returning from a call OR if we're in an iframe (chat overlay)
     const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
     const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
@@ -6216,6 +6551,10 @@ if (returningFromCall === 'true') {
     setTimeout(() => window.location.href = '/login.html', 1500);
     return;
   }
+  
+    if (isPageRefresh) {
+    restoreStateAfterRefresh(roomData.roomId);
+  }
 
   
 // CRITICAL: Start with buttons DISABLED until authenticated
@@ -6265,39 +6604,24 @@ if (cachedState && cachedState.roomId === roomData.roomId) {
   // No cache - use normal initial state (disabled)
   setInitialCallButtonState();
 }
-  // Render initial users
-  if (usersList && Array.isArray(roomData.users)) {
-    roomData.users.forEach(user => {
-      const userCard = document.createElement('div');
-      userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-      
-      const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-      
-      const userInfo = document.createElement('div');
-      userInfo.className = 'flex-1 min-w-0';
-      
-      const nameSpan = document.createElement('div');
-      nameSpan.className = 'text-sm font-semibold truncate';
-      nameSpan.textContent = user.username || 'User';
-      
-      const statusSpan = document.createElement('div');
-      statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-      statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-      
-      userInfo.appendChild(nameSpan);
-      userInfo.appendChild(statusSpan);
-      
-      userCard.appendChild(pfpElement);
-      userCard.appendChild(userInfo);
-      usersList.appendChild(userCard);
-    });
-
-    setupUserCardClick();
-
-    if (onlineCount) {
-      onlineCount.textContent = `${roomData.users.length} Online`;
+  // Initialize users if not refresh or if user list is empty
+  if (!isPageRefresh || roomUserList.size === 0) {
+    console.log('🆕 Initializing fresh user list from server');
+    roomUserList.clear();
+    if (Array.isArray(data.users)) {
+      data.users.forEach(user => {
+        addUserToRoom(user);
+      });
     }
+    renderUserList();
+    saveUserList(roomData.roomId);
+  } else {
+    console.log('🔄 Using cached user list (refresh detected)');
   }
+  
+  // Mark as joined
+  hasJoinedRoom = true;
+  saveParticipationState(roomData.roomId, true);
 
   console.log('⏰ Starting timer interval (will update when server data arrives)');
   // Start timer interval (will show "--" until server data arrives)
