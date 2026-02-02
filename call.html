@@ -332,41 +332,36 @@ window.addEventListener('message', (event) => {
 console.log('✅ Message listener added for iframe communication');
   
   window.addEventListener('popstate', (event) => {
-    console.log('⬅️ ========================================');
-    console.log('⬅️ BACK BUTTON PRESSED');
-    console.log('⬅️ ========================================');
+  console.log('⬅️ ========================================');
+  console.log('⬅️ BACK BUTTON PRESSED');
+  console.log('⬅️ ========================================');
+  
+  const chatOverlay = document.getElementById('chatOverlayContainer');
+  const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
+  
+  console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
+  
+  if (isShowingChat) {
+    // Hide chat, show call
+    console.log('📞 Hiding chat, showing call');
+    hideChat();
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
+  } else {
+    // CRITICAL: Navigate to chat.html as standalone page
+    // Call will remain active in background
+    console.log('🔄 Navigating to chat.html (call remains active)');
+    console.log(`   Active peer connections: ${peerConnections.size}`);
+    console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
     
-    const chatOverlay = document.getElementById('chatOverlayContainer');
-    const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
+    // Mark that we're navigating to chat (not closing)
+    sessionStorage.setItem('navigatingFromCall', 'true');
     
-    console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
-    
-    // CRITICAL: Always prevent default navigation
-    event.preventDefault();
-    
-    if (isShowingChat) {
-      // Hide chat, show call
-      console.log('📞 Hiding chat, showing call');
-      hideChat();
-      history.pushState({ view: 'call' }, 'Call', window.location.href);
-    } else {
-      // Hide call, show chat
-      if (!callData || !localStream) {
-        console.log('⚠️ No active call, allowing navigation');
-        window.location.href = '/chat.html';
-        return;
-      }
-      
-      console.log('💬 Hiding call, showing chat');
-      console.log(`   Active peer connections: ${peerConnections.size}`);
-      console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
-      
-      showChat();
-      history.pushState({ view: 'chat' }, 'Chat', window.location.href);
-    }
-    
-    console.log('⬅️ ========================================\n');
-  });
+    // Navigate to chat page
+    window.location.href = '/chat.html';
+  }
+  
+  console.log('⬅️ ========================================\n');
+});
 }
 
 function showChat() {
@@ -2590,27 +2585,47 @@ async function toggleVideo() {
 }
 
       function leaveCall() {
-        if (isInitializing) return;
-        isInitializing = true;
-       audioContexts.forEach(ac => {
-  try {
-    if (ac.stop) ac.stop();
-    if (ac.context && ac.context.state !== 'closed') {
-      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-    }
-  } catch (e) {
-    console.warn('Failed to cleanup audio context:', e);
-  }
-});
-        audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
-        peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
-        if (durationInterval) clearInterval(durationInterval);
-        localStorage.removeItem('activeCall');
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+  if (isInitializing) return;
+  isInitializing = true;
+  
+  console.log('🚪 ========================================');
+  console.log('🚪 LEAVE CALL INITIATED');
+  console.log('🚪 ========================================');
+  
+  audioContexts.forEach(ac => {
+    try {
+      if (ac.stop) ac.stop();
+      if (ac.context && ac.context.state !== 'closed') {
+        ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
       }
+    } catch (e) {
+      console.warn('Failed to cleanup audio context:', e);
+    }
+  });
+  audioContexts.clear();
+  
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  peerConnections.forEach(pc => pc.close());
+  peerConnections.clear();
+  
+  if (socketInstance && socketInstance.connected) {
+    socketInstance.emit('leave_call', { callId: callData.callId });
+    console.log('✅ leave_call emitted to server');
+  }
+  
+  if (durationInterval) clearInterval(durationInterval);
+  
+  localStorage.removeItem('activeCall');
+  sessionStorage.removeItem('hasBackgroundCall');
+  sessionStorage.removeItem('returningFromCall');
+  sessionStorage.removeItem('backgroundCallMode');
+  sessionStorage.removeItem('returningToBackgroundCall');
+  
+  console.log('✅ All call data cleared');
+  console.log('🚪 ========================================\n');
+  
+  setTimeout(() => { window.location.href = '/chat.html'; }, 500);
+}
       
       
       
@@ -3328,6 +3343,121 @@ setupCallBackButtonHandler();
 
 // Setup cleanup handler
 setupCallCleanup();
+
+
+// Setup beforeunload handler for call.html
+window.addEventListener('beforeunload', (e) => {
+  console.log('🚪 ========================================');
+  console.log('🚪 CALL.HTML BEFOREUNLOAD EVENT');
+  console.log('🚪 ========================================');
+  console.log(`   Reason: Page unload/navigation/close`);
+  console.log(`   Has call data: ${!!callData}`);
+  console.log(`   Has local stream: ${!!localStream}`);
+  console.log(`   Peer connections: ${peerConnections.size}`);
+  
+  // CRITICAL: Check if we're in an iframe (chat overlay on call.html)
+  const isInIframe = window.parent && window.parent !== window;
+  console.log(`   Is in iframe: ${isInIframe}`);
+  
+// CRITICAL: Check if chat overlay is open
+const chatOverlay = document.getElementById('chatOverlayContainer');
+const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
+console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
+
+// CRITICAL: Check if we're navigating to chat
+const isNavigatingToChat = sessionStorage.getItem('navigatingFromCall') === 'true';
+console.log(`   Navigating to chat: ${isNavigatingToChat}`);
+
+// ============================================
+// EXCEPTION: NAVIGATING TO CHAT
+// ============================================
+if (isChatOverlayOpen || isNavigatingToChat) {
+  console.log('🔒 Preserving call state - user navigating to chat');
+  console.log('   DO NOT emit leave_call or stop media');
+  
+  // Clear navigation flag
+  sessionStorage.removeItem('navigatingFromCall');
+  
+  console.log('🚪 ========================================\n');
+  return; // CRITICAL: Exit early without cleanup
+}
+  
+  // ============================================
+  // FULL LEAVE SEQUENCE (only for actual page close/reload)
+  // ============================================
+  console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE');
+  
+  try {
+    const activeCallStr = localStorage.getItem('activeCall');
+    if (activeCallStr) {
+      try {
+        const callData = JSON.parse(activeCallStr);
+        console.log(`📞 Leaving active call: ${callData.callId}`);
+        
+        if (socketInstance?.connected) {
+          socketInstance.emit('leave_call', { callId: callData.callId });
+        }
+      } catch (e) {
+        console.error('❌ Error parsing call data:', e);
+      }
+      
+      localStorage.removeItem('activeCall');
+      sessionStorage.removeItem('hasBackgroundCall');
+      sessionStorage.removeItem('returningFromCall');
+      sessionStorage.removeItem('backgroundCallMode');
+      sessionStorage.removeItem('returningToBackgroundCall');
+      console.log('✅ Call data cleared');
+    }
+    
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        track.stop();
+        console.log(`🛑 Stopped ${track.kind} track`);
+      });
+    }
+    
+    peerConnections.forEach((pc, userId) => {
+      pc.close();
+      console.log(`🗑️ Closed PC for ${userId}`);
+    });
+    peerConnections.clear();
+    
+    audioContexts.forEach((ctx, userId) => {
+      if (ctx.context && ctx.context.state !== 'closed') {
+        ctx.context.close();
+      }
+      console.log(`🗑️ Closed audio context for ${userId}`);
+    });
+    audioContexts.clear();
+    
+    if (socketInstance) {
+      socketInstance.disconnect();
+      console.log('✅ Socket disconnected');
+    }
+    
+    if (durationInterval) {
+      clearInterval(durationInterval);
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
+    
+  } catch (error) {
+    console.error('❌ Error in beforeunload leave sequence:', error);
+    
+    try {
+      localStorage.removeItem('activeCall');
+      if (socketInstance) socketInstance.disconnect();
+      if (durationInterval) clearInterval(durationInterval);
+    } catch (e) {
+      console.error('❌ Cleanup failed:', e);
+    }
+  }
+  
+  console.log('🚪 ========================================\n');
+});
+
+console.log('✅ Call page event handlers initialized');
 
 console.log('✅ Call page event handlers initialized');
           
