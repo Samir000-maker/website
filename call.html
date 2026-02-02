@@ -730,49 +730,49 @@ function setupCallCleanup() {
       }
       
       
-function updateVideoVisibility(userId, enabled, trackReady = true) {
-  const vid = document.getElementById(`video-${userId}`);
-  const pfp = document.getElementById(`pfp-${userId}`);
-  
-  if (!vid || !pfp) {
-    console.warn(`⚠️ Video elements not found for ${userId}`);
-    return;
-  }
-  
-  // ✅ Enhanced check: verify video track exists in stream
-  const hasVideoTrack = vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
-  const videoTrackEnabled = hasVideoTrack ? vid.srcObject.getVideoTracks()[0].enabled : false;
-  
-  const shouldShowVideo = enabled && trackReady && hasVideoTrack && videoTrackEnabled;
-  
+function updateVideoVisibility(userId, enabled, trackReady) {
   console.log(`📹 ========================================`);
   console.log(`📹 updateVideoVisibility(${userId})`);
   console.log(`📹 ========================================`);
   console.log(`   enabled: ${enabled}`);
   console.log(`   trackReady: ${trackReady}`);
+  
+  const videoEl = document.getElementById(`video-${userId}`);
+  const pfpContainer = document.getElementById(`pfp-${userId}`);
+  
+  if (!videoEl || !pfpContainer) {
+    console.warn(`⚠️ Video elements not found for ${userId}`);
+    console.log(`   videoEl: ${!!videoEl}, pfpContainer: ${!!pfpContainer}`);
+    console.log(`📹 ========================================\n`);
+    return;
+  }
+  
+  const hasVideoTrack = videoEl.srcObject?.getVideoTracks().length > 0;
+  const videoTrackEnabled = videoEl.srcObject?.getVideoTracks()[0]?.enabled || false;
+  
   console.log(`   hasVideoTrack: ${hasVideoTrack}`);
   console.log(`   videoTrackEnabled: ${videoTrackEnabled}`);
+  
+  const shouldShowVideo = enabled && (trackReady || hasVideoTrack) && videoTrackEnabled;
+  
   console.log(`   shouldShowVideo: ${shouldShowVideo}`);
   
-  if (vid.srcObject) {
-    console.log(`   srcObject video tracks: ${vid.srcObject.getVideoTracks().length}`);
-    const tracks = vid.srcObject.getVideoTracks();
-    tracks.forEach((track, i) => {
-      console.log(`      [${i}] ${track.kind} - enabled:${track.enabled}, readyState:${track.readyState}, id:${track.id.substring(0, 8)}...`);
-    });
+  if (videoEl.srcObject) {
+    console.log(`   srcObject video tracks: ${videoEl.srcObject.getVideoTracks().length}`);
   } else {
     console.log(`   srcObject: null`);
   }
   
   if (shouldShowVideo) {
-    vid.classList.remove('hidden');
-    pfp.classList.add('hidden');
-    console.log(`   ✅ Video SHOWN, profile picture HIDDEN`);
+    videoEl.classList.remove('hidden');
+    pfpContainer.classList.add('hidden');
+    console.log(`   ✅ Video VISIBLE, profile picture HIDDEN`);
   } else {
-    vid.classList.add('hidden');
-    pfp.classList.remove('hidden');
+    videoEl.classList.add('hidden');
+    pfpContainer.classList.remove('hidden');
     console.log(`   ✅ Video HIDDEN, profile picture SHOWN`);
   }
+  
   console.log(`📹 ========================================\n`);
 }
       
@@ -2293,17 +2293,17 @@ async function toggleVideo() {
   }
   
   let track = localStream.getVideoTracks()[0];
-  let wasTrackAdded = false;
   
-  // ✅ FIX: Handle missing video track (audio call or failed camera)
+  // ✅ FIX: Handle the two cases properly
   if (!track) {
+    // Case 1: No video track exists - need to request camera
     console.log(`📹 No video track exists - requesting camera access...`);
     
     try {
       const videoStream = await navigator.mediaDevices.getUserMedia({
         video: { 
-          width: {ideal:640}, 
-          height: {ideal:480},
+          width: {ideal: 640}, 
+          height: {ideal: 480},
           facingMode: 'user'
         }
       });
@@ -2312,7 +2312,6 @@ async function toggleVideo() {
       
       if (!track) {
         console.error('❌ Camera permission granted but no track received');
-        toast('Failed to access camera', 'error');
         isTogglingVideo = false;
         return;
       }
@@ -2321,102 +2320,61 @@ async function toggleVideo() {
       localStream.addTrack(track);
       console.log(`✅ Video track added to localStream (id: ${track.id.substring(0, 8)}...)`);
       
-      // ✅ CRITICAL: Add track to ALL existing peer connections
+      // Set enabled state
+      track.enabled = true;
+      isVideoEnabled = true;
+      
+      console.log(`✅ Video track enabled`);
+      
+      // ✅ Add track to ALL existing peer connections with renegotiation
       const renegotiationPromises = [];
       
       peerConnections.forEach((pc, userId) => {
         try {
           console.log(`📤 Adding video track to peer connection with ${userId}`);
           
-          // Add the track to the peer connection
-          const sender = pc.addTrack(track, localStream);
+          // Add the track
+          pc.addTrack(track, localStream);
           console.log(`✅ Video track added to PC for ${userId}`);
           
-          // ✅ CRITICAL: Create new offer to renegotiate (same as video call initiation)
+          // Renegotiate
           const renegotiationPromise = (async () => {
-  try {
-    console.log(`🔄 Creating renegotiation offer for ${userId}...`);
-    
-    // ✅ FIX H: Wait for stable signaling state before renegotiation
-    const maxWait = 5000;
-    const startWait = Date.now();
-    
-    while (pc.signalingState !== 'stable' && Date.now() - startWait < maxWait) {
-      console.log(`⏳ Waiting for stable state (current: ${pc.signalingState})`);
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    if (pc.signalingState !== 'stable') {
-      console.error(`❌ PC for ${userId} not stable after ${maxWait}ms, aborting renegotiation`);
-      return;
-    }
-    
-    console.log(`✅ PC stable, proceeding with renegotiation`);
-    
-    const offer = await pc.createOffer({ 
-      offerToReceiveAudio: true, 
-      offerToReceiveVideo: true 
-    });
-    
-    await pc.setLocalDescription(offer);
-    console.log(`✅ Renegotiation offer created for ${userId}`);
-    
-    // ✅ FIX H: Track renegotiation and require acknowledgment
-    const renegotiationId = `${callData.callId}_${currentUser.userId}_${userId}_${Date.now()}`;
-    
-    if (!window.pendingRenegotiations) window.pendingRenegotiations = new Map();
-    
-    const renegotiationPromise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Renegotiation timeout'));
-      }, 10000);
-      
-      window.pendingRenegotiations.set(renegotiationId, {
-        resolve,
-        reject,
-        timeout,
-        userId
-      });
-    });
-    
-    socketInstance.emit('webrtc_offer', { 
-      callId: callData.callId, 
-      targetUserId: userId, 
-      offer,
-      renegotiationId  // ✅ Include ID for tracking
-    });
-    
-    console.log(`📤 Renegotiation offer sent to ${userId} (ID: ${renegotiationId})`);
-    
-    // ✅ FIX H: Wait for remote peer to acknowledge
-    try {
-      await renegotiationPromise;
-      console.log(`✅ Renegotiation with ${userId} confirmed`);
-    } catch (e) {
-      console.error(`❌ Renegotiation with ${userId} failed/timeout:`, e.message);
-      
-      // Retry once
-      console.log(`🔄 Retrying renegotiation with ${userId}...`);
-      const retryOffer = await pc.createOffer({ 
-        offerToReceiveAudio: true, 
-        offerToReceiveVideo: true 
-      });
-      
-      await pc.setLocalDescription(retryOffer);
-      
-      socketInstance.emit('webrtc_offer', { 
-        callId: callData.callId, 
-        targetUserId: userId, 
-        offer: retryOffer
-      });
-      
-      console.log(`📤 Retry offer sent to ${userId}`);
-    }
-    
-  } catch (e) {
-    console.error(`❌ Renegotiation failed for ${userId}:`, e);
-  }
-})();
+            try {
+              // Wait for stable state
+              const maxWait = 5000;
+              const startWait = Date.now();
+              
+              while (pc.signalingState !== 'stable' && Date.now() - startWait < maxWait) {
+                console.log(`⏳ Waiting for stable state (current: ${pc.signalingState})`);
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+              
+              if (pc.signalingState !== 'stable') {
+                console.error(`❌ PC for ${userId} not stable after ${maxWait}ms, aborting renegotiation`);
+                return;
+              }
+              
+              console.log(`🔄 Creating renegotiation offer for ${userId}...`);
+              
+              const offer = await pc.createOffer({ 
+                offerToReceiveAudio: true, 
+                offerToReceiveVideo: true 
+              });
+              
+              await pc.setLocalDescription(offer);
+              console.log(`✅ Renegotiation offer created for ${userId}`);
+              
+              socketInstance.emit('webrtc_offer', { 
+                callId: callData.callId, 
+                targetUserId: userId, 
+                offer 
+              });
+              
+              console.log(`📤 Renegotiation offer sent to ${userId}`);
+            } catch (e) {
+              console.error(`❌ Renegotiation failed for ${userId}:`, e);
+            }
+          })();
           
           renegotiationPromises.push(renegotiationPromise);
           
@@ -2425,99 +2383,85 @@ async function toggleVideo() {
         }
       });
       
-      // Wait for all renegotiations to complete
+      // Wait for all renegotiations
       await Promise.all(renegotiationPromises);
       console.log(`✅ All peer connections renegotiated with video track`);
       
-      // Attach to local video element
+      // Update local video element
       const localVid = document.getElementById(`video-${currentUser.userId}`);
       if (localVid) {
         if (!localVid.srcObject) {
           localVid.srcObject = localStream;
           console.log(`✅ Local stream attached to video element`);
-        } else {
-          // srcObject already set, just ensure video track is there
-          console.log(`ℹ️ Video element already has srcObject, track added to stream`);
         }
         
         // Wait for video to be ready
-        await new Promise((resolve) => {
-          if (localVid.readyState >= 2) {
-            resolve();
-          } else {
-            localVid.addEventListener('loadedmetadata', resolve, { once: true });
+        localVid.onloadedmetadata = async () => {
+          console.log(`📺 Local video metadata loaded`);
+          try {
+            await localVid.play();
+            console.log(`▶️ Local video playing`);
+          } catch (e) {
+            console.error(`❌ Failed to play local video:`, e);
           }
-        });
+        };
         
-        try {
-          await localVid.play();
-          console.log(`▶️ Local video playback started`);
-        } catch (playError) {
-          console.warn(`⚠️ Local video play warning:`, playError);
+        if (localVid.readyState >= 2) {
+          localVid.play().catch(e => console.error(`❌ Play failed:`, e));
         }
       }
       
-      wasTrackAdded = true;
-      toast('Camera enabled', 'success');
+      // Update visibility
+      updateVideoVisibility(currentUser.userId, true, false);
       
-    } catch (e) {
-      console.error('❌ Failed to get video track:', e);
+      // Update UI
+      updateVideoButton();
       
-      if (e.name === 'NotAllowedError') {
-        toast('Camera permission denied', 'error');
-      } else if (e.name === 'NotFoundError') {
-        toast('No camera found', 'error');
-      } else {
-        toast('Failed to access camera', 'error');
+      // Notify server and peers
+      socketInstance.emit('video_state_changed', { 
+        callId: callData.callId, 
+        enabled: true 
+      });
+      
+      console.log(`✅ Video enabled successfully`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to get video track:`, error);
+      
+      if (error.name === 'NotAllowedError') {
+        console.log('⚠️ Camera permission denied');
+      } else if (error.name === 'NotFoundError') {
+        console.log('⚠️ No camera device found');
       }
       
-      isTogglingVideo = false;
-      return;
+      isVideoEnabled = false;
+      updateVideoButton();
     }
+    
+  } else {
+    // Case 2: Video track exists - just toggle enabled state
+    console.log(`📹 Video track exists - toggling enabled state`);
+    
+    track.enabled = !track.enabled;
+    isVideoEnabled = track.enabled;
+    
+    console.log(`✅ Video ${isVideoEnabled ? 'ENABLED' : 'DISABLED'}`);
+    
+    // Update visibility
+    updateVideoVisibility(currentUser.userId, isVideoEnabled, false);
+    
+    // Update UI
+    updateVideoButton();
+    
+    // Notify server and peers
+    socketInstance.emit('video_state_changed', { 
+      callId: callData.callId, 
+      enabled: isVideoEnabled 
+    });
   }
   
-  // ✅ Now we have a track - toggle it
-  const newState = !track.enabled;
-  track.enabled = newState;
-  isVideoEnabled = newState;
-  
-  console.log(`📹 Video track toggled: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-  console.log(`   Track ID: ${track.id.substring(0, 8)}...`);
-  console.log(`   Track enabled: ${track.enabled}`);
-  console.log(`   Track readyState: ${track.readyState}`);
-  console.log(`   Track muted: ${track.muted}`);
-  
-  // Update local video element visibility
-  const localVid = document.getElementById(`video-${currentUser.userId}`);
-  if (localVid && localVid.srcObject) {
-    console.log(`📹 Updating local video element visibility`);
-    updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
-  }
-  
-  // Update button state
-  updateVideoButton();
-  console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
-  
-  // ✅ Emit to server (will broadcast to others)
-  socketInstance.emit('video_state_changed', { 
-    callId: callData.callId, 
-    enabled: isVideoEnabled 
-  });
-  console.log(`📤 Emitted video_state_changed to server: ${isVideoEnabled}`);
-  
-  console.log(`📹 ========================================`);
-  console.log(`📹 VIDEO TOGGLE COMPLETE`);
-  console.log(`📹 ========================================`);
-  console.log(`   Final isVideoEnabled: ${isVideoEnabled}`);
-  console.log(`   Video tracks in localStream: ${localStream.getVideoTracks().length}`);
-  console.log(`   Was new track added: ${wasTrackAdded}`);
-  console.log(`   Icon text: ${document.getElementById('videoBtn')?.querySelector('.material-symbols-outlined')?.textContent}`);
   console.log(`📹 ========================================\n`);
-  
-  setTimeout(() => {
-    isTogglingVideo = false;
-    console.log(`🔓 Video toggle unlocked`);
-  }, 200);
+  isTogglingVideo = false;
 }
 
     function updateDuration() {
@@ -3008,63 +2952,63 @@ socketInstance.on('call_joined', async (data) => {
   console.log('✅ ========================================\n');
 });
           
-// Replace the entire user_joined_call handler
-socketInstance.on('user_joined_call', (data) => {
-  const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
-  const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
+// ✅ CRITICAL FIX: Handle remote users joining the call
+socketInstance.on('user_joined_call', ({ user, mediaState }) => {
+  console.log(`👤 ========================================`);
+  console.log(`👤 REMOTE USER JOINED CALL`);
+  console.log(`👤 ========================================`);
+  console.log(`   User: ${user.username} (${user.userId})`);
+  console.log(`   Video: ${mediaState.videoEnabled}`);
+  console.log(`   Audio: ${mediaState.audioEnabled}`);
   
-  console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
-  
-  // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
-  if (renderedParticipants.has(data.user.userId)) {
-    console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
+  // Skip if it's the current user
+  if (user.userId === currentUser.userId) {
+    console.log(`ℹ️ User joined event is for self, ignoring`);
+    console.log(`👤 ========================================\n`);
     return;
   }
   
-  const grid = document.getElementById('participantGrid');
-  const existingTile = document.getElementById(`participant-${data.user.userId}`);
-  
-  if (existingTile) {
-    console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
-    existingTile.remove();
-    renderedParticipants.delete(data.user.userId);
+  // Check if tile already exists
+  if (renderedParticipants.has(user.userId)) {
+    console.log(`ℹ️ Tile already exists for ${user.username}`);
+    console.log(`👤 ========================================\n`);
+    return;
   }
   
-  console.log(`➕ Adding NEW participant ${data.user.username}`);
+  // Create tile for the new participant
+  console.log(`🎨 Creating tile for new participant ${user.username}`);
   
-  if (grid) {
-    const isSelf = data.user.userId === currentUser.userId;
-    const tile = createParticipantTile(data.user, isSelf);
+  createTile(
+    user.username,
+    user.userId,
+    user.profilePicture,
+    false, // isSelf
+    mediaState.videoEnabled,
+    mediaState.audioEnabled
+  );
+  
+  renderedParticipants.add(user.userId);
+  
+  console.log(`✅ Tile created for ${user.username}`);
+  console.log(`📊 Total rendered participants: ${renderedParticipants.size}`);
+  console.log(`👤 ========================================\n`);
+  
+  // Now that tile exists, initiate WebRTC connection if we should
+  const shouldInitiate = currentUser.userId > user.userId;
+  
+  if (shouldInitiate) {
+    console.log(`🔗 We should initiate connection to ${user.username}`);
+    console.log(`   Waiting 1000ms before creating offer...`);
     
-    if (tile) {
-      grid.appendChild(tile);
-      
-      const micIndicator = document.getElementById(`mic-${data.user.userId}`);
-      if (micIndicator && audioState === false) {
-        micIndicator.classList.remove('hidden');
-      }
-      
-      // CRITICAL FIX: If this is our own tile, setup local video NOW
-      if (isSelf) {
-        console.log(`✅ Self tile created via user_joined_call - setting up local video...`);
-        setupLocalVideo().catch(err => {
-          console.error('❌ Failed to setup local video for self:', err);
-        });
-      } else {
-        // For remote users, initiate connection with delay to avoid race
-        const shouldInitiateOffer = currentUser.userId < data.user.userId;
-        if (shouldInitiateOffer) {
-          setTimeout(() => {
-            console.log(`📤 Creating offer to late joiner ${data.user.username}`);
-            createOffer(data.user.userId);
-          }, 2000); // Increased delay to 2s
-        }
-      }
-      
-      console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
-    }
+    setTimeout(() => {
+      console.log(`📤 Creating offer to ${user.username} (${user.userId})`);
+      createOffer(user.userId);
+    }, 1000);
+  } else {
+    console.log(`⏳ Waiting for offer from ${user.username}`);
   }
 });
+
           
 socketInstance.on('user_left_call', ({ userId, username }) => {
   console.log(`👋 User left: ${userId}`);
