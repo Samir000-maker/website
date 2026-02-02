@@ -638,78 +638,150 @@ function showChatOverlay() {
 
 function setupCallCleanup() {
   window.addEventListener('beforeunload', (e) => {
-    console.log('🚪 ========================================');
-    console.log('🚪 CALL PAGE BEFOREUNLOAD');
-    console.log('🚪 ========================================');
-    
-    // Check if chat is showing (means we're not actually leaving)
-    const chatOverlay = document.getElementById('chatOverlayContainer');
-    const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
-    
-    if (isShowingChat) {
-      console.log('🔒 Chat overlay active - NOT cleaning up');
-      console.log('   This should not happen - preventing navigation');
-      console.log('🚪 ========================================\n');
-      return;
+  console.log('🚪 ========================================');
+  console.log('🚪 CHAT PAGE BEFOREUNLOAD EVENT');
+  console.log('🚪 ========================================');
+  console.log(`   Reason: Page unload/navigation/close`);
+  console.log(`   Background call: ${isInBackgroundCall}`);
+  console.log(`   Navigating to call: ${navigatingToCall}`);
+  
+  // CRITICAL FIX: Check if we're in an iframe (chat overlay on call.html)
+  const isInIframe = window.parent && window.parent !== window;
+  console.log(`   Is in iframe: ${isInIframe}`);
+  
+  stopCachedCallMonitoring();
+  
+  // Clean up blob URLs
+  console.log('🧹 Cleaning up blob URLs...');
+  const images = document.querySelectorAll('img[data-blob-url]');
+  images.forEach(img => {
+    const blobUrl = img.dataset.blobUrl;
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
     }
-    
-    console.log('🗑️ Performing full cleanup');
-    
-    // Stop timer
-    if (durationInterval) {
-      clearInterval(durationInterval);
-      console.log('   ✓ Timer stopped');
-    }
-    
-    // Close audio contexts
-    audioContexts.forEach((ac, userId) => {
-      try {
-        if (ac.stop) ac.stop();
-        if (ac.context && ac.context.state !== 'closed') {
-          ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-        }
-      } catch (e) {
-        console.warn(`Failed to cleanup audio context for ${userId}:`, e);
-      }
-    });
-    audioContexts.clear();
-    console.log('   ✓ Audio contexts closed');
-    
-    // Stop local stream
-    if (localStream) {
-      localStream.getTracks().forEach(t => {
-        try {
-          t.stop();
-        } catch (e) {
-          console.warn('Failed to stop track:', e);
-        }
-      });
-      console.log('   ✓ Local stream stopped');
-    }
-    
-    // Close peer connections
-    peerConnections.forEach((pc, userId) => {
-      try {
-        pc.close();
-      } catch (e) {
-        console.warn(`Failed to close PC for ${userId}:`, e);
-      }
-    });
-    peerConnections.clear();
-    console.log('   ✓ Peer connections closed');
-    
-    // Emit leave call
-    if (socketInstance && socketInstance.connected) {
-      socketInstance.emit('leave_call', { callId: callData.callId });
-      console.log('   ✓ Leave call emitted');
-    }
-    
-    // Clear storage
-    localStorage.removeItem('activeCall');
-    
-    console.log('✅ Full cleanup complete');
-    console.log('🚪 ========================================\n');
   });
+  console.log(`✅ Revoked ${images.length} blob URL(s)`);
+  
+  // ============================================
+  // EXCEPTION 1: BACKGROUND CALL MODE
+  // ============================================
+  if (isInBackgroundCall) {
+    console.log('🔒 Background call active - preserving floating socket');
+    saveChatState(roomData.roomId, messagesCache);
+    
+    if (floatingCallSocket) {
+      console.log('✅ Keeping floating call socket alive');
+    }
+    
+    if (socketInstance) {
+      socketInstance.disconnect();
+    }
+    
+    console.log('🚪 ========================================\n');
+    return;
+  }
+  
+  // ============================================
+  // EXCEPTION 2: NAVIGATING TO CALL PAGE
+  // ============================================
+  if (navigatingToCall) {
+    console.log('🔒 Navigating to call - preserving state');
+    saveChatState(roomData.roomId, messagesCache);
+    console.log('🚪 ========================================\n');
+    return;
+  }
+  
+  // ============================================
+  // CRITICAL FIX: EXCEPTION 3 - IN IFRAME (CHAT OVERLAY)
+  // ============================================
+  if (isInIframe) {
+    console.log('🔒 Chat overlay in iframe - NOT leaving room');
+    console.log('   Parent call.html manages the room lifecycle');
+    console.log('   Only save state and disconnect socket');
+    
+    // Save state for when user returns
+    saveChatState(roomData.roomId, messagesCache);
+    
+    // Disconnect chat socket BUT DO NOT EMIT leave_room
+    if (socketInstance) {
+      socketInstance.disconnect();
+      console.log('✅ Chat socket disconnected (room not left)');
+    }
+    
+    // Clear timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('🚪 ========================================\n');
+    return; // CRITICAL: Exit early
+  }
+  
+  // ============================================
+  // FULL LEAVE SEQUENCE (only for standalone chat)
+  // ============================================
+  console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE (standalone chat exit)');
+  
+  try {
+    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+    if (activeCallStr) {
+      try {
+        const callData = JSON.parse(activeCallStr);
+        console.log(`📞 Leaving active call: ${callData.callId}`);
+        
+        if (socketInstance?.connected) {
+          socketInstance.emit('leave_call', { callId: callData.callId });
+        }
+      } catch (e) {
+        console.error('❌ Error parsing call data:', e);
+      }
+      
+      localStorage.removeItem(ACTIVE_CALL_KEY);
+      sessionStorage.removeItem('hasBackgroundCall');
+      sessionStorage.removeItem('returningFromCall');
+      sessionStorage.removeItem('backgroundCallMode');
+      sessionStorage.removeItem('returningToBackgroundCall');
+      console.log('✅ Call data cleared');
+    }
+    
+    if (socketInstance?.connected) {
+      console.log('🚪 Emitting leave_room to server');
+      socketInstance.emit('leave_room');
+      console.log('✅ leave_room emitted');
+    }
+    
+    clearChatState(true);
+    console.log('✅ Chat state cleared');
+    
+    if (socketInstance) {
+      socketInstance.disconnect();
+      console.log('✅ Socket disconnected');
+    }
+    
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
+    
+  } catch (error) {
+    console.error('❌ Error in beforeunload leave sequence:', error);
+    
+    try {
+      clearChatState(true);
+      if (socketInstance) socketInstance.disconnect();
+      if (timerInterval) clearInterval(timerInterval);
+    } catch (e) {
+      console.error('❌ Cleanup failed:', e);
+    }
+  }
+  
+  console.log('🚪 ========================================\n');
+});
 }
 
       function createProfilePicture(pfpUrl, username) {
