@@ -1199,13 +1199,18 @@ function createPC(userId) {
     lastIceCandidateTime: 0
   });
   
-  const tracks = localStream.getTracks();
-  console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
+const tracks = localStream.getTracks();
+console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
+
+tracks.forEach(track => {
+  const sender = pc.addTrack(track, localStream);
+  console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   
-  tracks.forEach(track => {
-    pc.addTrack(track, localStream);
-    console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
-  });
+  // CRITICAL: Store sender for future track replacement
+  if (!window.trackSenders) window.trackSenders = new Map();
+  if (!window.trackSenders.has(userId)) window.trackSenders.set(userId, new Map());
+  window.trackSenders.get(userId).set(track.kind, sender);
+});
   
 pc.ontrack = (event) => {
   console.log(`🎵 ========================================`);
@@ -1912,6 +1917,28 @@ async function handleOffer(fromUserId, offer, isRenegotiation = false) {
         pc.setRemoteDescription(new RTCSessionDescription(offer)),
         new Promise(resolve => setTimeout(resolve, 0))
       ]);
+      
+      // CRITICAL: Handle track changes during renegotiation
+pc.onnegotiationneeded = async () => {
+  if (pc.signalingState === 'stable') {
+    console.log(`🔄 Negotiation needed for ${fromUserId}, creating offer...`);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      socketInstance.emit('webrtc_offer', {
+        callId: callData.callId,
+        targetUserId: fromUserId,
+        offer: pc.localDescription,
+        renegotiation: true
+      });
+      
+      console.log(`✅ Renegotiation offer sent to ${fromUserId}`);
+    } catch (err) {
+      console.error(`❌ Negotiation failed for ${fromUserId}:`, err);
+    }
+  }
+};
       
       console.log(`✅ Remote description set successfully`);
       console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
@@ -2794,11 +2821,30 @@ socketInstance.on('room_sync_data', (data) => {
 });
           
           
-socketInstance.on('webrtc_offer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
-  console.log(`   Is renegotiation: ${d.renegotiation || false}`);
-  console.log(`   SDP includes video: ${d.offer?.sdp?.includes('m=video') || false}`);
-  handleOffer(d.fromUserId, d.offer, d.renegotiation);
+socketInstance.on('webrtc_offer', async ({ fromUserId, offer, renegotiation }) => {
+  console.log(`📥 ========================================`);
+  console.log(`📥 WEBRTC_OFFER EVENT RECEIVED`);
+  console.log(`📥 ========================================`);
+  console.log(`   From: ${fromUserId}`);
+  console.log(`   Type: ${renegotiation ? 'RENEGOTIATION' : 'INITIAL'}`);
+  console.log(`   Offer SDP includes video: ${offer.sdp?.includes('m=video') || false}`);
+  
+  await handleOffer(fromUserId, offer, renegotiation);
+  
+  // CRITICAL: After handling renegotiation, check and update video visibility
+  if (renegotiation) {
+    setTimeout(() => {
+      const remoteVideo = document.getElementById(`video-${fromUserId}`);
+      if (remoteVideo && remoteVideo.srcObject) {
+        const videoTracks = remoteVideo.srcObject.getVideoTracks();
+        const hasVideo = videoTracks.length > 0 && videoTracks[0].enabled;
+        console.log(`🔄 Post-renegotiation: ${fromUserId} has video = ${hasVideo}`);
+        updateVideoVisibility(fromUserId, hasVideo, hasVideo);
+      }
+    }, 500);
+  }
+  
+  console.log(`📥 ========================================\n`);
 });
 
 socketInstance.on('webrtc_answer', ({ fromUserId, answer, renegotiationId }) => {
