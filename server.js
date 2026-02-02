@@ -4268,14 +4268,12 @@ function validateICECandidate(candidate) {
   return { valid: true };
 }
 
-// Replace webrtc_offer handler (line 2826)
-socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
+socket.on('webrtc_offer', ({ callId, targetUserId, offer, renegotiation }) => {
   try {
     const user = socketUsers.get(socket.id);
     
     if (!user) return;
 
-    // ✅ FIX: Rate limiting
     if (!checkSignalingRateLimit(user.userId)) {
       console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
       socket.emit('error', { 
@@ -4285,13 +4283,11 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
       return;
     }
 
-    // ✅ FIX: Validate offer structure
     if (!offer || typeof offer !== 'object') {
       console.error(`❌ Invalid offer structure from ${user.username}`);
       return;
     }
 
-    // ✅ FIX: Validate SDP size and structure
     const sdpValidation = validateSDP(offer.sdp);
     if (!sdpValidation.valid) {
       console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
@@ -4305,8 +4301,7 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
     const offerKey = `${callId}:${user.userId}:${targetUserId}`;
     const now = Date.now();
     
-    // Check for duplicate offer within time window
-    if (activeOffers.has(offerKey)) {
+    if (!renegotiation && activeOffers.has(offerKey)) {
       const lastOfferTime = activeOffers.get(offerKey);
       if (now - lastOfferTime < OFFER_DEDUPE_WINDOW) {
         console.warn(`⚠️ Duplicate offer from ${user.username} to ${targetUserId} within ${now - lastOfferTime}ms, ignoring`);
@@ -4314,11 +4309,12 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
       }
     }
     
-    // Track this offer
     activeOffers.set(offerKey, now);
     
-    console.log(`📤 WebRTC offer from ${user.username} to ${targetUserId}`);
+    const offerType = renegotiation ? 'RENEGOTIATION' : 'INITIAL';
+    console.log(`📤 WebRTC ${offerType} offer from ${user.username} to ${targetUserId}`);
     console.log(`   Offer SDP length: ${offer.sdp.length} bytes (validated)`);
+    console.log(`   SDP includes video: ${offer.sdp.includes('m=video')}`);
 
     const targetSocket = findActiveSocketForUser(targetUserId);
     
@@ -4328,14 +4324,14 @@ socket.on('webrtc_offer', ({ callId, targetUserId, offer }) => {
         offer: {
           type: offer.type,
           sdp: offer.sdp
-        }
+        },
+        renegotiation: renegotiation || false
       });
-      console.log(`✅ Offer forwarded to ${targetUserId}`);
+      console.log(`✅ ${offerType} offer forwarded to ${targetUserId}`);
     } else {
       console.warn(`⚠️ Target user ${targetUserId} not found for offer`);
     }
     
-    // Clean up old offers after window expires
     setTimeout(() => {
       activeOffers.delete(offerKey);
     }, OFFER_DEDUPE_WINDOW);
