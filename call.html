@@ -1222,19 +1222,22 @@ pc.ontrack = (event) => {
     const remoteVideo = document.getElementById(`video-${userId}`);
     
     if (remoteVideo) {
-      const needsUpdate = !remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id;
+      const existingStream = remoteVideo.srcObject;
+      const needsUpdate = !existingStream || 
+                         existingStream.id !== remoteStream.id ||
+                         existingStream.getTracks().length !== remoteStream.getTracks().length;
       
       if (needsUpdate) {
         console.log(`📺 Setting/updating srcObject for ${userId}`);
+        console.log(`   Old stream: ${existingStream?.id || 'none'} with ${existingStream?.getTracks().length || 0} tracks`);
+        console.log(`   New stream: ${remoteStream.id} with ${remoteStream.getTracks().length} tracks`);
+        
         remoteVideo.srcObject = remoteStream;
         
-        // ✅ FIX A: Force unmute and verify
         remoteVideo.muted = false;
         remoteVideo.volume = 1.0;
         
-        // ✅ FIX B: Ensure audio context is running
         if (event.track.kind === 'audio') {
-          // Create or get audio context
           if (!audioContexts.has(userId)) {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioContexts.set(userId, audioCtx);
@@ -1242,7 +1245,6 @@ pc.ontrack = (event) => {
           
           const audioCtx = audioContexts.get(userId);
           
-          // Resume if suspended
           if (audioCtx.state === 'suspended') {
             audioCtx.resume().then(() => {
               console.log(`🔊 AudioContext resumed for ${userId}`);
@@ -1252,23 +1254,30 @@ pc.ontrack = (event) => {
           }
         }
         
-        // ✅ FIX C: Robust playback with retry and user interaction fallback
         const attemptPlayback = async (retryCount = 0) => {
           try {
-            // Verify unmute state before each attempt
             remoteVideo.muted = false;
             remoteVideo.volume = 1.0;
             
             await remoteVideo.play();
             console.log(`▶️ Remote video playing for ${userId} (attempt ${retryCount + 1})`);
             
-            // Update visibility if this is a video track
-            if (event.track.kind === 'video' && event.track.enabled) {
-              console.log(`📹 Remote video track enabled for ${userId}, updating visibility`);
+            const hasVideoTrack = remoteStream.getVideoTracks().length > 0;
+            const videoTrackEnabled = hasVideoTrack && remoteStream.getVideoTracks()[0].enabled;
+            
+            console.log(`📊 Stream analysis for ${userId}:`);
+            console.log(`   Video tracks: ${remoteStream.getVideoTracks().length}`);
+            console.log(`   Audio tracks: ${remoteStream.getAudioTracks().length}`);
+            console.log(`   Video enabled: ${videoTrackEnabled}`);
+            
+            if (hasVideoTrack && videoTrackEnabled) {
+              console.log(`📹 Video track present and enabled for ${userId}, showing video`);
               updateVideoVisibility(userId, true, true);
+            } else {
+              console.log(`📹 No video or disabled for ${userId}, showing profile picture`);
+              updateVideoVisibility(userId, false, false);
             }
             
-            // Periodic unmute enforcement (browsers can re-mute)
             const unmuteInterval = setInterval(() => {
               if (remoteVideo.muted) {
                 console.log(`🔊 Re-unmuting remote video for ${userId}`);
@@ -1277,7 +1286,6 @@ pc.ontrack = (event) => {
               }
             }, 1000);
             
-            // Store interval for cleanup
             if (!window.unmuteIntervals) window.unmuteIntervals = new Map();
             window.unmuteIntervals.set(userId, unmuteInterval);
             
@@ -1285,10 +1293,8 @@ pc.ontrack = (event) => {
             console.error(`❌ Play attempt ${retryCount + 1} failed for ${userId}:`, playError);
             
             if (playError.name === 'NotAllowedError' && retryCount < 2) {
-              // Autoplay blocked - retry with user interaction
               console.log(`⚠️ Autoplay blocked, waiting for user interaction...`);
               
-              // Create click-to-unmute overlay
               const overlay = document.createElement('div');
               overlay.id = `unmute-overlay-${userId}`;
               overlay.className = 'absolute inset-0 flex items-center justify-center bg-black/80 z-50 cursor-pointer';
@@ -1305,14 +1311,13 @@ pc.ontrack = (event) => {
                 await attemptPlayback(retryCount + 1);
               };
               
-              const tile = document.getElementById(`tile-${userId}`);
+              const tile = document.getElementById(`participant-${userId}`);
               if (tile) {
                 tile.appendChild(overlay);
                 console.log(`✅ Click-to-unmute overlay added for ${userId}`);
               }
               
             } else if (retryCount < 2) {
-              // Other errors - retry after short delay
               setTimeout(() => attemptPlayback(retryCount + 1), 500);
             }
           }
@@ -1323,7 +1328,6 @@ pc.ontrack = (event) => {
           attemptPlayback(0);
         };
         
-        // If metadata already loaded, play immediately
         if (remoteVideo.readyState >= 2) {
           console.log(`📺 Metadata already loaded for ${userId}, playing now`);
           attemptPlayback(0);
@@ -1332,14 +1336,18 @@ pc.ontrack = (event) => {
       } else {
         console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
         
-        // Still update visibility for new video tracks
-        if (event.track.kind === 'video' && event.track.enabled) {
+        const hasVideoTrack = remoteStream.getVideoTracks().length > 0;
+        const videoTrackEnabled = hasVideoTrack && remoteStream.getVideoTracks()[0].enabled;
+        
+        if (event.track.kind === 'video' && videoTrackEnabled) {
           console.log(`📹 New video track added to existing stream, updating visibility`);
           updateVideoVisibility(userId, true, true);
+        } else if (event.track.kind === 'video' && !videoTrackEnabled) {
+          console.log(`📹 Video track added but disabled, hiding video`);
+          updateVideoVisibility(userId, false, false);
         }
       }
       
-      // Setup audio detection for remote streams
       if (event.track.kind === 'audio') {
         console.log(`🎤 Setting up audio detection for remote user ${userId}`);
         setupAudioDetection(userId, remoteStream);
@@ -1352,18 +1360,15 @@ pc.ontrack = (event) => {
     console.warn(`⚠️ No streams in track event for ${userId}`);
   }
   
-  // Track ended handler
   event.track.onended = () => {
     console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
     
-    // Clean up unmute interval
     if (window.unmuteIntervals && window.unmuteIntervals.has(userId)) {
       clearInterval(window.unmuteIntervals.get(userId));
       window.unmuteIntervals.delete(userId);
     }
   };
   
-  // Track mute/unmute handlers
   event.track.onmute = () => {
     console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
   };
@@ -1373,12 +1378,43 @@ pc.ontrack = (event) => {
     
     if (event.track.kind === 'video') {
       console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
-      updateVideoVisibility(userId, true, true);
+      const remoteVideo = document.getElementById(`video-${userId}`);
+      if (remoteVideo && remoteVideo.srcObject) {
+        const hasVideoTrack = remoteVideo.srcObject.getVideoTracks().length > 0;
+        const videoTrackEnabled = hasVideoTrack && remoteVideo.srcObject.getVideoTracks()[0].enabled;
+        if (videoTrackEnabled) {
+          updateVideoVisibility(userId, true, true);
+        }
+      }
     }
   };
   
   console.log(`🎵 ========================================\n`);
 };
+
+
+pc.onremovetrack = (event) => {
+    console.log(`🔇 ========================================`);
+    console.log(`🔇 [TRACK REMOVED] from ${userId}`);
+    console.log(`🔇 ========================================`);
+    console.log(`   Track kind: ${event.track.kind}`);
+    console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
+    
+    const remoteVideo = document.getElementById(`video-${userId}`);
+    if (remoteVideo && remoteVideo.srcObject) {
+      const remainingVideoTracks = remoteVideo.srcObject.getVideoTracks().length;
+      const remainingAudioTracks = remoteVideo.srcObject.getAudioTracks().length;
+      
+      console.log(`   Remaining tracks: ${remainingVideoTracks} video, ${remainingAudioTracks} audio`);
+      
+      if (event.track.kind === 'video' && remainingVideoTracks === 0) {
+        console.log(`📹 No video tracks remaining for ${userId}, hiding video`);
+        updateVideoVisibility(userId, false, false);
+      }
+    }
+    
+    console.log(`🔇 ========================================\n`);
+  };
   
   // CRITICAL: ICE candidate handler with rate limiting
   let lastCandidateEmit = 0;
@@ -1824,20 +1860,18 @@ async function attemptIceRestart(userId) {
   }
 }
 
-async function handleOffer(fromUserId, offer) {
-  // CRITICAL: Prevent duplicate offer processing with mutex
+async function handleOffer(fromUserId, offer, isRenegotiation = false) {
   if (negotiationMutex.has(fromUserId)) {
     console.warn(`⚠️ Already processing offer from ${fromUserId}, ignoring duplicate`);
     return;
   }
   
-  // Create mutex promise
   const mutexPromise = (async () => {
     try {
-      console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
+      console.log(`📥 [OFFER] Received ${isRenegotiation ? 'RENEGOTIATION' : 'INITIAL'} offer from ${fromUserId}`);
       console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
+      console.log(`   SDP includes video: ${offer.sdp?.includes('m=video') || false}`);
       
-      // Validate localStream
       if (!localStream) {
         console.error(`❌ CRITICAL: No localStream when handling offer from ${fromUserId}`);
         return;
@@ -1847,29 +1881,24 @@ async function handleOffer(fromUserId, offer) {
       
       let pc = peerConnections.get(fromUserId);
       
-      // CRITICAL: Check for signaling state collision
       const offerCollision = pc && 
         (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer');
       
-      // Determine polite/impolite based on user ID comparison
       const polite = currentUser.userId < fromUserId;
       
       console.log(`   Polite: ${polite}, Offer collision: ${offerCollision}`);
       
-      // Impolite peer ignores colliding offers
       if (offerCollision && !polite) {
         console.log(`   🚫 Impolite peer ignoring colliding offer from ${fromUserId}`);
         return;
       }
       
-      // If PC exists and we have a collision, polite peer uses rollback
       if (offerCollision && polite) {
         console.log(`   🔄 Polite peer performing rollback for ${fromUserId}`);
         await pc.setLocalDescription({ type: 'rollback' });
         console.log(`   ✅ Rollback complete`);
       }
       
-      // Create new PC if needed or if closed
       if (!pc || pc.connectionState === 'closed') {
         console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
         pc = createPC(fromUserId);
@@ -1878,53 +1907,46 @@ async function handleOffer(fromUserId, offer) {
       console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
       console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
       
-      // CRITICAL: Use Promise.all to queue operations properly
       await Promise.all([
         pc.setRemoteDescription(new RTCSessionDescription(offer)),
-        // Queue ICE candidate processing after setRemoteDescription
         new Promise(resolve => setTimeout(resolve, 0))
       ]);
       
       console.log(`✅ Remote description set successfully`);
       console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
       
-      // Inside handleOffer function, replace the pending candidates section:
-
-// Process pending ICE candidates AFTER remote description is set
-if (pendingIceCandidates.has(fromUserId)) {
-  const cands = pendingIceCandidates.get(fromUserId);
-  console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
-  
-  for (const item of cands) {
-    try {
-      const c = item.candidate;
-      
-      // Validate before adding
-      if (!c.candidate || typeof c.candidate !== 'string') {
-        console.warn(`⚠️ Skipping invalid queued candidate`);
-        continue;
+      if (pendingIceCandidates.has(fromUserId)) {
+        const cands = pendingIceCandidates.get(fromUserId);
+        console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+        
+        for (const item of cands) {
+          try {
+            const c = item.candidate;
+            
+            if (!c.candidate || typeof c.candidate !== 'string') {
+              console.warn(`⚠️ Skipping invalid queued candidate`);
+              continue;
+            }
+            
+            if (c.sdpMid === null && c.sdpMLineIndex === null) {
+              console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
+              continue;
+            }
+            
+            await pc.addIceCandidate(new RTCIceCandidate(c));
+            console.log(`✅ Added pending ICE candidate`);
+          } catch (e) {
+            console.warn(`⚠️ Failed to add queued candidate:`, e.message);
+          }
+        }
+        pendingIceCandidates.delete(fromUserId);
       }
-      
-      if (c.sdpMid === null && c.sdpMLineIndex === null) {
-        console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
-        continue;
-      }
-      
-      await pc.addIceCandidate(new RTCIceCandidate(c));
-      console.log(`✅ Added pending ICE candidate`);
-    } catch (e) {
-      console.warn(`⚠️ Failed to add queued candidate:`, e.message);
-      // Continue with next candidate
-    }
-  }
-  pendingIceCandidates.delete(fromUserId);
-}
       
       console.log(`📤 Creating answer for ${fromUserId}...`);
       
-      // Create answer
       const answer = await pc.createAnswer();
       console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
+      console.log(`   Answer SDP includes video: ${answer.sdp?.includes('m=video') || false}`);
       
       await pc.setLocalDescription(answer);
       console.log(`✅ Answer set as local description`);
@@ -1943,7 +1965,6 @@ if (pendingIceCandidates.has(fromUserId)) {
       console.error(`   Error name: ${e.name}`);
       console.error(`   Error message: ${e.message}`);
     } finally {
-      // Remove mutex after 100ms to allow for any in-flight duplicates to be caught
       setTimeout(() => {
         negotiationMutex.delete(fromUserId);
       }, 100);
@@ -2216,9 +2237,7 @@ async function toggleVideo() {
   
   let track = localStream.getVideoTracks()[0];
   
-  // ✅ FIX: Handle the two cases properly
   if (!track) {
-    // Case 1: No video track exists - need to request camera
     console.log(`📹 No video track exists - requesting camera access...`);
     
     try {
@@ -2238,32 +2257,26 @@ async function toggleVideo() {
         return;
       }
       
-      // Add track to local stream
       localStream.addTrack(track);
       console.log(`✅ Video track added to localStream (id: ${track.id.substring(0, 8)}...)`);
       
-      // Set enabled state
       track.enabled = true;
       isVideoEnabled = true;
       
       console.log(`✅ Video track enabled`);
       
-      // ✅ Add track to ALL existing peer connections with renegotiation
       const renegotiationPromises = [];
       
       peerConnections.forEach((pc, userId) => {
         try {
           console.log(`📤 Adding video track to peer connection with ${userId}`);
           
-          // Add the track
           pc.addTrack(track, localStream);
           console.log(`✅ Video track added to PC for ${userId}`);
           
-          // Renegotiate
           const renegotiationPromise = (async () => {
             try {
-              // Wait for stable state
-              const maxWait = 5000;
+              const maxWait = 10000;
               const startWait = Date.now();
               
               while (pc.signalingState !== 'stable' && Date.now() - startWait < maxWait) {
@@ -2277,19 +2290,26 @@ async function toggleVideo() {
               }
               
               console.log(`🔄 Creating renegotiation offer for ${userId}...`);
+              console.log(`   PC tracks before offer: ${pc.getSenders().length} senders`);
+              pc.getSenders().forEach((sender, i) => {
+                console.log(`   [${i}] ${sender.track?.kind || 'null'} - enabled: ${sender.track?.enabled || 'N/A'}`);
+              });
               
               const offer = await pc.createOffer({ 
                 offerToReceiveAudio: true, 
-                offerToReceiveVideo: true 
+                offerToReceiveVideo: true,
+                iceRestart: false
               });
               
               await pc.setLocalDescription(offer);
               console.log(`✅ Renegotiation offer created for ${userId}`);
+              console.log(`   SDP includes video: ${offer.sdp.includes('m=video')}`);
               
               socketInstance.emit('webrtc_offer', { 
                 callId: callData.callId, 
                 targetUserId: userId, 
-                offer 
+                offer,
+                renegotiation: true
               });
               
               console.log(`📤 Renegotiation offer sent to ${userId}`);
@@ -2305,11 +2325,9 @@ async function toggleVideo() {
         }
       });
       
-      // Wait for all renegotiations
       await Promise.all(renegotiationPromises);
       console.log(`✅ All peer connections renegotiated with video track`);
       
-      // Update local video element
       const localVid = document.getElementById(`video-${currentUser.userId}`);
       if (localVid) {
         if (!localVid.srcObject) {
@@ -2317,7 +2335,6 @@ async function toggleVideo() {
           console.log(`✅ Local stream attached to video element`);
         }
         
-        // Wait for video to be ready
         localVid.onloadedmetadata = async () => {
           console.log(`📺 Local video metadata loaded`);
           try {
@@ -2333,13 +2350,9 @@ async function toggleVideo() {
         }
       }
       
-      // Update visibility
       updateVideoVisibility(currentUser.userId, true, false);
-      
-      // Update UI
       updateVideoButton();
       
-      // Notify server and peers
       socketInstance.emit('video_state_changed', { 
         callId: callData.callId, 
         enabled: true 
@@ -2361,7 +2374,6 @@ async function toggleVideo() {
     }
     
   } else {
-    // Case 2: Video track exists - just toggle enabled state
     console.log(`📹 Video track exists - toggling enabled state`);
     
     track.enabled = !track.enabled;
@@ -2369,13 +2381,9 @@ async function toggleVideo() {
     
     console.log(`✅ Video ${isVideoEnabled ? 'ENABLED' : 'DISABLED'}`);
     
-    // Update visibility
     updateVideoVisibility(currentUser.userId, isVideoEnabled, false);
-    
-    // Update UI
     updateVideoButton();
     
-    // Notify server and peers
     socketInstance.emit('video_state_changed', { 
       callId: callData.callId, 
       enabled: isVideoEnabled 
@@ -2739,7 +2747,9 @@ socketInstance.on('room_sync_data', (data) => {
           
 socketInstance.on('webrtc_offer', (d) => {
   console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
-  handleOffer(d.fromUserId, d.offer);
+  console.log(`   Is renegotiation: ${d.renegotiation || false}`);
+  console.log(`   SDP includes video: ${d.offer?.sdp?.includes('m=video') || false}`);
+  handleOffer(d.fromUserId, d.offer, d.renegotiation);
 });
 
 socketInstance.on('webrtc_answer', ({ fromUserId, answer, renegotiationId }) => {
