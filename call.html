@@ -1284,7 +1284,6 @@ function createPC(userId) {
     console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
   });
   
-// CRITICAL: Add ontrack handler to receive remote media
 pc.ontrack = (event) => {
   console.log(`🎵 ========================================`);
   console.log(`🎵 [TRACK] Received ${event.track.kind} track`);
@@ -1301,47 +1300,117 @@ pc.ontrack = (event) => {
     const remoteVideo = document.getElementById(`video-${userId}`);
     
     if (remoteVideo) {
-      // ✅ CRITICAL: Always update srcObject when new tracks arrive
       const needsUpdate = !remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id;
       
       if (needsUpdate) {
         console.log(`📺 Setting/updating srcObject for ${userId}`);
         remoteVideo.srcObject = remoteStream;
+        
+        // ✅ FIX A: Force unmute and verify
         remoteVideo.muted = false;
         remoteVideo.volume = 1.0;
         
-        // Wait for metadata and play
-        remoteVideo.onloadedmetadata = async () => {
-          console.log(`📺 Metadata loaded for ${userId}: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
+        // ✅ FIX B: Ensure audio context is running
+        if (event.track.kind === 'audio') {
+          // Create or get audio context
+          if (!audioContexts.has(userId)) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioContexts.set(userId, audioCtx);
+          }
+          
+          const audioCtx = audioContexts.get(userId);
+          
+          // Resume if suspended
+          if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(() => {
+              console.log(`🔊 AudioContext resumed for ${userId}`);
+            }).catch(err => {
+              console.error(`❌ Failed to resume AudioContext for ${userId}:`, err);
+            });
+          }
+        }
+        
+        // ✅ FIX C: Robust playback with retry and user interaction fallback
+        const attemptPlayback = async (retryCount = 0) => {
           try {
-            await remoteVideo.play();
-            console.log(`▶️ Remote video playing for ${userId}`);
+            // Verify unmute state before each attempt
+            remoteVideo.muted = false;
+            remoteVideo.volume = 1.0;
             
-            // ✅ Update visibility if this is a video track
+            await remoteVideo.play();
+            console.log(`▶️ Remote video playing for ${userId} (attempt ${retryCount + 1})`);
+            
+            // Update visibility if this is a video track
             if (event.track.kind === 'video' && event.track.enabled) {
               console.log(`📹 Remote video track enabled for ${userId}, updating visibility`);
               updateVideoVisibility(userId, true, true);
             }
+            
+            // Periodic unmute enforcement (browsers can re-mute)
+            const unmuteInterval = setInterval(() => {
+              if (remoteVideo.muted) {
+                console.log(`🔊 Re-unmuting remote video for ${userId}`);
+                remoteVideo.muted = false;
+                remoteVideo.volume = 1.0;
+              }
+            }, 1000);
+            
+            // Store interval for cleanup
+            if (!window.unmuteIntervals) window.unmuteIntervals = new Map();
+            window.unmuteIntervals.set(userId, unmuteInterval);
+            
           } catch (playError) {
-            console.error(`❌ Failed to play remote video for ${userId}:`, playError);
+            console.error(`❌ Play attempt ${retryCount + 1} failed for ${userId}:`, playError);
+            
+            if (playError.name === 'NotAllowedError' && retryCount < 2) {
+              // Autoplay blocked - retry with user interaction
+              console.log(`⚠️ Autoplay blocked, waiting for user interaction...`);
+              
+              // Create click-to-unmute overlay
+              const overlay = document.createElement('div');
+              overlay.id = `unmute-overlay-${userId}`;
+              overlay.className = 'absolute inset-0 flex items-center justify-center bg-black/80 z-50 cursor-pointer';
+              overlay.innerHTML = `
+                <div class="text-center text-white p-4">
+                  <span class="material-symbols-outlined text-6xl mb-2">volume_up</span>
+                  <p class="font-bold">Tap to enable audio</p>
+                </div>
+              `;
+              
+              overlay.onclick = async () => {
+                console.log(`🖱️ User interaction for ${userId} audio`);
+                overlay.remove();
+                await attemptPlayback(retryCount + 1);
+              };
+              
+              const tile = document.getElementById(`tile-${userId}`);
+              if (tile) {
+                tile.appendChild(overlay);
+                console.log(`✅ Click-to-unmute overlay added for ${userId}`);
+              }
+              
+            } else if (retryCount < 2) {
+              // Other errors - retry after short delay
+              setTimeout(() => attemptPlayback(retryCount + 1), 500);
+            }
           }
+        };
+        
+        remoteVideo.onloadedmetadata = () => {
+          console.log(`📺 Metadata loaded for ${userId}: ${remoteVideo.videoWidth}x${remoteVideo.videoHeight}`);
+          attemptPlayback(0);
         };
         
         // If metadata already loaded, play immediately
         if (remoteVideo.readyState >= 2) {
           console.log(`📺 Metadata already loaded for ${userId}, playing now`);
-          remoteVideo.play().catch(e => {
-            console.error(`❌ Play failed for ${userId}:`, e);
-          });
-          
-          if (event.track.kind === 'video' && event.track.enabled) {
-            updateVideoVisibility(userId, true, true);
-          }
+          attemptPlayback(0);
         }
+        
       } else {
         console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
         
-        // ✅ Still update visibility for new video tracks
+        // Still update visibility for new video tracks
         if (event.track.kind === 'video' && event.track.enabled) {
           console.log(`📹 New video track added to existing stream, updating visibility`);
           updateVideoVisibility(userId, true, true);
@@ -1364,6 +1433,12 @@ pc.ontrack = (event) => {
   // Track ended handler
   event.track.onended = () => {
     console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
+    
+    // Clean up unmute interval
+    if (window.unmuteIntervals && window.unmuteIntervals.has(userId)) {
+      clearInterval(window.unmuteIntervals.get(userId));
+      window.unmuteIntervals.delete(userId);
+    }
   };
   
   // Track mute/unmute handlers
@@ -1374,7 +1449,6 @@ pc.ontrack = (event) => {
   event.track.onunmute = () => {
     console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
     
-    // ✅ Handle video unmute event (dynamic video addition)
     if (event.track.kind === 'video') {
       console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
       updateVideoVisibility(userId, true, true);
@@ -1643,33 +1717,85 @@ pc.onconnectionstatechange = () => {
 
 
 async function createOffer(userId) {
-  // CRITICAL: Check if already making offer
-  if (makingOffer.get(userId)) {
-    console.warn(`⚠️ Already making offer to ${userId}, skipping`);
-    return;
+  // ✅ FIX D: Mutex with timeout to prevent deadlock
+  const offerMutexKey = `offer_${userId}`;
+  
+  if (window.offerMutexes && window.offerMutexes.has(offerMutexKey)) {
+    console.warn(`⚠️ Offer already in progress for ${userId}, waiting...`);
+    
+    try {
+      await Promise.race([
+        window.offerMutexes.get(offerMutexKey),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Mutex timeout')), 5000))
+      ]);
+    } catch (e) {
+      console.error(`❌ Mutex timeout for ${userId}, proceeding anyway`);
+    }
   }
   
+  if (!window.offerMutexes) window.offerMutexes = new Map();
+  
+  let releaseMutex;
+  const mutexPromise = new Promise(resolve => { releaseMutex = resolve; });
+  window.offerMutexes.set(offerMutexKey, mutexPromise);
+  
   try {
-    makingOffer.set(userId, true);
-    
     console.log(`📤 Creating offer for ${userId}`);
     
-    // Small delay to ensure remote peer has fully joined
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // ✅ FIX F: Remove artificial delay
+    // await new Promise(resolve => setTimeout(resolve, 500)); // REMOVED
     
-    const pc = createPC(userId);
+    // ✅ FIX D: Check if PC exists and is in stable state
+    let pc = peerConnections.get(userId);
+    
+    if (pc) {
+      if (pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+        console.log(`🔄 Existing PC for ${userId} is ${pc.connectionState}, recreating`);
+        pc.close();
+        peerConnections.delete(userId);
+        pc = null;
+      } else if (pc.signalingState !== 'stable') {
+        console.warn(`⚠️ Existing PC for ${userId} in unstable state: ${pc.signalingState}`);
+        
+        // Determine if we should wait or proceed based on polite/impolite
+        const polite = currentUser.userId < userId;
+        
+        if (!polite) {
+          console.log(`🚫 Impolite peer - aborting offer to ${userId}`);
+          return;
+        }
+        
+        console.log(`🔄 Polite peer - performing rollback before new offer`);
+        try {
+          await pc.setLocalDescription({ type: 'rollback' });
+          console.log(`✅ Rollback successful`);
+        } catch (rollbackError) {
+          console.error(`❌ Rollback failed:`, rollbackError);
+          // Create new PC as fallback
+          pc.close();
+          peerConnections.delete(userId);
+          pc = null;
+        }
+      }
+    }
+    
+    // Create PC if needed
+    if (!pc) {
+      pc = createPC(userId);
+    }
     
     // Validate local stream
     if (!localStream || localStream.getTracks().length === 0) {
       console.error(`❌ No local stream available when creating offer for ${userId}`);
-      return;
+      throw new Error('No local stream');
     }
     
     console.log(`📊 Local stream for offer: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
     
     const offer = await pc.createOffer({ 
       offerToReceiveAudio: true, 
-      offerToReceiveVideo: true 
+      offerToReceiveVideo: true,
+      iceRestart: false  // Will be set to true for recovery
     });
     
     await pc.setLocalDescription(offer);
@@ -1687,12 +1813,92 @@ async function createOffer(userId) {
     
     console.log(`📤 Offer sent to ${userId} via socket`);
     
+    // ✅ FIX E: Set up connection failure recovery
+    const connectionTimeout = setTimeout(() => {
+      const currentPC = peerConnections.get(userId);
+      if (currentPC && (currentPC.connectionState === 'new' || currentPC.connectionState === 'connecting')) {
+        console.warn(`⚠️ Connection to ${userId} timed out after 10s, attempting ICE restart`);
+        
+        // ICE restart
+        attemptIceRestart(userId);
+      }
+    }, 10000);
+    
+    // Store timeout for cleanup
+    if (!window.connectionTimeouts) window.connectionTimeouts = new Map();
+    window.connectionTimeouts.set(userId, connectionTimeout);
+    
   } catch (e) { 
     console.error(`❌ Offer creation error for ${userId}:`, e);
     console.error(`   Error name: ${e.name}`);
     console.error(`   Error message: ${e.message}`);
+    
+    // ✅ FIX E: Retry with ICE restart if first attempt fails
+    if (!e.message.includes('No local stream')) {
+      console.log(`🔄 Retrying offer to ${userId} with ICE restart in 2s...`);
+      setTimeout(() => attemptIceRestart(userId), 2000);
+    }
+    
   } finally {
-    makingOffer.set(userId, false);
+    releaseMutex();
+    window.offerMutexes.delete(offerMutexKey);
+  }
+}
+
+// ✅ NEW FUNCTION: ICE restart helper
+async function attemptIceRestart(userId) {
+  console.log(`🔄 ========================================`);
+  console.log(`🔄 ATTEMPTING ICE RESTART`);
+  console.log(`🔄 ========================================`);
+  console.log(`   Target: ${userId}`);
+  
+  const pc = peerConnections.get(userId);
+  
+  if (!pc) {
+    console.log(`❌ No PC found for ${userId}, cannot restart ICE`);
+    return;
+  }
+  
+  if (pc.connectionState === 'connected') {
+    console.log(`✅ Connection already established, ICE restart not needed`);
+    return;
+  }
+  
+  try {
+    const stats = connectionStats.get(userId);
+    if (stats) {
+      stats.iceRestartCount = (stats.iceRestartCount || 0) + 1;
+      
+      if (stats.iceRestartCount > 3) {
+        console.error(`❌ Too many ICE restart attempts for ${userId} (${stats.iceRestartCount}), giving up`);
+        pc.close();
+        peerConnections.delete(userId);
+        return;
+      }
+    }
+    
+    console.log(`🔄 Creating new offer with iceRestart=true`);
+    
+    const offer = await pc.createOffer({ 
+      offerToReceiveAudio: true, 
+      offerToReceiveVideo: true,
+      iceRestart: true  // ✅ KEY: ICE restart
+    });
+    
+    await pc.setLocalDescription(offer);
+    
+    socketInstance.emit('webrtc_offer', { 
+      callId: callData.callId, 
+      targetUserId: userId, 
+      offer 
+    });
+    
+    console.log(`✅ ICE restart offer sent to ${userId}`);
+    console.log(`🔄 ========================================\n`);
+    
+  } catch (e) {
+    console.error(`❌ ICE restart failed for ${userId}:`, e);
+    console.log(`🔄 ========================================\n`);
   }
 }
 
@@ -1892,6 +2098,80 @@ if (pendingIceCandidates.has(fromUserId)) {
   }
 }
 
+// ✅ FIX H: Modified handleAnswer to acknowledge renegotiations
+async function handleAnswer(fromUserId, answer, renegotiationId) {
+  try {
+    console.log(`📥 [ANSWER] Received answer from ${fromUserId}`);
+    if (renegotiationId) {
+      console.log(`   Renegotiation ID: ${renegotiationId}`);
+    }
+    console.log(`   Answer type: ${answer.type}, SDP length: ${answer.sdp?.length || 0}`);
+    
+    const pc = peerConnections.get(fromUserId);
+    
+    if (!pc) {
+      console.error(`❌ No PC found for ${fromUserId} when handling answer`);
+      return;
+    }
+    
+    console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    if (pc.signalingState !== 'have-local-offer') {
+      console.warn(`⚠️ Ignoring answer from ${fromUserId} - wrong state: ${pc.signalingState}`);
+      return;
+    }
+    
+    console.log(`🔧 Setting remote description (answer) for ${fromUserId}`);
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log(`✅ Answer set as remote description`);
+    console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
+    
+    // Process pending ICE candidates
+    if (pendingIceCandidates.has(fromUserId)) {
+      const cands = pendingIceCandidates.get(fromUserId);
+      console.log(`🧊 Adding ${cands.length} pending ICE candidates for ${fromUserId}`);
+      
+      for (const item of cands) {
+        try {
+          const c = item.candidate;
+          
+          if (!c.candidate || typeof c.candidate !== 'string') {
+            console.warn(`⚠️ Skipping invalid queued candidate`);
+            continue;
+          }
+          
+          if (c.sdpMid === null && c.sdpMLineIndex === null) {
+            console.warn(`⚠️ Skipping queued candidate with null sdpMid/sdpMLineIndex`);
+            continue;
+          }
+          
+          await pc.addIceCandidate(new RTCIceCandidate(c));
+          console.log(`✅ Added pending ICE candidate`);
+        } catch (e) {
+          console.warn(`⚠️ Failed to add queued candidate:`, e.message);
+        }
+      }
+      pendingIceCandidates.delete(fromUserId);
+    }
+    
+    // ✅ FIX H: Acknowledge renegotiation completion
+    if (renegotiationId && window.pendingRenegotiations && window.pendingRenegotiations.has(renegotiationId)) {
+      const pending = window.pendingRenegotiations.get(renegotiationId);
+      clearTimeout(pending.timeout);
+      pending.resolve();
+      window.pendingRenegotiations.delete(renegotiationId);
+      console.log(`✅ Renegotiation ${renegotiationId} acknowledged`);
+    }
+    
+    console.log(`✅ Answer handling complete for ${fromUserId}`);
+    
+  } catch (e) { 
+    console.error(`❌ Handle answer error for ${fromUserId}:`, e);
+    console.error(`   Error name: ${e.name}`);
+    console.error(`   Error message: ${e.message}`);
+  }
+}
+
 // Replace handleIceCandidate function
 async function handleIceCandidate(fromUserId, candidate) {
   try {
@@ -2054,28 +2334,89 @@ async function toggleVideo() {
           
           // ✅ CRITICAL: Create new offer to renegotiate (same as video call initiation)
           const renegotiationPromise = (async () => {
-            try {
-              console.log(`🔄 Creating renegotiation offer for ${userId}...`);
-              
-              const offer = await pc.createOffer({ 
-                offerToReceiveAudio: true, 
-                offerToReceiveVideo: true 
-              });
-              
-              await pc.setLocalDescription(offer);
-              console.log(`✅ Renegotiation offer created for ${userId}`);
-              
-              socketInstance.emit('webrtc_offer', { 
-                callId: callData.callId, 
-                targetUserId: userId, 
-                offer 
-              });
-              
-              console.log(`📤 Renegotiation offer sent to ${userId}`);
-            } catch (e) {
-              console.error(`❌ Renegotiation failed for ${userId}:`, e);
-            }
-          })();
+  try {
+    console.log(`🔄 Creating renegotiation offer for ${userId}...`);
+    
+    // ✅ FIX H: Wait for stable signaling state before renegotiation
+    const maxWait = 5000;
+    const startWait = Date.now();
+    
+    while (pc.signalingState !== 'stable' && Date.now() - startWait < maxWait) {
+      console.log(`⏳ Waiting for stable state (current: ${pc.signalingState})`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    if (pc.signalingState !== 'stable') {
+      console.error(`❌ PC for ${userId} not stable after ${maxWait}ms, aborting renegotiation`);
+      return;
+    }
+    
+    console.log(`✅ PC stable, proceeding with renegotiation`);
+    
+    const offer = await pc.createOffer({ 
+      offerToReceiveAudio: true, 
+      offerToReceiveVideo: true 
+    });
+    
+    await pc.setLocalDescription(offer);
+    console.log(`✅ Renegotiation offer created for ${userId}`);
+    
+    // ✅ FIX H: Track renegotiation and require acknowledgment
+    const renegotiationId = `${callData.callId}_${currentUser.userId}_${userId}_${Date.now()}`;
+    
+    if (!window.pendingRenegotiations) window.pendingRenegotiations = new Map();
+    
+    const renegotiationPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Renegotiation timeout'));
+      }, 10000);
+      
+      window.pendingRenegotiations.set(renegotiationId, {
+        resolve,
+        reject,
+        timeout,
+        userId
+      });
+    });
+    
+    socketInstance.emit('webrtc_offer', { 
+      callId: callData.callId, 
+      targetUserId: userId, 
+      offer,
+      renegotiationId  // ✅ Include ID for tracking
+    });
+    
+    console.log(`📤 Renegotiation offer sent to ${userId} (ID: ${renegotiationId})`);
+    
+    // ✅ FIX H: Wait for remote peer to acknowledge
+    try {
+      await renegotiationPromise;
+      console.log(`✅ Renegotiation with ${userId} confirmed`);
+    } catch (e) {
+      console.error(`❌ Renegotiation with ${userId} failed/timeout:`, e.message);
+      
+      // Retry once
+      console.log(`🔄 Retrying renegotiation with ${userId}...`);
+      const retryOffer = await pc.createOffer({ 
+        offerToReceiveAudio: true, 
+        offerToReceiveVideo: true 
+      });
+      
+      await pc.setLocalDescription(retryOffer);
+      
+      socketInstance.emit('webrtc_offer', { 
+        callId: callData.callId, 
+        targetUserId: userId, 
+        offer: retryOffer
+      });
+      
+      console.log(`📤 Retry offer sent to ${userId}`);
+    }
+    
+  } catch (e) {
+    console.error(`❌ Renegotiation failed for ${userId}:`, e);
+  }
+})();
           
           renegotiationPromises.push(renegotiationPromise);
           
@@ -2515,9 +2856,8 @@ socketInstance.on('webrtc_offer', (d) => {
   handleOffer(d.fromUserId, d.offer);
 });
 
-socketInstance.on('webrtc_answer', (d) => {
-  console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
-  handleAnswer(d.fromUserId, d.answer);
+socketInstance.on('webrtc_answer', ({ fromUserId, answer, renegotiationId }) => {
+  handleAnswer(fromUserId, answer, renegotiationId);
 });
 
 socketInstance.on('ice_candidate', (d) => {
@@ -2726,51 +3066,61 @@ socketInstance.on('user_joined_call', (data) => {
   }
 });
           
-socketInstance.on('user_left_call', (data) => {
-  console.log(`👋 User left: ${data.userId}`);
-  
-  // Remove tile
-  const tile = document.getElementById(`participant-${data.userId}`);
-  if (tile) tile.remove();
-  renderedParticipants.delete(data.userId);
+socketInstance.on('user_left_call', ({ userId, username }) => {
+  console.log(`👋 User left: ${userId}`);
   
   // Clean up peer connection
-  const pc = peerConnections.get(data.userId);
-  if (pc) { 
-    pc.close(); 
-    peerConnections.delete(data.userId); 
+  if (peerConnections.has(userId)) {
+    const pc = peerConnections.get(userId);
+    pc.close();
+    peerConnections.delete(userId);
+    console.log(`🗑️ Closed peer connection for ${userId}`);
   }
   
-  // CRITICAL FIX: Clean up audio context properly
-  const ac = audioContexts.get(data.userId);
-  if (ac) {
-    if (ac.stop) ac.stop(); // Stop detection first
-    if (ac.context && ac.context.state !== 'closed') {
-      ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-    }
-    audioContexts.delete(data.userId);
+  // Clean up audio context
+  if (audioContexts.has(userId)) {
+    const ctx = audioContexts.get(userId);
+    ctx.close();
+    audioContexts.delete(userId);
+    console.log(`🗑️ Closed audio context for ${userId}`);
   }
   
-  // Clean up connection stats and monitoring
-  const stats = connectionStats.get(data.userId);
-  if (stats && stats.monitorInterval) {
-    clearInterval(stats.monitorInterval);
+  // Clean up connection stats
+  connectionStats.delete(userId);
+  pendingIceCandidates.delete(userId);
+  
+  // ✅ FIX I: Clean up unmute interval
+  if (window.unmuteIntervals && window.unmuteIntervals.has(userId)) {
+    clearInterval(window.unmuteIntervals.get(userId));
+    window.unmuteIntervals.delete(userId);
   }
-  connectionStats.delete(data.userId);
   
-  // Clean up pending candidates
-  pendingIceCandidates.delete(data.userId);
+  // ✅ FIX I: Clean up connection timeout
+  if (window.connectionTimeouts && window.connectionTimeouts.has(userId)) {
+    clearTimeout(window.connectionTimeouts.get(userId));
+    window.connectionTimeouts.delete(userId);
+  }
   
-  // Clean up negotiation mutex
-  negotiationMutex.delete(data.userId);
-  makingOffer.delete(data.userId);
+  // ✅ FIX I: Remove from rendered participants
+  renderedParticipants.delete(userId);
   
-  console.log(`✅ Fully cleaned up resources for ${data.userId}`);
+  // ✅ FIX J: Remove tile from DOM
+  const tile = document.getElementById(`tile-${userId}`);
+  if (tile) {
+    tile.remove();
+    console.log(`🗑️ Removed tile for ${userId}`);
+  }
+  
+  console.log(`✅ Fully cleaned up resources for ${userId}`);
+  
+  // ✅ FIX J: Refresh grid layout
+  const grid = document.getElementById('participantGrid');
+  const remainingTiles = grid.querySelectorAll('.video-tile');
+  console.log(`📊 Remaining tiles after ${username} left: ${remainingTiles.length}`);
+  
+  // ✅ FIX K: Request server state verification
+  socketInstance.emit('verify_call_state', { callId: callData.callId });
 });
-          
-          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
-          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
-          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
           
           socketInstance.on('speaking_state', (d) => {
             const s = document.getElementById(`speaking-${d.userId}`);
@@ -2833,6 +3183,119 @@ socketInstance.on('video_state_changed', (data) => {
   
   console.log(`✅ Remote video state updated successfully`);
   console.log(`📹 ========================================\n`);
+});
+
+
+// ✅ FIX K: Handle server state mismatch
+socketInstance.on('call_state_mismatch', ({ callId, reason, action }) => {
+  console.log(`⚠️ ========================================`);
+  console.log(`⚠️ CALL STATE MISMATCH DETECTED`);
+  console.log(`⚠️ ========================================`);
+  console.log(`   CallID: ${callId}`);
+  console.log(`   Reason: ${reason}`);
+  console.log(`   Action: ${action}`);
+  
+  if (action === 'leave') {
+    console.log(`🚪 Server instructing client to leave call`);
+    
+    // Perform cleanup
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        track.stop();
+        console.log(`🛑 Stopped ${track.kind} track`);
+      });
+    }
+    
+    peerConnections.forEach((pc, userId) => {
+      pc.close();
+      console.log(`🗑️ Closed PC for ${userId}`);
+    });
+    peerConnections.clear();
+    
+    audioContexts.forEach((ctx, userId) => {
+      ctx.close();
+      console.log(`🗑️ Closed audio context for ${userId}`);
+    });
+    audioContexts.clear();
+    
+    // Navigate back to chat
+    console.log(`🔙 Navigating back to chat due to state mismatch`);
+    window.location.href = '/chat.html';
+  }
+  
+  console.log(`⚠️ ========================================\n`);
+});
+
+// ✅ FIX K: Handle server-verified state
+socketInstance.on('call_state_verified', ({ callId, participants, callType, expiresAt }) => {
+  console.log(`✅ ========================================`);
+  console.log(`✅ CALL STATE VERIFIED BY SERVER`);
+  console.log(`✅ ========================================`);
+  console.log(`   CallID: ${callId}`);
+  console.log(`   Participants: ${participants.length}`);
+  console.log(`   Call type: ${callType}`);
+  
+  // ✅ FIX J: Rebuild grid from authoritative server data
+  const grid = document.getElementById('participantGrid');
+  if (!grid) return;
+  
+  // Get currently rendered user IDs
+  const currentTiles = new Set(
+    Array.from(grid.querySelectorAll('.video-tile'))
+      .map(tile => tile.id.replace('tile-', ''))
+  );
+  
+  const serverUserIds = new Set(participants.map(p => p.userId));
+  
+  // Remove tiles for users not in server list
+  currentTiles.forEach(userId => {
+    if (!serverUserIds.has(userId)) {
+      console.log(`🗑️ Removing stale tile for ${userId}`);
+      const tile = document.getElementById(`tile-${userId}`);
+      if (tile) tile.remove();
+      
+      renderedParticipants.delete(userId);
+      
+      // Close stale peer connection
+      if (peerConnections.has(userId)) {
+        peerConnections.get(userId).close();
+        peerConnections.delete(userId);
+      }
+    }
+  });
+  
+  // Add tiles for users in server list but not rendered
+  participants.forEach(participant => {
+    if (!currentTiles.has(participant.userId)) {
+      console.log(`➕ Adding missing tile for ${participant.username}`);
+      
+      const isSelf = participant.userId === currentUser.userId;
+      
+      // Create tile (reusing existing createTile logic)
+      createTile(
+        participant.username,
+        participant.userId,
+        participant.profilePicture,
+        isSelf,
+        participant.videoEnabled,
+        participant.audioEnabled
+      );
+      
+      renderedParticipants.add(participant.userId);
+      
+      // Initiate connection if not self and not already connected
+      if (!isSelf && !peerConnections.has(participant.userId)) {
+        const shouldInitiate = currentUser.userId > participant.userId;
+        if (shouldInitiate) {
+          console.log(`🔗 Initiating connection to ${participant.userId} after state sync`);
+          setTimeout(() => createOffer(participant.userId), 1000);
+        }
+      }
+    }
+  });
+  
+  console.log(`✅ Grid synchronized with server state`);
+  console.log(`✅ ========================================\n`);
 });
           
           socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
