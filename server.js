@@ -4396,6 +4396,89 @@ socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
     }
   });
 
+// ✅ FIX K: Server-authoritative state verification
+socket.on('verify_call_state', async ({ callId }) => {
+  try {
+    const user = socketUsers.get(socket.id);
+    if (!user) return;
+    
+    console.log(`🔍 ========================================`);
+    console.log(`🔍 STATE VERIFICATION REQUEST`);
+    console.log(`🔍 ========================================`);
+    console.log(`   From: ${user.username} (${user.userId})`);
+    console.log(`   CallID: ${callId}`);
+    
+    const call = activeCalls.get(callId);
+    
+    if (!call) {
+      console.log(`❌ Call ${callId} not found on server`);
+      socket.emit('call_state_mismatch', {
+        callId,
+        reason: 'call_not_found',
+        action: 'leave'
+      });
+      console.log(`📤 Sent call_state_mismatch - instructing client to leave`);
+      return;
+    }
+    
+    // Check if user is in participant list
+    if (!call.participants.includes(user.userId)) {
+      console.log(`❌ User ${user.username} not in server participant list`);
+      console.log(`   Server participants: [${call.participants.join(', ')}]`);
+      
+      socket.emit('call_state_mismatch', {
+        callId,
+        reason: 'not_in_participants',
+        action: 'leave'
+      });
+      console.log(`📤 Sent call_state_mismatch - instructing client to leave`);
+      return;
+    }
+    
+    // Provide authoritative participant list
+    const room = matchmaking.getRoom(call.roomId);
+    const db = getDB();
+    const usersCollection = db.collection('users');
+    
+    const participantDetails = await Promise.all(
+      call.participants.map(async (userId) => {
+        const user = await usersCollection.findOne(
+          { _id: new ObjectId(userId) },
+          { projection: { username: 1, profilePicture: 1 } }
+        );
+        
+        const mediaState = call.userMediaStates.get(userId) || {
+          videoEnabled: call.callType === 'video',
+          audioEnabled: true
+        };
+        
+        return {
+          userId,
+          username: user?.username || 'Unknown',
+          profilePicture: user?.profilePicture || null,
+          videoEnabled: mediaState.videoEnabled,
+          audioEnabled: mediaState.audioEnabled
+        };
+      })
+    );
+    
+    console.log(`✅ Server state verified - sending authoritative data`);
+    console.log(`   Participants: ${participantDetails.length}`);
+    
+    socket.emit('call_state_verified', {
+      callId,
+      participants: participantDetails,
+      callType: call.callType,
+      expiresAt: room?.expiresAt || null
+    });
+    
+    console.log(`🔍 ========================================\n`);
+    
+  } catch (error) {
+    console.error('❌ Verify call state error:', error);
+  }
+});
+
   socket.on('speaking_state', ({ callId, speaking }) => {
     try {
       const user = socketUsers.get(socket.id);
