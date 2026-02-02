@@ -6099,6 +6099,57 @@ window.addEventListener('beforeunload', (e) => {
   console.log(`   Background call: ${isInBackgroundCall}`);
   console.log(`   Navigating to call: ${navigatingToCall}`);
   
+  // CRITICAL FIX: Check if we're in an iframe (chat overlay on call.html)
+  const isInIframe = window.parent && window.parent !== window;
+  console.log(`   Is in iframe: ${isInIframe}`);
+  
+  // CRITICAL FIX: If in iframe, NEVER emit leave_room
+  if (isInIframe) {
+    console.log('🔒 ========================================');
+    console.log('🔒 CHAT OVERLAY IN IFRAME - SKIPPING CLEANUP');
+    console.log('🔒 ========================================');
+    console.log('   Parent call.html manages the room lifecycle');
+    console.log('   This is just the chat overlay - NOT the room owner');
+    console.log('   Only cleaning up chat-specific resources');
+    
+    stopCachedCallMonitoring();
+    
+    // Clean up blob URLs
+    const images = document.querySelectorAll('img[data-blob-url]');
+    images.forEach(img => {
+      const blobUrl = img.dataset.blobUrl;
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    });
+    console.log(`✅ Revoked ${images.length} blob URL(s)`);
+    
+    // Save state for when overlay reopens
+    if (roomData && messagesCache) {
+      saveChatState(roomData.roomId, messagesCache);
+      console.log('💾 Chat state saved');
+    }
+    
+    // Disconnect chat socket BUT DO NOT EMIT leave_room
+    if (socketInstance) {
+      socketInstance.disconnect();
+      console.log('✅ Chat socket disconnected (room NOT left)');
+    }
+    
+    // Clear timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('🔒 ========================================');
+    console.log('🔒 IFRAME CLEANUP COMPLETE - ROOM PRESERVED');
+    console.log('🔒 ========================================\n');
+    return; // CRITICAL: Exit early - don't run full cleanup
+  }
+  
+  // NOT in iframe - continue with normal cleanup
   stopCachedCallMonitoring();
   
   // Clean up blob URLs
@@ -6119,12 +6170,10 @@ window.addEventListener('beforeunload', (e) => {
     console.log('🔒 Background call active - preserving floating socket');
     saveChatState(roomData.roomId, messagesCache);
     
-    // Don't disconnect floating socket - let it persist
     if (floatingCallSocket) {
       console.log('✅ Keeping floating call socket alive');
     }
     
-    // Only disconnect main chat socket (but DON'T leave room)
     if (socketInstance) {
       socketInstance.disconnect();
     }
@@ -6144,12 +6193,11 @@ window.addEventListener('beforeunload', (e) => {
   }
   
   // ============================================
-  // CRITICAL FIX: EXECUTE FULL LEAVE SEQUENCE
+  // FULL LEAVE SEQUENCE (standalone chat exit)
   // ============================================
   console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE (same as Leave button)');
   
   try {
-    // 1. Leave any active call
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     if (activeCallStr) {
       try {
@@ -6157,7 +6205,6 @@ window.addEventListener('beforeunload', (e) => {
         console.log(`📞 Leaving active call: ${callData.callId}`);
         
         if (socketInstance?.connected) {
-          // SYNCHRONOUS emit (beforeunload is synchronous)
           socketInstance.emit('leave_call', { callId: callData.callId });
         }
       } catch (e) {
@@ -6172,25 +6219,20 @@ window.addEventListener('beforeunload', (e) => {
       console.log('✅ Call data cleared');
     }
     
-    // 2. Leave the room
     if (socketInstance?.connected) {
       console.log('🚪 Emitting leave_room to server');
-      // SYNCHRONOUS emit - critical for beforeunload
       socketInstance.emit('leave_room');
       console.log('✅ leave_room emitted');
     }
     
-    // 3. Clear all chat state
     clearChatState(true);
     console.log('✅ Chat state cleared');
     
-    // 4. Disconnect socket
     if (socketInstance) {
       socketInstance.disconnect();
       console.log('✅ Socket disconnected');
     }
     
-    // 5. Clear timer
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
@@ -6202,7 +6244,6 @@ window.addEventListener('beforeunload', (e) => {
   } catch (error) {
     console.error('❌ Error in beforeunload leave sequence:', error);
     
-    // Force cleanup even on error
     try {
       clearChatState(true);
       if (socketInstance) socketInstance.disconnect();
