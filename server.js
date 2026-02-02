@@ -2819,13 +2819,42 @@ socket.on('join_room', ({ roomId }) => {
       return;
     }
 
-    if (!room.hasUser(user.userId)) {
-      console.error(`❌ User ${user.username} (${user.userId}) not in room ${roomId}`);
-      socket.emit('error', { 
-        message: 'You are not a member of this room',
-        code: 'NOT_IN_ROOM'
-      });
-      return;
+if (!room.hasUser(user.userId)) {
+      console.warn(`⚠️ User ${user.username} (${user.userId}) not in room ${roomId} - attempting to re-add`);
+      
+      // Check if user was recently in this room (grace period reconnection)
+      const activeRoom = firebaseUid ? getUserActiveRoom(firebaseUid) : null;
+      
+      if (activeRoom && activeRoom.roomId === roomId) {
+        // User is reconnecting to their active room - re-add them
+        console.log(`🔄 Re-adding ${user.username} to room ${roomId} (reconnection)`);
+        
+        try {
+          // Re-add user to room
+          room.addUser({
+            userId: user.userId,
+            username: user.username,
+            pfpUrl: user.pfpUrl
+          });
+          
+          console.log(`✅ Successfully re-added ${user.username} to room ${roomId}`);
+        } catch (error) {
+          console.error(`❌ Failed to re-add user to room:`, error);
+          socket.emit('error', { 
+            message: 'Failed to rejoin room. Please try again.',
+            code: 'REJOIN_FAILED'
+          });
+          return;
+        }
+      } else {
+        // User genuinely not in this room
+        console.error(`❌ User ${user.username} (${user.userId}) not authorized for room ${roomId}`);
+        socket.emit('error', { 
+          message: 'You are not a member of this room',
+          code: 'NOT_IN_ROOM'
+        });
+        return;
+      }
     }
 
     if (!socket.rooms.has(roomId)) {
@@ -4772,8 +4801,21 @@ socket.on('disconnect', async (reason) => {
   console.log(`📱 [UID: ${firebaseUid || userId}] Last device disconnected - starting grace period`);
   
   // Start grace period timer
+// Start grace period timer
   const cleanup = setTimeout(async () => {
-    console.log(`⏰ [UID: ${firebaseUid || userId}] Grace period expired - cleaning up`);
+    console.log(`⏰ [UID: ${firebaseUid || userId}] Grace period expired - checking if user reconnected`);
+    
+    // Check if user reconnected during grace period
+    const stillDisconnected = !userToSocketId.has(userId) && 
+                               (!firebaseUid || getUserSocketIds(firebaseUid).length === 0);
+    
+    if (!stillDisconnected) {
+      console.log(`✅ [UID: ${firebaseUid || userId}] User reconnected during grace period - canceling cleanup`);
+      socketUserCleanup.delete(userId);
+      return;
+    }
+    
+    console.log(`🧹 [UID: ${firebaseUid || userId}] User still disconnected - proceeding with cleanup`);
     
     // Remove from mood tracking
     removeUserFromAllMoods(userId);
@@ -4784,7 +4826,55 @@ socket.on('disconnect', async (reason) => {
     if (activeRoom) {
       const room = matchmaking.getRoom(activeRoom.roomId);
       if (room && !room.isExpired) {
-        // Remove from room
+        // Check if there's an active call - if so, DON'T remove user yet
+        let hasActiveCall = false;
+        activeCalls.forEach((call) => {
+          if (call.roomId === activeRoom.roomId && call.participants.includes(userId)) {
+            hasActiveCall = true;
+          }
+        });
+        
+        if (hasActiveCall) {
+          console.log(`📞 [UID: ${firebaseUid || userId}] User in active call - extending grace period`);
+          // Extend grace period for users in calls (they might be navigating between pages)
+          const extendedCleanup = setTimeout(async () => {
+            console.log(`⏰ [UID: ${firebaseUid || userId}] Extended grace period expired`);
+            
+            // Check again if still disconnected
+            const finalCheck = !userToSocketId.has(userId) && 
+                               (!firebaseUid || getUserSocketIds(firebaseUid).length === 0);
+            
+            if (finalCheck) {
+              const currentRoom = matchmaking.getRoom(activeRoom.roomId);
+              if (currentRoom && !currentRoom.isExpired) {
+                // Remove from room
+                currentRoom.removeUser(userId);
+                
+                // Notify partner
+                const partner = currentRoom.users.find(u => u.userId !== userId);
+                if (partner) {
+                  emitToUserAllDevices(partner.userId, 'partner_disconnected', {
+                    roomId: activeRoom.roomId,
+                    userId,
+                    username: username
+                  });
+                }
+              }
+              
+              // Clear active room state
+              if (firebaseUid) {
+                clearUserActiveRoom(firebaseUid);
+              }
+            }
+            
+            socketUserCleanup.delete(userId);
+          }, 10000); // Additional 10 seconds for call navigation
+          
+          socketUserCleanup.set(userId, extendedCleanup);
+          return;
+        }
+        
+        // No active call - remove from room normally
         room.removeUser(userId);
         
         // Notify partner
