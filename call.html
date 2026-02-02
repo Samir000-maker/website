@@ -632,151 +632,6 @@ function showChatOverlay() {
 }
 
 function setupCallCleanup() {
-  window.addEventListener('beforeunload', (e) => {
-  console.log('🚪 ========================================');
-  console.log('🚪 CHAT PAGE BEFOREUNLOAD EVENT');
-  console.log('🚪 ========================================');
-  console.log(`   Reason: Page unload/navigation/close`);
-  console.log(`   Background call: ${isInBackgroundCall}`);
-  console.log(`   Navigating to call: ${navigatingToCall}`);
-  
-  // CRITICAL FIX: Check if we're in an iframe (chat overlay on call.html)
-  const isInIframe = window.parent && window.parent !== window;
-  console.log(`   Is in iframe: ${isInIframe}`);
-  
-  stopCachedCallMonitoring();
-  
-  // Clean up blob URLs
-  console.log('🧹 Cleaning up blob URLs...');
-  const images = document.querySelectorAll('img[data-blob-url]');
-  images.forEach(img => {
-    const blobUrl = img.dataset.blobUrl;
-    if (blobUrl) {
-      URL.revokeObjectURL(blobUrl);
-    }
-  });
-  console.log(`✅ Revoked ${images.length} blob URL(s)`);
-  
-  // ============================================
-  // EXCEPTION 1: BACKGROUND CALL MODE
-  // ============================================
-  if (isInBackgroundCall) {
-    console.log('🔒 Background call active - preserving floating socket');
-    saveChatState(roomData.roomId, messagesCache);
-    
-    if (floatingCallSocket) {
-      console.log('✅ Keeping floating call socket alive');
-    }
-    
-    if (socketInstance) {
-      socketInstance.disconnect();
-    }
-    
-    console.log('🚪 ========================================\n');
-    return;
-  }
-  
-  // ============================================
-  // EXCEPTION 2: NAVIGATING TO CALL PAGE
-  // ============================================
-  if (navigatingToCall) {
-    console.log('🔒 Navigating to call - preserving state');
-    saveChatState(roomData.roomId, messagesCache);
-    console.log('🚪 ========================================\n');
-    return;
-  }
-  
-  // ============================================
-  // CRITICAL FIX: EXCEPTION 3 - IN IFRAME (CHAT OVERLAY)
-  // ============================================
-  if (isInIframe) {
-    console.log('🔒 Chat overlay in iframe - NOT leaving room');
-    console.log('   Parent call.html manages the room lifecycle');
-    console.log('   Only save state and disconnect socket');
-    
-    // Save state for when user returns
-    saveChatState(roomData.roomId, messagesCache);
-    
-    // Disconnect chat socket BUT DO NOT EMIT leave_room
-    if (socketInstance) {
-      socketInstance.disconnect();
-      console.log('✅ Chat socket disconnected (room not left)');
-    }
-    
-    // Clear timer
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-      console.log('✅ Timer cleared');
-    }
-    
-    console.log('🚪 ========================================\n');
-    return; // CRITICAL: Exit early
-  }
-  
-  // ============================================
-  // FULL LEAVE SEQUENCE (only for standalone chat)
-  // ============================================
-  console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE (standalone chat exit)');
-  
-  try {
-    const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-    if (activeCallStr) {
-      try {
-        const callData = JSON.parse(activeCallStr);
-        console.log(`📞 Leaving active call: ${callData.callId}`);
-        
-        if (socketInstance?.connected) {
-          socketInstance.emit('leave_call', { callId: callData.callId });
-        }
-      } catch (e) {
-        console.error('❌ Error parsing call data:', e);
-      }
-      
-      localStorage.removeItem(ACTIVE_CALL_KEY);
-      sessionStorage.removeItem('hasBackgroundCall');
-      sessionStorage.removeItem('returningFromCall');
-      sessionStorage.removeItem('backgroundCallMode');
-      sessionStorage.removeItem('returningToBackgroundCall');
-      console.log('✅ Call data cleared');
-    }
-    
-    if (socketInstance?.connected) {
-      console.log('🚪 Emitting leave_room to server');
-      socketInstance.emit('leave_room');
-      console.log('✅ leave_room emitted');
-    }
-    
-    clearChatState(true);
-    console.log('✅ Chat state cleared');
-    
-    if (socketInstance) {
-      socketInstance.disconnect();
-      console.log('✅ Socket disconnected');
-    }
-    
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-      console.log('✅ Timer cleared');
-    }
-    
-    console.log('✅ FULL LEAVE SEQUENCE COMPLETE');
-    
-  } catch (error) {
-    console.error('❌ Error in beforeunload leave sequence:', error);
-    
-    try {
-      clearChatState(true);
-      if (socketInstance) socketInstance.disconnect();
-      if (timerInterval) clearInterval(timerInterval);
-    } catch (e) {
-      console.error('❌ Cleanup failed:', e);
-    }
-  }
-  
-  console.log('🚪 ========================================\n');
-});
 }
 
       function createProfilePicture(pfpUrl, username) {
@@ -3065,16 +2920,39 @@ socketInstance.on('user_joined_call', ({ user, mediaState }) => {
   // Create tile for the new participant
   console.log(`🎨 Creating tile for new participant ${user.username}`);
   
-  createTile(
-    user.username,
-    user.userId,
-    user.profilePicture,
-    false, // isSelf
-    mediaState.videoEnabled,
-    mediaState.audioEnabled
-  );
+  const grid = document.getElementById('participantGrid');
+  if (!grid) {
+    console.error(`❌ Grid element not found!`);
+    return;
+  }
   
-  renderedParticipants.add(user.userId);
+  const tile = createParticipantTile({
+    username: user.username,
+    userId: user.userId,
+    pfpUrl: user.profilePicture || user.pfpUrl,
+    videoEnabled: mediaState.videoEnabled,
+    audioEnabled: mediaState.audioEnabled
+  }, false); // isSelf = false
+  
+  if (tile) {
+    grid.appendChild(tile);
+    console.log(`✅ Tile added to grid for ${user.username}`);
+    
+    // Update mic indicator if audio is off
+    if (!mediaState.audioEnabled) {
+      const micIndicator = document.getElementById(`mic-${user.userId}`);
+      if (micIndicator) {
+        micIndicator.classList.remove('hidden');
+        console.log(`   🔇 Mic indicator shown for ${user.username}`);
+      }
+    }
+    
+    // Update video visibility
+    if (!mediaState.videoEnabled) {
+      updateVideoVisibility(user.userId, false, false);
+      console.log(`   📹 Video hidden for ${user.username}`);
+    }
+  }
   
   console.log(`✅ Tile created for ${user.username}`);
   console.log(`📊 Total rendered participants: ${renderedParticipants.size}`);
@@ -3098,7 +2976,10 @@ socketInstance.on('user_joined_call', ({ user, mediaState }) => {
 
           
 socketInstance.on('user_left_call', ({ userId, username }) => {
-  console.log(`👋 User left: ${userId}`);
+  console.log(`👋 ========================================`);
+  console.log(`👋 USER LEFT CALL`);
+  console.log(`👋 ========================================`);
+  console.log(`   User: ${username} (${userId})`);
   
   // Clean up peer connection
   if (peerConnections.has(userId)) {
@@ -3111,32 +2992,39 @@ socketInstance.on('user_left_call', ({ userId, username }) => {
   // Clean up audio context
   if (audioContexts.has(userId)) {
     const ctx = audioContexts.get(userId);
-    ctx.close();
+    if (ctx.stop) ctx.stop();
+    if (ctx.context && ctx.context.state !== 'closed') {
+      ctx.context.close().catch(e => console.warn('Failed to close audio context:', e));
+    }
     audioContexts.delete(userId);
     console.log(`🗑️ Closed audio context for ${userId}`);
   }
   
   // Clean up connection stats
+  const stats = connectionStats.get(userId);
+  if (stats && stats.monitorInterval) {
+    clearInterval(stats.monitorInterval);
+  }
   connectionStats.delete(userId);
   pendingIceCandidates.delete(userId);
   
-  // ✅ FIX I: Clean up unmute interval
+  // Clean up unmute interval
   if (window.unmuteIntervals && window.unmuteIntervals.has(userId)) {
     clearInterval(window.unmuteIntervals.get(userId));
     window.unmuteIntervals.delete(userId);
   }
   
-  // ✅ FIX I: Clean up connection timeout
+  // Clean up connection timeout
   if (window.connectionTimeouts && window.connectionTimeouts.has(userId)) {
     clearTimeout(window.connectionTimeouts.get(userId));
     window.connectionTimeouts.delete(userId);
   }
   
-  // ✅ FIX I: Remove from rendered participants
+  // Remove from rendered participants
   renderedParticipants.delete(userId);
   
-  // ✅ FIX J: Remove tile from DOM
-  const tile = document.getElementById(`tile-${userId}`);
+  // Remove tile from DOM
+  const tile = document.getElementById(`participant-${userId}`);
   if (tile) {
     tile.remove();
     console.log(`🗑️ Removed tile for ${userId}`);
@@ -3144,13 +3032,15 @@ socketInstance.on('user_left_call', ({ userId, username }) => {
   
   console.log(`✅ Fully cleaned up resources for ${userId}`);
   
-  // ✅ FIX J: Refresh grid layout
-  const grid = document.getElementById('participantGrid');
-  const remainingTiles = grid.querySelectorAll('.video-tile');
-  console.log(`📊 Remaining tiles after ${username} left: ${remainingTiles.length}`);
+  // Update participant count in subtitle
+  const subtitle = document.getElementById('callSubtitle');
+  if (subtitle) {
+    const remainingCount = renderedParticipants.size;
+    subtitle.textContent = `${remainingCount} participant${remainingCount !== 1 ? 's' : ''}`;
+  }
   
-  // ✅ FIX K: Request server state verification
-  socketInstance.emit('verify_call_state', { callId: callData.callId });
+  console.log(`📊 Remaining participants: ${renderedParticipants.size}`);
+  console.log(`👋 ========================================\n`);
 });
           
           socketInstance.on('speaking_state', (d) => {
@@ -3456,8 +3346,6 @@ if (isChatOverlayOpen || isNavigatingToChat) {
   
   console.log('🚪 ========================================\n');
 });
-
-console.log('✅ Call page event handlers initialized');
 
 console.log('✅ Call page event handlers initialized');
           
