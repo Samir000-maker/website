@@ -1,3 +1,4 @@
+
 // ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
 // Features:
 // 1. Persistent call state with grace periods
@@ -4166,6 +4167,31 @@ socket.on('join_existing_call', async ({ callId, roomId }) => {
         callType: call.callType
       });
       console.log(`📢 Broadcasted call_state_update to room: ${call.participants.length} participant(s)`);
+      
+      // CRITICAL: Notify existing call participants about the new joiner
+      // This ensures tiles are created on all devices
+      const joinerMediaState = call.userMediaStates.get(user.userId);
+      
+      socket.join(`call-${callId}`);
+      console.log(`📞 User ${user.username} joined Socket.IO call room: call-${callId}`);
+      
+      const notificationData = {
+        user: {
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl
+        },
+        mediaState: {
+          videoEnabled: joinerMediaState?.videoEnabled || (call.callType === 'video'),
+          audioEnabled: joinerMediaState?.audioEnabled || true
+        }
+      };
+      
+      // Broadcast to all OTHER participants in the call
+      socket.to(`call-${callId}`).emit('user_joined_call', notificationData);
+      console.log(`📢 Notified existing participants in call-${callId} about ${user.username} joining`);
+      console.log(`   Media state: video=${notificationData.mediaState.videoEnabled}, audio=${notificationData.mediaState.audioEnabled}`);
+      
     } else {
       console.error(`❌ CRITICAL: User ${user.username} not in participants after mutex!`);
       socket.emit('error', { 
