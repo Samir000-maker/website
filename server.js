@@ -3686,6 +3686,25 @@ socket.on('join_call', async ({ callId }) => {
             callType: call.callType,
             participants: participantsWithMediaStates
           });
+          
+          // CRITICAL: Notify ALL other participants about this user joining
+      // This ensures tiles are created on all devices
+      const notificationData = {
+        user: {
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl
+        },
+        mediaState: {
+          videoEnabled: userMediaState.videoEnabled,
+          audioEnabled: userMediaState.audioEnabled
+        }
+      };
+      
+      // Send to all sockets in the call room EXCEPT the joining user
+      socket.to(`call-${callId}`).emit('user_joined_call', notificationData);
+      console.log(`📢 Notified ${io.sockets.adapter.rooms.get(`call-${callId}`)?.size - 1 || 0} other participant(s) about ${user.username} joining`);
+          
         }
       }
       return;
@@ -3729,13 +3748,21 @@ socket.on('join_call', async ({ callId }) => {
       const participantSet = new Set(call.participants);
       const wasAlreadyInCall = participantSet.has(user.userId);
       
+   // ✅ FIX: Only broadcast if this is a NEW join (not re-join)
       if (!wasAlreadyInCall) {
-        participantSet.add(user.userId);
-        call.participants = Array.from(participantSet); // ✅ Guaranteed unique
-        userCalls.set(user.userId, callId);
-        
-        console.log(`➕ Added ${user.username} to call ${callId} participants`);
-        console.log(`   Participants: [${call.participants.join(', ')}] (${call.participants.length} total)`);
+        socket.to(`call-${callId}`).emit('user_joined_call', {
+          user: {
+            userId: user.userId,
+            username: user.username,
+            pfpUrl: user.pfpUrl
+          },
+          mediaState: {
+            videoEnabled: userMediaState.videoEnabled,
+            audioEnabled: userMediaState.audioEnabled
+          }
+        });
+        console.log(`📢 Broadcasted user_joined_call to other participants`);
+        console.log(`   User: ${user.username}, Video: ${userMediaState.videoEnabled}, Audio: ${userMediaState.audioEnabled}`);
       } else {
         console.log(`ℹ️ User ${user.username} already in call ${callId} participants (re-joining)`);
       }
@@ -3806,12 +3833,6 @@ socket.on('join_call', async ({ callId }) => {
 
       console.log(`📊 Sending ${participantsWithMediaStates.length} VALIDATED participants to ${user.username}`);
 
-      // Send complete state to joining user
-      socket.emit('call_joined', {
-        callId,
-        callType: call.callType,
-        participants: participantsWithMediaStates
-      });
 
       // Get current user's media state
       const userMediaState = call.userMediaStates.get(user.userId);
