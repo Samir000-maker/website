@@ -3681,29 +3681,29 @@ socket.on('join_call', async ({ callId }) => {
             };
           }).filter(p => p !== null);
           
-          socket.emit('call_joined', {
-            callId,
-            callType: call.callType,
-            participants: participantsWithMediaStates
-          });
+      //     socket.emit('call_joined', {
+      //       callId,
+      //       callType: call.callType,
+      //       participants: participantsWithMediaStates
+      //     });
           
-          // CRITICAL: Notify ALL other participants about this user joining
-      // This ensures tiles are created on all devices
-      const notificationData = {
-        user: {
-          userId: user.userId,
-          username: user.username,
-          pfpUrl: user.pfpUrl
-        },
-        mediaState: {
-          videoEnabled: userMediaState.videoEnabled,
-          audioEnabled: userMediaState.audioEnabled
-        }
-      };
+      //     // CRITICAL: Notify ALL other participants about this user joining
+      // // This ensures tiles are created on all devices
+      // const notificationData = {
+      //   user: {
+      //     userId: user.userId,
+      //     username: user.username,
+      //     pfpUrl: user.pfpUrl
+      //   },
+      //   mediaState: {
+      //     videoEnabled: userMediaState.videoEnabled,
+      //     audioEnabled: userMediaState.audioEnabled
+      //   }
+      // };
       
-      // Send to all sockets in the call room EXCEPT the joining user
-      socket.to(`call-${callId}`).emit('user_joined_call', notificationData);
-      console.log(`📢 Notified ${io.sockets.adapter.rooms.get(`call-${callId}`)?.size - 1 || 0} other participant(s) about ${user.username} joining`);
+      // // Send to all sockets in the call room EXCEPT the joining user
+      // socket.to(`call-${callId}`).emit('user_joined_call', notificationData);
+      // console.log(`📢 Notified ${io.sockets.adapter.rooms.get(`call-${callId}`)?.size - 1 || 0} other participant(s) about ${user.username} joining`);
           
         }
       }
@@ -3836,6 +3836,31 @@ socket.on('join_call', async ({ callId }) => {
 
       // Get current user's media state
       const userMediaState = call.userMediaStates.get(user.userId);
+      
+      
+            socket.emit('call_joined', {
+        callId,
+        callType: call.callType,
+        participants: participantsWithMediaStates
+      });
+
+      // CRITICAL: Notify ALL other participants about this user joining
+      // This ensures tiles are created on all devices
+      const notificationData = {
+        user: {
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl
+        },
+        mediaState: {
+          videoEnabled: userMediaState.videoEnabled,
+          audioEnabled: userMediaState.audioEnabled
+        }
+      };
+      
+      // Send to all sockets in the call room EXCEPT the joining user
+      socket.to(`call-${callId}`).emit('user_joined_call', notificationData);
+      console.log(`📢 Notified ${io.sockets.adapter.rooms.get(`call-${callId}`)?.size - 1 || 0} other participant(s) about ${user.username} joining`);
 
       // ✅ FIX: Only broadcast if this is a NEW join (not re-join)
       if (!wasAlreadyInCall) {
