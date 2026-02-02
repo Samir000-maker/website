@@ -242,7 +242,8 @@
 let videoStateChangeTimeout = null;
 let isTogglingVideo = false;
 let isJoiningCall = false;
-
+let lastVideoToggleTime = 0;
+const VIDEO_TOGGLE_DEBOUNCE = 500; // ms
 let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
 let makingOffer = new Map();
         
@@ -2214,6 +2215,13 @@ function toggleMic() {
 }
 
 async function toggleVideo() {
+  const now = Date.now();
+  if (now - lastVideoToggleTime < VIDEO_TOGGLE_DEBOUNCE) {
+    console.log('⚠️ Video toggle debounced - too soon after last toggle');
+    return;
+  }
+  lastVideoToggleTime = now;
+  
   if (isTogglingVideo) {
     console.log('⚠️ Video toggle already in progress, ignoring');
     return;
@@ -2221,177 +2229,218 @@ async function toggleVideo() {
   
   isTogglingVideo = true;
   
-  console.log(`📹 ========================================`);
-  console.log(`📹 VIDEO TOGGLE REQUESTED`);
-  console.log(`📹 ========================================`);
-  console.log(`   Call type: ${callData.callType}`);
-  console.log(`   Current isVideoEnabled: ${isVideoEnabled}`);
-  console.log(`   Video tracks before: ${localStream.getVideoTracks().length}`);
-  console.log(`   Active peer connections: ${peerConnections.size}`);
-  
-  if (!localStream) {
-    console.error('❌ No localStream available');
-    isTogglingVideo = false;
-    return;
-  }
-  
-  let track = localStream.getVideoTracks()[0];
-  
-  if (!track) {
-    console.log(`📹 No video track exists - requesting camera access...`);
+  try {
+    console.log(`📹 ========================================`);
+    console.log(`📹 VIDEO TOGGLE STARTED`);
+    console.log(`📹 ========================================`);
+    console.log(`   Call type: ${callData.callType}`);
+    console.log(`   Current isVideoEnabled: ${isVideoEnabled}`);
+    console.log(`   LocalStream exists: ${!!localStream}`);
+    console.log(`   Video tracks before: ${localStream?.getVideoTracks().length || 0}`);
+    console.log(`   Active peer connections: ${peerConnections.size}`);
+    console.log(`   Socket connected: ${socketInstance?.connected}`);
     
-    try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: {ideal: 640}, 
-          height: {ideal: 480},
-          facingMode: 'user'
+    if (!localStream) {
+      console.error('❌ No localStream available');
+      isTogglingVideo = false;
+      return;
+    }
+    
+    if (!socketInstance || !socketInstance.connected) {
+      console.error('❌ Socket not connected');
+      isTogglingVideo = false;
+      return;
+    }
+    
+    let track = localStream.getVideoTracks()[0];
+    
+    if (!track) {
+      console.log(`📹 No existing video track - requesting camera...`);
+      
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            width: {ideal: 640}, 
+            height: {ideal: 480},
+            facingMode: 'user'
+          }
+        });
+        
+        track = videoStream.getVideoTracks()[0];
+        
+        if (!track) {
+          console.error('❌ Failed to get video track from camera');
+          isTogglingVideo = false;
+          return;
         }
-      });
-      
-      track = videoStream.getVideoTracks()[0];
-      
-      if (!track) {
-        console.error('❌ Camera permission granted but no track received');
-        isTogglingVideo = false;
-        return;
-      }
-      
-      localStream.addTrack(track);
-      console.log(`✅ Video track added to localStream (id: ${track.id.substring(0, 8)}...)`);
-      
-      track.enabled = true;
-      isVideoEnabled = true;
-      
-      console.log(`✅ Video track enabled`);
-      
-      const renegotiationPromises = [];
-      
-      peerConnections.forEach((pc, userId) => {
-        try {
-          console.log(`📤 Adding video track to peer connection with ${userId}`);
-          
-          pc.addTrack(track, localStream);
-          console.log(`✅ Video track added to PC for ${userId}`);
-          
-          const renegotiationPromise = (async () => {
+        
+        console.log(`✅ Got new video track: ${track.id}`);
+        localStream.addTrack(track);
+        track.enabled = true;
+        isVideoEnabled = true;
+        
+        console.log(`📊 Adding track to ${peerConnections.size} peer connection(s)...`);
+        
+        // Add track to all peer connections
+        const addPromises = [];
+        peerConnections.forEach((pc, userId) => {
+          console.log(`   📤 Adding video track to PC for ${userId}`);
+          try {
+            const sender = pc.addTrack(track, localStream);
+            console.log(`   ✅ Track added, sender: ${sender ? 'yes' : 'no'}`);
+          } catch (e) {
+            console.error(`   ❌ Failed to add track to ${userId}:`, e);
+          }
+        });
+        
+        // Wait a moment for tracks to be added
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Now renegotiate with ALL peers
+        console.log(`🔄 Starting renegotiation with ${peerConnections.size} peer(s)...`);
+        
+        const renegotiationPromises = [];
+        peerConnections.forEach((pc, userId) => {
+          const renegotiatePromise = (async () => {
             try {
-              const maxWait = 10000;
+              console.log(`🔄 [${userId}] Starting renegotiation...`);
+              console.log(`   SignalingState: ${pc.signalingState}`);
+              console.log(`   ConnectionState: ${pc.connectionState}`);
+              console.log(`   IceConnectionState: ${pc.iceConnectionState}`);
+              
+              // Wait for stable state
+              const maxWait = 15000;
               const startWait = Date.now();
               
-              while (pc.signalingState !== 'stable' && Date.now() - startWait < maxWait) {
-                console.log(`⏳ Waiting for stable state (current: ${pc.signalingState})`);
-                await new Promise(resolve => setTimeout(resolve, 100));
+              while (pc.signalingState !== 'stable' && (Date.now() - startWait) < maxWait) {
+                console.log(`   ⏳ [${userId}] Waiting for stable (current: ${pc.signalingState})`);
+                await new Promise(resolve => setTimeout(resolve, 200));
               }
               
               if (pc.signalingState !== 'stable') {
-                console.error(`❌ PC for ${userId} not stable after ${maxWait}ms, aborting renegotiation`);
+                console.error(`   ❌ [${userId}] Not stable after ${maxWait}ms - aborting`);
                 return;
               }
               
-              console.log(`🔄 Creating renegotiation offer for ${userId}...`);
-              console.log(`   PC tracks before offer: ${pc.getSenders().length} senders`);
-              pc.getSenders().forEach((sender, i) => {
-                console.log(`   [${i}] ${sender.track?.kind || 'null'} - enabled: ${sender.track?.enabled || 'N/A'}`);
+              console.log(`   ✅ [${userId}] PC is stable, creating offer...`);
+              
+              // Log current senders
+              const senders = pc.getSenders();
+              console.log(`   📊 [${userId}] Current senders: ${senders.length}`);
+              senders.forEach((sender, i) => {
+                const kind = sender.track?.kind || 'null';
+                const enabled = sender.track?.enabled || false;
+                const id = sender.track?.id?.substring(0, 8) || 'null';
+                console.log(`      [${i}] ${kind} - enabled:${enabled} - id:${id}`);
               });
               
-              const offer = await pc.createOffer({ 
-                offerToReceiveAudio: true, 
-                offerToReceiveVideo: true,
-                iceRestart: false
+              const offer = await pc.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
               });
+              
+              console.log(`   ✅ [${userId}] Offer created`);
+              console.log(`      Type: ${offer.type}`);
+              console.log(`      Has video: ${offer.sdp.includes('m=video')}`);
+              console.log(`      SDP length: ${offer.sdp.length}`);
               
               await pc.setLocalDescription(offer);
-              console.log(`✅ Renegotiation offer created for ${userId}`);
-              console.log(`   SDP includes video: ${offer.sdp.includes('m=video')}`);
+              console.log(`   ✅ [${userId}] Local description set`);
               
-              socketInstance.emit('webrtc_offer', { 
-                callId: callData.callId, 
-                targetUserId: userId, 
-                offer,
+              // Emit the offer
+              console.log(`   📤 [${userId}] Emitting webrtc_offer...`);
+              socketInstance.emit('webrtc_offer', {
+                callId: callData.callId,
+                targetUserId: userId,
+                offer: offer,
                 renegotiation: true
               });
+              console.log(`   ✅ [${userId}] Offer emitted successfully`);
               
-              console.log(`📤 Renegotiation offer sent to ${userId}`);
             } catch (e) {
-              console.error(`❌ Renegotiation failed for ${userId}:`, e);
+              console.error(`   ❌ [${userId}] Renegotiation failed:`, e);
+              console.error(`      Error name: ${e.name}`);
+              console.error(`      Error message: ${e.message}`);
+              console.error(`      Stack:`, e.stack);
             }
           })();
           
-          renegotiationPromises.push(renegotiationPromise);
-          
-        } catch (e) {
-          console.error(`❌ Failed to add track to PC ${userId}:`, e);
-        }
-      });
-      
-      await Promise.all(renegotiationPromises);
-      console.log(`✅ All peer connections renegotiated with video track`);
-      
-      const localVid = document.getElementById(`video-${currentUser.userId}`);
-      if (localVid) {
-        if (!localVid.srcObject) {
-          localVid.srcObject = localStream;
-          console.log(`✅ Local stream attached to video element`);
-        }
+          renegotiationPromises.push(renegotiatePromise);
+        });
         
-        localVid.onloadedmetadata = async () => {
-          console.log(`📺 Local video metadata loaded`);
+        await Promise.all(renegotiationPromises);
+        console.log(`✅ All renegotiations completed`);
+        
+        // Update local video
+        const localVid = document.getElementById(`video-${currentUser.userId}`);
+        if (localVid) {
+          if (!localVid.srcObject) {
+            localVid.srcObject = localStream;
+          }
           try {
             await localVid.play();
             console.log(`▶️ Local video playing`);
           } catch (e) {
             console.error(`❌ Failed to play local video:`, e);
           }
-        };
-        
-        if (localVid.readyState >= 2) {
-          localVid.play().catch(e => console.error(`❌ Play failed:`, e));
         }
+        
+        updateVideoVisibility(currentUser.userId, true, false);
+        updateVideoButton();
+        
+        // Emit state change
+        console.log(`📤 Emitting video_state_changed: enabled=true`);
+        socketInstance.emit('video_state_changed', {
+          callId: callData.callId,
+          enabled: true
+        });
+        console.log(`✅ Video state change emitted`);
+        
+      } catch (error) {
+        console.error(`❌ Failed to get camera:`, error);
+        console.error(`   Error name: ${error.name}`);
+        console.error(`   Error message: ${error.message}`);
+        isVideoEnabled = false;
+        updateVideoButton();
       }
       
-      updateVideoVisibility(currentUser.userId, true, false);
+    } else {
+      // Toggle existing track
+      console.log(`📹 Toggling existing video track`);
+      console.log(`   Track ID: ${track.id}`);
+      console.log(`   Current enabled: ${track.enabled}`);
+      console.log(`   Current readyState: ${track.readyState}`);
+      
+      track.enabled = !track.enabled;
+      isVideoEnabled = track.enabled;
+      
+      console.log(`   ✅ Track toggled to: ${isVideoEnabled ? 'ENABLED' : 'DISABLED'}`);
+      
+      updateVideoVisibility(currentUser.userId, isVideoEnabled, false);
       updateVideoButton();
       
-      socketInstance.emit('video_state_changed', { 
-        callId: callData.callId, 
-        enabled: true 
+      console.log(`📤 Emitting video_state_changed: enabled=${isVideoEnabled}`);
+      socketInstance.emit('video_state_changed', {
+        callId: callData.callId,
+        enabled: isVideoEnabled
       });
-      
-      console.log(`✅ Video enabled successfully`);
-      
-    } catch (error) {
-      console.error(`❌ Failed to get video track:`, error);
-      
-      if (error.name === 'NotAllowedError') {
-        console.log('⚠️ Camera permission denied');
-      } else if (error.name === 'NotFoundError') {
-        console.log('⚠️ No camera device found');
-      }
-      
-      isVideoEnabled = false;
-      updateVideoButton();
+      console.log(`✅ Video state change emitted`);
     }
     
-  } else {
-    console.log(`📹 Video track exists - toggling enabled state`);
+    console.log(`📹 ========================================`);
+    console.log(`📹 VIDEO TOGGLE COMPLETED`);
+    console.log(`   Final isVideoEnabled: ${isVideoEnabled}`);
+    console.log(`   Video tracks: ${localStream.getVideoTracks().length}`);
+    console.log(`📹 ========================================\n`);
     
-    track.enabled = !track.enabled;
-    isVideoEnabled = track.enabled;
-    
-    console.log(`✅ Video ${isVideoEnabled ? 'ENABLED' : 'DISABLED'}`);
-    
-    updateVideoVisibility(currentUser.userId, isVideoEnabled, false);
-    updateVideoButton();
-    
-    socketInstance.emit('video_state_changed', { 
-      callId: callData.callId, 
-      enabled: isVideoEnabled 
-    });
+  } catch (error) {
+    console.error(`❌ FATAL ERROR in toggleVideo:`, error);
+    console.error(`   Error name: ${error.name}`);
+    console.error(`   Error message: ${error.message}`);
+    console.error(`   Stack:`, error.stack);
+  } finally {
+    isTogglingVideo = false;
   }
-  
-  console.log(`📹 ========================================\n`);
-  isTogglingVideo = false;
 }
 
     function updateDuration() {
