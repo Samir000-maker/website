@@ -5741,10 +5741,26 @@ if (joinCallBtn) {
                 window.parent.postMessage({ action: 'hideChat' }, '*');
                 console.log('✅ Message posted to parent — call UI will restore without any reload or reconnection');
             } else {
-                console.log('✅ Not in iframe — setting flag and navigating to call.html');
-                // Fallback: only if somehow chat is NOT in iframe
-                sessionStorage.setItem('returningToBackgroundCall', 'true');
-                window.location.href = '/call.html';
+console.log('✅ Returning to call - using history navigation to preserve state');
+
+// Mark that we're returning (don't clear call data)
+sessionStorage.setItem('returningToBackgroundCall', 'true');
+navigatingToCall = true;
+
+// Save chat state
+saveChatState(roomData.roomId, messagesCache);
+
+// CRITICAL: Use history.back() if we came from call.html
+// This prevents full reload and uses browser's cached page
+const navigationHistory = sessionStorage.getItem('navigationHistory');
+if (navigationHistory === 'call->chat') {
+  console.log('✅ Using history.back() to restore cached call.html page');
+  history.back();
+} else {
+  // Fallback to navigation if history is unclear
+  console.log('⚠️ Navigation history unclear, using href navigation');
+  window.location.href = '/call.html';
+}
             }
             
             console.log('🔘 ========================================\n');
@@ -6417,6 +6433,10 @@ try {
         shouldPreserveState,
         hasActiveCall: !!activeCallStr
     });
+    
+    if (!sessionStorage.getItem('returningFromCall')) {
+  sessionStorage.removeItem('navigationHistory');
+}
     
     if (!shouldPreserveState) {
         // Only clear if this is a fresh entry to chat (not returning from call)
