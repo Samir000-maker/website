@@ -3433,10 +3433,6 @@ const chatOverlay = document.getElementById('chatOverlayContainer');
 const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
 console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
 
-// CRITICAL: Check if we're navigating to chat (BOTH directions)
-// Check if chat is open in overlay (iframe mode)
-const chatOverlay = document.getElementById('chatOverlayContainer');
-const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
 
 if (isChatOverlayOpen) {
   console.log('💬 Chat overlay open - this is iframe navigation, not page close');
