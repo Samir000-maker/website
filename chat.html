@@ -5736,13 +5736,21 @@ if (joinCallBtn) {
             console.log(`   callId: ${activeCallData.callId}`);
             console.log(`   Call is running in background - returning to call page`);
             
-            // CRITICAL: Mark that we're returning to existing call
-            sessionStorage.setItem('returningToBackgroundCall', 'true');
+            // CRITICAL: Check if we are inside an iframe (chat overlay on call.html)
+            const isInsideIframe = window.parent && window.parent !== window;
             
-            console.log('✅ Navigating back to call.html (preserving connections)');
-            
-            // Navigate to call page (connections will remain active)
-            window.location.href = '/call.html';
+            if (isInsideIframe) {
+                console.log('✅ We are in iframe — posting message to parent call.html to hide chat overlay');
+                // Tell parent to hide the chat overlay and show call UI back
+                // No navigation, no reload, no reconnection — just hide the overlay
+                window.parent.postMessage({ action: 'hideChat' }, '*');
+                console.log('✅ Message posted to parent — call UI will restore without any reload or reconnection');
+            } else {
+                console.log('✅ Not in iframe — setting flag and navigating to call.html');
+                // Fallback: only if somehow chat is NOT in iframe
+                sessionStorage.setItem('returningToBackgroundCall', 'true');
+                window.location.href = '/call.html';
+            }
             
             console.log('🔘 ========================================\n');
         } else {
@@ -6117,7 +6125,7 @@ window.addEventListener('beforeunload', (e) => {
   // ============================================
   // EXCEPTION 1: IN IFRAME (chat overlay)
   // ============================================
-  if (isInIframe) {
+if (isInIframe) {
     console.log('🔒 ========================================');
     console.log('🔒 CHAT OVERLAY IN IFRAME - SKIPPING CLEANUP');
     console.log('🔒 ========================================');
@@ -6125,9 +6133,10 @@ window.addEventListener('beforeunload', (e) => {
     console.log('   This is just the chat overlay - NOT the room owner');
     console.log('   Only cleaning up chat-specific resources');
     
+    // Stop the polling interval that checks for cached incoming calls
     stopCachedCallMonitoring();
     
-    // Clean up blob URLs
+    // Revoke any blob URLs this chat page created for image previews
     const images = document.querySelectorAll('img[data-blob-url]');
     images.forEach(img => {
       const blobUrl = img.dataset.blobUrl;
@@ -6137,19 +6146,23 @@ window.addEventListener('beforeunload', (e) => {
     });
     console.log(`✅ Revoked ${images.length} blob URL(s)`);
     
-    // Save state for when overlay reopens
+    // Save chat messages and button state so if the iframe reopens
+    // it can restore exactly where it was without re-fetching
     if (roomData && messagesCache) {
       saveChatState(roomData.roomId, messagesCache);
       console.log('💾 Chat state saved');
     }
     
-    // Disconnect chat socket BUT DO NOT EMIT leave_room
+    // Disconnect ONLY the chat page's own socket
+    // DO NOT emit leave_room — parent call.html owns the room
+    // DO NOT touch localStorage activeCall — parent owns that too
     if (socketInstance) {
+      socketInstance.off(); // Remove all listeners first so no stray events fire during disconnect
       socketInstance.disconnect();
       console.log('✅ Chat socket disconnected (room NOT left)');
     }
     
-    // Clear timer
+    // Clear the chat page's own timer interval
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
@@ -6158,8 +6171,8 @@ window.addEventListener('beforeunload', (e) => {
     
     console.log('🔒 ========================================');
     console.log('🔒 IFRAME CLEANUP COMPLETE - ROOM PRESERVED');
-    console.log('🔒 ========================================\n');
-    return; // CRITICAL: Exit early - don't run full cleanup
+    console.log('🔒 ========================================');
+    return; // CRITICAL: Exit here. Nothing below this should run.
   }
   
   // ============================================
