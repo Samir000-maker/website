@@ -2626,6 +2626,7 @@ const returningToBackground = sessionStorage.getItem('returningToBackgroundCall'
     console.log('🔄 RETURNING TO BACKGROUND CALL - SKIP INIT');
     console.log('🔄 ========================================');
     
+    // CRITICAL: Clear the flag immediately
     sessionStorage.removeItem('returningToBackgroundCall');
     
     console.log('✅ Call already initialized - UI restoration only');
@@ -2670,6 +2671,7 @@ const returningToBackground = sessionStorage.getItem('returningToBackgroundCall'
             console.log(`   serverClockOffset: ${(serverClockOffset / 1000).toFixed(1)}s`);
             
             // Start timer
+            if (durationInterval) clearInterval(durationInterval);
             durationInterval = setInterval(updateDuration, 1000);
             updateDuration();
             console.log('✅ Timer restarted');
@@ -2679,6 +2681,12 @@ const returningToBackground = sessionStorage.getItem('returningToBackgroundCall'
         } catch (e) {
           console.error('Failed to parse room data:', e);
         }
+      }
+      
+      // Update participant count
+      const subtitle = document.getElementById('callSubtitle');
+      if (subtitle && renderedParticipants.size > 0) {
+        subtitle.textContent = `${renderedParticipants.size} participant${renderedParticipants.size > 1 ? 's' : ''}`;
       }
     }
     
@@ -3424,14 +3432,15 @@ console.log(`   Navigating to chat: ${isNavigatingToChat}`);
 console.log(`   Returning from chat: ${isReturningFromChat}`);
 
 // ============================================
-// EXCEPTION: NAVIGATING TO CHAT
+// EXCEPTION: NAVIGATING TO/FROM CHAT
 // ============================================
 if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
-  console.log('🔒 Preserving call state - user navigating to chat');
+  console.log('🔒 Preserving call state - navigation between call and chat');
   console.log('   DO NOT emit leave_call or stop media');
   
-  // Clear navigation flag
+  // Clear navigation flags
   sessionStorage.removeItem('navigatingFromCall');
+  // DON'T remove returningToBackgroundCall here - initCall needs it
   
   console.log('🚪 ========================================\n');
   return; // CRITICAL: Exit early without cleanup
