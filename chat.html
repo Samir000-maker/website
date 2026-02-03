@@ -1459,7 +1459,60 @@ function setupAndroidBackButtonHandler() {
     // Push a dummy state to history
     history.pushState({ page: 'chat' }, '', window.location.href);
     
-
+    window.addEventListener('popstate', async (event) => {
+      console.log('🔙 ========================================');
+      console.log('🔙 ANDROID BACK BUTTON PRESSED');
+      console.log('🔙 ========================================');
+      
+      // Prevent default back navigation
+      event.preventDefault();
+      
+      // Show confirmation dialog
+      const shouldLeave = await showConfirmationDialog();
+      
+      if (shouldLeave) {
+        console.log('✅ User confirmed leave via back button');
+        
+        // Execute EXACT same leave sequence as Leave button
+        try {
+          stopCachedCallMonitoring();
+          
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            const callData = JSON.parse(activeCallStr);
+            if (socketInstance?.connected) {
+              socketInstance.emit('leave_call', { callId: callData.callId });
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            sessionStorage.removeItem('hasBackgroundCall');
+            sessionStorage.removeItem('returningFromCall');
+            sessionStorage.removeItem('backgroundCallMode');
+            sessionStorage.removeItem('returningToBackgroundCall');
+          }
+          
+          if (socketInstance?.connected) {
+            socketInstance.emit('leave_room');
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+          
+          await clearChatState(true);
+          
+          console.log('✅ Leave sequence complete - navigating to mood.html');
+          window.location.href = '/mood.html';
+          
+        } catch (error) {
+          console.error('❌ Error in back button leave sequence:', error);
+          window.location.href = '/mood.html';
+        }
+      } else {
+        console.log('❌ User cancelled leave via back button');
+        // Push state again to prevent navigation
+        history.pushState({ page: 'chat' }, '', window.location.href);
+      }
+      
+      console.log('🔙 ========================================\n');
+    });
   } else {
     console.log('ℹ️ Not Android/WebView - standard back button behavior');
   }
@@ -3771,52 +3824,49 @@ function setupBackButtonHandler() {
     }
   }
   
-window.addEventListener('popstate', async (event) => {
-  console.log('⬅️ ========================================');
-  console.log('⬅️ POPSTATE FIRED');
-  console.log('⬅️ ========================================');
-  console.log(`   Guard active: ${historyGuardActive}`);
-  console.log(`   Dialog open: ${dialogOpen}`);
-  console.log(`   Is leaving: ${isLeaving}`);
-  
-  // CRITICAL: Check if this is a programmatic history.back() to return to call
-  const isReturningToCall = navigatingToCall === true;
-  console.log(`   Is returning to call: ${isReturningToCall}`);
-  
-  if (isLeaving || !historyGuardActive || isReturningToCall) {
-    console.log('   Guard inactive or returning to call - allowing navigation');
-    return; // Let the navigation happen
-  }
-  
-  // IMMEDIATELY re-push to cancel back navigation
-  history.pushState({ page: 'chat', guard: Date.now() }, '');
-  console.log('   ✅ Canceled back navigation');
-  
-  // SECOND BACK PRESS
-  if (dialogOpen) {
-    console.log('   🔴 SECOND BACK PRESS');
-    const overlay = document.getElementById('confirmationOverlay');
-    if (overlay) overlay.style.display = 'none';
-    dialogOpen = false;
+  // Popstate event handler
+  window.addEventListener('popstate', async (event) => {
+    console.log('⬅️ ========================================');
+    console.log('⬅️ POPSTATE FIRED');
+    console.log('⬅️ ========================================');
+    console.log(`   Guard active: ${historyGuardActive}`);
+    console.log(`   Dialog open: ${dialogOpen}`);
+    console.log(`   Is leaving: ${isLeaving}`);
+    
+    if (isLeaving || !historyGuardActive) {
+      console.log('   Guard inactive - allowing navigation');
+      return;
+    }
+    
+    // IMMEDIATELY re-push to cancel back navigation
+    history.pushState({ page: 'chat', guard: Date.now() }, '');
+    console.log('   ✅ Canceled back navigation');
+    
+    // SECOND BACK PRESS
+    if (dialogOpen) {
+      console.log('   🔴 SECOND BACK PRESS');
+      const overlay = document.getElementById('confirmationOverlay');
+      if (overlay) overlay.style.display = 'none';
+      dialogOpen = false;
+      console.log('⬅️ ========================================\n');
+      await executeLeaveSequence();
+      return;
+    }
+    
+    // FIRST BACK PRESS
+    console.log('   🟡 FIRST BACK PRESS');
     console.log('⬅️ ========================================\n');
-    await executeLeaveSequence();
-    return;
-  }
-  
-  // FIRST BACK PRESS
-  console.log('   🟡 FIRST BACK PRESS');
-  console.log('⬅️ ========================================\n');
-  
-  dialogOpen = true;
-  const shouldLeave = await showConfirmationDialog();
-  dialogOpen = false;
-  
-  console.log('📋 Dialog response:', shouldLeave ? 'LEAVE' : 'STAY');
-  
-  if (shouldLeave) {
-    await executeLeaveSequence();
-  }
-});
+    
+    dialogOpen = true;
+    const shouldLeave = await showConfirmationDialog();
+    dialogOpen = false;
+    
+    console.log('📋 Dialog response:', shouldLeave ? 'LEAVE' : 'STAY');
+    
+    if (shouldLeave) {
+      await executeLeaveSequence();
+    }
+  });
   
   console.log('✅ Back button handler installed');
   console.log('🔧 ========================================\n');
@@ -3991,11 +4041,14 @@ socketInstance.on('call_created', (data) => {
   console.log(`   callType: ${data.callType}`);
   console.log(`   isInitiator: ${data.isInitiator}`);
   
+  // Only navigate if we're the initiator
   if (data.isInitiator) {
     console.log('✅ We initiated this call - navigating to call page');
     
+    // Mark that we're navigating to call
     navigatingToCall = true;
     
+    // Clear loading states
     if (audioCallBtn) {
       audioCallBtn.classList.remove('call-btn-loading');
       audioCallBtn.disabled = false;
@@ -4005,12 +4058,11 @@ socketInstance.on('call_created', (data) => {
       videoCallBtn.disabled = false;
     }
     
+    // Save chat state
     saveChatState(roomData.roomId, messagesCache);
     sessionStorage.setItem('returningFromCall', 'true');
     
-    // CRITICAL FIX: Set userInCall flag BEFORE storing call data
-    sessionStorage.setItem('userInCall', 'true');
-    
+    // Store call data
     localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
       callId: data.callId,
       roomId: roomData.roomId,
@@ -4018,9 +4070,10 @@ socketInstance.on('call_created', (data) => {
       users: data.participants || []
     }));
     
-    console.log(`✅ Stored call data with userInCall flag, navigating to call.html`);
+    console.log(`✅ Stored call data, navigating to call.html`);
     console.log('📞 ========================================\n');
     
+    // Navigate to call page
     window.location.href = '/call.html';
   } else {
     console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
@@ -5308,6 +5361,7 @@ socketInstance.on('join_existing_call_success', (data) => {
   console.log(`   callType: ${data.callType}`);
   console.log(`   roomId: ${data.roomId}`);
   
+  // Remove loading states
   if (joinCallBtn) {
     joinCallBtn.classList.remove('join-btn-loading');
     joinCallBtn.disabled = false;
@@ -5317,14 +5371,14 @@ socketInstance.on('join_existing_call_success', (data) => {
     acceptCallBtn.disabled = false;
   }
   
+  // Mark navigating
   navigatingToCall = true;
   
+  // Save chat state (if not already saved)
   saveChatState(roomData.roomId, messagesCache);
   sessionStorage.setItem('returningFromCall', 'true');
   
-  // CRITICAL FIX: Set userInCall flag
-  sessionStorage.setItem('userInCall', 'true');
-  
+  // Ensure call data is stored (should already be, but verify)
   const storedCall = localStorage.getItem(ACTIVE_CALL_KEY);
   console.log(`   Stored call data exists: ${!!storedCall}`);
   
@@ -5341,6 +5395,7 @@ socketInstance.on('join_existing_call_success', (data) => {
   console.log('🚀 Navigating to call page in 500ms...');
   console.log('✅ ========================================\n');
   
+  // Navigate to call with small delay to ensure storage is written
   setTimeout(() => {
     window.location.href = '/call.html';
   }, 500);
@@ -5657,61 +5712,33 @@ if (videoCallBtn) {
 
 
 if (joinCallBtn) {
-        joinCallBtn.addEventListener('click', () => {
+    joinCallBtn.addEventListener('click', () => {
         console.log('🔘 ========================================');
         console.log('🔘 JOIN CALL BUTTON CLICKED');
         console.log('🔘 ========================================');
         
         // Check if this is "Back to Call" or "Join Call"
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        const userInCallStr = sessionStorage.getItem('userInCall');
+        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
         
         console.log(`   activeCallStr exists: ${!!activeCallStr}`);
-        console.log(`   userInCall flag: ${userInCallStr}`);
+        console.log(`   userInCall: ${userInCall}`);
         console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
         
-        // CRITICAL FIX: Check sessionStorage flag, not roomId match
-        const userInCall = activeCallStr && userInCallStr === 'true';
-        
-        if (userInCall && activeCallInRoom) {
-            // User is already in call - return to call page
-            console.log('📞 BACK TO CALL MODE');
-            
-            const activeCallData = JSON.parse(activeCallStr);
-            console.log(`   callId: ${activeCallData.callId}`);
-            console.log(`   Call is running in background - returning to call page`);
-            
-            // CRITICAL: Check if we are inside an iframe (chat overlay on call.html)
-            const isInsideIframe = window.parent && window.parent !== window;
-            
-            if (isInsideIframe) {
-                console.log('✅ We are in iframe — posting message to parent call.html to hide chat overlay');
-                // Tell parent to hide the chat overlay and show call UI back
-                // No navigation, no reload, no reconnection — just hide the overlay
-                window.parent.postMessage({ action: 'hideChat' }, '*');
-                console.log('✅ Message posted to parent — call UI will restore without any reload or reconnection');
-            } else {
-console.log('✅ Returning to call - using history navigation to preserve state');
-
-// Mark that we're returning (don't clear call data)
-sessionStorage.setItem('returningToBackgroundCall', 'true');
-navigatingToCall = true;
-
-// Save chat state
-saveChatState(roomData.roomId, messagesCache);
-
-// CRITICAL: Use history.back() if we came from call.html
-// This prevents full reload and uses browser's cached page
-const navigationHistory = sessionStorage.getItem('navigationHistory');
-if (navigationHistory === 'call->chat') {
-  console.log('✅ Using history.back() to restore cached call.html page');
-  history.back();
-} else {
-  // Fallback to navigation if history is unclear
-  console.log('⚠️ Navigation history unclear, using href navigation');
-  window.location.href = '/call.html';
-}
-            }
+if (userInCall) {
+    // User is already in call - show call UI in iframe/overlay
+    console.log('📞 BACK TO CALL MODE');
+    
+    const activeCallData = JSON.parse(activeCallStr);
+    console.log(`   callId: ${activeCallData.callId}`);
+    console.log(`   Call is running in background - returning to call page`);
+    
+    // CRITICAL: Mark that we're returning to existing call
+    sessionStorage.setItem('returningToBackgroundCall', 'true');
+    
+    // Navigate to call page (connections will remain active)
+    console.log('✅ Navigating back to call.html (preserving connections)');
+    window.location.href = '/call.html';
             
             console.log('🔘 ========================================\n');
         } else {
@@ -6068,25 +6095,15 @@ window.addEventListener('beforeunload', (e) => {
   console.log('🚪 CHAT PAGE BEFOREUNLOAD EVENT');
   console.log('🚪 ========================================');
   console.log(`   Reason: Page unload/navigation/close`);
-  
-  // Get state flags
-  const returningToCall = sessionStorage.getItem('returningToBackgroundCall') === 'true';
-  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-  const userInCall = sessionStorage.getItem('userInCall') === 'true';
-  
   console.log(`   Background call: ${isInBackgroundCall}`);
   console.log(`   Navigating to call: ${navigatingToCall}`);
-  console.log(`   Returning to call: ${returningToCall}`);
-  console.log(`   User in call: ${userInCall}`);
   
   // CRITICAL FIX: Check if we're in an iframe (chat overlay on call.html)
   const isInIframe = window.parent && window.parent !== window;
   console.log(`   Is in iframe: ${isInIframe}`);
   
-  // ============================================
-  // EXCEPTION 1: IN IFRAME (chat overlay)
-  // ============================================
-if (isInIframe) {
+  // CRITICAL FIX: If in iframe, NEVER emit leave_room
+  if (isInIframe) {
     console.log('🔒 ========================================');
     console.log('🔒 CHAT OVERLAY IN IFRAME - SKIPPING CLEANUP');
     console.log('🔒 ========================================');
@@ -6094,10 +6111,9 @@ if (isInIframe) {
     console.log('   This is just the chat overlay - NOT the room owner');
     console.log('   Only cleaning up chat-specific resources');
     
-    // Stop the polling interval that checks for cached incoming calls
     stopCachedCallMonitoring();
     
-    // Revoke any blob URLs this chat page created for image previews
+    // Clean up blob URLs
     const images = document.querySelectorAll('img[data-blob-url]');
     images.forEach(img => {
       const blobUrl = img.dataset.blobUrl;
@@ -6107,23 +6123,19 @@ if (isInIframe) {
     });
     console.log(`✅ Revoked ${images.length} blob URL(s)`);
     
-    // Save chat messages and button state so if the iframe reopens
-    // it can restore exactly where it was without re-fetching
+    // Save state for when overlay reopens
     if (roomData && messagesCache) {
       saveChatState(roomData.roomId, messagesCache);
       console.log('💾 Chat state saved');
     }
     
-    // Disconnect ONLY the chat page's own socket
-    // DO NOT emit leave_room — parent call.html owns the room
-    // DO NOT touch localStorage activeCall — parent owns that too
+    // Disconnect chat socket BUT DO NOT EMIT leave_room
     if (socketInstance) {
-      socketInstance.off(); // Remove all listeners first so no stray events fire during disconnect
       socketInstance.disconnect();
       console.log('✅ Chat socket disconnected (room NOT left)');
     }
     
-    // Clear the chat page's own timer interval
+    // Clear timer
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
@@ -6132,19 +6144,20 @@ if (isInIframe) {
     
     console.log('🔒 ========================================');
     console.log('🔒 IFRAME CLEANUP COMPLETE - ROOM PRESERVED');
-    console.log('🔒 ========================================');
-    return; // CRITICAL: Exit here. Nothing below this should run.
+    console.log('🔒 ========================================\n');
+    return; // CRITICAL: Exit early - don't run full cleanup
   }
   
-  // ============================================
-  // EXCEPTION 2: RETURNING TO CALL PAGE
-  // ============================================
-  if (returningToCall && activeCallStr && userInCall) {
+  
+  
+    const returningToCall = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  
+  if (returningToCall && activeCallStr) {
     console.log('🔙 ========================================');
     console.log('🔙 RETURNING TO ACTIVE CALL PAGE');
     console.log('🔙 ========================================');
     console.log('   Preserving all call connections and state');
-    console.log('   Call will remain active in call.html');
     
     stopCachedCallMonitoring();
     
@@ -6165,11 +6178,10 @@ if (isInIframe) {
     }
     
     // Disconnect chat socket BUT PRESERVE CALL DATA
-    // DO NOT emit leave_room - we're still in the room via call page
     if (socketInstance) {
+      socketInstance.emit('leave_room');
       socketInstance.disconnect();
       console.log('✅ Chat socket disconnected (call data preserved)');
-      console.log('   Did NOT emit leave_room - room lifecycle managed by call.html');
     }
     
     // Clear timer
@@ -6179,33 +6191,31 @@ if (isInIframe) {
       console.log('✅ Timer cleared');
     }
     
-    // DON'T clear the returningToBackgroundCall flag - call.html needs it
-    console.log('   Keeping returningToBackgroundCall flag for call.html');
-    
     console.log('🔙 ========================================');
     console.log('🔙 CLEANUP COMPLETE - CALL PRESERVED');
     console.log('🔙 ========================================\n');
     return; // Exit early - don't run full leave sequence
   }
   
+  // NOT in iframe - continue with normal cleanup
+  stopCachedCallMonitoring();
+  
+  // Clean up blob URLs
+  console.log('🧹 Cleaning up blob URLs...');
+  const images = document.querySelectorAll('img[data-blob-url]');
+  images.forEach(img => {
+    const blobUrl = img.dataset.blobUrl;
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+    }
+  });
+  console.log(`✅ Revoked ${images.length} blob URL(s)`);
+  
   // ============================================
-  // EXCEPTION 3: BACKGROUND CALL MODE
+  // EXCEPTION 1: BACKGROUND CALL MODE
   // ============================================
   if (isInBackgroundCall) {
     console.log('🔒 Background call active - preserving floating socket');
-    
-    stopCachedCallMonitoring();
-    
-    // Clean up blob URLs
-    const images = document.querySelectorAll('img[data-blob-url]');
-    images.forEach(img => {
-      const blobUrl = img.dataset.blobUrl;
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
-    });
-    console.log(`✅ Revoked ${images.length} blob URL(s)`);
-    
     saveChatState(roomData.roomId, messagesCache);
     
     if (floatingCallSocket) {
@@ -6221,23 +6231,10 @@ if (isInIframe) {
   }
   
   // ============================================
-  // EXCEPTION 4: NAVIGATING TO CALL PAGE (new call)
+  // EXCEPTION 2: NAVIGATING TO CALL PAGE
   // ============================================
   if (navigatingToCall) {
     console.log('🔒 Navigating to call - preserving state');
-    
-    stopCachedCallMonitoring();
-    
-    // Clean up blob URLs
-    const images = document.querySelectorAll('img[data-blob-url]');
-    images.forEach(img => {
-      const blobUrl = img.dataset.blobUrl;
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
-    });
-    console.log(`✅ Revoked ${images.length} blob URL(s)`);
-    
     saveChatState(roomData.roomId, messagesCache);
     console.log('🚪 ========================================\n');
     return;
@@ -6249,18 +6246,6 @@ if (isInIframe) {
   console.log('🗑️ EXECUTING FULL LEAVE SEQUENCE (same as Leave button)');
   
   try {
-    stopCachedCallMonitoring();
-    
-    // Clean up blob URLs
-    const images = document.querySelectorAll('img[data-blob-url]');
-    images.forEach(img => {
-      const blobUrl = img.dataset.blobUrl;
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
-    });
-    console.log(`✅ Revoked ${images.length} blob URL(s)`);
-    
     const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
     if (activeCallStr) {
       try {
@@ -6279,7 +6264,6 @@ if (isInIframe) {
       sessionStorage.removeItem('returningFromCall');
       sessionStorage.removeItem('backgroundCallMode');
       sessionStorage.removeItem('returningToBackgroundCall');
-      sessionStorage.removeItem('userInCall');
       console.log('✅ Call data cleared');
     }
     
@@ -6383,10 +6367,6 @@ try {
         shouldPreserveState,
         hasActiveCall: !!activeCallStr
     });
-    
-    if (!sessionStorage.getItem('returningFromCall')) {
-  sessionStorage.removeItem('navigationHistory');
-}
     
     if (!shouldPreserveState) {
         // Only clear if this is a fresh entry to chat (not returning from call)
