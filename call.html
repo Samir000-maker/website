@@ -358,6 +358,7 @@ console.log('✅ Message listener added for iframe communication');
     
     // Mark that we're navigating to chat (not closing)
     sessionStorage.setItem('navigatingFromCall', 'true');
+    console.log('✅ Preserving userInCall flag (user still in call)');
     
     // Navigate to chat page
     window.location.href = '/chat.html';
@@ -2929,6 +2930,9 @@ socketInstance.on('call_joined', async (data) => {
   console.log(`✅ ========================================`);
   console.log(`📊 Participants: ${data.participants.length}`);
   
+  sessionStorage.setItem('userInCall', 'true');
+  console.log('✅ Set userInCall flag to true');
+  
   // Log all participants
   data.participants.forEach((p, i) => {
     console.log(`   [${i}] ${p.username} (${p.userId}) video:${p.videoEnabled} audio:${p.audioEnabled}`);
@@ -3438,9 +3442,11 @@ if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
   console.log('🔒 Preserving call state - navigation between call and chat');
   console.log('   DO NOT emit leave_call or stop media');
   
-  // Clear navigation flags
-  sessionStorage.removeItem('navigatingFromCall');
-  // DON'T remove returningToBackgroundCall here - initCall needs it
+// Clear navigation flag
+sessionStorage.removeItem('navigatingFromCall');
+// DON'T remove returningToBackgroundCall here - initCall needs it
+// DON'T remove userInCall here - chat page needs it
+console.log('   Keeping userInCall flag for chat.html');
   
   console.log('🚪 ========================================\n');
   return; // CRITICAL: Exit early without cleanup
@@ -3470,6 +3476,7 @@ if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
       sessionStorage.removeItem('returningFromCall');
       sessionStorage.removeItem('backgroundCallMode');
       sessionStorage.removeItem('returningToBackgroundCall');
+      sessionStorage.removeItem('userInCall'); // Clear when actually leaving
       console.log('✅ Call data cleared');
     }
     
