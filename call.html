@@ -384,6 +384,8 @@
             console.log(`   Peer connections: ${peerConnections.size} (still active)`);
             console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
             console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
+            // CRITICAL: Don't push history state here - let popstate handle it naturally
+            // Pushing here would create duplicate history entries
             console.log('📞 ========================================\n');
           }
 
@@ -397,20 +399,42 @@
           console.log('⬅️ BACK BUTTON PRESSED');
           console.log('⬅️ ========================================');
 
+          // CRITICAL: Check BOTH old chat overlay AND new chat iframe
           const chatOverlay = document.getElementById('chatOverlayContainer');
-          const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
+          const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
 
-          console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
+          const chatIframeContainer = document.getElementById('chatIframeContainer');
+          const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
 
-          if (isShowingChat) {
-            // Hide chat, show call
-            console.log('📞 Hiding chat, showing call');
+          console.log(`   Chat overlay visible: ${isShowingChatOverlay}`);
+          console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
+          console.log(`   History state: ${JSON.stringify(event.state)}`);
+
+          if (isShowingChatOverlay) {
+            // Old chat overlay is showing - hide it
+            console.log('📞 Hiding chat overlay, showing call');
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
+          } else if (isShowingChatIframe) {
+            // Chat iframe is showing - hide it, show call UI
+            console.log('📞 Hiding chat iframe, showing call UI');
+
+            // Hide iframe
+            chatIframeContainer.classList.add('hidden');
+
+            // Show call UI
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
+
+            if (header) header.style.display = '';
+            if (main) main.style.display = '';
+            if (footer) footer.style.display = '';
+
+            console.log('✅ Call UI shown - iframe hidden');
           } else {
-            // CRITICAL: Show chat in iframe instead of navigating
-            // This preserves ALL call state - WebRTC, media streams, UI
-            console.log('🔄 Showing chat in iframe (call continues in background)');
+            // Currently showing call UI - show chat iframe
+            console.log('🔄 Showing chat iframe (call continues in background)');
             console.log(`   Active peer connections: ${peerConnections.size}`);
             console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
 
@@ -437,6 +461,10 @@
               }
               chatContainer.classList.remove('hidden');
               console.log('✅ Chat iframe shown - call UI hidden');
+
+              // CRITICAL: Push history state for proper back button behavior
+              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+              console.log('✅ History state pushed: chat view');
             }
 
             console.log('✅ Call remains FULLY ACTIVE in background');
