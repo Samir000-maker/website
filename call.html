@@ -352,46 +352,6 @@ window.addEventListener('message', (event) => {
   console.log('📨 ========================================');
   console.log(`   action: ${event.data?.action}`);
 
-  // CRITICAL: Handle back button press from chat iframe
-  if (event.data && event.data.action === 'backButtonPressed') {
-    console.log('⚠️ Chat iframe back button pressed');
-    
-    const confirmed = confirm('Do you want to leave the call?\n\nClick "OK" to leave the call and return to chat.\nClick "Cancel" to stay in the call.');
-    
-    if (confirmed) {
-      console.log('✅ User confirmed - leaving call');
-      
-      // Hide iframe
-      const chatIframeContainer = document.getElementById('chatIframeContainer');
-      if (chatIframeContainer) {
-        chatIframeContainer.classList.add('hidden');
-      }
-      
-      // Show call UI briefly
-      const header = document.querySelector('header');
-      const main = document.querySelector('main');
-      const footer = document.querySelector('footer');
-      
-      if (header) header.style.display = '';
-      if (main) main.style.display = '';
-      if (footer) footer.style.display = '';
-      
-      // Leave call
-      leaveCall();
-      
-    } else {
-      console.log('❌ User cancelled - staying in call');
-      
-      // Tell iframe to stay (push history back)
-      const chatIframe = document.getElementById('chatIframe');
-      if (chatIframe && chatIframe.contentWindow) {
-        chatIframe.contentWindow.postMessage({ action: 'stayInCall' }, '*');
-      }
-    }
-    
-    console.log('📨 ========================================\n');
-    return;
-  }
 
   if (event.data && event.data.action === 'hideChat') {
     console.log('💬 Hiding chat overlay as requested by iframe');
@@ -455,8 +415,8 @@ window.addEventListener('message', (event) => {
     hideChat();
     history.pushState({ view: 'call' }, 'Call', window.location.href);
   } else if (isShowingChatIframe) {
-    // Show confirmation dialog
-    console.log('⚠️ User attempting to leave chat iframe');
+    // Chat iframe is showing - show confirmation dialog
+    console.log('⚠️ User attempting to leave call from chat view');
     
     const confirmed = confirm('Do you want to leave the call?\n\nClick "OK" to leave the call and return to chat.\nClick "Cancel" to stay in the call.');
     
