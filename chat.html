@@ -3866,32 +3866,33 @@
         console.log('🔒 SETTING UP IFRAME BACK BUTTON HANDLER');
         console.log('🔒 ========================================');
 
-        // CRITICAL FIX: Do NOT push history state from inside the iframe.
-        // The parent (call.html) manages the history stack for the "Chat" view.
-        // Pushing state here creates a "trap" and confusing double-entries.
-
-        // Just listen for the popstate that the PARENT might pass down or 
-        // handle internal iframe navigation if any (but we mostly want to rely on parent)
-
-        // We will still implement a safety mechanism for the "Leave" dialog
-        // but we won't push states aggressively on load.
+        console.log('✅ Mode: Passive with Dialog Support');
 
         let dialogOpen = false;
 
-        // If we are effectively in an iframe, we might want to let the parent know
-        // we are ready or just be passive.
+        // Listen for messages from Parent (call.html)
+        window.addEventListener('message', async (event) => {
+          if (event.data && event.data.action === 'triggerBackLogic') {
+            console.log('📥 Received triggerBackLogic from Parent');
 
-        // OVERRIDE: We will NOT listen to popstate for history blocking in the iframe
-        // because the browser back button affects the TOP window primarily.
-        // If the user clicks "Back", the Parent window's popstate fires.
+            if (dialogOpen) return; // Already showing
 
-        // However, if we DID push a state (which we shouldn't), we would catch it.
-        // We will REMOVE the aggressive history push.
+            dialogOpen = true;
+            const shouldLeave = await showConfirmationDialog();
+            dialogOpen = false;
 
-        console.log('✅ Mode: Passive (History managed by Parent)');
+            if (shouldLeave) {
+              console.log('✅ Iframe confirm: LEAVE');
+              window.parent.postMessage({ action: 'confirmedLeave' }, '*');
 
-        // We can expose a globally accessible function for the parent to call
-        // if it wants to try to close the chat effectively, or just handle it purely in UI.
+              // Also attempt cleanup here just in case
+              await performCleanupAndLeave();
+            } else {
+              console.log('❌ Iframe confirm: STAY');
+              // We don't need to notify parent really, parent already restored state
+            }
+          }
+        });
       }
 
       // REDEFINED: Robust functionality to ensure we actually LEAVE
