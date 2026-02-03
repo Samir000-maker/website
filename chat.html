@@ -3769,6 +3769,60 @@
         });
       }
 
+      // ============================================
+      // SHARED LEAVE SEQUENCE
+      // ============================================
+      async function performCleanupAndLeave() {
+        console.log('🚪 ========================================');
+        console.log('🚪 EXECUTING SHARED LEAVE SEQUENCE');
+        console.log('🚪 ========================================');
+
+        try {
+          if (typeof stopCachedCallMonitoring === 'function') {
+            stopCachedCallMonitoring();
+          }
+
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            const callData = JSON.parse(activeCallStr);
+            if (socketInstance?.connected) {
+              console.log('📤 Emitting leave_call');
+              socketInstance.emit('leave_call', { callId: callData.callId });
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            sessionStorage.removeItem('hasBackgroundCall');
+            sessionStorage.removeItem('returningFromCall');
+            sessionStorage.removeItem('backgroundCallMode');
+            sessionStorage.removeItem('returningToBackgroundCall');
+
+            // CRITICAL: Clear dialog state
+            sessionStorage.removeItem('userInRoom');
+            sessionStorage.removeItem('confirmDialogState');
+          }
+
+          if (socketInstance?.connected) {
+            console.log('📤 Emitting leave_room');
+            socketInstance.emit('leave_room');
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+
+          if (typeof clearChatState === 'function') {
+            await clearChatState(true);
+          }
+
+          console.log('✅ Cleanup complete');
+          console.log('🔄 Navigating to mood.html');
+          console.log('🚪 ========================================\n');
+
+          // Direct navigation - no other functions
+          window.location.href = '/mood.html';
+
+        } catch (error) {
+          console.error('❌ Error during leave:', error);
+          window.location.href = '/mood.html';
+        }
+      }
 
       // ============================================
       // IFRAME-SPECIFIC BACK BUTTON HANDLER
@@ -3821,7 +3875,7 @@
             dialogOpen = false;
 
             // Execute leave sequence
-            await executeLeaveSequence();
+            await performCleanupAndLeave();
             return;
           }
 
@@ -3838,7 +3892,7 @@
 
           if (shouldLeave) {
             console.log('✅ User chose LEAVE');
-            await executeLeaveSequence();
+            await performCleanupAndLeave();
           } else {
             console.log('❌ User chose STAY');
             // Ensure we are still in correct state
