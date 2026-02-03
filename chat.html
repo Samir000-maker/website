@@ -4041,14 +4041,11 @@ socketInstance.on('call_created', (data) => {
   console.log(`   callType: ${data.callType}`);
   console.log(`   isInitiator: ${data.isInitiator}`);
   
-  // Only navigate if we're the initiator
   if (data.isInitiator) {
     console.log('✅ We initiated this call - navigating to call page');
     
-    // Mark that we're navigating to call
     navigatingToCall = true;
     
-    // Clear loading states
     if (audioCallBtn) {
       audioCallBtn.classList.remove('call-btn-loading');
       audioCallBtn.disabled = false;
@@ -4058,11 +4055,12 @@ socketInstance.on('call_created', (data) => {
       videoCallBtn.disabled = false;
     }
     
-    // Save chat state
     saveChatState(roomData.roomId, messagesCache);
     sessionStorage.setItem('returningFromCall', 'true');
     
-    // Store call data
+    // CRITICAL FIX: Set userInCall flag BEFORE storing call data
+    sessionStorage.setItem('userInCall', 'true');
+    
     localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
       callId: data.callId,
       roomId: roomData.roomId,
@@ -4070,10 +4068,9 @@ socketInstance.on('call_created', (data) => {
       users: data.participants || []
     }));
     
-    console.log(`✅ Stored call data, navigating to call.html`);
+    console.log(`✅ Stored call data with userInCall flag, navigating to call.html`);
     console.log('📞 ========================================\n');
     
-    // Navigate to call page
     window.location.href = '/call.html';
   } else {
     console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
@@ -5361,7 +5358,6 @@ socketInstance.on('join_existing_call_success', (data) => {
   console.log(`   callType: ${data.callType}`);
   console.log(`   roomId: ${data.roomId}`);
   
-  // Remove loading states
   if (joinCallBtn) {
     joinCallBtn.classList.remove('join-btn-loading');
     joinCallBtn.disabled = false;
@@ -5371,14 +5367,14 @@ socketInstance.on('join_existing_call_success', (data) => {
     acceptCallBtn.disabled = false;
   }
   
-  // Mark navigating
   navigatingToCall = true;
   
-  // Save chat state (if not already saved)
   saveChatState(roomData.roomId, messagesCache);
   sessionStorage.setItem('returningFromCall', 'true');
   
-  // Ensure call data is stored (should already be, but verify)
+  // CRITICAL FIX: Set userInCall flag
+  sessionStorage.setItem('userInCall', 'true');
+  
   const storedCall = localStorage.getItem(ACTIVE_CALL_KEY);
   console.log(`   Stored call data exists: ${!!storedCall}`);
   
@@ -5395,7 +5391,6 @@ socketInstance.on('join_existing_call_success', (data) => {
   console.log('🚀 Navigating to call page in 500ms...');
   console.log('✅ ========================================\n');
   
-  // Navigate to call with small delay to ensure storage is written
   setTimeout(() => {
     window.location.href = '/call.html';
   }, 500);
