@@ -197,6 +197,11 @@
       </div>
 
       <div class="hidden sm:flex items-center gap-2 px-2">
+        <button id="toggleChatBtn"
+          class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
+          <span class="material-symbols-outlined text-base sm:text-xl">chat</span>
+          <span class="font-bold hidden md:inline">Chat</span>
+        </button>
         <button id="moodBtn"
           class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
           <span class="text-base sm:text-xl">😊</span>
@@ -347,6 +352,31 @@
         // Flag to distinguish programmatic back (button) vs user back (browser)
         window.isProgrammativeBack = false;
 
+        // Setup Chat Toggle Button
+        const toggleChatBtn = document.getElementById('toggleChatBtn');
+        if (toggleChatBtn) {
+          toggleChatBtn.addEventListener('click', () => {
+            console.log('💬 Toggle chat button clicked');
+            const chatContainer = document.getElementById('chatIframeContainer');
+            const chatIframe = document.getElementById('chatIframe');
+
+            if (chatContainer && chatIframe) {
+              // Load chat.html in iframe (only if not already loaded)
+              if (!chatIframe.src || chatIframe.src === '') {
+                chatIframe.src = '/chat.html';
+                console.log('📄 Loading chat.html in iframe');
+              } else {
+                console.log('📄 Chat iframe already loaded - reusing');
+              }
+              chatContainer.classList.remove('hidden');
+              console.log('✅ Chat iframe shown via Button');
+
+              // Push history state
+              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+            }
+          });
+        }
+
         // Listen for messages from chat iframe
         window.addEventListener('message', (event) => {
           console.log('📨 ========================================');
@@ -357,7 +387,9 @@
           if (event.data && event.data.action === 'hideChat') {
             console.log('💬 Hiding chat overlay as requested by iframe');
             hideChat();
-            history.pushState({ view: 'call' }, 'Call', window.location.href);
+            // history.pushState({ view: 'call' }, 'Call', window.location.href); // don't push, just hide?
+            // Actually if we hide it via internal action, we should probably just sync history
+            // But usually this calls history.back()
           }
 
           // CRITICAL: Handle "Back to Call" button from chat iframe
@@ -366,24 +398,12 @@
             console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
             console.log('📞 ========================================');
 
-            // If we have a history state that says we are in 'chat' or 'chat-iframe',
-            // we should pop it to keep the browser back button logic consistent.
-            // Check if we can just go back.
-
-            // Note: chat.html used to push 'chat-iframe', call.html pushes 'chat'.
-            // Either way, if we are returning to call, we want to go back.
-
             // We'll try history.back() which should trigger our popstate listener
             // that handles the hiding of the UI.
 
             console.log('🔙 Triggering history.back() to close chat view cleanely');
             window.isProgrammativeBack = true; // Mark as intended
             history.back();
-
-            // Fallback: If history.back() doesn't fire popstate (e.g. no history), 
-            // we force UI update after a short timeout?
-            // Actually, if there is no history, history.back() might unload the page.
-            // But we pushed state when opening chat, so it should be fine.
           }
 
           if (event.data && event.data.action === 'confirmedLeave') {
@@ -418,7 +438,7 @@
             // Old chat overlay is showing - hide it
             console.log('📞 Hiding chat overlay, showing call');
             hideChat();
-            history.pushState({ view: 'call' }, 'Call', window.location.href);
+            // restore call view state if needed, or just let it float
           } else if (isShowingChatIframe) {
             // Chat iframe is showing - hide it, show call UI
             console.log('📞 Hiding chat iframe, showing call UI');
@@ -454,44 +474,12 @@
             }
             return;
           } else {
-            // Currently showing call UI - show chat iframe
-            console.log('🔄 Showing chat iframe (call continues in background)');
-            console.log(`   Active peer connections: ${peerConnections.size}`);
-            console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
+            // NO chat is showing. The user is in the Call UI and pressed Back.
+            // Standard behavior: Let the browser go back (Leave Page).
+            // Since we didn't prevent default or push new state, 
+            // the browser should have already changed the URL/State.
 
-            // Hide call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = 'none';
-            if (main) main.style.display = 'none';
-            if (footer) footer.style.display = 'none';
-
-            // Show chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            const chatIframe = document.getElementById('chatIframe');
-
-            if (chatContainer && chatIframe) {
-              // Load chat.html in iframe (only if not already loaded)
-              if (!chatIframe.src || chatIframe.src === '') {
-                chatIframe.src = '/chat.html';
-                console.log('📄 Loading chat.html in iframe');
-              } else {
-                console.log('📄 Chat iframe already loaded - reusing');
-              }
-              chatContainer.classList.remove('hidden');
-              console.log('✅ Chat iframe shown - call UI hidden');
-
-              // CRITICAL: Push history state for proper back button behavior
-              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-              console.log('✅ History state pushed: chat view');
-            }
-
-            console.log('✅ Call remains FULLY ACTIVE in background');
-            console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
+            console.log('🛑 Popstate with no chat visible - Leaving Call Page via standard navigation');
           }
 
           console.log('⬅️ ========================================\n');
