@@ -6629,9 +6629,23 @@
       // Setup all event listeners
       setupEventListeners();
 
-      // Setup back button handler
-      setupBackButtonHandler();
-      setupAndroidBackButtonHandler();
+      // CRITICAL: Only setup back button handler if NOT in iframe
+      // When in iframe, parent call.html manages ALL navigation
+      const isInIframe = window.parent && window.parent !== window;
+
+      if (!isInIframe) {
+        console.log('🔧 Setting up back button handler (standalone mode)');
+        setupBackButtonHandler();
+        setupAndroidBackButtonHandler();
+      } else {
+        console.log('🔒 ========================================');
+        console.log('🔒 RUNNING IN IFRAME - NAVIGATION MANAGED BY PARENT');
+        console.log('🔒 ========================================');
+        console.log('   Back button will be handled by call.html');
+        console.log('   This prevents history conflicts');
+        console.log('   Only "Back to Call" button will trigger navigation');
+        console.log('🔒 ========================================\n');
+      }
 
       console.log('✅ Chat initialization complete');
 
