@@ -3710,7 +3710,7 @@
           if (!overlay) return resolve(false);
 
           const dialogHTML = `
-      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 99999;">
         <div class="confirmation-dialog" style="background: linear-gradient(135deg, #0d1117 0%, #161b22 100%); border: 1px solid #30363d; border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(6, 182, 212, 0.3);">
           <div style="text-align: center; margin-bottom: 1.5rem;">
             <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.15) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(239, 68, 68, 0.3);">
@@ -3772,58 +3772,92 @@
       // ============================================
       // SHARED LEAVE SEQUENCE
       // ============================================
+      // ============================================
+      // SHARED LEAVE SEQUENCE
+      // ============================================
       async function performCleanupAndLeave() {
         console.log('🚪 ========================================');
         console.log('🚪 EXECUTING SHARED LEAVE SEQUENCE');
         console.log('🚪 ========================================');
 
         try {
+          // 1. STOP EVERYTHING FIRST
           if (typeof stopCachedCallMonitoring === 'function') {
             stopCachedCallMonitoring();
           }
+          if (typeof stopTimer === 'function') stopTimer(); // If exists
 
+          // 2. Clear Critical Storage
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
           if (activeCallStr) {
-            const callData = JSON.parse(activeCallStr);
+            console.log('🧹 Clearing active call data...');
+            // Try to emit leave_call if connected
             if (socketInstance?.connected) {
+              const callData = JSON.parse(activeCallStr);
               console.log('📤 Emitting leave_call');
               socketInstance.emit('leave_call', { callId: callData.callId });
-              await new Promise(resolve => setTimeout(resolve, 300));
+              // Small grace period for network
+              await new Promise(resolve => setTimeout(resolve, 100));
             }
+
+            // Nuke storage
             localStorage.removeItem(ACTIVE_CALL_KEY);
+            localStorage.removeItem('currentRoom'); // Also clear room data
+
+            // Clear session flags
             sessionStorage.removeItem('hasBackgroundCall');
             sessionStorage.removeItem('returningFromCall');
             sessionStorage.removeItem('backgroundCallMode');
             sessionStorage.removeItem('returningToBackgroundCall');
-
-            // CRITICAL: Clear dialog state
             sessionStorage.removeItem('userInRoom');
             sessionStorage.removeItem('confirmDialogState');
           }
 
-          if (socketInstance?.connected) {
-            console.log('📤 Emitting leave_room');
-            socketInstance.emit('leave_room');
-            await new Promise(resolve => setTimeout(resolve, 300));
+          // 3. Leave Room & Disconnect Socket
+          if (socketInstance) {
+            if (socketInstance.connected) {
+              console.log('📤 Emitting leave_room');
+              socketInstance.emit('leave_room');
+              // Short wait for packet to send
+              await new Promise(resolve => setTimeout(resolve, 150));
+
+              console.log('🔌 Force disconnecting socket...');
+              socketInstance.disconnect();
+            }
           }
 
           if (typeof clearChatState === 'function') {
             await clearChatState(true);
           }
 
-          console.log('✅ Cleanup complete');
-          console.log('🔄 Navigating to mood.html');
+          console.log('✅ Cleanup complete - GUARANTEED');
+          console.log('🔄 Navigating away...');
           console.log('🚪 ========================================\n');
 
-          // Direct navigation - no other functions
-          window.location.href = '/mood.html';
+          // 4. Force Navigation (Handle Iframe Case)
+          const isInIframe = window.parent && window.parent !== window;
+          if (isInIframe) {
+            console.log('🪟 Detected Iframe - Breaking out to top');
+            window.top.location.href = '/mood.html';
+          } else {
+            window.location.href = '/mood.html';
+          }
 
         } catch (error) {
-          console.error('❌ Error during leave:', error);
-          window.location.href = '/mood.html';
+          console.error('❌ Error during leave sequence:', error);
+          // Fallback force navigation
+          const isInIframe = window.parent && window.parent !== window;
+          if (isInIframe) {
+            window.top.location.href = '/mood.html';
+          } else {
+            window.location.href = '/mood.html';
+          }
         }
       }
 
+      // ============================================
+      // IFRAME-SPECIFIC BACK BUTTON HANDLER
+      // ============================================
       // ============================================
       // IFRAME-SPECIFIC BACK BUTTON HANDLER
       // ============================================
@@ -3832,76 +3866,50 @@
         console.log('🔒 SETTING UP IFRAME BACK BUTTON HANDLER');
         console.log('🔒 ========================================');
 
-        // CRITICAL: Push state IMMEDIATELY to intercept back button
-        // This ensures the first back press hits our popstate handler
-        // instead of navigating the iframe or parent
-        try {
-          const currentState = history.state;
-          if (!currentState || currentState.view !== 'chat-iframe') {
-            history.pushState({ view: 'chat-iframe', inCall: true }, '', window.location.href);
-            console.log('✅ Initial history state pushed for iframe interception');
-          } else {
-            console.log('ℹ️ History state already set');
-          }
-        } catch (e) {
-          console.error('Error pushing initial history state:', e);
-        }
+        // CRITICAL FIX: Do NOT push history state from inside the iframe.
+        // The parent (call.html) manages the history stack for the "Chat" view.
+        // Pushing state here creates a "trap" and confusing double-entries.
 
-        // Track dialog state locally and in storage
+        // Just listen for the popstate that the PARENT might pass down or 
+        // handle internal iframe navigation if any (but we mostly want to rely on parent)
+
+        // We will still implement a safety mechanism for the "Leave" dialog
+        // but we won't push states aggressively on load.
+
         let dialogOpen = false;
 
-        window.addEventListener('popstate', async (event) => {
-          console.log('⬅️ ========================================');
-          console.log('⬅️ BACK PRESSED IN IFRAME');
-          console.log('⬅️ ========================================');
+        // If we are effectively in an iframe, we might want to let the parent know
+        // we are ready or just be passive.
 
-          // CRITICAL: Prevent navigation and restore state
-          // logic: Any back press tries to go back to "initial"
-          // We immediately push state back to stay on "chat-iframe"
-          history.pushState({ view: 'chat-iframe', inCall: true }, '', window.location.href);
+        // OVERRIDE: We will NOT listen to popstate for history blocking in the iframe
+        // because the browser back button affects the TOP window primarily.
+        // If the user clicks "Back", the Parent window's popstate fires.
 
-          // Check persisted dialog state (handles refresh)
-          const storedDialogState = sessionStorage.getItem('confirmDialogState');
+        // However, if we DID push a state (which we shouldn't), we would catch it.
+        // We will REMOVE the aggressive history push.
 
-          if (storedDialogState === 'open' || dialogOpen) {
-            console.log('🚪 Dialog already open - treating as LEAVE');
+        console.log('✅ Mode: Passive (History managed by Parent)');
 
-            // Close dialog UI
-            const dialogEl = document.getElementById('confirmationDialog');
-            if (dialogEl) dialogEl.classList.add('hidden');
-
-            // Clear state
-            sessionStorage.removeItem('confirmDialogState');
-            dialogOpen = false;
-
-            // Execute leave sequence
-            await performCleanupAndLeave();
-            return;
-          }
-
-          // First back press - show dialog
-          console.log('📋 Showing confirmation dialog');
-          sessionStorage.setItem('confirmDialogState', 'open');
-          dialogOpen = true;
-
-          const shouldLeave = await showConfirmationDialog();
-
-          // Handle result
-          sessionStorage.removeItem('confirmDialogState');
-          dialogOpen = false;
-
-          if (shouldLeave) {
-            console.log('✅ User chose LEAVE');
-            await performCleanupAndLeave();
-          } else {
-            console.log('❌ User chose STAY');
-            // Ensure we are still in correct state
-            history.pushState({ view: 'chat-iframe', inCall: true }, '', window.location.href);
-          }
-        });
-
-        console.log('✅ iframe back button handler active');
+        // We can expose a globally accessible function for the parent to call
+        // if it wants to try to close the chat effectively, or just handle it purely in UI.
       }
+
+      // REDEFINED: Robust functionality to ensure we actually LEAVE
+      async function forceLeaveRoom() {
+        console.log('🚀 FORCE LEAVING ROOM...');
+
+        const overlay = document.getElementById('confirmationOverlay');
+        if (overlay) overlay.style.display = 'none';
+
+        // 1. Immediate cleanup of local state that might block things
+        sessionStorage.removeItem('confirmDialogState');
+
+        // 2. Perform the logic
+        await performCleanupAndLeave();
+      }
+
+      window.forceLeaveRoom = forceLeaveRoom; // Expose for debugging or parent
+
 
 
       // ============================================
