@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
@@ -338,6 +339,7 @@ console.log('✅ Message listener added for iframe communication');
   console.log('⬅️ ========================================');
   console.log('⬅️ BACK BUTTON PRESSED');
   console.log('⬅️ ========================================');
+  console.log(`   event.state:`, event.state);
   
   const chatOverlay = document.getElementById('chatOverlayContainer');
   const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
@@ -345,19 +347,16 @@ console.log('✅ Message listener added for iframe communication');
   console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
   
   if (isShowingChat) {
-    // Hide chat, show call
+    // Hide chat, show call — user pressed back while chat was open
     console.log('📞 Hiding chat, showing call');
     hideChat();
+    // Push call state back so next back press has something to pop
     history.pushState({ view: 'call' }, 'Call', window.location.href);
   } else {
-  console.log('💬 Showing chat overlay (call remains in background)');
-  console.log(`   Active peer connections: ${peerConnections.size}`);
-  console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
-  
-  showChat();
-  history.pushState({ view: 'chat' }, 'Chat', window.location.href);
-  
-  console.log('✅ Chat overlay shown - call connections preserved');
+    // Call UI is showing, back press should do nothing (stay on call)
+    // Push state again to keep the history stack intact
+    console.log('📞 Call UI is active, blocking back navigation');
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
   }
   
   console.log('⬅️ ========================================\n');
@@ -387,13 +386,21 @@ function showChat() {
     chatOverlay.classList.remove('hidden');
     
     // Load chat page in iframe ONLY if not already loaded
-    if (chatIframe && !chatIframe.src) {
+// Load chat page in iframe ONLY if not already loaded
+    if (chatIframe && (!chatIframe.src || chatIframe.src === '')) {
       chatIframe.src = '/chat.html';
-      console.log('✅ Chat iframe loaded');
+      console.log('✅ Chat iframe loaded fresh');
     } else if (chatIframe && chatIframe.src) {
-      console.log('ℹ️ Chat iframe already loaded, reusing');
-      // Reload to get fresh state
-      chatIframe.contentWindow.location.reload();
+      console.log('ℹ️ Chat iframe already loaded, reusing without reload');
+      // CRITICAL: Do NOT reload - just make sure it knows it's visible
+      try {
+        if (chatIframe.contentWindow && chatIframe.contentDocument) {
+          chatIframe.contentWindow.postMessage({ action: 'chatOverlayVisible' }, '*');
+          console.log('✅ Notified existing chat iframe it is visible');
+        }
+      } catch (e) {
+        console.warn('⚠️ Could not post message to chat iframe:', e);
+      }
     }
   }
   
@@ -3434,11 +3441,20 @@ const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden
 console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
 
 
-if (isChatOverlayOpen) {
-  console.log('💬 Chat overlay open - this is iframe navigation, not page close');
-  console.log('   Preserving all call state');
+if (isChatOverlayOpen || isNavigatingToChat) {
+  console.log('💬 Chat overlay open or navigating to chat - preserving all call state');
+  console.log(`   isChatOverlayOpen: ${isChatOverlayOpen}`);
+  console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
   console.log('🚪 ========================================\n');
-  return; // Exit early - call stays active
+  return; // Exit early - call stays active, do NOT clean up anything
+}
+
+// Also check: if we have an active call and sessionStorage says we should preserve it
+const shouldPreserve = sessionStorage.getItem('returningToBackgroundCall') === 'true' || sessionStorage.getItem('userInCall') === 'true';
+if (shouldPreserve) {
+  console.log('💬 Session flags indicate call should be preserved — blocking cleanup');
+  console.log('🚪 ========================================\n');
+  return;
 }
   
   // ============================================
