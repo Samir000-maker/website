@@ -5725,21 +5725,20 @@ if (joinCallBtn) {
         console.log(`   userInCall: ${userInCall}`);
         console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
         
-        if (userInCall) {
-            // User is already in call - show call UI in iframe/overlay
-            console.log('📞 BACK TO CALL MODE');
-            
-            const activeCallData = JSON.parse(activeCallStr);
-            console.log(`   callId: ${activeCallData.callId}`);
-            console.log(`   Call is running in background - will hide chat overlay`);
-            
-            if (window.parent && window.parent !== window) {
-                console.log('📱 We are in iframe - posting message to parent');
-                window.parent.postMessage({ action: 'hideChat' }, '*');
-            } else {
-                console.log('⚠️ Not in iframe - navigating directly');
-                window.location.href = '/call.html';
-            }
+if (userInCall) {
+    // User is already in call - show call UI in iframe/overlay
+    console.log('📞 BACK TO CALL MODE');
+    
+    const activeCallData = JSON.parse(activeCallStr);
+    console.log(`   callId: ${activeCallData.callId}`);
+    console.log(`   Call is running in background - returning to call page`);
+    
+    // CRITICAL: Mark that we're returning to existing call
+    sessionStorage.setItem('returningToBackgroundCall', 'true');
+    
+    // Navigate to call page (connections will remain active)
+    console.log('✅ Navigating back to call.html (preserving connections)');
+    window.location.href = '/call.html';
             
             console.log('🔘 ========================================\n');
         } else {
@@ -6147,6 +6146,55 @@ window.addEventListener('beforeunload', (e) => {
     console.log('🔒 IFRAME CLEANUP COMPLETE - ROOM PRESERVED');
     console.log('🔒 ========================================\n');
     return; // CRITICAL: Exit early - don't run full cleanup
+  }
+  
+  
+  
+    const returningToCall = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  
+  if (returningToCall && activeCallStr) {
+    console.log('🔙 ========================================');
+    console.log('🔙 RETURNING TO ACTIVE CALL PAGE');
+    console.log('🔙 ========================================');
+    console.log('   Preserving all call connections and state');
+    
+    stopCachedCallMonitoring();
+    
+    // Clean up blob URLs only
+    const images = document.querySelectorAll('img[data-blob-url]');
+    images.forEach(img => {
+      const blobUrl = img.dataset.blobUrl;
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    });
+    console.log(`✅ Revoked ${images.length} blob URL(s)`);
+    
+    // Save chat state
+    if (roomData && messagesCache) {
+      saveChatState(roomData.roomId, messagesCache);
+      console.log('💾 Chat state saved');
+    }
+    
+    // Disconnect chat socket BUT PRESERVE CALL DATA
+    if (socketInstance) {
+      socketInstance.emit('leave_room');
+      socketInstance.disconnect();
+      console.log('✅ Chat socket disconnected (call data preserved)');
+    }
+    
+    // Clear timer
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      console.log('✅ Timer cleared');
+    }
+    
+    console.log('🔙 ========================================');
+    console.log('🔙 CLEANUP COMPLETE - CALL PRESERVED');
+    console.log('🔙 ========================================\n');
+    return; // Exit early - don't run full leave sequence
   }
   
   // NOT in iframe - continue with normal cleanup
