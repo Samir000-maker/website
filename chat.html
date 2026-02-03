@@ -3771,85 +3771,6 @@
 
 
       // ============================================
-      // IFRAME-SPECIFIC BACK BUTTON HANDLER
-      // ============================================
-      // This function handles back button in iframe mode
-      // Shows dialog immediately, handles double-back, persists state
-      function setupIframeBackButton() {
-        console.log('🔒 ========================================');
-        console.log('🔒 SETTING UP IFRAME BACK BUTTON HANDLER');
-        console.log('🔒 ========================================');
-        console.log('   Dialog will show on FIRST back press');
-        console.log('   Second back press will auto-leave');
-        console.log('   State persists across reloads');
-
-        // Push initial state to enable back button interception
-        history.pushState({ view: 'chat-iframe', inCall: true }, '', window.location.href);
-
-        let dialogOpen = false;
-
-        window.addEventListener('popstate', async (event) => {
-          console.log('⬅️ ========================================');
-          console.log('⬅️ BACK PRESSED IN IFRAME');
-          console.log('⬅️ ========================================');
-
-          // CRITICAL: Always prevent navigation in iframe
-          event.preventDefault();
-          history.pushState({ view: 'chat-iframe', inCall: true }, '', window.location.href);
-
-          // Check if dialog is already open (from sessionStorage or local flag)
-          const storedDialogState = sessionStorage.getItem('confirmDialogState');
-
-          if (storedDialogState === 'open' || dialogOpen) {
-            console.log('🚪 ========================================');
-            console.log('🚪 DIALOG ALREADY OPEN - AUTO LEAVE');
-            console.log('🚪 ========================================');
-            console.log('   Second back press detected');
-            console.log('   Treating as LEAVE action');
-
-            // Close dialog if visible
-            const dialogEl = document.getElementById('confirmationDialog');
-            if (dialogEl) {
-              dialogEl.classList.add('hidden');
-            }
-
-            // Clear dialog state
-            sessionStorage.removeItem('confirmDialogState');
-            dialogOpen = false;
-
-            // Execute leave sequence
-            console.log('🗑️ Auto-leaving room...');
-            await executeLeaveSequence();
-            return;
-          }
-
-          // Show confirmation dialog on first back press
-          console.log('📋 Showing confirmation dialog (first back press)');
-
-          sessionStorage.setItem('confirmDialogState', 'open');
-          dialogOpen = true;
-
-          const shouldLeave = await showConfirmationDialog();
-
-          sessionStorage.removeItem('confirmDialogState');
-          dialogOpen = false;
-
-          if (shouldLeave) {
-            console.log('✅ User chose LEAVE');
-            await executeLeaveSequence();
-          } else {
-            console.log('❌ User chose STAY');
-          }
-
-          console.log('⬅️ ========================================\n');
-        });
-
-        console.log('✅ iframe back button handler installed');
-        console.log('🔒 ========================================\n');
-      }
-
-
-      // ============================================
       // BACK BUTTON HANDLER
       // ============================================
 
@@ -3857,18 +3778,6 @@
         console.log('🔧 ========================================');
         console.log('🔧 SETTING UP BACK BUTTON HANDLER');
         console.log('🔧 ========================================');
-
-        // CRITICAL: Check if running in iframe
-        const isInIframe = window.parent && window.parent !== window;
-
-        if (isInIframe) {
-          console.log('🔒 DETECTED IFRAME MODE');
-          console.log('   Using specialized iframe back button handler');
-          setupIframeBackButton();
-          return; // Exit early, iframe handler takes over
-        }
-
-        console.log('   Standalone mode - using standard handler');
 
         let dialogOpen = false;
         let isLeaving = false;
@@ -3910,10 +3819,6 @@
               sessionStorage.removeItem('returningFromCall');
               sessionStorage.removeItem('backgroundCallMode');
               sessionStorage.removeItem('returningToBackgroundCall');
-              // CRITICAL: Clear dialog state
-              sessionStorage.removeItem('userInRoom');
-              sessionStorage.removeItem('confirmDialogState');
-              console.log('✅ Dialog state cleared');
             }
 
             if (socketInstance?.connected) {
@@ -6724,48 +6629,25 @@
       // Setup all event listeners
       setupEventListeners();
 
-      // Setup back button handler (internally detects iframe vs standalone)
-      setupBackButtonHandler();
-      setupAndroidBackButtonHandler();
+      // CRITICAL: Only setup back button handler if NOT in iframe
+      // When in iframe, parent call.html manages ALL navigation
+      const isInIframe = window.parent && window.parent !== window;
+
+      if (!isInIframe) {
+        console.log('🔧 Setting up back button handler (standalone mode)');
+        setupBackButtonHandler();
+        setupAndroidBackButtonHandler();
+      } else {
+        console.log('🔒 ========================================');
+        console.log('🔒 RUNNING IN IFRAME - NAVIGATION MANAGED BY PARENT');
+        console.log('🔒 ========================================');
+        console.log('   Back button will be handled by call.html');
+        console.log('   This prevents history conflicts');
+        console.log('   Only "Back to Call" button will trigger navigation');
+        console.log('🔒 ========================================\n');
+      }
 
       console.log('✅ Chat initialization complete');
-
-      // ============================================
-      // BFCACHE RESTORATION HANDLER
-      // ============================================
-      // CRITICAL: Handle page restoration from browser cache
-      window.addEventListener('pageshow', (event) => {
-        if (event.persisted) {
-          console.log('🔄 ========================================');
-          console.log('🔄 PAGE RESTORED FROM BFCACHE');
-          console.log('🔄 ========================================');
-
-          const isInIframe = window.parent && window.parent !== window;
-          console.log(`   In iframe: ${isInIframe}`);
-
-          if (isInIframe) {
-            console.log('🔒 Re-configuring for iframe mode after bfcache restore');
-
-            // Remove any existing popstate handlers (they get restored by bfcache)
-            // Clear the old handler by removing all listeners
-            const oldHandler = window.onpopstate;
-            window.onpopstate = null;
-
-            // Re-setup iframe back button handler
-            console.log('   Re-initializing iframe back button handler');
-            setupIframeBackButton();
-
-            // Push state to prevent unwanted navigation
-            history.pushState({ view: 'chat-iframe', restored: true }, '', window.location.href);
-
-            console.log('✅ iframe behavior re-configured after bfcache');
-          } else {
-            console.log('   Standalone mode - bfcache restore handled normally');
-          }
-
-          console.log('🔄 ========================================\n');
-        }
-      });
 
     })();
   </script>
