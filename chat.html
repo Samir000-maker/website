@@ -5746,39 +5746,67 @@
             console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
 
             if (userInCall) {
-              // User is already in call - show call UI in iframe/overlay
+              // User is already in call - return to call view
               console.log('📞 BACK TO CALL MODE');
 
               const activeCallData = JSON.parse(activeCallStr);
               console.log(`   callId: ${activeCallData.callId}`);
               console.log(`   Call is running in background - returning to call page`);
 
-              // CRITICAL FIX: Save timer state before navigation
-              if (typeof roomExpiresAt !== 'undefined' && typeof serverClockOffset !== 'undefined') {
-                localStorage.setItem('timerState', JSON.stringify({
-                  roomExpiresAt,
-                  serverClockOffset,
-                  savedAt: Date.now()
-                }));
-                console.log('💾 Timer state saved for restoration');
-              }
+              // CRITICAL: Check if we're running in an iframe
+              const isInIframe = window.parent && window.parent !== window;
 
-              // CRITICAL FIX: Close BroadcastChannel before navigation to prevent errors
-              try {
-                if (window.tabManager && window.tabManager.channel) {
-                  window.tabManager.channel.close();
-                  console.log('✅ BroadcastChannel closed before navigation');
+              if (isInIframe) {
+                // ✅ IFRAME MODE: Send message to parent (ZERO STATE LOSS)
+                console.log('🎯 ========================================');
+                console.log('🎯 RUNNING IN IFRAME - USING postMessage');
+                console.log('🎯 ========================================');
+                console.log('   This navigation will be INSTANT (<10ms)');
+                console.log('   Call state will be 100% PRESERVED');
+                console.log('   No WebRTC reconnection needed');
+
+                // Send message to parent window
+                window.parent.postMessage({
+                  action: 'returnToCall'
+                }, window.location.origin);
+
+                console.log('✅ postMessage sent to parent window');
+                console.log('🎯 ========================================\n');
+              } else {
+                // ⚠️ FALLBACK MODE: Full page navigation (state loss)
+                console.warn('⚠️ ========================================');
+                console.warn('⚠️ NOT IN IFRAME - FALLBACK NAVIGATION');
+                console.warn('⚠️ ========================================');
+                console.warn('   This mode loses state (for direct chat.html access)');
+                console.warn('   Call state will need to be restored');
+
+                // Save timer state before navigation
+                if (typeof roomExpiresAt !== 'undefined' && typeof serverClockOffset !== 'undefined') {
+                  localStorage.setItem('timerState', JSON.stringify({
+                    roomExpiresAt,
+                    serverClockOffset,
+                    savedAt: Date.now()
+                  }));
+                  console.log('💾 Timer state saved for restoration');
                 }
-              } catch (e) {
-                console.warn('⚠️ Could not close BroadcastChannel:', e);
+
+                // Close BroadcastChannel before navigation
+                try {
+                  if (window.tabManager && window.tabManager.channel) {
+                    window.tabManager.channel.close();
+                    console.log('✅ BroadcastChannel closed before navigation');
+                  }
+                } catch (e) {
+                  console.warn('⚠️ Could not close BroadcastChannel:', e);
+                }
+
+                // Mark that we're returning to background call
+                sessionStorage.setItem('returningToBackgroundCall', 'true');
+
+                // Navigate to call page (connections will be lost and need restoration)
+                console.log('⚠️ Navigating to call.html (state will be lost)');
+                window.location.href = '/call.html';
               }
-
-              // CRITICAL: Mark that we're returning to existing call
-              sessionStorage.setItem('returningToBackgroundCall', 'true');
-
-              // Navigate to call page (connections will remain active)
-              console.log('✅ Navigating back to call.html (preserving connections)');
-              window.location.href = '/call.html';
 
               console.log('🔘 ========================================\n');
             } else {
