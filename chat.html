@@ -6781,7 +6781,13 @@
       setupEventListeners();
 
       // CRITICAL: Setup appropriate back button handler
-      const isInIframe = window.parent && window.parent !== window;
+      const isInIframe = (() => {
+        try {
+          return window.self !== window.top;
+        } catch (e) {
+          return true;
+        }
+      })();
 
       if (!isInIframe) {
         console.log('🔧 Setting up back button handler (standalone mode)');
@@ -6792,7 +6798,12 @@
         console.log('🔒 RUNNING IN IFRAME');
         console.log('🔒 ========================================');
         console.log('   Setting up specialized iframe handler');
-        setupIframeBackButton();
+        // Ensure setupIframeBackButton exists
+        if (typeof setupIframeBackButton === 'function') {
+          setupIframeBackButton();
+        } else {
+          console.error('❌ setupIframeBackButton is NOT defined!');
+        }
       }
 
       console.log('✅ Chat initialization complete');
@@ -6803,12 +6814,21 @@
       window.addEventListener('pageshow', (event) => {
         if (event.persisted) {
           console.log('🔄 PAGE RESTORED FROM BFCACHE');
-          const isInIframe = window.parent && window.parent !== window;
-          if (isInIframe) {
+          const isFrames = (() => {
+            try {
+              return window.self !== window.top;
+            } catch (e) {
+              return true;
+            }
+          })();
+
+          if (isFrames) {
             console.log('🔒 Restoring iframe back button handler');
             // Clear old handler
             window.onpopstate = null;
-            setupIframeBackButton();
+            if (typeof setupIframeBackButton === 'function') {
+              setupIframeBackButton();
+            }
           }
         }
       });
