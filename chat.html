@@ -6812,6 +6812,23 @@
       // BFCACHE RESTORATION HANDLER
       // ============================================
       window.addEventListener('pageshow', (event) => {
+        // ALWAYS reset these flags when page is shown (persisted or not)
+        // This ensures we don't get stuck in "initiating" state if the user navigates back
+        isInitiatingCall = false;
+        navigatingToCall = false;
+
+        if (audioCallBtn) {
+          audioCallBtn.classList.remove('call-btn-loading', 'calling');
+          audioCallBtn.disabled = !isSocketAuthenticated;
+        }
+        if (videoCallBtn) {
+          videoCallBtn.classList.remove('call-btn-loading');
+          videoCallBtn.disabled = !isSocketAuthenticated;
+        }
+        if (joinCallBtn) {
+          joinCallBtn.classList.remove('join-btn-loading');
+        }
+
         if (event.persisted) {
           console.log('🔄 PAGE RESTORED FROM BFCACHE');
           const isFrames = (() => {
