@@ -339,6 +339,9 @@ console.log('✅ Message listener added for iframe communication');
   console.log('⬅️ BACK BUTTON PRESSED');
   console.log('⬅️ ========================================');
   
+  sessionStorage.setItem('navigationHistory', 'call->chat');
+console.log('📍 Navigation history marked: call->chat');
+  
   const chatOverlay = document.getElementById('chatOverlayContainer');
   const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
   
@@ -2627,6 +2630,35 @@ if (returningToBackground) {
     console.log('🔄 ========================================');
     
     sessionStorage.removeItem('returningToBackgroundCall');
+    
+    
+    // CRITICAL: Restore clock offset from localStorage
+const roomStr = localStorage.getItem('currentRoom');
+if (roomStr) {
+  try {
+    const roomData = JSON.parse(roomStr);
+    if (roomData.serverClockOffset !== undefined) {
+      serverClockOffset = roomData.serverClockOffset;
+      console.log(`✅ Restored clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+    } else {
+      console.warn('⚠️ No clock offset in room data - assuming 0');
+      serverClockOffset = 0;
+    }
+    
+    if (roomData.expiresAt) {
+      roomExpiresAt = roomData.expiresAt;
+      console.log('✅ Loaded room expiry time:', new Date(roomExpiresAt).toISOString());
+      console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+      
+      // Restart timer with proper data
+      durationInterval = setInterval(updateDuration, 1000);
+      updateDuration();
+      console.log('✅ Timer restarted with proper expiry data and clock offset');
+    }
+  } catch (e) {
+    console.error('❌ Failed to restore state:', e);
+  }
+}
     
     console.log('✅ Call already initialized - UI restoration only');
     console.log('   Peer connections: Should already be active');
