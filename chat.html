@@ -3710,7 +3710,7 @@
           if (!overlay) return resolve(false);
 
           const dialogHTML = `
-      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 99999;">
+      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
         <div class="confirmation-dialog" style="background: linear-gradient(135deg, #0d1117 0%, #161b22 100%); border: 1px solid #30363d; border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(6, 182, 212, 0.3);">
           <div style="text-align: center; margin-bottom: 1.5rem;">
             <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.15) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(239, 68, 68, 0.3);">
@@ -3769,149 +3769,6 @@
         });
       }
 
-      // ============================================
-      // SHARED LEAVE SEQUENCE
-      // ============================================
-      // ============================================
-      // SHARED LEAVE SEQUENCE
-      // ============================================
-      async function performCleanupAndLeave() {
-        console.log('🚪 ========================================');
-        console.log('🚪 EXECUTING SHARED LEAVE SEQUENCE');
-        console.log('🚪 ========================================');
-
-        try {
-          // 1. STOP EVERYTHING FIRST
-          if (typeof stopCachedCallMonitoring === 'function') {
-            stopCachedCallMonitoring();
-          }
-          if (typeof stopTimer === 'function') stopTimer(); // If exists
-
-          // 2. Clear Critical Storage
-          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-          if (activeCallStr) {
-            console.log('🧹 Clearing active call data...');
-            // Try to emit leave_call if connected
-            if (socketInstance?.connected) {
-              const callData = JSON.parse(activeCallStr);
-              console.log('📤 Emitting leave_call');
-              socketInstance.emit('leave_call', { callId: callData.callId });
-              // Small grace period for network
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
-
-            // Nuke storage
-            localStorage.removeItem(ACTIVE_CALL_KEY);
-            localStorage.removeItem('currentRoom'); // Also clear room data
-
-            // Clear session flags
-            sessionStorage.removeItem('hasBackgroundCall');
-            sessionStorage.removeItem('returningFromCall');
-            sessionStorage.removeItem('backgroundCallMode');
-            sessionStorage.removeItem('returningToBackgroundCall');
-            sessionStorage.removeItem('userInRoom');
-            sessionStorage.removeItem('confirmDialogState');
-          }
-
-          // 3. Leave Room & Disconnect Socket
-          if (socketInstance) {
-            if (socketInstance.connected) {
-              console.log('📤 Emitting leave_room');
-              socketInstance.emit('leave_room');
-              // Short wait for packet to send
-              await new Promise(resolve => setTimeout(resolve, 150));
-
-              console.log('🔌 Force disconnecting socket...');
-              socketInstance.disconnect();
-            }
-          }
-
-          if (typeof clearChatState === 'function') {
-            await clearChatState(true);
-          }
-
-          console.log('✅ Cleanup complete - GUARANTEED');
-          console.log('🔄 Navigating away...');
-          console.log('🚪 ========================================\n');
-
-          // 4. Force Navigation (Handle Iframe Case)
-          const isInIframe = window.parent && window.parent !== window;
-          if (isInIframe) {
-            console.log('🪟 Detected Iframe - Breaking out to top');
-            window.top.location.href = '/mood.html';
-          } else {
-            window.location.href = '/mood.html';
-          }
-
-        } catch (error) {
-          console.error('❌ Error during leave sequence:', error);
-          // Fallback force navigation
-          const isInIframe = window.parent && window.parent !== window;
-          if (isInIframe) {
-            window.top.location.href = '/mood.html';
-          } else {
-            window.location.href = '/mood.html';
-          }
-        }
-      }
-
-      // ============================================
-      // IFRAME-SPECIFIC BACK BUTTON HANDLER
-      // ============================================
-      // ============================================
-      // IFRAME-SPECIFIC BACK BUTTON HANDLER
-      // ============================================
-      function setupIframeBackButton() {
-        console.log('🔒 ========================================');
-        console.log('🔒 SETTING UP IFRAME BACK BUTTON HANDLER');
-        console.log('🔒 ========================================');
-
-        console.log('✅ Mode: Passive with Dialog Support');
-
-        let dialogOpen = false;
-
-        // Listen for messages from Parent (call.html)
-        window.addEventListener('message', async (event) => {
-          if (event.data && event.data.action === 'triggerBackLogic') {
-            console.log('📥 Received triggerBackLogic from Parent');
-
-            if (dialogOpen) return; // Already showing
-
-            dialogOpen = true;
-            const shouldLeave = await showConfirmationDialog();
-            dialogOpen = false;
-
-            if (shouldLeave) {
-              console.log('✅ Iframe confirm: LEAVE');
-              window.parent.postMessage({ action: 'confirmedLeave' }, '*');
-
-              // Also attempt cleanup here just in case
-              await performCleanupAndLeave();
-            } else {
-              console.log('❌ Iframe confirm: STAY');
-              // We don't need to notify parent really, parent already restored state
-            }
-          }
-        });
-      }
-
-      // REDEFINED: Robust functionality to ensure we actually LEAVE
-      async function forceLeaveRoom() {
-        console.log('🚀 FORCE LEAVING ROOM...');
-
-        const overlay = document.getElementById('confirmationOverlay');
-        if (overlay) overlay.style.display = 'none';
-
-        // 1. Immediate cleanup of local state that might block things
-        sessionStorage.removeItem('confirmDialogState');
-
-        // 2. Perform the logic
-        await performCleanupAndLeave();
-      }
-
-      window.forceLeaveRoom = forceLeaveRoom; // Expose for debugging or parent
-
-
 
       // ============================================
       // BACK BUTTON HANDLER
@@ -3962,10 +3819,6 @@
               sessionStorage.removeItem('returningFromCall');
               sessionStorage.removeItem('backgroundCallMode');
               sessionStorage.removeItem('returningToBackgroundCall');
-
-              // CRITICAL: Clear dialog state
-              sessionStorage.removeItem('userInRoom');
-              sessionStorage.removeItem('confirmDialogState');
             }
 
             if (socketInstance?.connected) {
@@ -4400,10 +4253,6 @@
 
           saveChatState(roomData.roomId, messagesCache);
           console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
-
-          // CRITICAL: Mark user as in-room for dialog state persistence
-          sessionStorage.setItem('userInRoom', 'true');
-          console.log('🔒 User marked as in-room (dialog will persist across reload)');
 
           // [Rest of room_joined handler...]
           if (shouldUseCache && cachedState) {
@@ -6780,14 +6629,127 @@
       // Setup all event listeners
       setupEventListeners();
 
-      // CRITICAL: Setup appropriate back button handler
-      const isInIframe = (() => {
+      // ============================================
+      // SHARED LEAVE SEQUENCE
+      // ============================================
+      async function performCleanupAndLeave() {
+        console.log('🚪 ========================================');
+        console.log('🚪 EXECUTING SHARED LEAVE SEQUENCE');
+        console.log('🚪 ========================================');
+
         try {
-          return window.self !== window.top;
-        } catch (e) {
-          return true;
+          // 1. STOP EVERYTHING FIRST
+          if (typeof stopCachedCallMonitoring === 'function') {
+            stopCachedCallMonitoring();
+          }
+          if (typeof stopTimer === 'function') stopTimer(); // If exists
+
+          // 2. Clear Critical Storage
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            console.log('🧹 Clearing active call data...');
+            // Try to emit leave_call if connected
+            if (socketInstance?.connected) {
+              const callData = JSON.parse(activeCallStr);
+              console.log('📤 Emitting leave_call');
+              socketInstance.emit('leave_call', { callId: callData.callId });
+              // Small grace period for network
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            // Nuke storage
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            localStorage.removeItem('currentRoom'); // Also clear room data
+
+            // Clear session flags
+            sessionStorage.removeItem('hasBackgroundCall');
+            sessionStorage.removeItem('returningFromCall');
+            sessionStorage.removeItem('backgroundCallMode');
+            sessionStorage.removeItem('returningToBackgroundCall');
+            sessionStorage.removeItem('userInRoom');
+            sessionStorage.removeItem('confirmDialogState');
+          }
+
+          // 3. Leave Room & Disconnect Socket
+          if (socketInstance) {
+            if (socketInstance.connected) {
+              console.log('📤 Emitting leave_room');
+              socketInstance.emit('leave_room');
+              // Short wait for packet to send
+              await new Promise(resolve => setTimeout(resolve, 150));
+
+              console.log('🔌 Force disconnecting socket...');
+              socketInstance.disconnect();
+            }
+          }
+
+          if (typeof clearChatState === 'function') {
+            await clearChatState(true);
+          }
+
+          console.log('✅ Cleanup complete - GUARANTEED');
+          console.log('🔄 Navigating away...');
+          console.log('🚪 ========================================\n');
+
+          // 4. Force Navigation (Handle Iframe Case)
+          const isInIframe = window.parent && window.parent !== window;
+          if (isInIframe) {
+            console.log('🪟 Detected Iframe - Breaking out to top');
+            window.top.location.href = '/mood.html';
+          } else {
+            window.location.href = '/mood.html';
+          }
+
+        } catch (error) {
+          console.error('❌ Error during leave sequence:', error);
+          // Fallback force navigation
+          const isInIframe = window.parent && window.parent !== window;
+          if (isInIframe) {
+            window.top.location.href = '/mood.html';
+          } else {
+            window.location.href = '/mood.html';
+          }
         }
-      })();
+      }
+
+      // ============================================
+      // IFRAME-SPECIFIC BACK BUTTON HANDLER
+      // ============================================
+      function setupIframeBackButton() {
+        console.log('🔒 ========================================');
+        console.log('🔒 SETTING UP IFRAME BACK BUTTON HANDLER');
+        console.log('🔒 ========================================');
+
+        console.log('✅ Mode: Passive with Dialog Support');
+
+        let dialogOpen = false;
+
+        // Listen for messages from Parent (call.html)
+        window.addEventListener('message', async (event) => {
+          if (event.data && event.data.action === 'triggerBackLogic') {
+            console.log('📥 Received triggerBackLogic from Parent');
+
+            if (dialogOpen) return; // Already showing
+
+            dialogOpen = true;
+            const shouldLeave = await showConfirmationDialog();
+            dialogOpen = false;
+
+            if (shouldLeave) {
+              console.log('✅ Iframe confirm: LEAVE');
+              window.parent.postMessage({ action: 'confirmedLeave' }, '*');
+              await performCleanupAndLeave();
+            } else {
+              console.log('❌ Iframe confirm: STAY');
+              // We don't need to notify parent really, parent already restored state
+            }
+          }
+        });
+      }
+
+      // CRITICAL: Only setup back button handler if NOT in iframe
+      // When in iframe, parent call.html manages ALL navigation
+      const isInIframe = window.parent && window.parent !== window;
 
       if (!isInIframe) {
         console.log('🔧 Setting up back button handler (standalone mode)');
@@ -6798,57 +6760,10 @@
         console.log('🔒 RUNNING IN IFRAME');
         console.log('🔒 ========================================');
         console.log('   Setting up specialized iframe handler');
-        // Ensure setupIframeBackButton exists
-        if (typeof setupIframeBackButton === 'function') {
-          setupIframeBackButton();
-        } else {
-          console.error('❌ setupIframeBackButton is NOT defined!');
-        }
+        setupIframeBackButton();
       }
 
       console.log('✅ Chat initialization complete');
-
-      // ============================================
-      // BFCACHE RESTORATION HANDLER
-      // ============================================
-      window.addEventListener('pageshow', (event) => {
-        // ALWAYS reset these flags when page is shown (persisted or not)
-        // This ensures we don't get stuck in "initiating" state if the user navigates back
-        isInitiatingCall = false;
-        navigatingToCall = false;
-
-        if (audioCallBtn) {
-          audioCallBtn.classList.remove('call-btn-loading', 'calling');
-          audioCallBtn.disabled = !isSocketAuthenticated;
-        }
-        if (videoCallBtn) {
-          videoCallBtn.classList.remove('call-btn-loading');
-          videoCallBtn.disabled = !isSocketAuthenticated;
-        }
-        if (joinCallBtn) {
-          joinCallBtn.classList.remove('join-btn-loading');
-        }
-
-        if (event.persisted) {
-          console.log('🔄 PAGE RESTORED FROM BFCACHE');
-          const isFrames = (() => {
-            try {
-              return window.self !== window.top;
-            } catch (e) {
-              return true;
-            }
-          })();
-
-          if (isFrames) {
-            console.log('🔒 Restoring iframe back button handler');
-            // Clear old handler
-            window.onpopstate = null;
-            if (typeof setupIframeBackButton === 'function') {
-              setupIframeBackButton();
-            }
-          }
-        }
-      });
 
     })();
   </script>
