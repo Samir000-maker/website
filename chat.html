@@ -6646,27 +6646,27 @@
   history.pushState({ page: 'chat-iframe' }, '', window.location.href);
   
   // Handle back button in iframe
-  window.addEventListener('popstate', (event) => {
-    console.log('⬅️ IFRAME: Back button pressed');
+  // window.addEventListener('popstate', (event) => {
+  //   console.log('⬅️ IFRAME: Back button pressed');
     
-    // Prevent default navigation
-    event.preventDefault();
+  //   // Prevent default navigation
+  //   event.preventDefault();
     
-    // Push state back to stay in place
-    history.pushState({ page: 'chat-iframe' }, '', window.location.href);
+  //   // Push state back to stay in place
+  //   history.pushState({ page: 'chat-iframe' }, '', window.location.href);
     
-    // Notify parent window
-    console.log('📤 IFRAME: Notifying parent of back button press');
-    window.parent.postMessage({ action: 'backButtonPressed' }, '*');
-  });
+  //   // Notify parent window
+  //   console.log('📤 IFRAME: Notifying parent of back button press');
+  //   window.parent.postMessage({ action: 'backButtonPressed' }, '*');
+  // });
   
-  // Listen for parent's response
-  window.addEventListener('message', (event) => {
-    if (event.data && event.data.action === 'stayInCall') {
-      console.log('✅ IFRAME: Parent says stay - maintaining position');
-      // Just stay put - already pushed history state above
-    }
-  });
+  // // Listen for parent's response
+  // window.addEventListener('message', (event) => {
+  //   if (event.data && event.data.action === 'stayInCall') {
+  //     console.log('✅ IFRAME: Parent says stay - maintaining position');
+  //     // Just stay put - already pushed history state above
+  //   }
+  // });
   
   console.log('✅ IFRAME: Back button handler installed');
   console.log('🔒 ========================================\n');
