@@ -417,40 +417,21 @@
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           } else if (isShowingChatIframe) {
             // Chat iframe is showing - hide it, show call UI
-            if (window.isProgrammativeBack) {
-              // CASE: "Back to Call" button clicked
-              console.log('🤖 Programmatic back detected - closing chat normally');
+            console.log('📞 Hiding chat iframe, showing call UI');
 
-              // Hide iframe
-              chatIframeContainer.classList.add('hidden');
+            // Hide iframe
+            chatIframeContainer.classList.add('hidden');
 
-              // Show call UI
-              const header = document.querySelector('header');
-              const main = document.querySelector('main');
-              const footer = document.querySelector('footer');
+            // Show call UI
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
 
-              if (header) header.style.display = '';
-              if (main) main.style.display = '';
-              if (footer) footer.style.display = '';
+            if (header) header.style.display = '';
+            if (main) main.style.display = '';
+            if (footer) footer.style.display = '';
 
-              console.log('✅ Call UI shown - iframe hidden');
-              window.isProgrammativeBack = false; // Reset
-              return;
-            }
-
-            // CASE: Browser Back Button clicked by User
-            console.log('👤 User back detected - intercepting for dialog');
-
-            // 1. Undo the navigation immediately (Push state back to Chat)
-            history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-
-            // 2. Tell iframe to show dialog
-            const iframe = document.getElementById('chatIframe');
-            if (iframe && iframe.contentWindow) {
-              console.log('📤 Sending triggerBackLogic to iframe');
-              iframe.contentWindow.postMessage({ action: 'triggerBackLogic' }, '*');
-            }
-            return;
+            console.log('✅ Call UI shown - iframe hidden');
           } else {
             // Currently showing call UI - show chat iframe
             console.log('🔄 Showing chat iframe (call continues in background)');
