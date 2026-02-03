@@ -415,24 +415,36 @@
             console.log('📞 Hiding chat overlay, showing call');
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
-          } else if (isShowingChatIframe) {
-            // Chat iframe is showing - hide it, show call UI
-            console.log('📞 Hiding chat iframe, showing call UI');
-
-            // Hide iframe
-            chatIframeContainer.classList.add('hidden');
-
-            // Show call UI
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
-
-            console.log('✅ Call UI shown - iframe hidden');
-          } else {
+            } else if (isShowingChatIframe) {
+    // Show confirmation dialog
+    console.log('⚠️ User attempting to leave chat iframe');
+    
+    const confirmed = confirm('Do you want to leave the call?\n\nClick "OK" to leave the call and return to chat.\nClick "Cancel" to stay in the call.');
+    
+    if (confirmed) {
+      console.log('✅ User confirmed - leaving call');
+      
+      // Hide iframe
+      chatIframeContainer.classList.add('hidden');
+      
+      // Show call UI briefly
+      const header = document.querySelector('header');
+      const main = document.querySelector('main');
+      const footer = document.querySelector('footer');
+      
+      if (header) header.style.display = '';
+      if (main) main.style.display = '';
+      if (footer) footer.style.display = '';
+      
+      // Then immediately leave call
+      leaveCall();
+      
+    } else {
+      console.log('❌ User cancelled - staying in call');
+      
+      // Push the chat state back to prevent navigation
+      history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+    } else {
             // Currently showing call UI - show chat iframe
             console.log('🔄 Showing chat iframe (call continues in background)');
             console.log(`   Active peer connections: ${peerConnections.size}`);
