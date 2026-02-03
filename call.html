@@ -302,6 +302,7 @@ async function fetchIceServers() {
       let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
+      let roomExpiresAt = null;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
       let isNavigatingToChat = false;
@@ -2619,7 +2620,7 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
       
 const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
   
-  if (returningToBackground) {
+if (returningToBackground) {
     console.log('🔄 ========================================');
     console.log('🔄 RETURNING TO BACKGROUND CALL - SKIP INIT');
     console.log('🔄 ========================================');
@@ -2632,9 +2633,9 @@ const returningToBackground = sessionStorage.getItem('returningToBackgroundCall'
     console.log('   Socket: Should already be connected');
     console.log('🔄 ========================================\n');
     
-    isInitializing = false; // Allow UI interactions
+    isInitializing = false;
     
-    // Just restore UI elements and timer
+    // CRITICAL FIX: Properly load room data for timer
     const callStr = localStorage.getItem('activeCall');
     if (callStr) {
       callData = JSON.parse(callStr);
@@ -2642,24 +2643,34 @@ const returningToBackground = sessionStorage.getItem('returningToBackgroundCall'
       const title = document.getElementById('callTitle');
       if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
       
-      // Restart timer
+      // CRITICAL: Load room data to get expiresAt
       const roomStr = localStorage.getItem('currentRoom');
       if (roomStr) {
         try {
           const roomData = JSON.parse(roomStr);
           if (roomData.expiresAt) {
+            // Set the global variable properly
+            roomExpiresAt = roomData.expiresAt;
+            
+            console.log('✅ Loaded room expiry time:', new Date(roomExpiresAt).toISOString());
+            
+            // Now start timer with proper data
             durationInterval = setInterval(updateDuration, 1000);
             updateDuration();
-            console.log('✅ Timer restarted');
+            console.log('✅ Timer restarted with proper expiry data');
+          } else {
+            console.error('❌ No expiresAt in room data - timer will not work');
           }
         } catch (e) {
-          console.error('Failed to parse room data:', e);
+          console.error('❌ Failed to parse room data:', e);
         }
+      } else {
+        console.error('❌ No room data in localStorage - timer will not work');
       }
     }
     
     console.log('✅ UI restored - call page ready');
-    return; // CRITICAL: Exit initCall early - don't reinitialize
+    return;
   }
       
         if (isInitializing) return;
