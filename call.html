@@ -345,52 +345,91 @@
         history.pushState({ view: 'call' }, 'Call', window.location.href);
 
 
-        // Listen for messages from chat iframe
-        window.addEventListener('message', (event) => {
-          console.log('📨 ========================================');
-          console.log('📨 MESSAGE RECEIVED FROM IFRAME');
-          console.log('📨 ========================================');
-          console.log(`   action: ${event.data?.action}`);
+// Listen for messages from chat iframe
+window.addEventListener('message', (event) => {
+  console.log('📨 ========================================');
+  console.log('📨 MESSAGE RECEIVED FROM IFRAME');
+  console.log('📨 ========================================');
+  console.log(`   action: ${event.data?.action}`);
 
-          if (event.data && event.data.action === 'hideChat') {
-            console.log('💬 Hiding chat overlay as requested by iframe');
-            hideChat();
-            history.pushState({ view: 'call' }, 'Call', window.location.href);
-          }
+  // CRITICAL: Handle back button press from chat iframe
+  if (event.data && event.data.action === 'backButtonPressed') {
+    console.log('⚠️ Chat iframe back button pressed');
+    
+    const confirmed = confirm('Do you want to leave the call?\n\nClick "OK" to leave the call and return to chat.\nClick "Cancel" to stay in the call.');
+    
+    if (confirmed) {
+      console.log('✅ User confirmed - leaving call');
+      
+      // Hide iframe
+      const chatIframeContainer = document.getElementById('chatIframeContainer');
+      if (chatIframeContainer) {
+        chatIframeContainer.classList.add('hidden');
+      }
+      
+      // Show call UI briefly
+      const header = document.querySelector('header');
+      const main = document.querySelector('main');
+      const footer = document.querySelector('footer');
+      
+      if (header) header.style.display = '';
+      if (main) main.style.display = '';
+      if (footer) footer.style.display = '';
+      
+      // Leave call
+      leaveCall();
+      
+    } else {
+      console.log('❌ User cancelled - staying in call');
+      
+      // Tell iframe to stay (push history back)
+      const chatIframe = document.getElementById('chatIframe');
+      if (chatIframe && chatIframe.contentWindow) {
+        chatIframe.contentWindow.postMessage({ action: 'stayInCall' }, '*');
+      }
+    }
+    
+    console.log('📨 ========================================\n');
+    return;
+  }
 
-          // CRITICAL: Handle "Back to Call" button from chat iframe
-          if (event.data && event.data.action === 'returnToCall') {
-            console.log('📞 ========================================');
-            console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
-            console.log('📞 ========================================');
+  if (event.data && event.data.action === 'hideChat') {
+    console.log('💬 Hiding chat overlay as requested by iframe');
+    hideChat();
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
+  }
 
-            // Hide chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            if (chatContainer) {
-              chatContainer.classList.add('hidden');
-              console.log('✅ Chat iframe hidden');
-            }
+  // CRITICAL: Handle "Back to Call" button from chat iframe
+  if (event.data && event.data.action === 'returnToCall') {
+    console.log('📞 ========================================');
+    console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
+    console.log('📞 ========================================');
 
-            // Show call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
+    // Hide chat iframe
+    const chatContainer = document.getElementById('chatIframeContainer');
+    if (chatContainer) {
+      chatContainer.classList.add('hidden');
+      console.log('✅ Chat iframe hidden');
+    }
 
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
+    // Show call UI elements
+    const header = document.querySelector('header');
+    const main = document.querySelector('main');
+    const footer = document.querySelector('footer');
 
-            console.log('✅ Call UI restored - call NEVER STOPPED');
-            console.log(`   Peer connections: ${peerConnections.size} (still active)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
-            // CRITICAL: Don't push history state here - let popstate handle it naturally
-            // Pushing here would create duplicate history entries
-            console.log('📞 ========================================\n');
-          }
+    if (header) header.style.display = '';
+    if (main) main.style.display = '';
+    if (footer) footer.style.display = '';
 
-          console.log('📨 ========================================\n');
-        });
+    console.log('✅ Call UI restored - call NEVER STOPPED');
+    console.log(`   Peer connections: ${peerConnections.size} (still active)`);
+    console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
+    console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
+    console.log('📞 ========================================\n');
+  }
+
+  console.log('📨 ========================================\n');
+});
 
         console.log('✅ Message listener added for iframe communication');
 
