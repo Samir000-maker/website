@@ -344,6 +344,8 @@
         // Set initial state
         history.pushState({ view: 'call' }, 'Call', window.location.href);
 
+        // Flag to distinguish programmatic back (button) vs user back (browser)
+        window.isProgrammativeBack = false;
 
         // Listen for messages from chat iframe
         window.addEventListener('message', (event) => {
@@ -364,29 +366,30 @@
             console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
             console.log('📞 ========================================');
 
-            // Hide chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            if (chatContainer) {
-              chatContainer.classList.add('hidden');
-              console.log('✅ Chat iframe hidden');
-            }
+            // If we have a history state that says we are in 'chat' or 'chat-iframe',
+            // we should pop it to keep the browser back button logic consistent.
+            // Check if we can just go back.
 
-            // Show call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
+            // Note: chat.html used to push 'chat-iframe', call.html pushes 'chat'.
+            // Either way, if we are returning to call, we want to go back.
 
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
+            // We'll try history.back() which should trigger our popstate listener
+            // that handles the hiding of the UI.
 
-            console.log('✅ Call UI restored - call NEVER STOPPED');
-            console.log(`   Peer connections: ${peerConnections.size} (still active)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
-            // CRITICAL: Don't push history state here - let popstate handle it naturally
-            // Pushing here would create duplicate history entries
-            console.log('📞 ========================================\n');
+            console.log('🔙 Triggering history.back() to close chat view cleanely');
+            window.isProgrammativeBack = true; // Mark as intended
+            history.back();
+
+            // Fallback: If history.back() doesn't fire popstate (e.g. no history), 
+            // we force UI update after a short timeout?
+            // Actually, if there is no history, history.back() might unload the page.
+            // But we pushed state when opening chat, so it should be fine.
+          }
+
+          if (event.data && event.data.action === 'confirmedLeave') {
+            console.log('✅ User confirmed leave in iframe dialog');
+            // Proceed to leave logic
+            window.location.href = '/mood.html';
           }
 
           console.log('📨 ========================================\n');
@@ -396,8 +399,9 @@
 
         window.addEventListener('popstate', (event) => {
           console.log('⬅️ ========================================');
-          console.log('⬅️ BACK BUTTON PRESSED');
+          console.log('⬅️ POPSTATE (BACK BUTTON) DETECTED');
           console.log('⬅️ ========================================');
+          console.log(`   Programmatic: ${window.isProgrammativeBack}`);
 
           // CRITICAL: Check BOTH old chat overlay AND new chat iframe
           const chatOverlay = document.getElementById('chatOverlayContainer');
@@ -419,19 +423,36 @@
             // Chat iframe is showing - hide it, show call UI
             console.log('📞 Hiding chat iframe, showing call UI');
 
-            // Hide iframe
-            chatIframeContainer.classList.add('hidden');
+            if (window.isProgrammativeBack) {
+              // CASE: "Back to Call" button clicked
+              console.log('🤖 Programmatic back detected - closing chat normally');
+              chatIframeContainer.classList.add('hidden');
 
-            // Show call UI
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
+              // Restore UI
+              const header = document.querySelector('header');
+              const main = document.querySelector('main');
+              const footer = document.querySelector('footer');
+              if (header) header.style.display = '';
+              if (main) main.style.display = '';
+              if (footer) footer.style.display = '';
 
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
+              window.isProgrammativeBack = false; // Reset
+              return;
+            }
 
-            console.log('✅ Call UI shown - iframe hidden');
+            // CASE: Browser Back Button clicked by User
+            console.log('👤 User back detected - intercepting for dialog');
+
+            // 1. Undo the navigation immediately (Stay in "Chat" state)
+            history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+
+            // 2. Tell iframe to show dialog
+            const iframe = document.getElementById('chatIframe');
+            if (iframe && iframe.contentWindow) {
+              console.log('📤 Sending triggerBackLogic to iframe');
+              iframe.contentWindow.postMessage({ action: 'triggerBackLogic' }, '*');
+            }
+            return;
           } else {
             // Currently showing call UI - show chat iframe
             console.log('🔄 Showing chat iframe (call continues in background)');
