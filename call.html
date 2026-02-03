@@ -2833,12 +2833,8 @@ socketInstance.on('room_sync_data', (data) => {
     data.serverTime = clientNow;
   }
   
-  // Calculate clock offset
-  serverClockOffset = data.serverTime - clientNow;
-  
-  
-  // Calculate clock offset
-  serverClockOffset = data.serverTime - clientNow;
+serverClockOffset = data.serverTime - clientNow;
+
   
   console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
   console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
