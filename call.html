@@ -350,18 +350,14 @@ console.log('✅ Message listener added for iframe communication');
     hideChat();
     history.pushState({ view: 'call' }, 'Call', window.location.href);
   } else {
-    // CRITICAL: Navigate to chat.html as standalone page
-    // Call will remain active in background
-    console.log('🔄 Navigating to chat.html (call remains active)');
-    console.log(`   Active peer connections: ${peerConnections.size}`);
-    console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
-    
-    // Mark that we're navigating to chat (not closing)
-    sessionStorage.setItem('navigatingFromCall', 'true');
-    console.log('✅ Preserving userInCall flag (user still in call)');
-    
-    // Navigate to chat page
-    window.location.href = '/chat.html';
+  console.log('💬 Showing chat overlay (call remains in background)');
+  console.log(`   Active peer connections: ${peerConnections.size}`);
+  console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
+  
+  showChat();
+  history.pushState({ view: 'chat' }, 'Chat', window.location.href);
+  
+  console.log('✅ Chat overlay shown - call connections preserved');
   }
   
   console.log('⬅️ ========================================\n');
@@ -390,10 +386,14 @@ function showChat() {
   if (chatOverlay) {
     chatOverlay.classList.remove('hidden');
     
-    // Load chat page in iframe
-    if (chatIframe) {
+    // Load chat page in iframe ONLY if not already loaded
+    if (chatIframe && !chatIframe.src) {
       chatIframe.src = '/chat.html';
       console.log('✅ Chat iframe loaded');
+    } else if (chatIframe && chatIframe.src) {
+      console.log('ℹ️ Chat iframe already loaded, reusing');
+      // Reload to get fresh state
+      chatIframe.contentWindow.location.reload();
     }
   }
   
@@ -401,15 +401,19 @@ function showChat() {
   if (miniIndicator) {
     miniIndicator.classList.remove('hidden');
     miniIndicator.onclick = () => {
-      console.log('🔙 Mini indicator clicked');
+      console.log('🔙 Mini indicator clicked - returning to call');
       hideChat();
       history.pushState({ view: 'call' }, 'Call', window.location.href);
     };
   }
   
+  // Update mini indicator with call info
+  updateMiniCallIndicator();
+  
   console.log('✅ Chat overlay shown - call remains active');
   console.log(`   PeerConnections: ${peerConnections.size}`);
   console.log(`   LocalStream: ${localStream?.getTracks().length} tracks`);
+  console.log(`   Socket connected: ${socketInstance?.connected}`);
   console.log('💬 ========================================\n');
 }
 
@@ -3430,26 +3434,15 @@ const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden
 console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
 
 // CRITICAL: Check if we're navigating to chat (BOTH directions)
-const isNavigatingToChat = sessionStorage.getItem('navigatingFromCall') === 'true';
-const isReturningFromChat = sessionStorage.getItem('returningToBackgroundCall') === 'true';
-console.log(`   Navigating to chat: ${isNavigatingToChat}`);
-console.log(`   Returning from chat: ${isReturningFromChat}`);
+// Check if chat is open in overlay (iframe mode)
+const chatOverlay = document.getElementById('chatOverlayContainer');
+const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
 
-// ============================================
-// EXCEPTION: NAVIGATING TO/FROM CHAT
-// ============================================
-if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
-  console.log('🔒 Preserving call state - navigation between call and chat');
-  console.log('   DO NOT emit leave_call or stop media');
-  
-// Clear navigation flag
-sessionStorage.removeItem('navigatingFromCall');
-// DON'T remove returningToBackgroundCall here - initCall needs it
-// DON'T remove userInCall here - chat page needs it
-console.log('   Keeping userInCall flag for chat.html');
-  
+if (isChatOverlayOpen) {
+  console.log('💬 Chat overlay open - this is iframe navigation, not page close');
+  console.log('   Preserving all call state');
   console.log('🚪 ========================================\n');
-  return; // CRITICAL: Exit early without cleanup
+  return; // Exit early - call stays active
 }
   
   // ============================================
