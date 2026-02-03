@@ -2617,20 +2617,49 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
 
       async function initCall() {
       
-        const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
   
   if (returningToBackground) {
     console.log('🔄 ========================================');
-    console.log('🔄 RETURNING TO BACKGROUND CALL');
+    console.log('🔄 RETURNING TO BACKGROUND CALL - SKIP INIT');
     console.log('🔄 ========================================');
     
     sessionStorage.removeItem('returningToBackgroundCall');
     
-    // Call is already active, we're just returning to the UI
-    console.log('ℹ️ Call connections should already be active');
-    console.log('ℹ️ Reconnecting to existing call state...');
+    console.log('✅ Call already initialized - UI restoration only');
+    console.log('   Peer connections: Should already be active');
+    console.log('   Local stream: Should already exist');
+    console.log('   Socket: Should already be connected');
+    console.log('🔄 ========================================\n');
     
-    // The rest of initCall will handle reconnection
+    isInitializing = false; // Allow UI interactions
+    
+    // Just restore UI elements and timer
+    const callStr = localStorage.getItem('activeCall');
+    if (callStr) {
+      callData = JSON.parse(callStr);
+      
+      const title = document.getElementById('callTitle');
+      if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
+      
+      // Restart timer
+      const roomStr = localStorage.getItem('currentRoom');
+      if (roomStr) {
+        try {
+          const roomData = JSON.parse(roomStr);
+          if (roomData.expiresAt) {
+            durationInterval = setInterval(updateDuration, 1000);
+            updateDuration();
+            console.log('✅ Timer restarted');
+          }
+        } catch (e) {
+          console.error('Failed to parse room data:', e);
+        }
+      }
+    }
+    
+    console.log('✅ UI restored - call page ready');
+    return; // CRITICAL: Exit initCall early - don't reinitialize
   }
       
         if (isInitializing) return;
@@ -3354,19 +3383,21 @@ window.addEventListener('beforeunload', (e) => {
   const isInIframe = window.parent && window.parent !== window;
   console.log(`   Is in iframe: ${isInIframe}`);
   
-// CRITICAL: Check if chat overlay is open
+// CRITICAL: Check if we're navigating to chat
 const chatOverlay = document.getElementById('chatOverlayContainer');
 const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
 console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
 
-// CRITICAL: Check if we're navigating to chat
+// CRITICAL: Check if we're navigating to chat (BOTH directions)
 const isNavigatingToChat = sessionStorage.getItem('navigatingFromCall') === 'true';
+const isReturningFromChat = sessionStorage.getItem('returningToBackgroundCall') === 'true';
 console.log(`   Navigating to chat: ${isNavigatingToChat}`);
+console.log(`   Returning from chat: ${isReturningFromChat}`);
 
 // ============================================
 // EXCEPTION: NAVIGATING TO CHAT
 // ============================================
-if (isChatOverlayOpen || isNavigatingToChat) {
+if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
   console.log('🔒 Preserving call state - user navigating to chat');
   console.log('   DO NOT emit leave_call or stop media');
   
