@@ -214,6 +214,13 @@
     </div>
   </footer>
 
+  <!-- Chat iFrame Container for Navigation (hidden by default) -->
+  <div id="chatIframeContainer" class="hidden fixed inset-0 z-[10000] bg-white dark:bg-background-dark">
+    <iframe id="chatIframe" class="w-full h-full border-none" allow="microphone; camera"
+      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads">
+    </iframe>
+  </div>
+
   <div id="chatOverlayContainer" class="hidden fixed inset-0 z-[9999] bg-white">
     <iframe id="chatOverlayIframe" class="w-full h-full border-none"></iframe>
   </div>
@@ -351,6 +358,35 @@
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           }
 
+          // CRITICAL: Handle "Back to Call" button from chat iframe
+          if (event.data && event.data.action === 'returnToCall') {
+            console.log('📞 ========================================');
+            console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
+            console.log('📞 ========================================');
+
+            // Hide chat iframe
+            const chatContainer = document.getElementById('chatIframeContainer');
+            if (chatContainer) {
+              chatContainer.classList.add('hidden');
+              console.log('✅ Chat iframe hidden');
+            }
+
+            // Show call UI elements
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
+
+            if (header) header.style.display = '';
+            if (main) main.style.display = '';
+            if (footer) footer.style.display = '';
+
+            console.log('✅ Call UI restored - call NEVER STOPPED');
+            console.log(`   Peer connections: ${peerConnections.size} (still active)`);
+            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
+            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
+            console.log('📞 ========================================\n');
+          }
+
           console.log('📨 ========================================\n');
         });
 
@@ -372,17 +408,41 @@
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           } else {
-            // CRITICAL: Navigate to chat.html as standalone page
-            // Call will remain active in background
-            console.log('🔄 Navigating to chat.html (call remains active)');
+            // CRITICAL: Show chat in iframe instead of navigating
+            // This preserves ALL call state - WebRTC, media streams, UI
+            console.log('🔄 Showing chat in iframe (call continues in background)');
             console.log(`   Active peer connections: ${peerConnections.size}`);
-            console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
+            console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
 
-            // Mark that we're navigating to chat (not closing)
-            sessionStorage.setItem('navigatingFromCall', 'true');
+            // Hide call UI elements
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
 
-            // Navigate to chat page
-            window.location.href = '/chat.html';
+            if (header) header.style.display = 'none';
+            if (main) main.style.display = 'none';
+            if (footer) footer.style.display = 'none';
+
+            // Show chat iframe
+            const chatContainer = document.getElementById('chatIframeContainer');
+            const chatIframe = document.getElementById('chatIframe');
+
+            if (chatContainer && chatIframe) {
+              // Load chat.html in iframe (only if not already loaded)
+              if (!chatIframe.src || chatIframe.src === '') {
+                chatIframe.src = '/chat.html';
+                console.log('📄 Loading chat.html in iframe');
+              } else {
+                console.log('📄 Chat iframe already loaded - reusing');
+              }
+              chatContainer.classList.remove('hidden');
+              console.log('✅ Chat iframe shown - call UI hidden');
+            }
+
+            console.log('✅ Call remains FULLY ACTIVE in background');
+            console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
+            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
+            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
           }
 
           console.log('⬅️ ========================================\n');
