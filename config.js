@@ -11,8 +11,8 @@ export const config = {
   
   R2_PUBLIC_URL: "https://pub-b86353e4f63d45f8bf7e94b3143a1d8b.r2.dev",
   // MongoDB configuration
-  // MONGO_URI: 'mongodb+srv://samir_:fitara@cluster0.cmatn6k.mongodb.net/appdb?retryWrites=true&w=majority',
-  MONGO_URI: 'mongodb://admin:pyrJyWPWt9PQQDOSzoqYuruP@205.198.72.227:27017/admin?authSource=admin&directConnection=true',
+  MONGO_URI: 'mongodb+srv://samir_:fitara@cluster0.cmatn6k.mongodb.net/appdb?retryWrites=true&w=majority',
+  // MONGO_URI: 'mongodb://admin:pyrJyWPWt9PQQDOSzoqYuruP@205.198.72.227:27017/admin?authSource=admin&directConnection=true',
   DB_NAME: 'db',
   
   // App-level variables
