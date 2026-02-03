@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
@@ -339,7 +338,6 @@ console.log('✅ Message listener added for iframe communication');
   console.log('⬅️ ========================================');
   console.log('⬅️ BACK BUTTON PRESSED');
   console.log('⬅️ ========================================');
-  console.log(`   event.state:`, event.state);
   
   const chatOverlay = document.getElementById('chatOverlayContainer');
   const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
@@ -347,16 +345,23 @@ console.log('✅ Message listener added for iframe communication');
   console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
   
   if (isShowingChat) {
-    // Hide chat, show call — user pressed back while chat was open
+    // Hide chat, show call
     console.log('📞 Hiding chat, showing call');
     hideChat();
-    // Push call state back so next back press has something to pop
     history.pushState({ view: 'call' }, 'Call', window.location.href);
   } else {
-    // Call UI is showing, back press should do nothing (stay on call)
-    // Push state again to keep the history stack intact
-    console.log('📞 Call UI is active, blocking back navigation');
-    history.pushState({ view: 'call' }, 'Call', window.location.href);
+    // CRITICAL: Navigate to chat.html as standalone page
+    // Call will remain active in background
+    console.log('🔄 Navigating to chat.html (call remains active)');
+    console.log(`   Active peer connections: ${peerConnections.size}`);
+    console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
+    
+    // Mark that we're navigating to chat (not closing)
+    sessionStorage.setItem('navigatingFromCall', 'true');
+    console.log('✅ Preserving userInCall flag (user still in call)');
+    
+    // Navigate to chat page
+    window.location.href = '/chat.html';
   }
   
   console.log('⬅️ ========================================\n');
@@ -385,22 +390,10 @@ function showChat() {
   if (chatOverlay) {
     chatOverlay.classList.remove('hidden');
     
-    // Load chat page in iframe ONLY if not already loaded
-// Load chat page in iframe ONLY if not already loaded
-    if (chatIframe && (!chatIframe.src || chatIframe.src === '')) {
+    // Load chat page in iframe
+    if (chatIframe) {
       chatIframe.src = '/chat.html';
-      console.log('✅ Chat iframe loaded fresh');
-    } else if (chatIframe && chatIframe.src) {
-      console.log('ℹ️ Chat iframe already loaded, reusing without reload');
-      // CRITICAL: Do NOT reload - just make sure it knows it's visible
-      try {
-        if (chatIframe.contentWindow && chatIframe.contentDocument) {
-          chatIframe.contentWindow.postMessage({ action: 'chatOverlayVisible' }, '*');
-          console.log('✅ Notified existing chat iframe it is visible');
-        }
-      } catch (e) {
-        console.warn('⚠️ Could not post message to chat iframe:', e);
-      }
+      console.log('✅ Chat iframe loaded');
     }
   }
   
@@ -408,19 +401,15 @@ function showChat() {
   if (miniIndicator) {
     miniIndicator.classList.remove('hidden');
     miniIndicator.onclick = () => {
-      console.log('🔙 Mini indicator clicked - returning to call');
+      console.log('🔙 Mini indicator clicked');
       hideChat();
       history.pushState({ view: 'call' }, 'Call', window.location.href);
     };
   }
   
-  // Update mini indicator with call info
-  updateMiniCallIndicator();
-  
   console.log('✅ Chat overlay shown - call remains active');
   console.log(`   PeerConnections: ${peerConnections.size}`);
   console.log(`   LocalStream: ${localStream?.getTracks().length} tracks`);
-  console.log(`   Socket connected: ${socketInstance?.connected}`);
   console.log('💬 ========================================\n');
 }
 
@@ -2634,77 +2623,76 @@ async function attemptJoinCall(callId, retryDelay = 1000) {
 const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
   
   if (returningToBackground) {
-    // CRITICAL: Clear the flag immediately no matter what
+    console.log('🔄 ========================================');
+    console.log('🔄 RETURNING TO BACKGROUND CALL - SKIP INIT');
+    console.log('🔄 ========================================');
+    
+    // CRITICAL: Clear the flag immediately
     sessionStorage.removeItem('returningToBackgroundCall');
     
-    // CHECK IF JS STATE IS ACTUALLY ALIVE
-    // bfcache restores the page visually but ALL JS variables are dead
-    // peerConnections, localStream, socketInstance will all be empty/null
-    const jsStateAlive = socketInstance && socketInstance.connected && localStream && localStream.getTracks().length > 0 && peerConnections.size > 0;
-    
-    console.log('🔄 ========================================');
-    console.log('🔄 RETURNING TO BACKGROUND CALL');
-    console.log('🔄 ========================================');
-    console.log(`   socketInstance exists: ${!!socketInstance}`);
-    console.log(`   socket connected: ${socketInstance?.connected}`);
-    console.log(`   localStream exists: ${!!localStream}`);
-    console.log(`   localStream tracks: ${localStream?.getTracks().length || 0}`);
-    console.log(`   peerConnections size: ${peerConnections.size}`);
-    console.log(`   JS state alive: ${jsStateAlive}`);
+    console.log('✅ Call already initialized - UI restoration only');
+    console.log('   Peer connections: Should already be active');
+    console.log('   Local stream: Should already exist');
+    console.log('   Socket: Should already be connected');
     console.log('🔄 ========================================\n');
     
-    if (jsStateAlive) {
-      // Genuine background call still alive (iframe scenario or state truly preserved)
-      // Just restore UI and timer, skip full init
-      console.log('✅ JS state is alive — UI restoration only, skipping full init');
+    isInitializing = false;
+    
+    // Restore UI elements and timer
+    const callStr = localStorage.getItem('activeCall');
+    if (callStr) {
+      callData = JSON.parse(callStr);
       
-      isInitializing = false;
+      const title = document.getElementById('callTitle');
+      if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
       
-      const callStr = localStorage.getItem('activeCall');
-      if (callStr) {
-        callData = JSON.parse(callStr);
-        
-        const title = document.getElementById('callTitle');
-        if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
-        
-        const roomStr = localStorage.getItem('currentRoom');
-        if (roomStr) {
-          try {
-            const roomData = JSON.parse(roomStr);
-            if (roomData.expiresAt) {
-              roomExpiresAt = roomData.expiresAt;
-              const storedOffset = sessionStorage.getItem('serverClockOffset');
-              if (storedOffset) {
-                serverClockOffset = parseFloat(storedOffset);
-                console.log(`✅ Restored clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
-              } else {
-                serverClockOffset = 0;
-              }
-              if (durationInterval) clearInterval(durationInterval);
-              durationInterval = setInterval(updateDuration, 1000);
-              updateDuration();
-              console.log('✅ Timer restarted');
+      // CRITICAL: Load room data for timer
+      const roomStr = localStorage.getItem('currentRoom');
+      if (roomStr) {
+        try {
+          const roomData = JSON.parse(roomStr);
+          
+          // CRITICAL: Initialize timer variables from localStorage
+          if (roomData.expiresAt) {
+            roomExpiresAt = roomData.expiresAt;
+            
+            // Calculate clock offset from previous session (if available)
+            const clientNow = Date.now();
+            const storedOffset = sessionStorage.getItem('serverClockOffset');
+            if (storedOffset) {
+              serverClockOffset = parseFloat(storedOffset);
+              console.log(`✅ Restored clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+            } else {
+              serverClockOffset = 0;
+              console.log(`⚠️ No stored clock offset, using 0`);
             }
-          } catch (e) {
-            console.error('Failed to parse room data:', e);
+            
+            console.log(`✅ Timer data restored:`);
+            console.log(`   roomExpiresAt: ${new Date(roomExpiresAt).toISOString()}`);
+            console.log(`   serverClockOffset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+            
+            // Start timer
+            if (durationInterval) clearInterval(durationInterval);
+            durationInterval = setInterval(updateDuration, 1000);
+            updateDuration();
+            console.log('✅ Timer restarted');
+          } else {
+            console.warn('⚠️ No expiresAt in room data - timer will show "--"');
           }
-        }
-        
-        const subtitle = document.getElementById('callSubtitle');
-        if (subtitle && renderedParticipants.size > 0) {
-          subtitle.textContent = `${renderedParticipants.size} participant${renderedParticipants.size > 1 ? 's' : ''}`;
+        } catch (e) {
+          console.error('Failed to parse room data:', e);
         }
       }
       
-      console.log('✅ UI restored - call page ready');
-      return; // Exit initCall early — everything is alive
-    } else {
-      // bfcache restored the page but JS is dead
-      // We MUST do a full re-init — fall through to normal initCall flow below
-      console.log('⚠️ JS state is DEAD (bfcache restore detected)');
-      console.log('   Falling through to full init — will reconnect and rejoin call');
-      // Do NOT return — let initCall() run fully below
+      // Update participant count
+      const subtitle = document.getElementById('callSubtitle');
+      if (subtitle && renderedParticipants.size > 0) {
+        subtitle.textContent = `${renderedParticipants.size} participant${renderedParticipants.size > 1 ? 's' : ''}`;
+      }
     }
+    
+    console.log('✅ UI restored - call page ready');
+    return; // CRITICAL: Exit initCall early
   }
   
   sessionStorage.removeItem('serverClockOffset');
@@ -3441,21 +3429,27 @@ const chatOverlay = document.getElementById('chatOverlayContainer');
 const isChatOverlayOpen = chatOverlay && !chatOverlay.classList.contains('hidden');
 console.log(`   Chat overlay open: ${isChatOverlayOpen}`);
 
+// CRITICAL: Check if we're navigating to chat (BOTH directions)
+const isNavigatingToChat = sessionStorage.getItem('navigatingFromCall') === 'true';
+const isReturningFromChat = sessionStorage.getItem('returningToBackgroundCall') === 'true';
+console.log(`   Navigating to chat: ${isNavigatingToChat}`);
+console.log(`   Returning from chat: ${isReturningFromChat}`);
 
-if (isChatOverlayOpen || isNavigatingToChat) {
-  console.log('💬 Chat overlay open or navigating to chat - preserving all call state');
-  console.log(`   isChatOverlayOpen: ${isChatOverlayOpen}`);
-  console.log(`   isNavigatingToChat: ${isNavigatingToChat}`);
+// ============================================
+// EXCEPTION: NAVIGATING TO/FROM CHAT
+// ============================================
+if (isChatOverlayOpen || isNavigatingToChat || isReturningFromChat) {
+  console.log('🔒 Preserving call state - navigation between call and chat');
+  console.log('   DO NOT emit leave_call or stop media');
+  
+// Clear navigation flag
+sessionStorage.removeItem('navigatingFromCall');
+// DON'T remove returningToBackgroundCall here - initCall needs it
+// DON'T remove userInCall here - chat page needs it
+console.log('   Keeping userInCall flag for chat.html');
+  
   console.log('🚪 ========================================\n');
-  return; // Exit early - call stays active, do NOT clean up anything
-}
-
-// Also check: if we have an active call and sessionStorage says we should preserve it
-const shouldPreserve = sessionStorage.getItem('returningToBackgroundCall') === 'true' || sessionStorage.getItem('userInCall') === 'true';
-if (shouldPreserve) {
-  console.log('💬 Session flags indicate call should be preserved — blocking cleanup');
-  console.log('🚪 ========================================\n');
-  return;
+  return; // CRITICAL: Exit early without cleanup
 }
   
   // ============================================
@@ -3543,24 +3537,7 @@ console.log('✅ Call page event handlers initialized');
           setTimeout(() => window.location.href = '/chat.html', 2000);
         }
       }
-// CRITICAL: Disable bfcache on call.html entirely
-      // bfcache restores pages visually but kills all JS state (sockets, streams, peer connections)
-      // This page cannot function without live JS state so bfcache must never cache it
-      window.addEventListener('pageshow', (event) => {
-        if (event.persisted) {
-          // Page was restored from bfcache — JS state is dead
-          // Force a hard reload to re-run everything from scratch
-          console.log('⚠️ call.html restored from bfcache — forcing reload');
-          window.location.reload();
-        }
-      });
-      
-      window.addEventListener('beforeunload', () => {
-        // Setting this header via JS is not possible but calling
-        // sessionStorage touch ensures bfcache eligibility check runs
-        // The pageshow handler above is the actual guard
-      });
-      
+
       console.log('✅ Page loaded - starting initialization');
       initCall();
     })();
