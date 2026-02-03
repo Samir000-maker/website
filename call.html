@@ -303,6 +303,7 @@ async function fetchIceServers() {
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let roomExpiresAt = null;
+      let serverClockOffset = 0;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
       let isNavigatingToChat = false;
@@ -2643,16 +2644,31 @@ if (returningToBackground) {
       const title = document.getElementById('callTitle');
       if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
       
-      // CRITICAL: Load room data to get expiresAt
-      const roomStr = localStorage.getItem('currentRoom');
-      if (roomStr) {
-        try {
-          const roomData = JSON.parse(roomStr);
-          if (roomData.expiresAt) {
-            // Set the global variable properly
-            roomExpiresAt = roomData.expiresAt;
-            
-            console.log('✅ Loaded room expiry time:', new Date(roomExpiresAt).toISOString());
+// CRITICAL: Load room data to get expiresAt and serverClockOffset
+const roomStr = localStorage.getItem('currentRoom');
+if (roomStr) {
+  try {
+    const roomData = JSON.parse(roomStr);
+    if (roomData.expiresAt) {
+      // Set the global variables properly
+      roomExpiresAt = roomData.expiresAt;
+      
+      // CRITICAL: Restore clock offset if it exists
+      if (roomData.serverClockOffset !== undefined) {
+        serverClockOffset = roomData.serverClockOffset;
+        console.log(`✅ Restored clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+      } else {
+        serverClockOffset = 0;
+        console.warn('⚠️ No clock offset in room data - assuming 0');
+      }
+      
+      console.log('✅ Loaded room expiry time:', new Date(roomExpiresAt).toISOString());
+      console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
+      
+      // Now start timer with proper data
+      durationInterval = setInterval(updateDuration, 1000);
+      updateDuration();
+      console.log('✅ Timer restarted with proper expiry data and clock offset');
             
             // Now start timer with proper data
             durationInterval = setInterval(updateDuration, 1000);
@@ -2819,6 +2835,33 @@ socketInstance.on('room_sync_data', (data) => {
   
   // Calculate clock offset
   serverClockOffset = data.serverTime - clientNow;
+  
+  
+  // Calculate clock offset
+  serverClockOffset = data.serverTime - clientNow;
+  
+  console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
+  console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
+  console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
+  
+  if (Math.abs(serverClockOffset) > 5000) {
+    console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+    console.warn(`   Timer will be adjusted to compensate`);
+  }
+  
+  // CRITICAL: Store clock offset to localStorage for later restoration
+  const roomStr = localStorage.getItem('currentRoom');
+  if (roomStr) {
+    try {
+      const roomData = JSON.parse(roomStr);
+      roomData.serverClockOffset = serverClockOffset;
+      localStorage.setItem('currentRoom', JSON.stringify(roomData));
+      console.log('💾 Stored clock offset to localStorage');
+    } catch (e) {
+      console.error('❌ Failed to store clock offset:', e);
+    }
+  }
+  
   
   console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
   console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
