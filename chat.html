@@ -6637,40 +6637,15 @@
         console.log('🔧 Setting up back button handler (standalone mode)');
         setupBackButtonHandler();
         setupAndroidBackButtonHandler();
-} else {
-  console.log('🔒 ========================================');
-  console.log('🔒 RUNNING IN IFRAME - SETTING UP IFRAME BACK HANDLER');
-  console.log('🔒 ========================================');
-  
-  // Push initial state for iframe
-  history.pushState({ page: 'chat-iframe' }, '', window.location.href);
-  
-  // Handle back button in iframe
-  // window.addEventListener('popstate', (event) => {
-  //   console.log('⬅️ IFRAME: Back button pressed');
-    
-  //   // Prevent default navigation
-  //   event.preventDefault();
-    
-  //   // Push state back to stay in place
-  //   history.pushState({ page: 'chat-iframe' }, '', window.location.href);
-    
-  //   // Notify parent window
-  //   console.log('📤 IFRAME: Notifying parent of back button press');
-  //   window.parent.postMessage({ action: 'backButtonPressed' }, '*');
-  // });
-  
-  // // Listen for parent's response
-  // window.addEventListener('message', (event) => {
-  //   if (event.data && event.data.action === 'stayInCall') {
-  //     console.log('✅ IFRAME: Parent says stay - maintaining position');
-  //     // Just stay put - already pushed history state above
-  //   }
-  // });
-  
-  console.log('✅ IFRAME: Back button handler installed');
-  console.log('🔒 ========================================\n');
-}
+      } else {
+        console.log('🔒 ========================================');
+        console.log('🔒 RUNNING IN IFRAME - NAVIGATION MANAGED BY PARENT');
+        console.log('🔒 ========================================');
+        console.log('   Back button will be handled by call.html');
+        console.log('   This prevents history conflicts');
+        console.log('   Only "Back to Call" button will trigger navigation');
+        console.log('🔒 ========================================\n');
+      }
 
       console.log('✅ Chat initialization complete');
 
