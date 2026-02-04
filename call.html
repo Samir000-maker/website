@@ -362,6 +362,22 @@
           console.log('⬅️ BACK BUTTON PRESSED');
           console.log('⬅️ ========================================');
 
+          // CRITICAL: Check if we are running inside an iframe
+          const isInIframe = window.parent && window.parent !== window;
+          console.log(`   Running in iframe: ${isInIframe}`);
+
+          if (isInIframe) {
+            // We are in an iframe inside chat.html
+            // Back button means "Hide this call UI" -> Tell parent to hide us
+            console.log('📱 In iframe - sending hideCall to parent');
+            window.parent.postMessage({ action: 'hideCall' }, '*');
+
+            // Push state back so we don't actually navigate back in history
+            history.pushState({ view: 'call' }, 'Call', window.location.href);
+            return;
+          }
+
+          // Standalone mode logic (existing)
           const chatOverlay = document.getElementById('chatOverlayContainer');
           const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
 
@@ -382,8 +398,8 @@
               return;
             }
 
-            // Call exists (initializing, connecting, or connected) - keep page alive, show chat iframe
-            console.log('💬 Call active - hiding UI and showing chat iframe');
+            // Call exists - keep page alive, show chat iframe
+            console.log('💬 Call active - showing chat iframe');
             console.log(`   Call state: ${callConnectionState}`);
             console.log(`   This keeps the connection process running in background`);
             console.log(`   Active peer connections: ${peerConnections.size}`);
@@ -419,10 +435,14 @@
         if (chatOverlay) {
           chatOverlay.classList.remove('hidden');
 
-          // Load chat page in iframe
+          // Load chat page in iframe - CRITICAL: Don't reload if already loaded
           if (chatIframe) {
-            chatIframe.src = '/chat.html';
-            console.log('✅ Chat iframe loaded');
+            if (!chatIframe.getAttribute('src')) {
+              chatIframe.src = '/chat.html';
+              console.log('✅ Chat iframe loaded (first time)');
+            } else {
+              console.log('✅ Chat iframe already loaded - showing existing');
+            }
           }
         }
 
