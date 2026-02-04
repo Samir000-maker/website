@@ -933,13 +933,12 @@
 }
     
     
-    /* Image Viewer Modal */
 .image-viewer-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.95);
   backdrop-filter: blur(8px);
-  z-index: 10000;
+  z-index: 10000; /* Make sure this is higher than other elements */
   display: none;
   align-items: center;
   justify-content: center;
@@ -948,7 +947,7 @@
 }
 
 .image-viewer-overlay.active {
-  display: flex;
+  display: flex !important; /* Force display */
   opacity: 1;
 }
 
@@ -2153,7 +2152,7 @@ const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
  
  
  
- async function openImageViewer(fileId, fileName) {
+async function openImageViewer(fileId, fileName) {
   console.log('🖼️ ========================================');
   console.log('🖼️ OPENING IMAGE VIEWER');
   console.log('🖼️ ========================================');
@@ -2167,6 +2166,8 @@ const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
   
   if (!overlay || !image) {
     console.error('❌ Image viewer elements not found');
+    console.error('   overlay:', !!overlay);
+    console.error('   image:', !!image);
     return;
   }
   
@@ -2198,10 +2199,16 @@ const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
     isImageZoomed = false;
     image.classList.remove('zoomed');
     
-    // Show overlay
+    // CRITICAL FIX: Force display and ensure it's visible
+    overlay.style.display = 'flex';
     overlay.classList.add('active');
     
+    // Force a reflow to ensure the display change is applied
+    void overlay.offsetHeight;
+    
     console.log('✅ Image viewer opened');
+    console.log('   Display:', overlay.style.display);
+    console.log('   Has active class:', overlay.classList.contains('active'));
     console.log('🖼️ ========================================\n');
     
   } catch (error) {
@@ -2221,6 +2228,10 @@ function closeImageViewer() {
   
   if (overlay) {
     overlay.classList.remove('active');
+    // Use setTimeout to allow animation to complete before hiding
+    setTimeout(() => {
+      overlay.style.display = 'none';
+    }, 200); // Match the transition duration in CSS
   }
   
   // Cleanup blob URL to prevent memory leak
