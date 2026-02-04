@@ -933,6 +933,104 @@
 }
     
     
+    /* Image Viewer Modal */
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.95);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.image-viewer-overlay.active {
+  display: flex;
+  opacity: 1;
+}
+
+.image-viewer-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px 20px;
+}
+
+.image-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease;
+  cursor: zoom-in;
+}
+
+.image-viewer-image.zoomed {
+  cursor: zoom-out;
+  transform: scale(1.5);
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 44px;
+  height: 44px;
+  background: rgba(22, 27, 34, 0.9);
+  border: 1px solid rgba(48, 54, 61, 0.8);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10001;
+}
+
+.image-viewer-close:hover {
+  background: rgba(33, 38, 45, 0.95);
+  border-color: rgba(68, 76, 86, 0.9);
+  transform: scale(1.1);
+}
+
+.image-viewer-close .material-symbols-outlined {
+  font-size: 24px;
+  color: #f0f6fc;
+}
+
+.image-viewer-info {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(22, 27, 34, 0.9);
+  border: 1px solid rgba(48, 54, 61, 0.8);
+  border-radius: 12px;
+  padding: 12px 20px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.image-viewer-filename {
+  color: #f0f6fc;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.image-viewer-size {
+  color: #8b949e;
+  font-size: 12px;
+}
+    
+    
 </style>
 </head>
 <body class="bg-background-light main-container flex flex-col overflow-hidden">
@@ -1098,6 +1196,23 @@
     
     <!-- Emoji Picker Bottom Sheet -->
 <div id="emojiPickerOverlay" class="emoji-picker-overlay">
+  
+  <!-- Image Viewer Modal -->
+<div id="imageViewerOverlay" class="image-viewer-overlay">
+  <button class="image-viewer-close" id="imageViewerClose" aria-label="Close image viewer">
+    <span class="material-symbols-outlined">close</span>
+  </button>
+  
+  <div class="image-viewer-container" id="imageViewerContainer">
+    <img id="imageViewerImage" class="image-viewer-image" alt="Viewing image">
+  </div>
+  
+  <div class="image-viewer-info">
+    <div class="image-viewer-filename" id="imageViewerFilename">Image</div>
+    <div class="image-viewer-size" id="imageViewerSize">Click image to zoom</div>
+  </div>
+</div>
+  
   <div class="emoji-picker-sheet">
     <!-- Handle bar -->
     <div class="emoji-picker-handle"></div>
@@ -1181,6 +1296,7 @@ const CALL_CACHE_TIMEOUT = 60000; // 60 seconds max cache time
 let cachedCallCheckInterval = null;
 
 let pendingAttachment = null;
+let isImageZoomed = false;
   // ============================================
   // STATE MANAGEMENT
   // ============================================
@@ -2033,6 +2149,117 @@ const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
  * Chunk file into manageable pieces for transmission
  * Returns array of { index, data: base64, size }
  */
+ 
+ 
+ 
+ 
+ async function openImageViewer(fileId, fileName) {
+  console.log('🖼️ ========================================');
+  console.log('🖼️ OPENING IMAGE VIEWER');
+  console.log('🖼️ ========================================');
+  console.log(`   FileID: ${fileId}`);
+  console.log(`   Filename: ${fileName}`);
+  
+  const overlay = document.getElementById('imageViewerOverlay');
+  const image = document.getElementById('imageViewerImage');
+  const filenameEl = document.getElementById('imageViewerFilename');
+  const sizeEl = document.getElementById('imageViewerSize');
+  
+  if (!overlay || !image) {
+    console.error('❌ Image viewer elements not found');
+    return;
+  }
+  
+  try {
+    // Get file from IndexedDB
+    const fileData = await getFileFromIndexedDB(fileId);
+    
+    if (!fileData || !fileData.blob) {
+      console.error('❌ File not found in IndexedDB');
+      toast('Image not found', 'error');
+      return;
+    }
+    
+    console.log(`✅ File retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+    
+    // Create blob URL for display
+    const blobUrl = URL.createObjectURL(fileData.blob);
+    
+    // Set image source
+    image.src = blobUrl;
+    image.alt = fileData.name;
+    image.dataset.blobUrl = blobUrl;
+    
+    // Update info
+    if (filenameEl) filenameEl.textContent = fileData.name;
+    if (sizeEl) sizeEl.textContent = `${formatFileSize(fileData.size)} • Click image to zoom`;
+    
+    // Reset zoom state
+    isImageZoomed = false;
+    image.classList.remove('zoomed');
+    
+    // Show overlay
+    overlay.classList.add('active');
+    
+    console.log('✅ Image viewer opened');
+    console.log('🖼️ ========================================\n');
+    
+  } catch (error) {
+    console.error('❌ Error opening image viewer:', error);
+    toast('Failed to open image', 'error');
+  }
+}
+
+/**
+ * Close image viewer and cleanup
+ */
+function closeImageViewer() {
+  console.log('🖼️ Closing image viewer');
+  
+  const overlay = document.getElementById('imageViewerOverlay');
+  const image = document.getElementById('imageViewerImage');
+  
+  if (overlay) {
+    overlay.classList.remove('active');
+  }
+  
+  // Cleanup blob URL to prevent memory leak
+  if (image && image.dataset.blobUrl) {
+    URL.revokeObjectURL(image.dataset.blobUrl);
+    delete image.dataset.blobUrl;
+    console.log('🧹 Blob URL revoked');
+  }
+  
+  // Reset zoom
+  isImageZoomed = false;
+  if (image) {
+    image.classList.remove('zoomed');
+  }
+  
+  console.log('✅ Image viewer closed');
+}
+
+/**
+ * Toggle zoom on image
+ */
+function toggleImageZoom() {
+  const image = document.getElementById('imageViewerImage');
+  if (!image) return;
+  
+  isImageZoomed = !isImageZoomed;
+  
+  if (isImageZoomed) {
+    image.classList.add('zoomed');
+    console.log('🔍 Image zoomed in');
+  } else {
+    image.classList.remove('zoomed');
+    console.log('🔍 Image zoomed out');
+  }
+}
+ 
+ 
+ 
+ 
 async function chunkFile(file) {
   console.log('✂️ ========================================');
   console.log('✂️ CHUNKING FILE FOR TRANSMISSION');
@@ -3464,37 +3691,9 @@ async function loadImageAttachment(fileId, imgElement) {
     imgElement.parentNode?.replaceChild(newImg, imgElement);
     
     newImg.addEventListener('click', async () => {
-      console.log(`🔍 Opening full-size image: ${fileData.name}`);
-      
-      try {
-        const freshBlob = await getFileFromIndexedDB(fileId);
-        if (!freshBlob || !freshBlob.blob) {
-          toast('Failed to open image', 'error');
-          return;
-        }
-        
-        const freshBlobUrl = URL.createObjectURL(freshBlob.blob);
-        const newWindow = window.open(freshBlobUrl, '_blank');
-        
-        console.log(`✅ Opened image in new window`);
-        
-        if (newWindow) {
-          newWindow.addEventListener('load', () => {
-            setTimeout(() => {
-              URL.revokeObjectURL(freshBlobUrl);
-              console.log('🧹 Revoked blob URL from new window');
-            }, 1000);
-          });
-        } else {
-          URL.revokeObjectURL(freshBlobUrl);
-          toast('Please allow popups to view full image', 'warning');
-        }
-        
-      } catch (error) {
-        console.error('❌ Failed to open full-size image:', error);
-        toast('Failed to open image', 'error');
-      }
-    }, { passive: true });
+  console.log(`🔍 Opening image in viewer: ${fileData.name}`);
+  openImageViewer(fileId, fileData.name);
+}, { passive: true });
     
   } catch (error) {
     console.error('❌ Error loading image attachment:', error);
@@ -5069,6 +5268,40 @@ socketInstance.on('join_existing_call_success', (data) => {
     // Reply
     cancelReplyBtn?.addEventListener('click', hideReplyPreview, { passive: true });
     
+    // Image viewer controls
+const imageViewerClose = document.getElementById('imageViewerClose');
+const imageViewerOverlay = document.getElementById('imageViewerOverlay');
+const imageViewerImage = document.getElementById('imageViewerImage');
+
+if (imageViewerClose) {
+  imageViewerClose.addEventListener('click', closeImageViewer, { passive: true });
+  console.log('✅ Image viewer close button listener attached');
+}
+
+if (imageViewerOverlay) {
+  imageViewerOverlay.addEventListener('click', (e) => {
+    // Close if clicking overlay background (not the image)
+    if (e.target === imageViewerOverlay || e.target.id === 'imageViewerContainer') {
+      closeImageViewer();
+    }
+  }, { passive: true });
+  console.log('✅ Image viewer overlay listener attached');
+}
+
+if (imageViewerImage) {
+  imageViewerImage.addEventListener('click', toggleImageZoom, { passive: true });
+  console.log('✅ Image viewer zoom listener attached');
+}
+
+// ESC key to close image viewer
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const imageViewerOverlay = document.getElementById('imageViewerOverlay');
+    if (imageViewerOverlay && imageViewerOverlay.classList.contains('active')) {
+      closeImageViewer();
+    }
+  }
+});
     
     
     
