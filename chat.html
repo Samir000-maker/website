@@ -5563,13 +5563,21 @@
           backToCallBtn.addEventListener('click', () => {
             console.log('🔙 Back to Call button clicked - showing call iframe');
 
-            const callIframeContainer = document.getElementById('callIframeContainer');
-            if (callIframeContainer) {
+            let callIframeContainer = document.getElementById('callIframeContainer');
+
+            // Create iframe container if it doesn't exist
+            if (!callIframeContainer) {
+              console.log('📱 Call iframe container missing - creating it');
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+              callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Call iframe container created and call.html loaded');
+            } else {
+              // Iframe exists, just show it
               callIframeContainer.classList.remove('hidden');
               console.log('✅ Call iframe shown');
-            } else {
-              console.warn('⚠️ Call iframe container not found - falling back to navigation');
-              window.location.href = '/call.html';
             }
           }, { passive: true });
         }
@@ -5802,13 +5810,21 @@
               console.log(`   callId: ${activeCallData.callId}`);
 
               // Check if call iframe exists (running in background)
-              const callIframeContainer = document.getElementById('callIframeContainer');
-              if (callIframeContainer) {
-                console.log('📱 Call iframe exists - showing it');
-                callIframeContainer.classList.remove('hidden');
+              let callIframeContainer = document.getElementById('callIframeContainer');
+
+              if (!callIframeContainer) {
+                // Create iframe container if it doesn't exist
+                console.log('📱 Call iframe container missing - creating it');
+                callIframeContainer = document.createElement('div');
+                callIframeContainer.id = 'callIframeContainer';
+                callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+                callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+                document.body.appendChild(callIframeContainer);
+                console.log('✅ Call iframe container created and call.html loaded');
               } else {
-                console.log('⚠️ Call iframe not found - navigating to call.html');
-                window.location.href = '/call.html';
+                // Iframe exists, just show it
+                callIframeContainer.classList.remove('hidden');
+                console.log('✅ Call iframe shown');
               }
 
             } else {
