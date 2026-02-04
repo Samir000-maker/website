@@ -5859,6 +5859,10 @@
                 console.log('✅ Call iframe shown');
               }
 
+              // CRITICAL: Force UI update to show we are in call
+              activeCallConnectionState = 'connected';
+              updateCallButtonStates();
+
             } else {
               joinCallBtn.classList.add('join-btn-loading');
               joinCallBtn.disabled = true;
