@@ -3644,16 +3644,11 @@ async function loadImageAttachment(fileId, imgElement) {
   try {
     let fileData = await getFileFromIndexedDB(fileId);
     
-    // ============================================
-    // CRITICAL FIX: If file not found locally, it may be loading
-    // Wait briefly and retry before showing error
-    // ============================================
     if (!fileData || !fileData.blob) {
       console.log(`⏳ File not found, waiting 2s for peer transfer...`);
       
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Retry once
       fileData = await getFileFromIndexedDB(fileId);
       
       if (!fileData || !fileData.blob) {
@@ -3674,6 +3669,8 @@ async function loadImageAttachment(fileId, imgElement) {
     imgElement.src = blobUrl;
     imgElement.alt = fileData.name;
     imgElement.dataset.blobUrl = blobUrl;
+    imgElement.dataset.fileName = fileData.name; // Store filename for viewer
+    imgElement.style.cursor = 'pointer';
     
     imgElement.onload = () => {
       console.log(`✅ Image loaded successfully: ${fileData.name}`);
@@ -3685,15 +3682,24 @@ async function loadImageAttachment(fileId, imgElement) {
       imgElement.alt = 'Failed to load image';
     };
     
-    imgElement.style.cursor = 'pointer';
+    // CRITICAL FIX: Add click handler directly to existing element
+    // Remove any existing click handlers first
+    const newClickHandler = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log(`🔍 Opening image in viewer: ${fileData.name}`);
+      await openImageViewer(fileId, fileData.name);
+    };
     
-    const newImg = imgElement.cloneNode(true);
-    imgElement.parentNode?.replaceChild(newImg, imgElement);
+    // Store handler reference to prevent duplicates
+    if (imgElement._clickHandler) {
+      imgElement.removeEventListener('click', imgElement._clickHandler);
+    }
     
-    newImg.addEventListener('click', async () => {
-  console.log(`🔍 Opening image in viewer: ${fileData.name}`);
-  openImageViewer(fileId, fileData.name);
-}, { passive: true });
+    imgElement._clickHandler = newClickHandler;
+    imgElement.addEventListener('click', newClickHandler, { passive: false });
+    
+    console.log(`✅ Click handler attached to image`);
     
   } catch (error) {
     console.error('❌ Error loading image attachment:', error);
