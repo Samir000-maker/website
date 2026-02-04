@@ -4207,12 +4207,9 @@
           console.log(`   callType: ${data.callType}`);
           console.log(`   isInitiator: ${data.isInitiator}`);
 
-          // Only navigate if we're the initiator
+          // Only handle if we're the initiator
           if (data.isInitiator) {
-            console.log('✅ We initiated this call - navigating to call page');
-
-            // Mark that we're navigating to call
-            navigatingToCall = true;
+            console.log('✅ We initiated this call - loading in iframe');
 
             // Clear loading states
             if (audioCallBtn) {
@@ -4224,23 +4221,43 @@
               videoCallBtn.disabled = false;
             }
 
-            // Save chat state
-            saveChatState(roomData.roomId, messagesCache);
-            sessionStorage.setItem('returningFromCall', 'true');
-
             // Store call data
             localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
               callId: data.callId,
               roomId: roomData.roomId,
               callType: data.callType,
-              users: data.participants || []
+              users: data.participants || [],
+              connectionState: 'initializing' // Set initial state
             }));
 
-            console.log(`✅ Stored call data, navigating to call.html`);
-            console.log('📞 ========================================\n');
+            console.log(`✅ Stored call data with initializing state`);
 
-            // Navigate to call page
-            window.location.href = '/call.html';
+            // CRITICAL: Load call.html in iframe instead of navigating
+            console.log('📱 Loading call.html in iframe (background mode)');
+
+            // Create or show call iframe container
+            let callIframeContainer = document.getElementById('callIframeContainer');
+            if (!callIframeContainer) {
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black hidden';
+              callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Created call iframe container');
+            }
+
+            const callIframe = document.getElementById('callIframe');
+            if (callIframe) {
+              callIframe.src = '/call.html';
+              console.log('✅ Loading call.html in iframe');
+            }
+
+            // Update UI state immediately
+            activeCallConnectionState = 'initializing';
+            updateCallButtonStates();
+
+            console.log('✅ Call will initialize in background iframe');
+            console.log('📞 ========================================\n');
           } else {
             console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
             console.log('📞 ========================================\n');
@@ -5525,8 +5542,16 @@
         const backToCallBtn = document.getElementById('backToCallBtn');
         if (backToCallBtn) {
           backToCallBtn.addEventListener('click', () => {
-            console.log('🔙 Back to Call button clicked - navigating to call.html');
-            window.location.href = '/call.html';
+            console.log('🔙 Back to Call button clicked - showing call iframe');
+
+            const callIframeContainer = document.getElementById('callIframeContainer');
+            if (callIframeContainer) {
+              callIframeContainer.classList.remove('hidden');
+              console.log('✅ Call iframe shown');
+            } else {
+              console.warn('⚠️ Call iframe container not found - falling back to navigation');
+              window.location.href = '/call.html';
+            }
           }, { passive: true });
         }
 
