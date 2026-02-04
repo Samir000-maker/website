@@ -148,7 +148,68 @@
 
     .animate-bounce-slow {
       animation: bounce-slow 2s ease-in-out infinite;
+      
     }
+    
+    
+    .confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.confirmation-dialog {
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+  border: 1px solid #30363d;
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(6, 182, 212, 0.3);
+}
+
+.btn-stay {
+  flex: 1;
+  padding: 0.875rem 1.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  background-color: #1c2128;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+}
+
+.btn-stay:hover {
+  background-color: #21262d;
+  border-color: #444c56;
+}
+
+.btn-leave {
+  flex: 1;
+  padding: 0.875rem 1.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+  color: white;
+  border: 1px solid #f87171;
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+.btn-leave:hover {
+  background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.5);
+}
+    
   </style>
 </head>
 
@@ -232,6 +293,8 @@
         <span class="text-sm font-bold">Back to Call</span>
     </div>
 </button> -->
+
+<div id="confirmationOverlay" style="display: none;"></div>
 
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -397,92 +460,111 @@
 
         console.log('✅ Message listener added for iframe communication');
 
-        window.addEventListener('popstate', (event) => {
-          console.log('⬅️ ========================================');
-          console.log('⬅️ BACK BUTTON PRESSED');
-          console.log('⬅️ ========================================');
+        window.addEventListener('popstate', async (event) => {
+  console.log('⬅️ ========================================');
+  console.log('⬅️ POPSTATE FIRED IN call.html');
+  console.log('⬅️ ========================================');
+  console.log(`   isInChatIframe: ${isInChatIframe}`);
+  console.log(`   History state:`, event.state);
 
-          // CRITICAL: Check BOTH old chat overlay AND new chat iframe
-          const chatOverlay = document.getElementById('chatOverlayContainer');
-          const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
+  // CRITICAL: If user is in chatIframe, show confirmation dialog
+  if (isInChatIframe) {
+    console.log('🔒 User in chatIframe - showing confirmation dialog');
+    
+    // Re-push state to prevent navigation
+    history.pushState({ page: 'chat' }, '', window.location.href);
+    
+    // Show confirmation dialog
+    const shouldLeave = await showChatExitConfirmation();
+    
+    if (shouldLeave) {
+      console.log('✅ User confirmed exit from chatIframe');
+      // Exit chatIframe (same as existing behavior)
+      const chatOverlay = document.getElementById('chatOverlay');
+      const chatIframe = document.getElementById('chatIframe');
+      
+      if (chatOverlay) chatOverlay.classList.add('hidden');
+      if (chatIframe) chatIframe.classList.add('hidden');
+      
+      isInChatIframe = false;
+      console.log('📤 Left Chat Iframe → isInChatIframe = false');
+      console.log('   Chat overlay visible:', chatOverlay ? !chatOverlay.classList.contains('hidden') : 'N/A');
+      console.log('   Chat iframe visible:', chatIframe ? !chatIframe.classList.contains('hidden') : 'N/A');
+      console.log('   History state:', history.state);
+    } else {
+      console.log('❌ User cancelled exit from chatIframe');
+      // Stay in chatIframe - do nothing
+    }
+    
+    console.log('⬅️ ========================================\n');
+    return;
+  }
 
-          const chatIframeContainer = document.getElementById('chatIframeContainer');
-          const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
-
-          console.log(`   Chat overlay visible: ${isShowingChatOverlay}`);
-          console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
-          console.log(`   History state: ${JSON.stringify(event.state)}`);
-
-          if (isShowingChatOverlay) {
-            // Old chat overlay is showing - hide it
-            console.log('📞 Hiding chat overlay, showing call');
-            hideChat();
-            history.pushState({ view: 'call' }, 'Call', window.location.href);
-          } else if (isShowingChatIframe) {
-            // Chat iframe is showing - hide it, show call UI
-            isInChatIframe = false;
-            console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
-            console.log('📞 Hiding chat iframe, showing call UI');
-
-            // Hide iframe
-            chatIframeContainer.classList.add('hidden');
-
-            // Show call UI
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
-
-            console.log('✅ Call UI shown - iframe hidden');
-          } else {
-            // Currently showing call UI - show chat iframe
-            console.log('🔄 Showing chat iframe (call continues in background)');
-            console.log(`   Active peer connections: ${peerConnections.size}`);
-            console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
-
-            // Hide call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = 'none';
-            if (main) main.style.display = 'none';
-            if (footer) footer.style.display = 'none';
-
-            // Show chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            const chatIframe = document.getElementById('chatIframe');
-
-            if (chatContainer && chatIframe) {
-              // Load chat.html in iframe (only if not already loaded)
-              if (!chatIframe.src || chatIframe.src === '') {
-                chatIframe.src = '/chat.html';
-                console.log('📄 Loading chat.html in iframe');
-              } else {
-                console.log('📄 Chat iframe already loaded - reusing');
-              }
-              chatContainer.classList.remove('hidden');
-              isInChatIframe = true;
-              console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
-              console.log('✅ Chat iframe shown - call UI hidden');
-
-              // CRITICAL: Push history state for proper back button behavior
-              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-              console.log('✅ History state pushed: chat view');
-            }
-
-            console.log('✅ Call remains FULLY ACTIVE in background');
-            console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
-          }
-
-          console.log('⬅️ ========================================\n');
-        });
+  // NOT in chatIframe - existing behavior
+  console.log('ℹ️ Not in chatIframe - normal back button behavior');
+  console.log('⬅️ ========================================\n');
+  
+  // Your existing popstate code for call UI goes here
+  // (leave it exactly as it is now)
+});
       }
+      
+      
+      // ============================================
+// CONFIRMATION DIALOG FUNCTION (from chat.html)
+// ============================================
+function showChatExitConfirmation() {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('confirmationOverlay');
+    if (!overlay) {
+      console.warn('⚠️ confirmationOverlay not found');
+      return resolve(false);
+    }
+
+    const dialogHTML = `
+      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div class="confirmation-dialog" style="background: linear-gradient(135deg, #0d1117 0%, #161b22 100%); border: 1px solid #30363d; border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(6, 182, 212, 0.3);">
+          <div style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.15) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(239, 68, 68, 0.3);">
+              <span class="material-symbols-outlined" style="font-size: 32px; color: #ef4444;">warning</span>
+            </div>
+            <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.75rem; color: #f0f6fc;">Leave Chat?</h3>
+            <p style="color: #8b949e; font-size: 0.95rem; line-height: 1.6;">
+              You're viewing the chat. Do you want to return to the call view?
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.75rem; justify-content: center;">
+            <button class="btn-stay" id="btnStayInChat" style="flex: 1; padding: 0.875rem 1.5rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background-color: #1c2128; color: #c9d1d9; border: 1px solid #30363d;">Stay Here</button>
+            <button class="btn-leave" id="btnLeaveChatIframe" style="flex: 1; padding: 0.875rem 1.5rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); color: white; border: 1px solid #f87171; box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);">Leave</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    overlay.innerHTML = dialogHTML;
+    overlay.style.display = 'flex';
+
+    const btnStay = document.getElementById('btnStayInChat');
+    const btnLeave = document.getElementById('btnLeaveChatIframe');
+
+    if (btnStay) {
+      btnStay.addEventListener('click', () => {
+        console.log('❌ User chose to stay in chat');
+        overlay.style.display = 'none';
+        resolve(false);
+      }, { once: true });
+    }
+
+    if (btnLeave) {
+      btnLeave.addEventListener('click', () => {
+        console.log('✅ User chose to leave chat');
+        overlay.style.display = 'none';
+        resolve(true);
+      }, { once: true });
+    }
+  });
+}
+      
 
       function showChat() {
         console.log('💬 ========================================');
