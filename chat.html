@@ -1388,6 +1388,13 @@
             backToCallBtn.style.display = 'flex';
           }
 
+          // CRITICAL: Automatically show call iframe when connected
+          const callIframeContainer = document.getElementById('callIframeContainer');
+          if (callIframeContainer && callIframeContainer.classList.contains('hidden')) {
+            console.log('🎬 Call connected - automatically showing call UI');
+            callIframeContainer.classList.remove('hidden');
+          }
+
         } else {
           // No active call - enable call buttons, hide back-to-call
           audioBtn.disabled = false;
