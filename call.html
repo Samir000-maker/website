@@ -233,6 +233,9 @@
     </div>
 </button> -->
 
+  <!-- Confirmation Dialog (hidden by default) -->
+  <div id="confirmationOverlay" style="display: none;"></div>
+
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script>
@@ -397,10 +400,32 @@
 
         console.log('✅ Message listener added for iframe communication');
 
-        window.addEventListener('popstate', (event) => {
+        window.addEventListener('popstate', async (event) => {
           console.log('⬅️ ========================================');
           console.log('⬅️ BACK BUTTON PRESSED');
           console.log('⬅️ ========================================');
+
+          // INTERCEPTION LOGIC
+          if (isInChatIframe) {
+            console.log('🛑 Back button intercepted by Chat Iframe');
+
+            // Trap user
+            history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+
+            const shouldLeave = await showConfirmationDialog();
+
+            if (shouldLeave) {
+              console.log('✅ User confirmed leave');
+              isInChatIframe = false;
+              console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
+
+              // Trigger actual back navigation (will be handled by normal logic next time)
+              history.back();
+            } else {
+              console.log('❌ User stayed');
+            }
+            return;
+          }
 
           // CRITICAL: Check BOTH old chat overlay AND new chat iframe
           const chatOverlay = document.getElementById('chatOverlayContainer');
@@ -3644,6 +3669,75 @@
       }
 
       console.log('✅ Page loaded - starting initialization');
+
+      function showConfirmationDialog() {
+        return new Promise((resolve) => {
+          const overlay = document.getElementById('confirmationOverlay');
+          if (!overlay) return resolve(false);
+
+          const dialogHTML = `
+      <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div class="confirmation-dialog" style="background: linear-gradient(135deg, #0d1117 0%, #161b22 100%); border: 1px solid #30363d; border-radius: 16px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 1px rgba(6, 182, 212, 0.3);">
+          <div style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="width: 64px; height: 64px; margin: 0 auto 1rem; background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.15) 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(239, 68, 68, 0.3);">
+              <span class="material-symbols-outlined" style="font-size: 32px; color: #ef4444;">warning</span>
+            </div>
+            <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.75rem; color: #f0f6fc;">Leave Chat Room?</h3>
+            <p style="color: #8b949e; font-size: 0.95rem; line-height: 1.6;">
+              You're currently in an active chat room. If you leave, you'll be disconnected from the conversation.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.75rem; justify-content: center;">
+            <button class="btn-stay" id="btnStay" style="flex: 1; padding: 0.875rem 1.5rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background-color: #1c2128; color: #c9d1d9; border: 1px solid #30363d;">Stay Here</button>
+            <button class="btn-leave" id="btnLeave" style="flex: 1; padding: 0.875rem 1.5rem; border-radius: 10px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); color: white; border: 1px solid #f87171; box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);">Leave</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+          overlay.innerHTML = dialogHTML;
+          overlay.style.display = 'flex';
+
+          // Add slight delay to ensure DOM is ready
+          setTimeout(() => {
+            const btnStay = document.getElementById('btnStay');
+            const btnLeave = document.getElementById('btnLeave');
+
+            if (btnStay) {
+              btnStay.addEventListener('mouseenter', () => {
+                btnStay.style.backgroundColor = '#21262d';
+                btnStay.style.borderColor = '#444c56';
+              });
+              btnStay.addEventListener('mouseleave', () => {
+                btnStay.style.backgroundColor = '#1c2128';
+                btnStay.style.borderColor = '#30363d';
+              });
+              btnStay.addEventListener('click', () => {
+                console.log('❌ User chose to stay');
+                overlay.style.display = 'none';
+                resolve(false); // Just return false - no other logic
+              }, { once: true });
+            }
+
+            if (btnLeave) {
+              btnLeave.addEventListener('mouseenter', () => {
+                btnLeave.style.background = 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)';
+                btnLeave.style.boxShadow = '0 0 25px rgba(239, 68, 68, 0.5)';
+              });
+              btnLeave.addEventListener('mouseleave', () => {
+                btnLeave.style.background = 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)';
+                btnLeave.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.3)';
+              });
+              btnLeave.addEventListener('click', () => {
+                console.log('✅ User chose to leave');
+                overlay.style.display = 'none';
+                resolve(true); // Just return true - no other logic
+              }, { once: true });
+            }
+          }, 0);
+        });
+      }
+
       initCall();
     })();
   </script>
