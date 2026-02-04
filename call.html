@@ -363,45 +363,20 @@
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           }
 
-          // CRITICAL: Handle "Back to Call" button from chat iframe
 // CRITICAL: Handle "Back to Call" button from chat iframe
 if (event.data && event.data.action === 'returnToCall') {
   console.log('📞 ========================================');
   console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
   console.log('📞 ========================================');
   
-  // CRITICAL: Set flag to FALSE first (before any navigation)
-  // This prevents dialog from showing when history.back() triggers popstate
+  // CRITICAL: Set flag to FALSE ONLY
+  // Do NOT hide iframe or show call UI here
+  // Let the popstate handler do all UI work
   isInChatIframe = false;
   console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
   
-  // Hide chat iframe container
-  const chatContainer = document.getElementById('chatIframeContainer');
-  if (chatContainer) {
-    chatContainer.classList.add('hidden');
-    console.log('✅ Chat iframe hidden');
-  }
-
-  // Show call UI elements
-  const header = document.querySelector('header');
-  const main = document.querySelector('main');
-  const footer = document.querySelector('footer');
-
-  if (header) header.style.display = '';
-  if (main) main.style.display = '';
-  if (footer) footer.style.display = '';
-
-  console.log('✅ Call UI restored - call NEVER STOPPED');
-  console.log(`   Peer connections: ${peerConnections.size} (still active)`);
-  console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
-  console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
-  
-  // CRITICAL: Manually pop the history state for the chat iframe
-  // This removes the chat iframe entry from history stack
-  // Since isInChatIframe is already false, popstate handler won't show dialog
-  if (history.state && history.state.view === 'chat') {
-    history.back();
-  }
+  // Trigger navigation - popstate will handle UI cleanup
+  history.back();
   
   console.log('📞 ========================================\n');
 }
@@ -415,9 +390,18 @@ if (event.data && event.data.action === 'returnToCall') {
   console.log('⬅️ ========================================');
   console.log('⬅️ BACK BUTTON PRESSED');
   console.log('⬅️ ========================================');
+  
+  // Get current state
+  const chatIframeContainer = document.getElementById('chatIframeContainer');
+  const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
+  
+  console.log(`   isInChatIframe: ${isInChatIframe}`);
+  console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
+  console.log(`   History state: ${JSON.stringify(event.state)}`);
 
-  // CRITICAL: Only show dialog if ALREADY in chat iframe
-  if (isInChatIframe) {
+  // CASE 1: User is ALREADY in chat iframe and pressing back
+  // Show dialog to confirm leaving
+  if (isInChatIframe && isShowingChatIframe) {
     console.log('🛑 Back button intercepted - User is IN Chat Iframe');
 
     // Trap user by pushing state back
@@ -428,38 +412,25 @@ if (event.data && event.data.action === 'returnToCall') {
 
     if (shouldLeave) {
       console.log('✅ User confirmed leave from Chat Iframe');
+      // Set flag to false so next back navigation can proceed
       isInChatIframe = false;
       console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
 
-      // Trigger back navigation again (will now hide iframe and show call)
+      // Trigger back navigation again
+      // This will now go to CASE 2 below
       history.back();
     } else {
       console.log('❌ User chose to stay in Chat Iframe');
     }
-    return; // CRITICAL: Exit early, don't process rest of handler
+    
+    console.log('⬅️ ========================================\n');
+    return; // CRITICAL: Exit early
   }
 
-  // If we're here, isInChatIframe === false
-  // Check what's currently visible
-  const chatOverlay = document.getElementById('chatOverlayContainer');
-  const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
-
-  const chatIframeContainer = document.getElementById('chatIframeContainer');
-  const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
-
-  console.log(`   isInChatIframe: ${isInChatIframe}`);
-  console.log(`   Chat overlay visible: ${isShowingChatOverlay}`);
-  console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
-  console.log(`   History state: ${JSON.stringify(event.state)}`);
-
-  if (isShowingChatOverlay) {
-    // Old chat overlay is showing - hide it
-    console.log('📞 Hiding chat overlay, showing call');
-    hideChat();
-    history.pushState({ view: 'call' }, 'Call', window.location.href);
-  } else if (isShowingChatIframe) {
-    // Chat iframe is showing but isInChatIframe is false
-    // This happens after dialog "Leave" was clicked
+  // CASE 2: Chat iframe is visible but flag is false
+  // This happens after "Back to Call" button or dialog "Leave" button
+  // Hide iframe and show call UI
+  if (isShowingChatIframe && !isInChatIframe) {
     console.log('📞 Hiding chat iframe, showing call UI');
 
     // Hide iframe
@@ -475,39 +446,52 @@ if (event.data && event.data.action === 'returnToCall') {
     if (footer) footer.style.display = '';
 
     console.log('✅ Call UI shown - iframe hidden');
-  } else {
-    // User pressed BACK while in Call View
-    // Show chat iframe WITHOUT dialog (dialog only shows when pressing back WHILE IN iframe)
-    console.log('↩️ Back pressed in Call View - Showing Chat Iframe (no dialog yet)');
-
-    // Hide call UI elements
-    const header = document.querySelector('header');
-    const main = document.querySelector('main');
-    const footer = document.querySelector('footer');
-
-    if (header) header.style.display = 'none';
-    if (main) main.style.display = 'none';
-    if (footer) footer.style.display = 'none';
-
-    // Show chat iframe
-    const chatContainer = document.getElementById('chatIframeContainer');
-    const chatIframe = document.getElementById('chatIframe');
-
-    if (chatContainer && chatIframe) {
-      if (!chatIframe.src || chatIframe.src === '') {
-        chatIframe.src = '/chat.html';
-      }
-      chatContainer.classList.remove('hidden');
-      isInChatIframe = true;
-      console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
-    }
-
-    // Push state so back button works
-    history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-    
-    console.log('✅ Chat Iframe shown - dialog will appear on NEXT back press');
+    console.log('⬅️ ========================================\n');
+    return;
   }
 
+  // CASE 3: Old chat overlay (legacy)
+  const chatOverlay = document.getElementById('chatOverlayContainer');
+  const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
+  
+  if (isShowingChatOverlay) {
+    console.log('📞 Hiding chat overlay, showing call');
+    hideChat();
+    history.pushState({ view: 'call' }, 'Call', window.location.href);
+    console.log('⬅️ ========================================\n');
+    return;
+  }
+
+  // CASE 4: User is in call view and pressing back
+  // Show chat iframe (NO dialog yet - dialog appears on NEXT back press)
+  console.log('↩️ Back pressed in Call View - Showing Chat Iframe (no dialog yet)');
+
+  // Hide call UI elements
+  const header = document.querySelector('header');
+  const main = document.querySelector('main');
+  const footer = document.querySelector('footer');
+
+  if (header) header.style.display = 'none';
+  if (main) main.style.display = 'none';
+  if (footer) footer.style.display = 'none';
+
+  // Show chat iframe
+  const chatContainer = document.getElementById('chatIframeContainer');
+  const chatIframe = document.getElementById('chatIframe');
+
+  if (chatContainer && chatIframe) {
+    if (!chatIframe.src || chatIframe.src === '') {
+      chatIframe.src = '/chat.html';
+    }
+    chatContainer.classList.remove('hidden');
+    isInChatIframe = true;
+    console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
+  }
+
+  // Push state so back button works
+  history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+  
+  console.log('✅ Chat Iframe shown - dialog will appear on NEXT back press');
   console.log('⬅️ ========================================\n');
 });
       }
