@@ -366,9 +366,8 @@
           const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
 
           console.log(`   Currently showing: ${isShowingChat ? 'chat overlay' : 'call UI'}`);
-
-          // CRITICAL: Always prevent default navigation
-          event.preventDefault();
+          console.log(`   Call state: ${callConnectionState}`);
+          console.log(`   Has callData: ${!!callData}`);
 
           if (isShowingChat) {
             // Hide chat, show call
@@ -376,16 +375,19 @@
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           } else {
-            // Hide call, show chat
-            if (!callData || !localStream) {
-              console.log('⚠️ No active call, allowing navigation');
+            // CRITICAL: If call exists (even if connecting), show chat iframe instead of navigating away
+            if (!callData) {
+              console.log('⚠️ No active call - allowing navigation to chat.html');
               window.location.href = '/chat.html';
               return;
             }
 
-            console.log('💬 Hiding call, showing chat');
+            // Call exists (initializing, connecting, or connected) - keep page alive, show chat iframe
+            console.log('💬 Call active - hiding UI and showing chat iframe');
+            console.log(`   Call state: ${callConnectionState}`);
+            console.log(`   This keeps the connection process running in background`);
             console.log(`   Active peer connections: ${peerConnections.size}`);
-            console.log(`   Local stream tracks: ${localStream.getTracks().length}`);
+            console.log(`   Local stream: ${localStream ? 'exists' : 'pending'}`);
 
             showChat();
             history.pushState({ view: 'chat' }, 'Chat', window.location.href);
