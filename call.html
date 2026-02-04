@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" class="dark">
 
@@ -363,37 +364,23 @@
           }
 
           // CRITICAL: Handle "Back to Call" button from chat iframe
-          if (event.data && event.data.action === 'returnToCall') {
-            console.log('📞 ========================================');
-            console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
-            console.log('📞 ========================================');
-            isInChatIframe = false;
-            console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
-
-            // Hide chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            if (chatContainer) {
-              chatContainer.classList.add('hidden');
-              console.log('✅ Chat iframe hidden');
-            }
-
-            // Show call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = '';
-            if (main) main.style.display = '';
-            if (footer) footer.style.display = '';
-
-            console.log('✅ Call UI restored - call NEVER STOPPED');
-            console.log(`   Peer connections: ${peerConnections.size} (still active)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
-            // CRITICAL: Don't push history state here - let popstate handle it naturally
-            // Pushing here would create duplicate history entries
-            console.log('📞 ========================================\n');
-          }
+// CRITICAL: Handle "Back to Call" button from chat iframe
+if (event.data && event.data.action === 'returnToCall') {
+  console.log('📞 ========================================');
+  console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
+  console.log('📞 ========================================');
+  
+  // Set flag to false BEFORE triggering back navigation
+  isInChatIframe = false;
+  console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
+  
+  // Trigger browser back navigation
+  // This will be handled by the popstate listener
+  // Since isInChatIframe is now false, the dialog won't show
+  history.back();
+  
+  console.log('📞 ========================================\n');
+}
 
           console.log('📨 ========================================\n');
         });
