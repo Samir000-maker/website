@@ -462,6 +462,51 @@
             if (footer) footer.style.display = '';
 
             console.log('✅ Call UI shown - iframe hidden');
+          } else {
+            // User pressed BACK while in Call View (and not in chat)
+            // Instead of leaving, we should:
+            // 1. Open the Chat Iframe (to show underlying context)
+            // 2. Show the Confirmation Dialog immediately
+
+            console.log('↩️ Back pressed in Call View - Intecepting to show Chat+Dialog');
+
+            // Hide call UI elements
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
+
+            if (header) header.style.display = 'none';
+            if (main) main.style.display = 'none';
+            if (footer) footer.style.display = 'none';
+
+            // Show chat iframe
+            const chatContainer = document.getElementById('chatIframeContainer');
+            const chatIframe = document.getElementById('chatIframe');
+
+            if (chatContainer && chatIframe) {
+              if (!chatIframe.src || chatIframe.src === '') {
+                chatIframe.src = '/chat.html';
+              }
+              chatContainer.classList.remove('hidden');
+              isInChatIframe = true;
+              console.log("📥 Entered Chat Iframe (Auto-Back) → isInChatIframe =", isInChatIframe);
+            }
+
+            // Push State to trap them in this new "Chat+Dialog" View
+            history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+
+            // Show Dialog Immediately
+            const shouldLeave = await showConfirmationDialog();
+
+            if (shouldLeave) {
+              console.log('✅ User confirmed leave (from Call View)');
+              isInChatIframe = false;
+              // User wants to leave, so we let them go back again (which now really triggers leave)
+              history.back();
+            } else {
+              console.log('❌ User stayed (now in Chat Iframe)');
+              // They are now in the chat iframe, standard behavior applies
+            }
           }
 
 
