@@ -333,6 +333,7 @@
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
       let isNavigatingToChat = false;
       let isInChatView = false;
+      let isInChatIframe = false;
 
       // CRITICAL: Timer sync variables (must exist for navigation from chat)
       let roomExpiresAt = null;
@@ -363,6 +364,8 @@
             console.log('📞 ========================================');
             console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
             console.log('📞 ========================================');
+            isInChatIframe = false;
+            console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
 
             // Hide chat iframe
             const chatContainer = document.getElementById('chatIframeContainer');
@@ -417,6 +420,8 @@
             history.pushState({ view: 'call' }, 'Call', window.location.href);
           } else if (isShowingChatIframe) {
             // Chat iframe is showing - hide it, show call UI
+            isInChatIframe = false;
+            console.log("📤 Left Chat Iframe → isInChatIframe =", isInChatIframe);
             console.log('📞 Hiding chat iframe, showing call UI');
 
             // Hide iframe
@@ -460,6 +465,8 @@
                 console.log('📄 Chat iframe already loaded - reusing');
               }
               chatContainer.classList.remove('hidden');
+              isInChatIframe = true;
+              console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
               console.log('✅ Chat iframe shown - call UI hidden');
 
               // CRITICAL: Push history state for proper back button behavior
