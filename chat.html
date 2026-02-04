@@ -1091,7 +1091,6 @@
             <span class="material-symbols-outlined text-base sm:text-lg">call</span>
             <span class="hidden sm:inline">Back to Call</span>
           </button>
-
           <button id="joinCallBtn"
             class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
             title="Join Active Call">
@@ -4040,13 +4039,35 @@
       // ============================================
 
       function setupBackButtonHandler() {
-        history.pushState({ page: 'chat' }, '', window.location.href);
+        const TRAP_STATE = { page: 'chat', trap: true };
 
+        const ensureTrapState = () => {
+          // Only push if we're not already in the trap state
+          if (!history.state || !history.state.trap) {
+            console.log('🔒 Injecting back button trap state');
+            history.pushState(TRAP_STATE, '', window.location.href);
+          }
+        };
+
+        // Initialize on load
+        ensureTrapState();
+
+        // Re-initialize on page show (handles BFCache and Refresh)
+        window.addEventListener('pageshow', (event) => {
+          // event.persisted check is optional but good for debugging BFCache
+          console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
+          setTimeout(ensureTrapState, 0); // specialized timeout ensures it runs after browser restoration
+        });
+
+        // Handle the Back Button (popstate)
         window.addEventListener('popstate', async (event) => {
           if (backButtonHandled) return;
 
-          console.log('⬅️ Back button pressed');
-          history.pushState({ page: 'chat' }, '', window.location.href);
+          console.log('⬅️ Back button pressed - Trapped!');
+
+          // Immediately push the state back to keep the user here while the modal shows
+          // This effectively "cancels" the back navigation from the browser's perspective
+          history.pushState(TRAP_STATE, '', window.location.href);
 
           const shouldLeave = await showConfirmationDialog();
 
@@ -4058,10 +4079,20 @@
               socketInstance.emit('leave_room');
             }
 
+            // Cleanup call if exists
+            // CRITICAL: Call cleanup before navigating
+            if (activeCallInRoom) {
+              // ... minimal cleanup if needed, but 'leaveBtn' handler does it better
+            }
+
             clearChatState(true);
+
+            // Allow navigation to proceed
+            // We use replaceState to go back "for real" or just assign location
             window.location.href = '/mood.html';
           } else {
             console.log('❌ User staying in chat');
+            // State is already pushed back, so we stay here
           }
         });
       }
@@ -5558,7 +5589,30 @@
         }
 
 
+        // Back to Call Button Handler
+        const backToCallBtn = document.getElementById('backToCallBtn');
+        if (backToCallBtn) {
+          backToCallBtn.addEventListener('click', () => {
+            console.log('🔙 Back to Call button clicked - showing call iframe');
 
+            let callIframeContainer = document.getElementById('callIframeContainer');
+
+            // Create iframe container if it doesn't exist
+            if (!callIframeContainer) {
+              console.log('📱 Call iframe container missing - creating it');
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+              callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Call iframe container created and call.html loaded');
+            } else {
+              // Iframe exists, just show it
+              callIframeContainer.classList.remove('hidden');
+              console.log('✅ Call iframe shown');
+            }
+          }, { passive: true });
+        }
 
 
         // Remove attachment button
@@ -5581,32 +5635,6 @@
                 console.error('❌ Failed to remove attachment:', error);
                 toast('Failed to remove attachment', 'error');
               }
-            }
-          }, { passive: true });
-        }
-
-
-        // Back to Call Button Handler
-        const backToCallBtn = document.getElementById('backToCallBtn');
-        if (backToCallBtn) {
-          backToCallBtn.addEventListener('click', () => {
-            console.log('🔙 Back to Call button clicked - showing call iframe');
-
-            let callIframeContainer = document.getElementById('callIframeContainer');
-
-            // Create iframe container if it doesn't exist
-            if (!callIframeContainer) {
-              console.log('📱 Call iframe container missing - creating it');
-              callIframeContainer = document.createElement('div');
-              callIframeContainer.id = 'callIframeContainer';
-              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
-              callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
-              document.body.appendChild(callIframeContainer);
-              console.log('✅ Call iframe container created and call.html loaded');
-            } else {
-              // Iframe exists, just show it
-              callIframeContainer.classList.remove('hidden');
-              console.log('✅ Call iframe shown');
             }
           }, { passive: true });
         }
