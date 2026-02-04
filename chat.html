@@ -1084,6 +1084,13 @@
             <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
           </button>
 
+          <!-- Back to Call Button (shown when call is connected in background) -->
+          <button id="backToCallBtn" style="display: none;"
+            class="px-3 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 rounded-lg bg-gradient-to-r from-[#06b6d4] to-[#22d3ee] text-white font-semibold text-xs sm:text-sm hover:shadow-lg hover:shadow-cyan-500/50 transition-all"
+            title="Return to active call">
+            <span class="material-symbols-outlined text-base sm:text-lg">call</span>
+            <span class="hidden sm:inline">Back to Call</span>
+          </button>
 
           <button id="joinCallBtn"
             class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
@@ -1349,7 +1356,7 @@
       function updateCallButtonStates() {
         const audioBtn = document.getElementById('audioCallBtn');
         const videoBtn = document.getElementById('videoCallBtn');
-        const joinCallBtn = document.getElementById('joinCallBtn');
+        const backToCallBtn = document.getElementById('backToCallBtn');
 
         if (!audioBtn || !videoBtn) return;
 
@@ -1364,12 +1371,12 @@
           videoBtn.classList.add('opacity-50', 'cursor-not-allowed');
           videoBtn.title = 'Call connecting...';
 
-          if (joinCallBtn) {
-            joinCallBtn.style.display = 'none';
+          if (backToCallBtn) {
+            backToCallBtn.style.display = 'none';
           }
 
         } else if (activeCallConnectionState === 'connected') {
-          // Call is connected - disable call buttons, show back-to-call (using joinCallBtn)
+          // Call is connected - disable call buttons, show back-to-call
           console.log('✅ Enabling Back to Call - call connected');
           audioBtn.disabled = true;
           videoBtn.disabled = true;
@@ -1378,23 +1385,8 @@
           audioBtn.title = 'Call in progress';
           videoBtn.title = 'Call in progress';
 
-          if (joinCallBtn) {
-            // Re-purpose Join Call button as Back to Call
-            joinCallBtn.style.display = 'flex';
-            joinCallBtn.classList.remove('hidden');
-
-            // Update text/icon for "Back to Call" context
-            const spanText = joinCallBtn.querySelector('.hidden.sm\\:inline');
-            const spanMobile = joinCallBtn.querySelector('.sm\\:hidden');
-            const icon = joinCallBtn.querySelector('.material-symbols-outlined');
-
-            if (spanText) spanText.textContent = 'Back to Call';
-            if (spanMobile && !spanMobile.classList.contains('material-symbols-outlined')) spanMobile.textContent = 'Back';
-            if (icon) icon.textContent = 'call';
-
-            joinCallBtn.title = 'Return to active call';
-            joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
-            joinCallBtn.classList.add('bg-gradient-to-r', 'from-[#06b6d4]', 'to-[#22d3ee]', 'hover:shadow-lg', 'hover:shadow-cyan-500/50');
+          if (backToCallBtn) {
+            backToCallBtn.style.display = 'flex';
           }
 
           // CRITICAL: Automatically show call iframe when connected
@@ -1413,33 +1405,8 @@
           audioBtn.title = 'Start audio call';
           videoBtn.title = 'Start video call';
 
-          if (joinCallBtn) {
-            // Restore Join Call button styling (will be hidden unless activeCallInRoom exists)
-            // But here we are handling "Active Call for THIS user".
-            // activeCallInRoom logic is handled elsewhere usually, we might need to be careful not to hide it if someone ELSE is calling?
-            // Actually, updateCallButtonStates is driven by THIS user's active call state.
-
-            if (!activeCallInRoom) {
-              joinCallBtn.style.display = 'none';
-            } else {
-              // Restore default "Join Call" styling if there is a call in room but we aren't in it
-              // Logic for showing Join button when NOT in call is handled in socket handlers/init.
-              // We should just ensure we reset styling if we hide it.
-              joinCallBtn.style.display = 'none'; // Default hide, let other logic show it if needed
-
-              // Restore original styling
-              const spanText = joinCallBtn.querySelector('.hidden.sm\\:inline');
-              const spanMobile = joinCallBtn.querySelector('.sm\\:hidden');
-              const icon = joinCallBtn.querySelector('.material-symbols-outlined');
-
-              if (spanText) spanText.textContent = 'Join Call';
-              if (spanMobile && !spanMobile.classList.contains('material-symbols-outlined')) spanMobile.textContent = 'Join';
-              if (icon) icon.textContent = 'login';
-
-              joinCallBtn.title = 'Join Active Call';
-              joinCallBtn.classList.add('bg-green-600', 'hover:bg-green-700');
-              joinCallBtn.classList.remove('bg-gradient-to-r', 'from-[#06b6d4]', 'to-[#22d3ee]', 'hover:shadow-lg', 'hover:shadow-cyan-500/50');
-            }
+          if (backToCallBtn) {
+            backToCallBtn.style.display = 'none';
           }
         }
       }
@@ -5614,6 +5581,32 @@
                 console.error('❌ Failed to remove attachment:', error);
                 toast('Failed to remove attachment', 'error');
               }
+            }
+          }, { passive: true });
+        }
+
+
+        // Back to Call Button Handler
+        const backToCallBtn = document.getElementById('backToCallBtn');
+        if (backToCallBtn) {
+          backToCallBtn.addEventListener('click', () => {
+            console.log('🔙 Back to Call button clicked - showing call iframe');
+
+            let callIframeContainer = document.getElementById('callIframeContainer');
+
+            // Create iframe container if it doesn't exist
+            if (!callIframeContainer) {
+              console.log('📱 Call iframe container missing - creating it');
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+              callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Call iframe container created and call.html loaded');
+            } else {
+              // Iframe exists, just show it
+              callIframeContainer.classList.remove('hidden');
+              console.log('✅ Call iframe shown');
             }
           }, { passive: true });
         }
