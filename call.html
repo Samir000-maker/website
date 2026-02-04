@@ -345,148 +345,136 @@
         history.pushState({ view: 'call' }, 'Call', window.location.href);
 
 
-// Listen for messages from chat iframe
-window.addEventListener('message', (event) => {
-  console.log('📨 ========================================');
-  console.log('📨 MESSAGE RECEIVED FROM IFRAME');
-  console.log('📨 ========================================');
-  console.log(`   action: ${event.data?.action}`);
+        // Listen for messages from chat iframe
+        window.addEventListener('message', (event) => {
+          console.log('📨 ========================================');
+          console.log('📨 MESSAGE RECEIVED FROM IFRAME');
+          console.log('📨 ========================================');
+          console.log(`   action: ${event.data?.action}`);
 
+          if (event.data && event.data.action === 'hideChat') {
+            console.log('💬 Hiding chat overlay as requested by iframe');
+            hideChat();
+            history.pushState({ view: 'call' }, 'Call', window.location.href);
+          }
 
-  if (event.data && event.data.action === 'hideChat') {
-    console.log('💬 Hiding chat overlay as requested by iframe');
-    hideChat();
-    history.pushState({ view: 'call' }, 'Call', window.location.href);
-  }
+          // CRITICAL: Handle "Back to Call" button from chat iframe
+          if (event.data && event.data.action === 'returnToCall') {
+            console.log('📞 ========================================');
+            console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
+            console.log('📞 ========================================');
 
-  // CRITICAL: Handle "Back to Call" button from chat iframe
-  if (event.data && event.data.action === 'returnToCall') {
-    console.log('📞 ========================================');
-    console.log('📞 RETURN TO CALL REQUEST FROM IFRAME');
-    console.log('📞 ========================================');
+            // Hide chat iframe
+            const chatContainer = document.getElementById('chatIframeContainer');
+            if (chatContainer) {
+              chatContainer.classList.add('hidden');
+              console.log('✅ Chat iframe hidden');
+            }
 
-    // Hide chat iframe
-    const chatContainer = document.getElementById('chatIframeContainer');
-    if (chatContainer) {
-      chatContainer.classList.add('hidden');
-      console.log('✅ Chat iframe hidden');
-    }
+            // Show call UI elements
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
 
-    // Show call UI elements
-    const header = document.querySelector('header');
-    const main = document.querySelector('main');
-    const footer = document.querySelector('footer');
+            if (header) header.style.display = '';
+            if (main) main.style.display = '';
+            if (footer) footer.style.display = '';
 
-    if (header) header.style.display = '';
-    if (main) main.style.display = '';
-    if (footer) footer.style.display = '';
+            console.log('✅ Call UI restored - call NEVER STOPPED');
+            console.log(`   Peer connections: ${peerConnections.size} (still active)`);
+            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
+            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
+            // CRITICAL: Don't push history state here - let popstate handle it naturally
+            // Pushing here would create duplicate history entries
+            console.log('📞 ========================================\n');
+          }
 
-    console.log('✅ Call UI restored - call NEVER STOPPED');
-    console.log(`   Peer connections: ${peerConnections.size} (still active)`);
-    console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (still active)`);
-    console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (still active)`);
-    console.log('📞 ========================================\n');
-  }
-
-  console.log('📨 ========================================\n');
-});
+          console.log('📨 ========================================\n');
+        });
 
         console.log('✅ Message listener added for iframe communication');
 
         window.addEventListener('popstate', (event) => {
-  console.log('⬅️ ========================================');
-  console.log('⬅️ BACK BUTTON PRESSED');
-  console.log('⬅️ ========================================');
+          console.log('⬅️ ========================================');
+          console.log('⬅️ BACK BUTTON PRESSED');
+          console.log('⬅️ ========================================');
 
-  // CRITICAL: Check BOTH old chat overlay AND new chat iframe
-  const chatOverlay = document.getElementById('chatOverlayContainer');
-  const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
+          // CRITICAL: Check BOTH old chat overlay AND new chat iframe
+          const chatOverlay = document.getElementById('chatOverlayContainer');
+          const isShowingChatOverlay = chatOverlay && !chatOverlay.classList.contains('hidden');
 
-  const chatIframeContainer = document.getElementById('chatIframeContainer');
-  const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
+          const chatIframeContainer = document.getElementById('chatIframeContainer');
+          const isShowingChatIframe = chatIframeContainer && !chatIframeContainer.classList.contains('hidden');
 
-  console.log(`   Chat overlay visible: ${isShowingChatOverlay}`);
-  console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
-  console.log(`   History state: ${JSON.stringify(event.state)}`);
+          console.log(`   Chat overlay visible: ${isShowingChatOverlay}`);
+          console.log(`   Chat iframe visible: ${isShowingChatIframe}`);
+          console.log(`   History state: ${JSON.stringify(event.state)}`);
 
-  if (isShowingChatOverlay) {
-    // Old chat overlay is showing - hide it
-    console.log('📞 Hiding chat overlay, showing call');
-    hideChat();
-    history.pushState({ view: 'call' }, 'Call', window.location.href);
-  } else if (isShowingChatIframe) {
-    // Chat iframe is showing - show confirmation dialog
-    console.log('⚠️ User attempting to leave call from chat view');
-    
-    const confirmed = confirm('Do you want to leave the call?\n\nClick "OK" to leave the call and return to chat.\nClick "Cancel" to stay in the call.');
-    
-    if (confirmed) {
-      console.log('✅ User confirmed - leaving call');
-      
-      // Hide iframe
-      chatIframeContainer.classList.add('hidden');
-      
-      // Show call UI briefly
-      const header = document.querySelector('header');
-      const main = document.querySelector('main');
-      const footer = document.querySelector('footer');
-      
-      if (header) header.style.display = '';
-      if (main) main.style.display = '';
-      if (footer) footer.style.display = '';
-      
-      // Then immediately leave call
-      leaveCall();
-      
-    } else {
-      console.log('❌ User cancelled - staying in call');
-      
-      // Push the chat state back to prevent navigation
-      history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-    }
-  } else {
-    // Currently showing call UI - show chat iframe
-    console.log('🔄 Showing chat iframe (call continues in background)');
-    console.log(`   Active peer connections: ${peerConnections.size}`);
-    console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
+          if (isShowingChatOverlay) {
+            // Old chat overlay is showing - hide it
+            console.log('📞 Hiding chat overlay, showing call');
+            hideChat();
+            history.pushState({ view: 'call' }, 'Call', window.location.href);
+          } else if (isShowingChatIframe) {
+            // Chat iframe is showing - hide it, show call UI
+            console.log('📞 Hiding chat iframe, showing call UI');
 
-    // Hide call UI elements
-    const header = document.querySelector('header');
-    const main = document.querySelector('main');
-    const footer = document.querySelector('footer');
+            // Hide iframe
+            chatIframeContainer.classList.add('hidden');
 
-    if (header) header.style.display = 'none';
-    if (main) main.style.display = 'none';
-    if (footer) footer.style.display = 'none';
+            // Show call UI
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
 
-    // Show chat iframe
-    const chatContainer = document.getElementById('chatIframeContainer');
-    const chatIframe = document.getElementById('chatIframe');
+            if (header) header.style.display = '';
+            if (main) main.style.display = '';
+            if (footer) footer.style.display = '';
 
-    if (chatContainer && chatIframe) {
-      // Load chat.html in iframe (only if not already loaded)
-      if (!chatIframe.src || chatIframe.src === '') {
-        chatIframe.src = '/chat.html';
-        console.log('📄 Loading chat.html in iframe');
-      } else {
-        console.log('📄 Chat iframe already loaded - reusing');
-      }
-      chatContainer.classList.remove('hidden');
-      console.log('✅ Chat iframe shown - call UI hidden');
+            console.log('✅ Call UI shown - iframe hidden');
+          } else {
+            // Currently showing call UI - show chat iframe
+            console.log('🔄 Showing chat iframe (call continues in background)');
+            console.log(`   Active peer connections: ${peerConnections.size}`);
+            console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
 
-      // CRITICAL: Push history state for proper back button behavior
-      history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-      console.log('✅ History state pushed: chat view');
-    }
+            // Hide call UI elements
+            const header = document.querySelector('header');
+            const main = document.querySelector('main');
+            const footer = document.querySelector('footer');
 
-    console.log('✅ Call remains FULLY ACTIVE in background');
-    console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
-    console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
-    console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
-  }
+            if (header) header.style.display = 'none';
+            if (main) main.style.display = 'none';
+            if (footer) footer.style.display = 'none';
 
-  console.log('⬅️ ========================================\n');
-});
+            // Show chat iframe
+            const chatContainer = document.getElementById('chatIframeContainer');
+            const chatIframe = document.getElementById('chatIframe');
+
+            if (chatContainer && chatIframe) {
+              // Load chat.html in iframe (only if not already loaded)
+              if (!chatIframe.src || chatIframe.src === '') {
+                chatIframe.src = '/chat.html';
+                console.log('📄 Loading chat.html in iframe');
+              } else {
+                console.log('📄 Chat iframe already loaded - reusing');
+              }
+              chatContainer.classList.remove('hidden');
+              console.log('✅ Chat iframe shown - call UI hidden');
+
+              // CRITICAL: Push history state for proper back button behavior
+              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+              console.log('✅ History state pushed: chat view');
+            }
+
+            console.log('✅ Call remains FULLY ACTIVE in background');
+            console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
+            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
+            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
+          }
+
+          console.log('⬅️ ========================================\n');
+        });
       }
 
       function showChat() {
