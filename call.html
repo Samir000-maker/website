@@ -462,48 +462,8 @@
             if (footer) footer.style.display = '';
 
             console.log('✅ Call UI shown - iframe hidden');
-          } else {
-            // Currently showing call UI - show chat iframe
-            console.log('🔄 Showing chat iframe (call continues in background)');
-            console.log(`   Active peer connections: ${peerConnections.size}`);
-            console.log(`   Local stream tracks: ${localStream?.getTracks()?.length || 0}`);
-
-            // Hide call UI elements
-            const header = document.querySelector('header');
-            const main = document.querySelector('main');
-            const footer = document.querySelector('footer');
-
-            if (header) header.style.display = 'none';
-            if (main) main.style.display = 'none';
-            if (footer) footer.style.display = 'none';
-
-            // Show chat iframe
-            const chatContainer = document.getElementById('chatIframeContainer');
-            const chatIframe = document.getElementById('chatIframe');
-
-            if (chatContainer && chatIframe) {
-              // Load chat.html in iframe (only if not already loaded)
-              if (!chatIframe.src || chatIframe.src === '') {
-                chatIframe.src = '/chat.html';
-                console.log('📄 Loading chat.html in iframe');
-              } else {
-                console.log('📄 Chat iframe already loaded - reusing');
-              }
-              chatContainer.classList.remove('hidden');
-              isInChatIframe = true;
-              console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
-              console.log('✅ Chat iframe shown - call UI hidden');
-
-              // CRITICAL: Push history state for proper back button behavior
-              history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
-              console.log('✅ History state pushed: chat view');
-            }
-
-            console.log('✅ Call remains FULLY ACTIVE in background');
-            console.log(`   Peer connections: ${peerConnections.size} (preserved)`);
-            console.log(`   LocalStream: ${localStream?.getTracks()?.length || 0} tracks (preserved)`);
-            console.log(`   Socket: ${socketInstance?.connected ? 'connected' : 'disconnected'} (preserved)`);
           }
+
 
           console.log('⬅️ ========================================\n');
         });
@@ -599,19 +559,41 @@
         console.log('💬 SHOWING CHAT VIEW');
         console.log('💬 ========================================');
 
-        isInChatView = true;
+        // Check if we already have a chat iframe logic, reuse usage in popstate
+        console.log('🔄 Showing chat iframe (call continues in background)');
 
-        // CRITICAL: Navigate to actual chat page while keeping call alive
-        // Save that we have background call
-        sessionStorage.setItem('hasBackgroundCall', 'true');
+        // Hide call UI elements
+        const header = document.querySelector('header');
+        const main = document.querySelector('main');
+        const footer = document.querySelector('footer');
 
-        console.log('✅ Navigating to chat with background call');
-        console.log(`   PeerConnections: ${peerConnections.size} (will remain connected)`);
-        console.log(`   LocalStream: ${localStream?.getTracks().length} tracks (will remain active)`);
+        if (header) header.style.display = 'none';
+        if (main) main.style.display = 'none';
+        if (footer) footer.style.display = 'none';
 
-        // Navigate to chat page
-        window.location.href = '/chat.html';
+        // Show chat iframe
+        const chatContainer = document.getElementById('chatIframeContainer');
+        const chatIframe = document.getElementById('chatIframe');
 
+        if (chatContainer && chatIframe) {
+          // Load chat.html in iframe (only if not already loaded)
+          if (!chatIframe.src || chatIframe.src === '') {
+            chatIframe.src = '/chat.html';
+            console.log('📄 Loading chat.html in iframe');
+          } else {
+            console.log('📄 Chat iframe already loaded - reusing');
+          }
+          chatContainer.classList.remove('hidden');
+          isInChatIframe = true;
+          console.log("📥 Entered Chat Iframe → isInChatIframe =", isInChatIframe);
+          console.log('✅ Chat iframe shown - call UI hidden');
+
+          // CRITICAL: Push history state for proper back button behavior
+          history.pushState({ view: 'chat', iframe: true }, 'Chat', window.location.href);
+          console.log('✅ History state pushed: chat view');
+        }
+
+        console.log('✅ Call remains FULLY ACTIVE in background');
         console.log('💬 ========================================\n');
       }
 
