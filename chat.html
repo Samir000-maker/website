@@ -1411,6 +1411,18 @@
         }
       });
 
+      // Listen for messages from call iframe
+      window.addEventListener('message', (event) => {
+        if (event.data && event.data.action === 'hideCall') {
+          console.log('📨 Message from call iframe: hideCall');
+          const callIframeContainer = document.getElementById('callIframeContainer');
+          if (callIframeContainer) {
+            callIframeContainer.classList.add('hidden');
+            console.log('✅ Call iframe hidden - chat visible');
+          }
+        }
+      });
+
       // Poll for call state (fallback for same-window updates)
       setInterval(updateActiveCallState, 1000);
 
@@ -5776,40 +5788,23 @@
             console.log(`   activeCallInRoom exists: ${!!activeCallInRoom}`);
 
             if (userInCall) {
-              // User is already in call - show call UI in iframe/overlay
+              // User is already in call - show call iframe or navigate
               console.log('📞 BACK TO CALL MODE');
 
               const activeCallData = JSON.parse(activeCallStr);
               console.log(`   callId: ${activeCallData.callId}`);
-              console.log(`   Call is running in background - will hide chat overlay`);
 
-              if (window.parent && window.parent !== window) {
-                console.log('📱 We are in iframe - posting message to parent');
-                window.parent.postMessage({ action: 'hideChat' }, '*');
+              // Check if call iframe exists (running in background)
+              const callIframeContainer = document.getElementById('callIframeContainer');
+              if (callIframeContainer) {
+                console.log('📱 Call iframe exists - showing it');
+                callIframeContainer.classList.remove('hidden');
               } else {
-                console.log('⚠️ Not in iframe - navigating directly');
+                console.log('⚠️ Call iframe not found - navigating to call.html');
                 window.location.href = '/call.html';
               }
 
-              console.log('🔘 ========================================\n');
             } else {
-              // No active call - join existing call
-              console.log('📞 JOIN EXISTING CALL MODE');
-
-              if (!activeCallInRoom) {
-                console.error('❌ activeCallInRoom is null/undefined!');
-                console.log('   This should not happen - UI should not show Join button');
-                toast('No active call to join', 'warning');
-                console.log('🔘 ========================================\n');
-                return;
-              }
-
-              console.log(`   activeCallInRoom.callId: ${activeCallInRoom.callId}`);
-              console.log(`   activeCallInRoom.callType: ${activeCallInRoom.callType}`);
-              console.log(`   activeCallInRoom.participantCount: ${activeCallInRoom.participantCount}`);
-              console.log(`   roomData.roomId: ${roomData.roomId}`);
-
-              // Add loading state
               joinCallBtn.classList.add('join-btn-loading');
               joinCallBtn.disabled = true;
               console.log('⏳ Join button set to loading state');
