@@ -1356,7 +1356,7 @@
             // CRITICAL: Ensure Join/Back button is updated based on localStorage state
             const userInCall = callData.roomId === roomData?.roomId;
             updateCallButtonState(true, {
-              participantCount: callData.participants?.length || 0,
+              participantCount: callData.participants?.length || activeCallInRoom?.participantCount || 0,
               callId: callData.callId,
               callType: callData.callType
             });
@@ -1421,12 +1421,21 @@
 
       // Listen for messages from call iframe
       window.addEventListener('message', (event) => {
-        if (event.data && event.data.action === 'hideCall') {
-          console.log('📨 Message from call iframe: hideCall');
+        const action = event.data?.action || event.data?.type; // Support both for compatibility
+
+        if (action === 'hideCall' || action === 'REQUEST_SHOW_CHAT') {
+          console.log(`📨 Message from call iframe: ${action}`);
           const callIframeContainer = document.getElementById('callIframeContainer');
           if (callIframeContainer) {
             callIframeContainer.classList.add('hidden');
             console.log('✅ Call iframe hidden - chat visible');
+          }
+        } else if (action === 'REQUEST_SHOW_CALL') {
+          console.log('📨 Message from call iframe: REQUEST_SHOW_CALL');
+          const callIframeContainer = document.getElementById('callIframeContainer');
+          if (callIframeContainer) {
+            callIframeContainer.classList.remove('hidden');
+            console.log('✅ Call iframe shown');
           }
         }
       });
@@ -5928,6 +5937,13 @@
             if (userInCall) {
               // User is already in call - show call iframe or navigate
               console.log('📞 BACK TO CALL MODE');
+
+              // CRITICAL: Check if we are running inside an iframe
+              if (window.parent && window.parent !== window) {
+                console.log('📱 In iframe - sending showCall to parent');
+                window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
+                return;
+              }
 
               const activeCallData = JSON.parse(activeCallStr);
               console.log(`   callId: ${activeCallData.callId}`);
