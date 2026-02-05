@@ -3015,6 +3015,30 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ============================================
+  // TYPING INDICATOR HANDLERS
+  // ============================================
+  socket.on('user_typing', ({ roomId }) => {
+    const user = socketUsers.get(socket.id);
+    if (!user) return;
+
+    // Broadcast typing state to EVERYONE ELSE in the room
+    socket.to(roomId).emit('user_typing', {
+      userId: user.userId,
+      username: user.username
+    });
+  });
+
+  socket.on('user_stop_typing', ({ roomId }) => {
+    const user = socketUsers.get(socket.id);
+    if (!user) return;
+
+    // Broadcast stop state to EVERYONE ELSE in the room
+    socket.to(roomId).emit('user_stop_typing', {
+      userId: user.userId
+    });
+  });
+
   socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
     try {
       const user = socketUsers.get(socket.id);
