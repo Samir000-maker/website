@@ -1029,12 +1029,44 @@
           // CRITICAL FIX: Store object with context and stop function
           audioContexts.set(userId, {
             context: audioContext,
-            stop: () => { stopped = true; }
+            stop: () => {
+              stopped = true;
+              if (audioContext.state !== 'closed') {
+                audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
+              }
+            }
           });
-        } catch (e) {
-          console.error('Audio detection error:', e);
+
+          // ✅ Handle initial suspension (browser auto-play policy)
+          if (audioContext.state === 'suspended') {
+            console.warn(`⚠️ AudioContext for ${userId} is suspended. Waiting for interaction...`);
+          }
+
+        } catch (error) {
+          console.error(`❌ setupAudioDetection error for ${userId}:`, error);
         }
       }
+
+      // ✅ GLOBAL RESUME FOR AUDIO CONTEXTS
+      function resumeAllAudioContexts() {
+        let resumedCount = 0;
+        audioContexts.forEach(({ context }, userId) => {
+          if (context.state === 'suspended') {
+            context.resume().then(() => {
+              console.log(`✅ Resumed AudioContext for ${userId}`);
+            }).catch(e => console.error(`❌ Resume failed for ${userId}:`, e));
+            resumedCount++;
+          }
+        });
+        return resumedCount;
+      }
+
+      // Resume on first interaction
+      ['click', 'touchstart', 'keydown'].forEach(evt => {
+        window.addEventListener(evt, () => {
+          resumeAllAudioContexts();
+        }, { once: true, passive: true });
+      });
 
       async function initLocalMedia() {
         const MAX_RETRIES = 3;
@@ -1319,8 +1351,35 @@
           candidatesReceived: 0,
           candidatesSent: 0,
           iceRestartCount: 0,
-          lastIceCandidateTime: 0
+          stunAttemptCount: 0, // ✅ Track STUN attempts
+          lastIceCandidateTime: 0,
+          watchdogTimer: null // ✅ For fast retry
         });
+
+        const stats = connectionStats.get(userId);
+
+        // ✅ START RETRY WATCHDOG (STUN ONLY)
+        if (!useTurnFallback) {
+          console.log(`⏱️ [ICE] Starting 7s watchdog for ${userId}`);
+          stats.watchdogTimer = setTimeout(() => {
+            const pcCurrent = peerConnections.get(userId);
+            if (pcCurrent &&
+              pcCurrent.iceConnectionState !== 'connected' &&
+              pcCurrent.iceConnectionState !== 'completed') {
+              console.warn(`⏱️ [ICE] Watchdog triggered for ${userId} (state: ${pcCurrent.iceConnectionState})`);
+
+              // Simulate failure to trigger retry logic
+              if (pcCurrent.oniceconnectionstatechange) {
+                // We just want to trigger the 'failed' block in our handler
+                // Since the real state hasn't changed, we manually call it with a fake failure
+                // or just call createOffer directly if we want to be more direct.
+                // However, our handler already has the retry logic, so let's call it.
+                // We'll modify the handler to accept an optional 'forceState' or just call the logic.
+                handleIceFailure(userId);
+              }
+            }
+          }, 7000); // 7 seconds timeout for STUN
+        }
 
         const tracks = localStream.getTracks();
         console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
@@ -1329,6 +1388,16 @@
           pc.addTrack(track, localStream);
           console.log(`   ➕ ${track.kind} track (id=${track.id.substring(0, 8)}..., enabled=${track.enabled})`);
         });
+
+        // ✅ PERFECT NEGOTIATION: Handle onnegotiationneeded
+        pc.onnegotiationneeded = async () => {
+          try {
+            console.log(`🔄 [PC] Negotiation needed for ${userId}`);
+            await createOffer(userId);
+          } catch (err) {
+            console.error(`❌ Negotiation error for ${userId}:`, err);
+          }
+        };
 
         // CRITICAL: Add ontrack handler to receive remote media
         pc.ontrack = (event) => {
@@ -1486,6 +1555,15 @@
 
           console.log(`🧊 [ICE] Connection state for ${userId}: ${state}`);
 
+          // ✅ Stop watchdog if connected
+          if (state === 'connected' || state === 'completed') {
+            if (stats && stats.watchdogTimer) {
+              clearTimeout(stats.watchdogTimer);
+              stats.watchdogTimer = null;
+              console.log(`⏱️ [ICE] Watchdog stopped for ${userId} (connected)`);
+            }
+          }
+
           if (state === 'connected' || state === 'completed') {
             console.log(`✅ [ICE] Connected to ${userId}`);
 
@@ -1560,52 +1638,7 @@
 
           } else if (state === 'failed') {
             console.error(`❌ [ICE] Connection failed for ${userId}`);
-
-            // ✅ TURN FALLBACK LOGIC
-            if (stats && stats.iceRestartCount < 1 && !useTurnFallback) {
-              stats.iceRestartCount++;
-
-              console.warn(`🔄 [FALLBACK] Connection failed with STUN-only mode`);
-              console.warn(`   Attempt ${stats.iceRestartCount}: Retrying with STUN only...`);
-
-              setTimeout(() => {
-                if (pc.connectionState !== 'closed') {
-                  createOffer(userId);
-                }
-              }, 1000);
-
-            } else if (stats && stats.iceRestartCount >= 1 && !useTurnFallback) {
-              // Second failure - enable TURN fallback
-              console.error(`❌ [FALLBACK] STUN-only failed after 2 attempts`);
-              console.warn(`🔄 Enabling TURN fallback for this call...`);
-              console.warn(`   This indicates symmetric NAT or restrictive firewall`);
-
-              useTurnFallback = true;
-
-              // Notify user
-              toast('Connection issues detected. Trying alternative route...', 'warning');
-
-              // Refetch ICE servers with TURN included
-              fetchIceServers().then(() => {
-                console.log(`✅ TURN servers loaded for fallback`);
-                console.log(`   Attempting ICE restart with TURN...`);
-
-                // Close old peer connection
-                pc.close();
-                peerConnections.delete(userId);
-
-                // Recreate with TURN-enabled config
-                setTimeout(() => {
-                  createOffer(userId);
-                }, 1500);
-              });
-
-            } else if (useTurnFallback && stats && stats.iceRestartCount >= 2) {
-              // Even TURN failed
-              console.error(`❌ [CRITICAL] Connection failed even with TURN fallback`);
-              toast('Unable to establish connection. Please check your network.', 'error');
-            }
-
+            handleIceFailure(userId);
           } else if (state === 'disconnected') {
             console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
 
@@ -1699,6 +1732,57 @@
         return pc;
       }
 
+      // ✅ CENTRALIZED ICE FAILURE HANDLER
+      function handleIceFailure(userId) {
+        const pc = peerConnections.get(userId);
+        const stats = connectionStats.get(userId);
+        if (!pc || !stats) return;
+
+        // Clear watchdog
+        if (stats.watchdogTimer) {
+          clearTimeout(stats.watchdogTimer);
+          stats.watchdogTimer = null;
+        }
+
+        const MAX_STUN_ATTEMPTS = 3;
+        const currentAttempts = stats.stunAttemptCount || 0;
+
+        if (!useTurnFallback && currentAttempts < MAX_STUN_ATTEMPTS) {
+          stats.stunAttemptCount = currentAttempts + 1;
+          stats.iceRestartCount++;
+
+          console.warn(`🔄 [RETRY] Triggering STUN retry ${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS} for ${userId}`);
+          toast(`Connection issues... Retrying (${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS})`, 'warning');
+
+          // Small delay before retry
+          setTimeout(() => {
+            const currentPC = peerConnections.get(userId);
+            if (currentPC && currentPC.connectionState !== 'closed') {
+              console.log(`🚀 [RETRY] Executing createOffer for ${userId}`);
+              createOffer(userId);
+            }
+          }, 500);
+
+        } else if (!useTurnFallback && currentAttempts >= MAX_STUN_ATTEMPTS) {
+          console.error(`❌ [FALLBACK] STUN failed after ${MAX_STUN_ATTEMPTS} attempts. Switching to TURN.`);
+          useTurnFallback = true;
+          toast('Switching to alternative connection path...', 'warning');
+
+          fetchIceServers().then(() => {
+            console.log(`✅ TURN configuration loaded`);
+            const currentPC = peerConnections.get(userId);
+            if (currentPC) currentPC.close();
+            peerConnections.delete(userId);
+
+            // Re-init with TURN
+            setTimeout(() => createOffer(userId), 1000);
+          });
+        } else if (useTurnFallback) {
+          console.error(`❌ [CRITICAL] Connection failed even with TURN fallback for ${userId}`);
+          toast('Unstable network connection detected.', 'error');
+        }
+      }
+
 
       async function createOffer(userId) {
         // CRITICAL: Check if already making offer
@@ -1775,35 +1859,36 @@
 
             console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
 
-            let pc = peerConnections.get(fromUserId);
+            // ✅ PERFECT NEGOTIATION: Collision detection
+            const pc = peerConnections.get(fromUserId);
+            const isMakingOffer = makingOffer.get(fromUserId);
+            const signalingState = pc ? pc.signalingState : 'stable';
 
-            // CRITICAL: Check for signaling state collision
-            const offerCollision = pc &&
-              (pc.signalingState !== 'stable' && pc.signalingState !== 'have-local-offer');
+            const offerCollision = (isMakingOffer || signalingState !== 'stable');
 
             // Determine polite/impolite based on user ID comparison
             const polite = currentUser.userId < fromUserId;
 
-            console.log(`   Polite: ${polite}, Offer collision: ${offerCollision}`);
+            console.log(`   Collision: ${offerCollision}, Polite: ${polite}, State: ${signalingState}`);
 
-            // Impolite peer ignores colliding offers
-            if (offerCollision && !polite) {
-              console.log(`   🚫 Impolite peer ignoring colliding offer from ${fromUserId}`);
-              return;
-            }
-
-            // If PC exists and we have a collision, polite peer uses rollback
-            if (offerCollision && polite) {
-              console.log(`   🔄 Polite peer performing rollback for ${fromUserId}`);
+            if (offerCollision) {
+              if (!polite) {
+                console.log(`   🚫 Impolite peer ignoring colliding offer from ${fromUserId}`);
+                return;
+              }
+              console.log(`   🔄 Polite peer rolling back for ${fromUserId}`);
               await pc.setLocalDescription({ type: 'rollback' });
               console.log(`   ✅ Rollback complete`);
             }
 
             // Create new PC if needed or if closed
-            if (!pc || pc.connectionState === 'closed') {
+            let currentPC = pc;
+            if (!currentPC || currentPC.connectionState === 'closed') {
               console.log(`🔧 Creating new PeerConnection for ${fromUserId}`);
-              pc = createPC(fromUserId);
+              currentPC = createPC(fromUserId);
             }
+
+            pc = currentPC; // Ensure we use the right one
 
             console.log(`🔧 Setting remote description (offer) for ${fromUserId}`);
             console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
@@ -1909,9 +1994,9 @@
 
             console.log(`📊 PC state before handling answer: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
 
-            // CRITICAL: Only accept answer if we're in the right state
+            // ✅ PERFECT NEGOTIATION: State check
             if (pc.signalingState !== 'have-local-offer') {
-              console.warn(`⚠️ Ignoring answer from ${fromUserId} - wrong state: ${pc.signalingState}`);
+              console.warn(`⚠️ Ignoring answer from ${fromUserId} in ${pc.signalingState} state`);
               return;
             }
 
