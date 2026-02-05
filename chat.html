@@ -1340,6 +1340,17 @@
           if (activeCallConnectionState !== newState) {
             console.log(`📞 Active call state changed: ${activeCallConnectionState} → ${newState}`);
             activeCallConnectionState = newState;
+
+            // CRITICAL: Hide incoming call modal if user is now in an active call state
+            if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected') {
+              const modal = document.getElementById('incomingCallModal');
+              if (modal && !modal.classList.contains('hidden')) {
+                console.log('🧹 Hiding incoming call modal - user is now in an active/initiating callState');
+                modal.classList.add('hidden');
+                pendingCallData = null;
+              }
+            }
+
             updateCallButtonStates();
 
             // CRITICAL: Ensure Join/Back button is updated based on localStorage state
@@ -2926,6 +2937,12 @@
       }
 
       function showCachedCallModal(callData) {
+        // GUARD: Don't show if already in/initiating a call
+        if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall) {
+          console.log('📞 Skipping cached call modal - user already in/initiating call');
+          return;
+        }
+
         console.log('📞 ========================================');
         console.log('📞 SHOWING CACHED INCOMING CALL');
         console.log('📞 ========================================');
@@ -5254,6 +5271,12 @@
         });
 
         socketInstance.on('incoming_call', (data) => {
+          // GUARD: Don't show if already in/initiating a call
+          if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall) {
+            console.log('📞 Skipping incoming call modal - user already in/initiating call');
+            return;
+          }
+
           console.log('📞 ========================================');
           console.log('📞 INCOMING_CALL EVENT RECEIVED');
           console.log('📞 ========================================');
@@ -5296,11 +5319,13 @@
 
           // Show modal after 2 second delay
           setTimeout(() => {
-            if (pendingCallData && pendingCallData.callId === data.callId) {
+            // Re-check guard conditions before showing
+            const isBusy = activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall;
+            if (pendingCallData && pendingCallData.callId === data.callId && !isBusy) {
               incomingCallModal?.classList.remove('hidden');
               console.log(`✅ Showing incoming call modal after 2s delay`);
             } else {
-              console.log(`📞 Call already handled, skipping modal display`);
+              console.log(`📞 Call already handled or user became busy, skipping modal display`);
             }
           }, 2000);
 
