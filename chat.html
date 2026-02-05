@@ -674,6 +674,65 @@
       opacity: 0.7;
     }
 
+    /* Typing Indicator Styles */
+    .typing-indicator-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      margin-bottom: 4px;
+      animation: slideInUp 0.2s ease-out;
+    }
+
+    .typing-dots {
+      display: flex;
+      gap: 4px;
+    }
+
+    .typing-dot {
+      width: 6px;
+      height: 6px;
+      background-color: #33bfcc;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(51, 191, 204, 0.4);
+      animation: typing-bounce 1.4s infinite ease-in-out;
+    }
+
+    .typing-dot:nth-child(1) {
+      animation-delay: -0.32s;
+    }
+
+    .typing-dot:nth-child(2) {
+      animation-delay: -0.16s;
+    }
+
+    @keyframes typing-bounce {
+
+      0%,
+      80%,
+      100% {
+        transform: scale(0);
+        opacity: 0.3;
+      }
+
+      40% {
+        transform: scale(1.0);
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideInUp {
+      from {
+        transform: translateY(10px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
 
     /* ============================================
    EMOJI PICKER BOTTOM SHEET - FUTURISTIC THEME
@@ -1157,6 +1216,18 @@
                 <span class="material-symbols-outlined">close</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div id="typingIndicator" class="hidden">
+          <div class="typing-indicator-container">
+            <div class="typing-dots">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+            <span id="typingText" class="text-xs text-gray-400 font-medium">Someone is typing...</span>
           </div>
         </div>
 
@@ -4230,6 +4301,65 @@
           showCachedCallModal(data);
         });
 
+        // ============================================
+        // TYPING INDICATOR LOGIC
+        // ============================================
+        const typingUsers = new Map(); // userId -> username
+        let typingTimeout = null;
+        let isCurrentlyTyping = false;
+
+        function updateTypingUI() {
+          const typingIndicator = document.getElementById('typingIndicator');
+          const typingText = document.getElementById('typingText');
+
+          if (typingUsers.size > 0) {
+            const names = Array.from(typingUsers.values());
+            if (names.length === 1) {
+              typingText.textContent = `${names[0]} is typing...`;
+            } else if (names.length === 2) {
+              typingText.textContent = `${names[0]} and ${names[1]} are typing...`;
+            } else {
+              typingText.textContent = "Multiple people are typing...";
+            }
+            typingIndicator.classList.remove('hidden');
+          } else {
+            typingIndicator.classList.add('hidden');
+          }
+        }
+
+        socketInstance.on('user_typing', ({ userId, username }) => {
+          typingUsers.set(userId, username);
+          updateTypingUI();
+        });
+
+        socketInstance.on('user_stop_typing', ({ userId }) => {
+          typingUsers.delete(userId);
+          updateTypingUI();
+        });
+
+        const stopTyping = () => {
+          if (isCurrentlyTyping) {
+            isCurrentlyTyping = false;
+            socketInstance.emit('user_stop_typing', { roomId: roomData.roomId });
+          }
+        };
+
+        const handleTyping = () => {
+          if (!isCurrentlyTyping) {
+            isCurrentlyTyping = true;
+            socketInstance.emit('user_typing', { roomId: roomData.roomId });
+          }
+
+          if (typingTimeout) clearTimeout(typingTimeout);
+          typingTimeout = setTimeout(stopTyping, 2000); // 2 seconds of silence = stop
+        };
+
+        // Add event listener to message input
+        const messageInput = document.getElementById('messageInput');
+        if (messageInput) {
+          messageInput.addEventListener('input', handleTyping);
+        }
+
         socketInstance.on('cached_call_invalid', (data) => {
           console.log('❌ Cached call invalid:', data.callId);
           localStorage.removeItem(CACHED_CALL_KEY);
@@ -6234,7 +6364,14 @@
             // ============================================
             // CLEAR INPUT AND ATTACHMENTS
             // ============================================
-            if (messageInput) messageInput.value = '';
+            if (messageInput) {
+              messageInput.value = '';
+              messageInput.style.height = 'auto';
+            }
+
+            // Clear typing state immediately on send
+            stopTyping();
+            if (typingTimeout) clearTimeout(typingTimeout);
 
             if (pendingAttachment) {
               hideAttachmentPreview();
@@ -6291,6 +6428,7 @@
 
           // socketInstance.disconnect() and leave_room removed to allow for session persistence
           // The server DISCONNECT_GRACE_PERIOD will handle real departures.
+          stopTyping();
           if (timerInterval) clearInterval(timerInterval);
         });
       }
