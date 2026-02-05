@@ -1392,6 +1392,11 @@
         // ✅ PERFECT NEGOTIATION: Handle onnegotiationneeded
         pc.onnegotiationneeded = async () => {
           try {
+            // Check if we already have a connection establishing
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+              console.log(`🔄 [PC] Negotiation needed for ${userId}, but already connected. Skipping.`);
+              return;
+            }
             console.log(`🔄 [PC] Negotiation needed for ${userId}`);
             await createOffer(userId);
           } catch (err) {
@@ -1757,10 +1762,13 @@
           // Small delay before retry
           setTimeout(() => {
             const currentPC = peerConnections.get(userId);
-            if (currentPC && currentPC.connectionState !== 'closed') {
-              console.log(`🚀 [RETRY] Executing createOffer for ${userId}`);
-              createOffer(userId);
+            if (currentPC) {
+              console.log(`🧹 Closing old PC for retry to ${userId}`);
+              currentPC.close();
+              peerConnections.delete(userId);
             }
+            console.log(`🚀 [RETRY] Executing createOffer for ${userId}`);
+            createOffer(userId);
           }, 500);
 
         } else if (!useTurnFallback && currentAttempts >= MAX_STUN_ATTEMPTS) {
@@ -1796,10 +1804,15 @@
 
           console.log(`📤 Creating offer for ${userId}`);
 
-          // Small delay to ensure remote peer has fully joined
-          await new Promise(resolve => setTimeout(resolve, 500));
+          let pc = peerConnections.get(userId);
 
-          const pc = createPC(userId);
+          // ✅ PERFECT NEGOTIATION: Reuse PC if exists and not closed
+          if (!pc || pc.connectionState === 'closed') {
+            console.log(`🔧 Creating NEW PeerConnection for ${userId} (initial/retry)`);
+            pc = createPC(userId);
+          } else {
+            console.log(`🔄 Reusing EXISTING PeerConnection for ${userId} (renegotiation)`);
+          }
 
           // Validate local stream
           if (!localStream || localStream.getTracks().length === 0) {
@@ -1860,7 +1873,7 @@
             console.log(`✅ LocalStream validated: ${localStream.getTracks().length} tracks`);
 
             // ✅ PERFECT NEGOTIATION: Collision detection
-            const pc = peerConnections.get(fromUserId);
+            let pc = peerConnections.get(fromUserId);
             const isMakingOffer = makingOffer.get(fromUserId);
             const signalingState = pc ? pc.signalingState : 'stable';
 
