@@ -4026,15 +4026,8 @@
                 await new Promise(resolve => setTimeout(resolve, 300));
               }
 
-              clearChatState(true);
-
+              exitRoomSequence().catch(console.error);
               resolve(true);
-
-              // 5. Navigate - this will handle both iframe and standalone cases
-              setTimeout(() => {
-                console.log('✅ Cleanup complete - initiating navigation');
-                cleanupParentCallPage();
-              }, 100);
 
             }, { once: true });
           }
@@ -4044,6 +4037,54 @@
       // ============================================
       // BACK BUTTON HANDLER
       // ============================================
+      async function exitRoomSequence() {
+        console.log('🚪 ========================================');
+        console.log('🚪 STARTING EXIT ROOM SEQUENCE');
+        console.log('🚪 ========================================');
+
+        // 1. Stop all monitoring and timers
+        stopCachedCallMonitoring();
+        if (timerInterval) clearInterval(timerInterval);
+
+        // 2. Cleanup active call if exists
+        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+        if (activeCallStr) {
+          console.log('📞 Active call detected - cleaning up...');
+          try {
+            const callData = JSON.parse(activeCallStr);
+            if (socketInstance && socketInstance.connected) {
+              socketInstance.emit('leave_call', { callId: callData.callId });
+              // Small delay to ensure emission
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          } catch (e) {
+            console.error('❌ Error during call cleanup:', e);
+          }
+
+          // Clear storage regardless of socket state
+          localStorage.removeItem(ACTIVE_CALL_KEY);
+          sessionStorage.removeItem('hasBackgroundCall');
+          sessionStorage.removeItem('returningFromCall');
+          sessionStorage.removeItem('backgroundCallMode');
+          sessionStorage.removeItem('returningToBackgroundCall');
+          console.log('✅ Call storage cleared');
+        }
+
+        // 3. Leave the chat room
+        if (socketInstance && socketInstance.connected) {
+          console.log('📤 Emitting leave_room...');
+          socketInstance.emit('leave_room');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        // 4. Clear chat state (deletes files, etc)
+        await clearChatState(true);
+
+        // 5. Navigate (this handles iframe + standalone redirections)
+        console.log('✅ Exit sequence complete - initiating redirection');
+        cleanupParentCallPage();
+        console.log('🚪 ========================================\n');
+      }
 
       function setupBackButtonHandler() {
         const TRAP_STATE = { page: 'chat', trap: true };
@@ -4092,11 +4133,7 @@
               // ... minimal cleanup if needed, but 'leaveBtn' handler does it better
             }
 
-            clearChatState(true);
-
-            // Allow navigation to proceed
-            // We use replaceState to go back "for real" or just assign location
-            window.location.href = '/mood.html';
+            exitRoomSequence().catch(console.error);
           } else {
             console.log('❌ User staying in chat');
             // State is already pushed back, so we stay here
@@ -4131,11 +4168,15 @@
         }
 
         if (remaining === 0) {
-          console.error('❌ Room expired - redirecting');
-          if (timerInterval) clearInterval(timerInterval);
+          console.error('❌ Room expired - initiating exit sequence');
           toast('Room has expired', 'warning');
-          clearChatState(true);
-          setTimeout(() => window.location.href = '/mood.html', 2000);
+
+          // CRITICAL: Use the same sequence as manual leave
+          exitRoomSequence().catch(e => {
+            console.error('❌ Error in periodic room exit sequence:', e);
+            // Fallback: emergency redirection
+            window.location.href = '/mood.html';
+          });
         }
       };
 
@@ -4935,20 +4976,8 @@
             }
 
             // Clear all storage
-            clearChatState(true);
-            localStorage.removeItem(ACTIVE_CALL_KEY);
-            sessionStorage.removeItem('hasBackgroundCall');
-            sessionStorage.removeItem('returningFromCall');
-            sessionStorage.removeItem('backgroundCallMode');
-            sessionStorage.removeItem('returningToBackgroundCall');
-
-            console.error('🗑️ Cleared all storage due to room error');
-
-            // Navigate and cleanup parent if in iframe
-            setTimeout(() => {
-              console.error('🔄 Navigating to mood.html after room error');
-              cleanupParentCallPage();
-            }, 2000);
+            console.error('🗑️ Using unified exit sequence due to room error');
+            exitRoomSequence().catch(console.error);
 
             console.error('❌ ========================================\n');
             return;
@@ -4987,19 +5016,8 @@
             }
 
             // Clear all storage
-            clearChatState(true);
-            localStorage.removeItem(ACTIVE_CALL_KEY);
-            sessionStorage.removeItem('hasBackgroundCall');
-            sessionStorage.removeItem('returningFromCall');
-            sessionStorage.removeItem('backgroundCallMode');
-            sessionStorage.removeItem('returningToBackgroundCall');
-
-            console.error('🗑️ Cleared all storage due to room expiry');
-
-            setTimeout(() => {
-              console.error('🔄 Navigating to mood.html after room expiry');
-              cleanupParentCallPage();
-            }, 2000);
+            console.error('🗑️ Using unified exit sequence due to room expiry error');
+            exitRoomSequence().catch(console.error);
 
             console.error('❌ ========================================\n');
             return;
@@ -5252,8 +5270,7 @@
 
           if (data.remainingUsers <= 1) {
             toast('Room closing...', 'warning');
-            clearChatState(true);
-            setTimeout(() => window.location.href = '/mood.html', 2000);
+            exitRoomSequence().catch(console.error);
           }
         });
 
@@ -6193,57 +6210,8 @@
         }
 
         leaveBtn?.addEventListener('click', async () => {
-          console.log('🚪 Leave button clicked - starting cleanup sequence');
-          stopCachedCallMonitoring();
-
-          // CRITICAL: Check if there's a background call running
-          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-
-          if (activeCallStr) {
-            console.log('📞 Active call detected - cleaning up before leaving');
-
-            try {
-              const callData = JSON.parse(activeCallStr);
-
-              // 1. Emit leave_call to server
-              if (socketInstance && socketInstance.connected) {
-                console.log('📤 Emitting leave_call to server...');
-                socketInstance.emit('leave_call', { callId: callData.callId });
-
-                // Wait for server to process the leave_call
-                await new Promise(resolve => setTimeout(resolve, 500));
-                console.log('✅ Leave_call processed');
-              }
-
-              // 2. Clear all call-related storage
-              localStorage.removeItem(ACTIVE_CALL_KEY);
-              sessionStorage.removeItem('hasBackgroundCall');
-              sessionStorage.removeItem('returningFromCall');
-              sessionStorage.removeItem('backgroundCallMode');
-              sessionStorage.removeItem('returningToBackgroundCall');
-
-              console.log('✅ All call data cleared');
-
-            } catch (e) {
-              console.error('❌ Error during call cleanup:', e);
-            }
-          }
-
-          // 3. Leave the chat room
-          if (socketInstance && socketInstance.connected) {
-            console.log('📤 Emitting leave_room...');
-            socketInstance.emit('leave_room');
-
-            // Wait for server to process
-            await new Promise(resolve => setTimeout(resolve, 300));
-          }
-
-          // 4. Clear chat state
-          clearChatState(true);
-
-          // 5. Navigate - this will handle both iframe and standalone cases
-          console.log('✅ Cleanup complete - initiating navigation');
-          cleanupParentCallPage();
+          console.log('🚪 Leave button clicked - initiating exit sequence');
+          await exitRoomSequence();
         });
 
         // Visibility change
