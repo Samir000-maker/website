@@ -27,7 +27,7 @@ class TabManager {
     // ✅ CRITICAL FIX: Use sessionStorage to persist tab ID across page navigation
     // sessionStorage persists within the SAME browser tab/window, but is unique per tab
     let existingTabId = sessionStorage.getItem('vibe_tab_id');
-    
+
     if (existingTabId) {
       // This is a page navigation within the same tab
       this.tabId = existingTabId;
@@ -38,36 +38,37 @@ class TabManager {
       sessionStorage.setItem('vibe_tab_id', this.tabId);
       console.log(`📱 [TabManager] Created NEW tab ID: ${this.tabId} (new tab)`);
     }
-    
+
     this.channelName = 'vibe_app_tab_control';
     this.channel = new BroadcastChannel(this.channelName);
     this.isActive = false; // ❌ CRITICAL: Start as INACTIVE until proven otherwise
     this.isBlocked = false;
     this.heartbeatInterval = null;
     this.initPromise = null;
-    
+    this.isChannelClosed = false; // ✅ Track closure state
+
     // ✅ CRITICAL: Synchronous check FIRST before anything else
     this.initPromise = this.immediateBlockCheck();
   }
-  
+
   /**
    * ✅ CRITICAL: Synchronous + async check to block IMMEDIATELY
    */
   async immediateBlockCheck() {
     console.log(`🔍 [TabManager] Checking for existing tabs...`);
-    
+
     return new Promise((resolve) => {
       let responseReceived = false;
       const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-      
+
       // ✅ Listen for ANY existing tab response
       const checkHandler = (event) => {
         const { type, tabId, timestamp } = event.data;
-        
+
         if (type === 'HEARTBEAT' && tabId !== this.tabId) {
           console.log(`⚠️ [TabManager] Detected existing tab: ${tabId}`);
           const theirTimestamp = timestamp;
-          
+
           // If their tab is OLDER (lower timestamp), we MUST block
           if (theirTimestamp < ourTimestamp) {
             console.error(`🚫 [TabManager] BLOCKING THIS TAB - older tab exists`);
@@ -78,20 +79,22 @@ class TabManager {
           }
         }
       };
-      
+
       this.channel.addEventListener('message', checkHandler);
-      
-      // ✅ Send ping to existing tabs
-      this.channel.postMessage({
-        type: 'HEARTBEAT_REQUEST',
-        tabId: this.tabId,
-        timestamp: ourTimestamp
-      });
-      
+
+      // ✅ Send ping to existing tabs (if not closed)
+      if (!this.isChannelClosed) {
+        this.channel.postMessage({
+          type: 'HEARTBEAT_REQUEST',
+          tabId: this.tabId,
+          timestamp: ourTimestamp
+        });
+      }
+
       // ✅ Wait 200ms for response (if no response, we're the first tab)
       setTimeout(() => {
         this.channel.removeEventListener('message', checkHandler);
-        
+
         if (!responseReceived) {
           console.log(`✅ [TabManager] No existing tabs - this tab is ACTIVE`);
           this.isActive = true;
@@ -102,46 +105,46 @@ class TabManager {
       }, 200);
     });
   }
-  
+
   /**
    * ✅ CRITICAL: Block tab IMMEDIATELY with no async operations
    */
   blockTabImmediately() {
     console.error(`🚫 [TabManager] IMMEDIATE BLOCK: ${this.tabId}`);
-    
+
     this.isBlocked = true;
     this.isActive = false;
-    
+
     // ✅ Show blocking overlay IMMEDIATELY (synchronous DOM operation)
     this.showBlockingOverlay();
-    
+
     // ✅ Dispatch block event IMMEDIATELY
-    window.dispatchEvent(new CustomEvent('tab_blocked', { 
-      detail: { tabId: this.tabId, immediate: true } 
+    window.dispatchEvent(new CustomEvent('tab_blocked', {
+      detail: { tabId: this.tabId, immediate: true }
     }));
-    
+
     // ✅ Prevent ALL JavaScript execution
     this.killAllActivity();
   }
-  
+
   /**
    * ✅ CRITICAL: Stop ALL activity in blocked tab
    */
   killAllActivity() {
     console.log(`💀 [TabManager] Killing all activity in blocked tab`);
-    
+
     // Clear ALL intervals and timeouts
     for (let i = 1; i < 99999; i++) {
       window.clearInterval(i);
       window.clearTimeout(i);
     }
-    
+
     // Override critical functions to prevent any activity
     window.fetch = () => Promise.reject(new Error('Tab blocked'));
-    window.XMLHttpRequest = function() { 
-      throw new Error('Tab blocked'); 
+    window.XMLHttpRequest = function () {
+      throw new Error('Tab blocked');
     };
-    
+
     // Prevent socket connections
     if (typeof io !== 'undefined') {
       window.io = () => {
@@ -149,20 +152,20 @@ class TabManager {
         return null;
       };
     }
-    
+
     console.log(`✅ [TabManager] All activity killed`);
   }
-  
+
   setupMessageHandlers() {
     console.log(`📡 [TabManager] Setting up message handlers`);
-    
+
     this.channel.addEventListener('message', (event) => {
       const { type, tabId, timestamp } = event.data;
-      
+
       switch (type) {
         case 'HEARTBEAT_REQUEST':
           // Someone is checking if we exist - respond immediately
-          if (this.isActive && !this.isBlocked) {
+          if (this.isActive && !this.isBlocked && !this.isChannelClosed) {
             this.channel.postMessage({
               type: 'HEARTBEAT',
               tabId: this.tabId,
@@ -170,13 +173,13 @@ class TabManager {
             });
           }
           break;
-          
+
         case 'TAB_CLOSING':
           // A tab is closing
           if (tabId !== this.tabId && this.isBlocked) {
             const theirTimestamp = timestamp;
             const ourTimestamp = parseInt(this.tabId.split('_')[1]);
-            
+
             // If it was the older tab, unblock
             if (theirTimestamp < ourTimestamp) {
               console.log(`✅ [TabManager] Older tab closed, unblocking`);
@@ -186,23 +189,25 @@ class TabManager {
           break;
       }
     });
-    
+
     // Cleanup on tab close
     window.addEventListener('beforeunload', () => {
-      this.channel.postMessage({
-        type: 'TAB_CLOSING',
-        tabId: this.tabId,
-        timestamp: parseInt(this.tabId.split('_')[1])
-      });
+      if (!this.isChannelClosed) {
+        this.channel.postMessage({
+          type: 'TAB_CLOSING',
+          tabId: this.tabId,
+          timestamp: parseInt(this.tabId.split('_')[1])
+        });
+      }
       this.cleanup();
     });
   }
-  
+
   startHeartbeat() {
     console.log(`💓 [TabManager] Starting heartbeat`);
-    
+
     this.heartbeatInterval = setInterval(() => {
-      if (this.isActive && !this.isBlocked) {
+      if (this.isActive && !this.isBlocked && !this.isChannelClosed) {
         this.channel.postMessage({
           type: 'HEARTBEAT',
           tabId: this.tabId,
@@ -211,21 +216,21 @@ class TabManager {
       }
     }, 2000);
   }
-  
+
   unblockTab() {
     console.log(`✅ [TabManager] UNBLOCKING: ${this.tabId}`);
-    
+
     this.isBlocked = false;
     this.isActive = true;
-    
+
     // Remove blocking overlay
     const overlay = document.getElementById('blocked-tab-overlay');
     if (overlay) overlay.remove();
-    
+
     // Reload to restore normal functionality
     window.location.reload();
   }
-  
+
   showBlockingOverlay() {
     const overlay = document.createElement('div');
     overlay.id = 'blocked-tab-overlay';
@@ -244,7 +249,7 @@ class TabManager {
       color: white;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     `;
-    
+
     overlay.innerHTML = `
       <div style="text-align: center; max-width: 500px; padding: 40px;">
         <svg width="100" height="100" viewBox="0 0 24 24" fill="none" style="margin-bottom: 32px; opacity: 0.7;">
@@ -275,16 +280,26 @@ class TabManager {
         </button>
       </div>
     `;
-    
+
     document.body.appendChild(overlay);
     console.log(`🚫 [TabManager] Blocking overlay shown`);
   }
-  
+
   cleanup() {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
-    this.channel.close();
+
+    if (!this.isChannelClosed && this.channel) {
+      try {
+        this.isChannelClosed = true;
+        this.channel.close();
+        console.log('✅ [TabManager] Channel closed safely');
+      } catch (e) {
+        console.warn('⚠️ [TabManager] Error closing channel:', e);
+      }
+    }
     // Note: We intentionally do NOT clear sessionStorage here
     // This allows the same tab ID to persist across page navigation
   }
@@ -299,12 +314,12 @@ window.tabManager = tabManager;
 (async () => {
   console.log(`⏳ [App] Waiting for tab validation...`);
   const isActive = await tabManager.initPromise;
-  
+
   if (!isActive) {
     console.error(`🚫 [App] This tab is BLOCKED - stopping all initialization`);
     return; // ❌ STOP HERE - don't initialize anything
   }
-  
+
   console.log(`✅ [App] Tab is active - continuing initialization`);
 })();
 
@@ -313,7 +328,7 @@ window.addEventListener('tab_blocked', (e) => {
   console.error(`🚫 [App] TAB_BLOCKED EVENT - immediate shutdown`);
   console.error(`   TabId: ${e.detail.tabId}`);
   console.error(`   Immediate: ${e.detail.immediate}`);
-  
+
   // Stop socket if exists
   if (window.socket && window.socket.instance) {
     console.log(`🔌 [App] Disconnecting socket`);
@@ -321,17 +336,17 @@ window.addEventListener('tab_blocked', (e) => {
     window.socket.instance = null;
     window.socket.connected = false;
   }
-  
+
   // Override all network functions
   window.fetch = () => Promise.reject(new Error('Tab blocked'));
-  window.XMLHttpRequest = function() { throw new Error('Tab blocked'); };
-  
+  window.XMLHttpRequest = function () { throw new Error('Tab blocked'); };
+
   // Clear all intervals/timeouts
   for (let i = 1; i < 99999; i++) {
     window.clearInterval(i);
     window.clearTimeout(i);
   }
-  
+
   console.error(`💀 [App] All activity terminated`);
 });
 
@@ -383,7 +398,7 @@ const API_BASE_URL = (() => {
     if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
       return 'https://website-hdem.onrender.com';
     }
-  } catch {}
+  } catch { }
 
   return window.location.origin;
 })();
@@ -414,7 +429,7 @@ const Auth = {
     await FirebaseReady;
     return new Promise((resolve) => {
       const unsub = firebase.auth().onAuthStateChanged(user => {
-        try { unsub(); } catch (e) {}
+        try { unsub(); } catch (e) { }
         resolve(user);
       });
     });
@@ -457,7 +472,7 @@ const Auth = {
 const API = {
   async request(endpoint, options = {}) {
     let token = null;
-    try { token = await Auth.getToken(); } catch {}
+    try { token = await Auth.getToken(); } catch { }
 
     const headers = {
       'Content-Type': 'application/json',
@@ -484,7 +499,7 @@ const API = {
   },
 
   get(url) { return this.request(url, { method: 'GET' }); },
-  
+
   post(url, body) {
     return this.request(url, {
       method: 'POST',
@@ -501,7 +516,7 @@ const API = {
    */
   async uploadFile(endpoint, file, fieldName = 'file') {
     let token = null;
-    try { token = await Auth.getToken(); } catch {}
+    try { token = await Auth.getToken(); } catch { }
 
     const formData = new FormData();
     formData.append(fieldName, file);
@@ -550,7 +565,7 @@ const Toast = {
     t.className = `toast ${type}`;
     t.textContent = msg;
     this.container.appendChild(t);
-    setTimeout(() => { try { t.remove(); } catch (e) {} }, time);
+    setTimeout(() => { try { t.remove(); } catch (e) { } }, time);
   },
   success(m, t) { this.show(m, 'success', t); },
   error(m, t) { this.show(m, 'error', t); },
@@ -597,12 +612,12 @@ const Validator = {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email.trim());
   },
-  
+
   isValidPassword(password) {
     if (!password || typeof password !== 'string') return false;
     return password.length >= 8;
   },
-  
+
   isValidUsername(username) {
     if (!username || typeof username !== 'string') return false;
     const trimmed = username.trim();
@@ -636,9 +651,9 @@ const Utils = {
 /* =========================================================
    SOCKET CLIENT (EXPOSES .instance, .connect(), .authenticate(), .emit(), .on())
    ========================================================= */
-   
-   
-   
+
+
+
 
 class SocketClient {
   constructor() {
@@ -706,7 +721,7 @@ class SocketClient {
       // If socket not connected, ignore silently (preserves behavior)
       return;
     }
-    try { this.instance.emit(event, ...args); } catch (e) {}
+    try { this.instance.emit(event, ...args); } catch (e) { }
   }
 
   /**
@@ -714,7 +729,7 @@ class SocketClient {
    */
   on(event, cb) {
     if (!this.instance) return;
-    try { this.instance.on(event, cb); } catch (e) {}
+    try { this.instance.on(event, cb); } catch (e) { }
   }
 }
 
