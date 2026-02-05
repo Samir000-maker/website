@@ -344,12 +344,15 @@
           console.log('📨 ========================================');
           console.log('📨 MESSAGE RECEIVED FROM IFRAME');
           console.log('📨 ========================================');
-          console.log(`   action: ${event.data?.action}`);
+          const action = event.data?.action || event.data?.type;
 
-          if (event.data && event.data.action === 'hideChat') {
-            console.log('💬 Hiding chat overlay as requested by iframe');
+          if (action === 'hideChat' || action === 'REQUEST_SHOW_CALL') {
+            console.log(`💬 Hiding chat overlay as requested by iframe (${action})`);
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
+          } else if (action === 'REQUEST_SHOW_CHAT') {
+            console.log('💬 Showing chat overlay as requested by iframe');
+            showChat();
           }
 
           console.log('📨 ========================================\n');
@@ -368,9 +371,9 @@
 
           if (isInIframe) {
             // We are in an iframe inside chat.html
-            // Back button means "Hide this call UI" -> Tell parent to hide us
-            console.log('📱 In iframe - sending hideCall to parent');
-            window.parent.postMessage({ action: 'hideCall' }, '*');
+            // Back button means "Show chat, hide call" -> Tell parent to show chat
+            console.log('📱 In iframe - sending REQUEST_SHOW_CHAT to parent');
+            window.parent.postMessage({ action: 'REQUEST_SHOW_CHAT' }, '*');
 
             // Push state back so we don't actually navigate back in history
             history.pushState({ view: 'call' }, 'Call', window.location.href);
