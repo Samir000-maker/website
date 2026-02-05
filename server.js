@@ -1629,7 +1629,12 @@ io.on('connection', (socket) => {
         if (!room || room.isExpired) {
           console.log(`🧹 [UID: ${firebaseUid}] Existing room is expired, clearing state`);
           clearUserActiveRoom(firebaseUid);
-          matchmaking.leaveRoom(userId);
+          // Check for active call before leaving matchmaking room
+          let hasActiveCall = false;
+          activeCalls.forEach(call => {
+            if (call.roomId === roomId && call.participants.length > 0) hasActiveCall = true;
+          });
+          matchmaking.leaveRoom(userId, hasActiveCall);
 
           // Continue with new mood selection
           console.log(`✅ [UID: ${firebaseUid}] Stale state cleared, proceeding with mood selection`);
@@ -1653,7 +1658,12 @@ io.on('connection', (socket) => {
 
             // Clear failed state and allow re-entry
             clearUserActiveRoom(firebaseUid);
-            matchmaking.leaveRoom(userId);
+            // Check for active call before leaving matchmaking room
+            let hasActiveCall = false;
+            activeCalls.forEach(call => {
+              if (call.roomId === roomId && call.participants.length > 0) hasActiveCall = true;
+            });
+            matchmaking.leaveRoom(userId, hasActiveCall);
             console.log(`🧹 [UID: ${firebaseUid}] Failed restoration cleaned up, proceeding with new selection`);
           }
         }
@@ -2431,10 +2441,10 @@ io.on('connection', (socket) => {
         }
 
         // Clean up any pending socket cleanup timers
-        if (socketUserCleanup.has(oldSocketId)) {
-          clearTimeout(socketUserCleanup.get(oldSocketId));
-          socketUserCleanup.delete(oldSocketId);
-          console.log(`⏰ Cancelled pending cleanup for old socket ${oldSocketId}`);
+        if (socketUserCleanup.has(mongoUserId)) {
+          clearTimeout(socketUserCleanup.get(mongoUserId));
+          socketUserCleanup.delete(mongoUserId);
+          console.log(`⏰ Cancelled pending cleanup for user ${mongoUserId}`);
         }
       }
 
@@ -2525,7 +2535,15 @@ io.on('connection', (socket) => {
         } else {
           // Room expired while user was disconnected
           console.log(`⚠️ User ${user.username} was in expired room ${legacyRoomId}`);
-          matchmaking.leaveRoom(mongoUserId);
+          // Check for active call before leaving matchmaking room
+          let hasActiveCall = false;
+          const userRoom = getUserActiveRoom(firebaseUid);
+          if (userRoom) {
+            activeCalls.forEach(call => {
+              if (call.roomId === userRoom.roomId && call.participants.length > 0) hasActiveCall = true;
+            });
+          }
+          matchmaking.leaveRoom(mongoUserId, hasActiveCall);
         }
       } else if (activeRoom) {
         // User has active room in new system - auto-join socket to room
@@ -2695,7 +2713,12 @@ io.on('connection', (socket) => {
 
           } else {
             console.error(`❌ No active socket found for user ${roomUser.username} (${roomUser.userId})`);
-            matchmaking.leaveRoom(roomUser.userId);
+            // Check for active call before leaving matchmaking room
+            let hasActiveCall = false;
+            activeCalls.forEach(call => {
+              if (call.roomId === roomId && call.participants.length > 0) hasActiveCall = true;
+            });
+            matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
           }
         });
 
@@ -4782,39 +4805,57 @@ io.on('connection', (socket) => {
       // ============================================
       // CHECK IF ROOM SHOULD BE DESTROYED
       // ============================================
+      // 🚨 CRITICAL FIX: Check for active calls before destroying room
+      let hasActiveCall = false;
+      activeCalls.forEach(call => {
+        if (call.roomId === roomId && call.participants.length > 0) {
+          hasActiveCall = true;
+        }
+      });
+
       if (remainingUsers === 0) {
         console.log(`🗑️ Room ${roomId} is now empty - will be destroyed by expiry system`);
         // Room will be cleaned up by its expiry timer
       } else if (remainingUsers === 1) {
-        console.log(`⚠️ Only 1 user left in room ${roomId} — auto-destroying`);
-        const lastUser = room.users[0];
-
-        // Notify last user that room is closing
-        emitToUserAllDevices(lastUser.firebaseUid, 'room_closed', {
-          roomId,
-          reason: 'Your partner left the room',
-          redirectTo: '/mood.html'
-        });
-
-        // Remove last user from room completely
-        room.removeUser(lastUser.userId);
-        if (lastUser.firebaseUid) {
-          clearUserActiveRoom(lastUser.firebaseUid);
-        }
-        removeUserFromMood(lastUser.userId, room.mood);
-        matchmaking.leaveRoom(lastUser.userId);
-
-        // Leave all sockets of last user out of this room
-        if (lastUser.firebaseUid) {
-          const lastUserSockets = getUserSocketIds(lastUser.firebaseUid);
-          lastUserSockets.forEach(sid => {
-            const s = io.sockets.sockets.get(sid);
-            if (s) s.leave(roomId);
+        if (hasActiveCall) {
+          console.log(`🛡️ Only 1 user left in room ${roomId} BUT call is active - PRESERVING ROOM`);
+          // Notify the last user so they know they are alone in chat but call continues
+          emitToUserAllDevices(room.users[0].firebaseUid, 'partner_left_chat', {
+            roomId,
+            userId,
+            username: username
           });
-        }
+        } else {
+          console.log(`⚠️ Only 1 user left in room ${roomId} and NO active call — auto-destroying`);
+          const lastUser = room.users[0];
 
-        // Destroy room immediately
-        await performRoomCleanup(roomId);
+          // Notify last user that room is closing
+          emitToUserAllDevices(lastUser.firebaseUid, 'room_closed', {
+            roomId,
+            reason: 'Your partner left the room',
+            redirectTo: '/mood.html'
+          });
+
+          // Remove last user from room completely
+          room.removeUser(lastUser.userId);
+          if (lastUser.firebaseUid) {
+            clearUserActiveRoom(lastUser.firebaseUid);
+          }
+          removeUserFromMood(lastUser.userId, room.mood);
+          matchmaking.leaveRoom(lastUser.userId, false); // Pass false for hasActiveCall here as we just checked
+
+          // Leave all sockets of last user out of this room
+          if (lastUser.firebaseUid) {
+            const lastUserSockets = getUserSocketIds(lastUser.firebaseUid);
+            lastUserSockets.forEach(sid => {
+              const s = io.sockets.sockets.get(sid);
+              if (s) s.leave(roomId);
+            });
+          }
+
+          // Destroy room immediately
+          await performRoomCleanup(roomId);
+        }
       }
 
       console.log(`✅ [UID: ${firebaseUid}] Successfully left room ${roomId}`);
