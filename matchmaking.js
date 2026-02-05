@@ -29,8 +29,8 @@ const roomActivity = new Map(); // roomId -> lastActivityTimestamp
 // Cleanup interval
 const CLEANUP_INTERVAL = 60 * 1000; // 1 minute
 // const ROOM_LIFETIME = 50 * 1000; // 50 SECONDS
-const ROOM_LIFETIME = 150000;
-const ROOM_WARNING_TIME = 30 * 1000; // 30 seconds (20 second warning before expiry)
+const ROOM_LIFETIME = 600000; // ✅ Increased to 10 minutes
+const ROOM_WARNING_TIME = 60000; // ✅ Warning at 1 minute remaining
 
 /**
  * Enhanced Room class with lifecycle management
@@ -70,12 +70,12 @@ class Room {
 
     const timeUntilWarning = ROOM_WARNING_TIME;
     const timeUntilExpiry = ROOM_LIFETIME;
-    
+
     console.log(`⏱️ Room ${this.id} timers STARTED at ${new Date(this.timerStartedAt).toISOString()}`);
     console.log(`   ⏰ Will expire at: ${new Date(this.expiresAt).toISOString()}`);
     console.log(`   ⚠️ Warning in: ${timeUntilWarning / 1000}s (at ${new Date(this.timerStartedAt + timeUntilWarning).toISOString()})`);
     console.log(`   💥 Expiry in: ${timeUntilExpiry / 1000}s (at ${new Date(this.expiresAt).toISOString()})`);
-    
+
     // Warning timer (fires at ROOM_WARNING_TIME)
     this.warningTimer = setTimeout(() => {
       this.emitWarning();
@@ -192,36 +192,36 @@ class Room {
   /**
    * Add user to room (for joining existing rooms)
    */
-addUser(userData) {
-  // Check if user already in room
-  if (this.hasUser(userData.userId)) {
-    console.log(`⚠️ User ${userData.username} already in room ${this.id}`);
-    return false;
+  addUser(userData) {
+    // Check if user already in room
+    if (this.hasUser(userData.userId)) {
+      console.log(`⚠️ User ${userData.username} already in room ${this.id}`);
+      return false;
+    }
+
+    // Check if room is full
+    if (this.users.length >= this.maxUsers) {
+      console.log(`⚠️ Room ${this.id} is full (${this.users.length}/${this.maxUsers})`);
+      return false;
+    }
+
+    // Add user with firebaseUid
+    this.users.push({
+      userId: userData.userId,
+      firebaseUid: userData.firebaseUid, // IMPORTANT: Store firebaseUid
+      username: userData.username,
+      pfpUrl: userData.pfpUrl
+    });
+
+    this.updateActivity();
+
+    console.log(`✅ User ${userData.username} added to room ${this.id} (${this.users.length}/${this.maxUsers})`);
+    return true;
   }
 
-  // Check if room is full
-  if (this.users.length >= this.maxUsers) {
-    console.log(`⚠️ Room ${this.id} is full (${this.users.length}/${this.maxUsers})`);
-    return false;
+  get chatHistory() {
+    return this.messages;
   }
-
-  // Add user with firebaseUid
-  this.users.push({
-    userId: userData.userId,
-    firebaseUid: userData.firebaseUid, // IMPORTANT: Store firebaseUid
-    username: userData.username,
-    pfpUrl: userData.pfpUrl
-  });
-  
-  this.updateActivity();
-  
-  console.log(`✅ User ${userData.username} added to room ${this.id} (${this.users.length}/${this.maxUsers})`);
-  return true;
-}
-
-get chatHistory() {
-  return this.messages;
-}
 
   /**
    * Check if room has space for more users
@@ -253,7 +253,7 @@ get chatHistory() {
    */
   destroy() {
     console.log(`🗑️ Room ${this.id} destroying...`);
-    
+
     // Clear timers
     if (this.cleanupTimer) {
       clearTimeout(this.cleanupTimer);
@@ -270,7 +270,7 @@ get chatHistory() {
 
     // Remove from activity tracking
     roomActivity.delete(this.id);
-    
+
     console.log(`✅ Room ${this.id} destroyed`);
   }
 }
@@ -305,10 +305,10 @@ export function addToQueue(userData) {
   const existingRoomId = userRoomMap.get(userId);
   if (existingRoomId) {
     const existingRoom = activeRooms.get(existingRoomId);
-    
+
     if (existingRoom && existingRoom.mood === mood && !existingRoom.isExpired) {
       console.log(`⚠️ User ${username} already in room ${existingRoomId}`);
-      
+
       // User is already in this room - don't queue them again
       // Just return the existing room so they can be redirected
       return existingRoom;
@@ -326,15 +326,15 @@ export function addToQueue(userData) {
 
   // Check if there's an existing non-full room for this mood
   const availableRoom = findAvailableRoom(mood);
-  
+
   if (availableRoom) {
     // Add user to existing room
     const added = availableRoom.addUser(userData);
-    
+
     if (added) {
       // Map user to room
       userRoomMap.set(userId, availableRoom.id);
-      
+
       console.log(`🎉 User ${username} joined existing room ${availableRoom.id}`);
       return availableRoom;
     }
@@ -584,11 +584,11 @@ export function getRoomStats() {
     totalRooms: rooms.length,
     totalUsers: rooms.reduce((sum, room) => sum + room.users.length, 0),
     totalMessages: rooms.reduce((sum, room) => sum + room.messages.length, 0),
-    averageRoomAge: rooms.length > 0 
-      ? rooms.reduce((sum, room) => sum + (Date.now() - room.createdAt), 0) / rooms.length 
+    averageRoomAge: rooms.length > 0
+      ? rooms.reduce((sum, room) => sum + (Date.now() - room.createdAt), 0) / rooms.length
       : 0,
-    oldestRoom: rooms.length > 0 
-      ? Math.min(...rooms.map(r => r.createdAt)) 
+    oldestRoom: rooms.length > 0
+      ? Math.min(...rooms.map(r => r.createdAt))
       : null
   };
 }
