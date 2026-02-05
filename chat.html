@@ -1084,13 +1084,7 @@
             <span class="material-symbols-outlined text-lg sm:text-xl">videocam</span>
           </button>
 
-          <!-- Back to Call Button (shown when call is connected in background) -->
-          <button id="backToCallBtn" style="display: none;"
-            class="px-3 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 rounded-lg bg-gradient-to-r from-[#06b6d4] to-[#22d3ee] text-white font-semibold text-xs sm:text-sm hover:shadow-lg hover:shadow-cyan-500/50 transition-all"
-            title="Return to active call">
-            <span class="material-symbols-outlined text-base sm:text-lg">call</span>
-            <span class="hidden sm:inline">Back to Call</span>
-          </button>
+
           <button id="joinCallBtn"
             class="hidden items-center gap-1.5 px-3 sm:px-4 h-9 sm:h-10 rounded-full bg-green-600 text-white hover:bg-green-700 transition-all text-xs sm:text-sm font-semibold"
             title="Join Active Call">
@@ -1333,6 +1327,7 @@
             console.log('📞 No active call - clearing state');
             activeCallConnectionState = null;
             updateCallButtonStates();
+            updateCallButtonState(false);
           }
           return;
         }
@@ -1341,52 +1336,51 @@
           const callData = JSON.parse(activeCallStr);
           const newState = callData.connectionState || 'connecting';
 
+          // Sync local state
           if (activeCallConnectionState !== newState) {
             console.log(`📞 Active call state changed: ${activeCallConnectionState} → ${newState}`);
             activeCallConnectionState = newState;
             updateCallButtonStates();
+
+            // CRITICAL: Ensure Join/Back button is updated based on localStorage state
+            const userInCall = callData.roomId === roomData?.roomId;
+            updateCallButtonState(true, {
+              participantCount: callData.participants?.length || 0,
+              callId: callData.callId,
+              callType: callData.callType
+            });
           }
         } catch (e) {
           console.error('❌ Failed to parse active call data:', e);
           activeCallConnectionState = null;
+          updateCallButtonStates();
+          updateCallButtonState(false);
         }
       }
 
       function updateCallButtonStates() {
-        const audioBtn = document.getElementById('audioCallBtn');
-        const videoBtn = document.getElementById('videoCallBtn');
-        const backToCallBtn = document.getElementById('backToCallBtn');
-
-        if (!audioBtn || !videoBtn) return;
+        if (!audioCallBtn || !videoCallBtn) return;
 
         if (activeCallConnectionState === 'connecting' || activeCallConnectionState === 'initializing') {
-          // Call is connecting - disable call buttons, hide back-to-call
+          // Call is connecting - disable call buttons
           console.log('🚫 Disabling call buttons - call connecting');
-          audioBtn.disabled = true;
-          audioBtn.classList.add('opacity-50', 'cursor-not-allowed');
-          audioBtn.title = 'Call connecting...';
+          audioCallBtn.disabled = true;
+          audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          audioCallBtn.title = 'Call connecting...';
 
-          videoBtn.disabled = true;
-          videoBtn.classList.add('opacity-50', 'cursor-not-allowed');
-          videoBtn.title = 'Call connecting...';
-
-          if (backToCallBtn) {
-            backToCallBtn.style.display = 'none';
-          }
+          videoCallBtn.disabled = true;
+          videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          videoCallBtn.title = 'Call connecting...';
 
         } else if (activeCallConnectionState === 'connected') {
-          // Call is connected - disable call buttons, show back-to-call
-          console.log('✅ Enabling Back to Call - call connected');
-          audioBtn.disabled = true;
-          videoBtn.disabled = true;
-          audioBtn.classList.add('opacity-50', 'cursor-not-allowed');
-          videoBtn.classList.add('opacity-50', 'cursor-not-allowed');
-          audioBtn.title = 'Call in progress';
-          videoBtn.title = 'Call in progress';
-
-          if (backToCallBtn) {
-            backToCallBtn.style.display = 'flex';
-          }
+          // Call is connected - disable call buttons
+          console.log('✅ Call connected - disabling initiate buttons');
+          audioCallBtn.disabled = true;
+          videoCallBtn.disabled = true;
+          audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          audioCallBtn.title = 'Call in progress';
+          videoCallBtn.title = 'Call in progress';
 
           // CRITICAL: Automatically show call iframe when connected
           const callIframeContainer = document.getElementById('callIframeContainer');
@@ -1396,17 +1390,13 @@
           }
 
         } else {
-          // No active call - enable call buttons, hide back-to-call
-          audioBtn.disabled = false;
-          videoBtn.disabled = false;
-          audioBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-          videoBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-          audioBtn.title = 'Start audio call';
-          videoBtn.title = 'Start video call';
-
-          if (backToCallBtn) {
-            backToCallBtn.style.display = 'none';
-          }
+          // No active call - enable call buttons
+          audioCallBtn.disabled = false;
+          videoCallBtn.disabled = false;
+          audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+          audioCallBtn.title = 'Start audio call';
+          videoCallBtn.title = 'Start video call';
         }
       }
 
@@ -3445,7 +3435,7 @@
             if (btnTextLong) btnTextLong.textContent = 'Back to Call';
             if (btnTextShort) btnTextShort.textContent = 'Back';
 
-            // Change to primary color (teal)
+            // Change to primary color
             joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
             joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
 
@@ -5420,6 +5410,74 @@
             acceptCallBtn.disabled = false;
           }
 
+          // CRITICAL: Immediate UI transition for call initiator
+          socketInstance.on('call_created', (data) => {
+            console.log('📞 ========================================');
+            console.log('📞 CALL_CREATED EVENT RECEIVED');
+            console.log('📞 ========================================');
+            console.log(`   Call ID: ${data.callId}`);
+            console.log(`   Call Type: ${data.callType}`);
+            console.log(`   Is Initiator: ${data.isInitiator}`);
+
+            if (data.isInitiator) {
+              console.log('🚀 I am the initiator - showing call UI immediately');
+
+              // Reset initiation state
+              isInitiatingCall = false;
+
+              // Clear timeouts
+              const audioBtn = document.getElementById('audioCallBtn');
+              const videoBtn = document.getElementById('videoCallBtn');
+
+              if (audioBtn) {
+                audioBtn.classList.remove('call-btn-loading');
+                if (audioBtn.dataset.timeoutId) {
+                  clearTimeout(parseInt(audioBtn.dataset.timeoutId));
+                  delete audioBtn.dataset.timeoutId;
+                }
+              }
+
+              if (videoBtn) {
+                videoBtn.classList.remove('call-btn-loading', 'calling');
+                if (videoBtn.dataset.timeoutId) {
+                  clearTimeout(parseInt(videoBtn.dataset.timeoutId));
+                  delete videoBtn.dataset.timeoutId;
+                }
+              }
+
+              // Store active call in localStorage
+              const activeCallData = {
+                callId: data.callId,
+                roomId: roomData.roomId,
+                callType: data.callType,
+                connectionState: 'initializing',
+                participants: data.participants || []
+              };
+              localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(activeCallData));
+
+              // Show the call iframe IMMEDIATELY
+              let callIframeContainer = document.getElementById('callIframeContainer');
+              if (!callIframeContainer) {
+                console.log('📱 Creating call iframe container');
+                callIframeContainer = document.createElement('div');
+                callIframeContainer.id = 'callIframeContainer';
+                callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+                callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+                document.body.appendChild(callIframeContainer);
+              } else {
+                console.log('📱 Showing existing call iframe container');
+                callIframeContainer.classList.remove('hidden');
+                // Reload iframe to ensure it picks up the new callId from localStorage
+                const iframe = document.getElementById('callIframe');
+                if (iframe) iframe.src = '/call.html';
+              }
+
+              // Update state
+              updateActiveCallState();
+            }
+            console.log('📞 ========================================\n');
+          });
+
           // Mark navigating
           navigatingToCall = true;
 
@@ -5585,32 +5643,6 @@
             document.body.appendChild(fileInput);
             fileInput.click();
 
-          }, { passive: true });
-        }
-
-
-        // Back to Call Button Handler
-        const backToCallBtn = document.getElementById('backToCallBtn');
-        if (backToCallBtn) {
-          backToCallBtn.addEventListener('click', () => {
-            console.log('🔙 Back to Call button clicked - showing call iframe');
-
-            let callIframeContainer = document.getElementById('callIframeContainer');
-
-            // Create iframe container if it doesn't exist
-            if (!callIframeContainer) {
-              console.log('📱 Call iframe container missing - creating it');
-              callIframeContainer = document.createElement('div');
-              callIframeContainer.id = 'callIframeContainer';
-              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
-              callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
-              document.body.appendChild(callIframeContainer);
-              console.log('✅ Call iframe container created and call.html loaded');
-            } else {
-              // Iframe exists, just show it
-              callIframeContainer.classList.remove('hidden');
-              console.log('✅ Call iframe shown');
-            }
           }, { passive: true });
         }
 
