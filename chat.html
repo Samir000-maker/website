@@ -6241,20 +6241,9 @@
 
           // CRITICAL: Check if in background call mode
           if (isInBackgroundCall) {
-            console.log('🔒 Background call active - preserving floating socket');
+            console.log('🔒 Background call active - preserving state');
             saveChatState(roomData.roomId, messagesCache);
-
-            // Don't disconnect floating socket - let it persist
-            if (floatingCallSocket) {
-              console.log('✅ Keeping floating call socket alive');
-            }
-
-            // Only disconnect main chat socket
-            if (socketInstance) {
-              socketInstance.emit('leave_room');
-              socketInstance.disconnect();
-            }
-
+            // socketInstance.disconnect() removed to allow for session persistence
             return;
           }
 
@@ -6264,12 +6253,11 @@
             return;
           }
 
-          console.log('🗑️ Normal chat exit - cleanup already done in leave handler');
+          console.log('🗑️ Reload or navigation detected - preserving state via server grace period');
+          saveChatState(roomData.roomId, messagesCache);
 
-          // Only disconnect sockets - cleanup was already done by leave button handlers
-          if (socketInstance) {
-            socketInstance.disconnect();
-          }
+          // socketInstance.disconnect() and leave_room removed to allow for session persistence
+          // The server DISCONNECT_GRACE_PERIOD will handle real departures.
           if (timerInterval) clearInterval(timerInterval);
         });
       }
