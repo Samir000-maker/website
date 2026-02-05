@@ -746,14 +746,9 @@
           peerConnections.clear();
           console.log('   ✓ Peer connections closed');
 
-          // Emit leave call
-          if (socketInstance && socketInstance.connected) {
-            socketInstance.emit('leave_call', { callId: callData.callId });
-            console.log('   ✓ Leave call emitted');
-          }
+          // localStorage.removeItem('activeCall'); // ✅ Preserve for restoration
 
-          // Clear storage
-          localStorage.removeItem('activeCall');
+          console.log('✅ Temporary cleanup complete (keeping server state active)');
 
           console.log('✅ Full cleanup complete');
           console.log('🚪 ========================================\n');
