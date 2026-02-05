@@ -5269,8 +5269,25 @@
           }
 
           if (data.remainingUsers <= 1) {
-            toast('Room closing...', 'warning');
-            exitRoomSequence().catch(console.error);
+            // CRITICAL: Check if we are in an active call before exiting
+            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+            let isInActiveCall = false;
+            if (activeCallStr) {
+              try {
+                const callData = JSON.parse(activeCallStr);
+                if (callData && callData.roomId === roomData?.roomId) {
+                  isInActiveCall = true;
+                }
+              } catch (e) { }
+            }
+
+            if (isInActiveCall) {
+              console.log('🛡️ Partner left room but call is active — PRESERVING UI');
+              toast('Partner left chat, but call remains active', 'warning');
+            } else {
+              toast('Room closing...', 'warning');
+              exitRoomSequence().catch(console.error);
+            }
           }
         });
 
