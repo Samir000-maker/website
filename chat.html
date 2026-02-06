@@ -4282,8 +4282,10 @@
           }
         };
 
-        // Initialize on load
+        // Initialize on load - push twice to create a deeper stack
+        // This makes it harder for the browser to skip the trap
         ensureTrapState();
+        setTimeout(ensureTrapState, 100);
 
         // Re-initialize on page show (handles BFCache and Refresh)
         window.addEventListener('pageshow', (event) => {
@@ -4308,20 +4310,11 @@
             console.log('✅ User confirmed leaving');
             backButtonHandled = true;
 
-            if (socketInstance?.connected) {
-              socketInstance.emit('leave_room');
-            }
-
-            // Cleanup call if exists
-            // CRITICAL: Call cleanup before navigating
-            if (activeCallInRoom) {
-              // ... minimal cleanup if needed, but 'leaveBtn' handler does it better
-            }
-
-            exitRoomSequence().catch(console.error);
+            // ✅ Explicitly redirect to mood.html (same as manual leaveBtn)
+            await exitRoomSequence('/mood.html');
           } else {
             console.log('❌ User staying in chat');
-            // State is already pushed back, so we stay here
+            // State was already pushed back, so the UI stays on chat.html
           }
         });
       }
