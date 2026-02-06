@@ -1424,13 +1424,28 @@
 
             updateCallButtonStates();
 
-            // CRITICAL: Ensure Join/Back button is updated based on localStorage state
-            const userInCall = callData.roomId === roomData?.roomId;
-            updateCallButtonState(true, {
-              participantCount: callData.participants?.length || activeCallInRoom?.participantCount || 0,
-              callId: callData.callId,
-              callType: callData.callType
-            });
+            // CRITICAL: Only update room-scoped UI if the call belongs to this room
+            const callInCurrentRoom = callData.roomId === roomData?.roomId;
+
+            if (callInCurrentRoom) {
+              // Synchronize global activeCallInRoom variable
+              if (!activeCallInRoom || activeCallInRoom.callId !== callData.callId) {
+                console.log('💾 Synchronizing activeCallInRoom from localStorage update');
+                activeCallInRoom = {
+                  callId: callData.callId,
+                  callType: callData.callType,
+                  participantCount: callData.participants?.length || activeCallInRoom?.participantCount || 0
+                };
+              }
+
+              updateCallButtonState(true, activeCallInRoom);
+            } else {
+              // Call in storage is for another room - ignore for main header buttons
+              // (will be shown in floating popup if hasBackgroundCall is true)
+              if (activeCallConnectionState === null) {
+                updateCallButtonState(false);
+              }
+            }
           }
         } catch (e) {
           console.error('❌ Failed to parse active call data:', e);
@@ -3541,6 +3556,16 @@
           }
         } else if (isActive && callData) {
           console.log('📞 Active call in room but user NOT in it - showing "Join Call" button');
+
+          // CRITICAL: Synchronize global activeCallInRoom variable if provided
+          if (callData && (!activeCallInRoom || activeCallInRoom.callId !== callData.callId)) {
+            console.log('💾 Synchronizing activeCallInRoom inside updateCallButtonState');
+            activeCallInRoom = {
+              callId: callData.callId,
+              callType: callData.callType,
+              participantCount: callData.participantCount || 0
+            };
+          }
 
           // Hide audio/video buttons
           if (audioCallBtn) {
@@ -6148,6 +6173,12 @@
               updateCallButtonStates();
 
             } else {
+              if (!activeCallInRoom) {
+                console.error('❌ Cannot join call: activeCallInRoom is null');
+                toast('Failed to join call data. Please refresh.', 'error');
+                return;
+              }
+
               joinCallBtn.classList.add('join-btn-loading');
               joinCallBtn.disabled = true;
               console.log('⏳ Join button set to loading state');
