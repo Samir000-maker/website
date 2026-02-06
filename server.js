@@ -2705,6 +2705,15 @@ io.on('connection', (socket) => {
 
             userSocket.emit('match_found', matchData);
 
+            // ✅ CRITICAL FIX: Track active room for disconnect handler
+            // We MUST use firebaseUid as key because disconnect handler uses it for lookup
+            if (roomUser.firebaseUid) {
+              setUserActiveRoom(roomUser.firebaseUid, room.id, room.mood);
+            } else {
+              // Fallback for guests (if any)
+              setUserActiveRoom(roomUser.userId, room.id, room.mood);
+            }
+
             // ✅ Keep user in mood count when moved to room
             addUserToMood(roomUser.userId, room.mood);
 
