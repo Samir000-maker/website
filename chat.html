@@ -1586,12 +1586,18 @@
       window.addEventListener('message', (event) => {
         const action = event.data?.action || event.data?.type; // Support both for compatibility
 
-        if (action === 'hideCall' || action === 'REQUEST_SHOW_CHAT') {
+        if (action === 'hideCall' || action === 'REQUEST_SHOW_CHAT' || action === 'FORCE_HIDE_CALL') {
           console.log(`📨 Message from call iframe: ${action}`);
           const callIframeContainer = document.getElementById('callIframeContainer');
           if (callIframeContainer) {
             callIframeContainer.classList.add('hidden');
             console.log('✅ Call iframe hidden - chat visible');
+          }
+
+          if (action === 'FORCE_HIDE_CALL') {
+            // Reset active call state
+            activeCallInRoom = null;
+            updateCallButtonState(false);
           }
         } else if (action === 'REQUEST_SHOW_CALL') {
           console.log('📨 Message from call iframe: REQUEST_SHOW_CALL');
