@@ -4482,6 +4482,13 @@
           // ✅ START HEARTBEAT after authentication
           startHeartbeat();
 
+          // ✅ Cache token for Beacon API (beforeunload)
+          if (MoodApp.Auth) {
+            MoodApp.Auth.getToken().then(token => {
+              sessionStorage.setItem('vibe_auth_token', token);
+            }).catch(() => { });
+          }
+
           // Request room data from server for clock sync
           const roomStr = localStorage.getItem('currentRoom');
           if (roomStr) {
@@ -6007,7 +6014,33 @@
 
           console.log('🚪 Page unloading - triggering best-effort leave');
 
-          // Emitting leave_room (best effort)
+          // ✅ Authoritative Exit Signal (Beacon API style)
+          const roomStr = localStorage.getItem('currentRoom');
+          if (roomStr) {
+            try {
+              const roomData = JSON.parse(roomStr);
+              const currentUserStr = localStorage.getItem('currentUser');
+              const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+
+              if (roomData.roomId) {
+                // We use a keepalive fetch to ensure the request is processed after page close
+                // Note: Auth token is retrieved from storage if possible for speed
+                const token = sessionStorage.getItem('vibe_auth_token'); // Assuming app.js might store it here, otherwise we skip headers and rely on server-side socket link if still active
+
+                fetch('/api/leave-chat', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                  },
+                  body: JSON.stringify({ roomId: roomData.roomId }),
+                  keepalive: true
+                }).catch(() => { });
+              }
+            } catch (e) { }
+          }
+
+          // Socket emission (legacy/fallback)
           if (socketInstance?.connected) {
             socketInstance.emit('leave_room');
           }
