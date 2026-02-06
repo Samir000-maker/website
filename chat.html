@@ -4475,27 +4475,27 @@ async function exitRoomSequence(targetUrl = null) {
           console.log('✅ ========================================\n');
           
           
-            // START HEARTBEAT
-  let heartbeatInterval = setInterval(() => {
-    if (socketInstance && socketInstance.connected && roomData?.roomId) {
-      socketInstance.emit('heartbeat', {
-        roomId: roomData.roomId,
-        userId: currentUser.userId,
-        timestamp: Date.now()
-      });
-    }
-  }, 5000); // Every 5 seconds
-  
-  console.log('💓 Heartbeat started (5s interval)');
-  
-  // Stop heartbeat on disconnect
-  socketInstance.on('disconnect', () => {
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-      console.log('💔 Heartbeat stopped');
-    }
-  });
+// START HEARTBEAT
+let heartbeatInterval = setInterval(() => {
+  if (socketInstance && socketInstance.connected && roomData?.roomId) {
+    socketInstance.emit('heartbeat', {
+      roomId: roomData.roomId,
+      userId: currentUser.userId,
+      timestamp: Date.now()
+    });
+  }
+}, 5000); // Every 5 seconds
+
+console.log('💓 Heartbeat started (5s interval)');
+
+// Stop heartbeat on disconnect
+socketInstance.on('disconnect', () => {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+    console.log('💔 Heartbeat stopped');
+  }
+});
           
         });
 
@@ -6028,93 +6028,90 @@ window.addEventListener('pagehide', (event) => {
 
 
         if (audioCallBtn) {
-          audioCallBtn.addEventListener('click', async () => {
-            console.log('📞 ========================================');
-            console.log('📞 AUDIO CALL BUTTON CLICKED');
-            console.log('📞 ========================================');
-            console.log(`   Authentication state: ${isSocketAuthenticated}`);
-            console.log(`   Socket connected: ${socketInstance?.connected}`);
-            console.log(`   Already initiating: ${isInitiatingCall}`);
+  audioCallBtn.addEventListener('click', async () => {
+    console.log('📞 ========================================');
+    console.log('📞 AUDIO CALL BUTTON CLICKED');
+    console.log('📞 ========================================');
+    
+    // Mark that we're navigating to call page
+    sessionStorage.setItem('navigating_to_call', 'true');
+    
+    // Small delay to ensure flag is set
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Rest of existing audio call logic...
+    if (isInitiatingCall) {
+      console.log('⚠️ Call already being initiated, ignoring click');
+      console.log('📞 ========================================\n');
+      return;
+    }
 
-            // CRITICAL: Block if already initiating
-            if (isInitiatingCall) {
-              console.log('⚠️ Call already being initiated, ignoring click');
-              console.log('📞 ========================================\n');
-              return;
-            }
+    if (!isSocketAuthenticated) {
+      console.log('⏳ Not authenticated yet - waiting...');
+      audioCallBtn.disabled = true;
+      audioCallBtn.classList.add('animate-pulse');
 
-            // CRITICAL: Wait for authentication if not ready
-            if (!isSocketAuthenticated) {
-              console.log('⏳ Not authenticated yet - waiting...');
-              audioCallBtn.disabled = true;
-              audioCallBtn.classList.add('animate-pulse');
+      try {
+        await waitForAuthentication();
+        console.log('✅ Authentication complete, proceeding with call');
+      } catch (e) {
+        console.error('❌ Authentication wait failed:', e);
+        toast('Connection failed. Please refresh.', 'error');
+        audioCallBtn.disabled = false;
+        audioCallBtn.classList.remove('animate-pulse');
+        console.log('📞 ========================================\n');
+        return;
+      }
+    }
 
-              try {
-                await waitForAuthentication();
-                console.log('✅ Authentication complete, proceeding with call');
-              } catch (e) {
-                console.error('❌ Authentication wait failed:', e);
-                toast('Connection failed. Please refresh.', 'error');
-                audioCallBtn.disabled = false;
-                audioCallBtn.classList.remove('animate-pulse');
-                console.log('📞 ========================================\n');
-                return;
-              }
-            }
+    if (!socketInstance || !socketInstance.connected) {
+      console.error('❌ Socket disconnected during call initiation');
+      toast('Connection lost. Please refresh.', 'error');
+      console.log('📞 ========================================\n');
+      return;
+    }
 
-            // CRITICAL: Verify socket still connected
-            if (!socketInstance || !socketInstance.connected) {
-              console.error('❌ Socket disconnected during call initiation');
-              toast('Connection lost. Please refresh.', 'error');
-              console.log('📞 ========================================\n');
-              return;
-            }
+    console.log('✅ All checks passed - initiating audio call');
+    isInitiatingCall = true;
 
-            console.log('✅ All checks passed - initiating audio call');
-            isInitiatingCall = true;
+    audioCallBtn.classList.add('call-btn-loading');
+    audioCallBtn.disabled = true;
+    if (videoCallBtn) {
+      videoCallBtn.classList.add('calling');
+      videoCallBtn.disabled = true;
+    }
 
-            // Add loading state
-            audioCallBtn.classList.add('call-btn-loading');
-            audioCallBtn.disabled = true;
-            if (videoCallBtn) {
-              videoCallBtn.classList.add('calling');
-              videoCallBtn.disabled = true;
-            }
+    socketInstance.emit('initiate_call', {
+      roomId: roomData.roomId,
+      callType: 'audio'
+    });
 
-            socketInstance.emit('initiate_call', {
-              roomId: roomData.roomId,
-              callType: 'audio'
-            });
+    console.log('📤 Audio call initiation sent to server');
+    toast('Calling...', 'success');
 
-            console.log('📤 Audio call initiation sent to server');
-            toast('Calling...', 'success');
-
-            // Timeout after 30 seconds with recovery
-            const timeoutId = setTimeout(() => {
-              if (isInitiatingCall) {
-                console.log('⏰ Call initiation timeout (30s)');
-                isInitiatingCall = false;
-                audioCallBtn.classList.remove('call-btn-loading');
-                if (videoCallBtn) {
-                  videoCallBtn.classList.remove('calling');
-                }
-
-                // CRITICAL: Re-enable buttons after timeout
-                if (isSocketAuthenticated) {
-                  enableCallButtons();
-                }
-
-                toast('Call timeout - no response', 'warning');
-              }
-            }, 30000);
-
-            // Store timeout for cleanup
-            audioCallBtn.dataset.timeoutId = timeoutId;
-
-            console.log('📞 ========================================\n');
-
-          }, { passive: true });
+    const timeoutId = setTimeout(() => {
+      if (isInitiatingCall) {
+        console.log('⏰ Call initiation timeout (30s)');
+        isInitiatingCall = false;
+        audioCallBtn.classList.remove('call-btn-loading');
+        if (videoCallBtn) {
+          videoCallBtn.classList.remove('calling');
         }
+
+        if (isSocketAuthenticated) {
+          enableCallButtons();
+        }
+
+        toast('Call timeout - no response', 'warning');
+      }
+    }, 30000);
+
+    audioCallBtn.dataset.timeoutId = timeoutId;
+
+    console.log('📞 ========================================\n');
+
+  }, { passive: true });
+}
 
         if (videoCallBtn) {
           videoCallBtn.addEventListener('click', async () => {
@@ -6124,6 +6121,13 @@ window.addEventListener('pagehide', (event) => {
             console.log(`   Authentication state: ${isSocketAuthenticated}`);
             console.log(`   Socket connected: ${socketInstance?.connected}`);
             console.log(`   Already initiating: ${isInitiatingCall}`);
+
+
+
+    sessionStorage.setItem('navigating_to_call', 'true');
+    
+    // Small delay to ensure flag is set
+    await new Promise(resolve => setTimeout(resolve, 10));
 
             // CRITICAL: Block if already initiating
             if (isInitiatingCall) {
@@ -6866,6 +6870,87 @@ window.addEventListener('pagehide', (event) => {
       setupBackButtonHandler();
 
       console.log('✅ Chat initialization complete');
+      
+      
+      let cleanupExecuted = false;
+
+async function performNavigationCleanup(reason) {
+  if (cleanupExecuted) {
+    console.log(`⚠️ Cleanup already executed, skipping`);
+    return;
+  }
+  
+  cleanupExecuted = true;
+  console.log(`🧹 ========================================`);
+  console.log(`🧹 NAVIGATION CLEANUP: ${reason}`);
+  console.log(`🧹 ========================================`);
+  
+  // Stop heartbeat
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+    console.log(`⏰ Heartbeat stopped`);
+  }
+  
+  // Get current room data
+  const roomData = JSON.parse(localStorage.getItem('currentRoom') || '{}');
+  const roomId = roomData.roomId;
+  
+  if (roomId && socketInstance && socketInstance.connected) {
+    console.log(`🚪 Leaving room: ${roomId}`);
+    
+    // Emit leave_room
+    socketInstance.emit('leave_room', {}, (response) => {
+      console.log(`✅ Left room:`, response);
+    });
+    
+    // Give server time to process (important!)
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  
+  // Clear local storage
+  localStorage.removeItem('currentRoom');
+  localStorage.removeItem('roomExpiry');
+  
+  console.log(`✅ Navigation cleanup complete`);
+  console.log(`🧹 ========================================`);
+}
+
+// Listen for page hide (most reliable for back button)
+window.addEventListener('pagehide', (event) => {
+  console.log(`📄 pagehide event fired (persisted: ${event.persisted})`);
+  
+  // Only cleanup if NOT going to call.html
+  const isNavigatingToCall = sessionStorage.getItem('navigating_to_call') === 'true';
+  
+  if (!isNavigatingToCall) {
+    performNavigationCleanup('pagehide');
+  } else {
+    console.log(`ℹ️ Skipping cleanup - navigating to call page`);
+  }
+});
+
+// Backup: visibilitychange for browsers that don't fire pagehide reliably
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    console.log(`👁️ visibilitychange: hidden`);
+    
+    // Double-check we're not going to call page
+    const isNavigatingToCall = sessionStorage.getItem('navigating_to_call') === 'true';
+    
+    if (!isNavigatingToCall && !cleanupExecuted) {
+      // Delay slightly to let pagehide fire first (if it will)
+      setTimeout(() => {
+        if (!cleanupExecuted) {
+          performNavigationCleanup('visibilitychange');
+        }
+      }, 50);
+    }
+  }
+});
+
+console.log(`✅ Navigation cleanup listeners attached`);
+      
 
     })();
   </script>
