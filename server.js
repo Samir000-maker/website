@@ -4945,39 +4945,25 @@ io.on('connection', (socket) => {
 
     // ✅ FIX: Reduced grace period to near-zero (500ms) for "realtime" feel
     const cleanup = setTimeout(async () => {
-      // CRITICAL FIX: Check if user is actually IN THE ROOM via any socket
-      // "stillDisconnected" previously checked global connectivity, which caused issues
-      // when users navigated to non-room pages (like index.html) but remained "connected"
+      console.log(`⏰ [UID: ${firebaseUid || userId}] Grace period expired - checking if user reconnected`);
 
-      const activeRoom = firebaseUid ? getUserActiveRoom(firebaseUid) : null;
-      let isStillInRoom = false;
+      // Check if user reconnected during grace period
+      const stillDisconnected = !userToSocketId.has(userId) &&
+        (!firebaseUid || getUserSocketIds(firebaseUid).length === 0);
 
-      // If we know the room, check if any of user's sockets are joined to it
-      if (activeRoom) {
-        const roomSockets = io.sockets.adapter.rooms.get(activeRoom.roomId);
-        const userSockets = getUserSocketIds(firebaseUid || userId);
-
-        if (roomSockets && userSockets.length > 0) {
-          isStillInRoom = userSockets.some(socketId => roomSockets.has(socketId));
-        }
-      } else {
-        // Fallback: if no active room known, check global connection (safest fallback)
-        isStillInRoom = !(!userToSocketId.has(userId) && (!firebaseUid || getUserSocketIds(firebaseUid).length === 0));
-      }
-
-      if (isStillInRoom) {
-        console.log(`✅ [UID: ${firebaseUid || userId}] User reconnected AND joined room - canceling cleanup`);
+      if (!stillDisconnected) {
+        console.log(`✅ [UID: ${firebaseUid || userId}] User reconnected during grace period - canceling cleanup`);
         socketUserCleanup.delete(userId);
         return;
       }
 
-      console.log(`🧹 [UID: ${firebaseUid || userId}] User socket not found in room - proceeding with cleanup`);
+      console.log(`🧹 [UID: ${firebaseUid || userId}] User still disconnected - proceeding with cleanup`);
 
       // Remove from mood tracking
       removeUserFromAllMoods(userId);
 
-      // Re-fetch active room (in case it changed, though unlikely)
-      // const activeRoom = ... (already have it)
+      // Get active room
+      const activeRoom = firebaseUid ? getUserActiveRoom(firebaseUid) : null;
 
       if (activeRoom) {
         const room = matchmaking.getRoom(activeRoom.roomId);
@@ -4996,16 +4982,11 @@ io.on('connection', (socket) => {
             const extendedCleanup = setTimeout(async () => {
               console.log(`⏰ [UID: ${firebaseUid || userId}] Extended grace period expired`);
 
-              // Check again if is IN ROOM
-              let finalIsStillInRoom = false;
-              const currentRoomSockets = io.sockets.adapter.rooms.get(activeRoom.roomId);
-              const currentUserSockets = getUserSocketIds(firebaseUid || userId);
+              // Check again if still disconnected
+              const finalCheck = !userToSocketId.has(userId) &&
+                (!firebaseUid || getUserSocketIds(firebaseUid).length === 0);
 
-              if (currentRoomSockets && currentUserSockets.length > 0) {
-                finalIsStillInRoom = currentUserSockets.some(socketId => currentRoomSockets.has(socketId));
-              }
-
-              if (!finalIsStillInRoom) {
+              if (finalCheck) {
                 const currentRoom = matchmaking.getRoom(activeRoom.roomId);
                 if (currentRoom && !currentRoom.isExpired) {
                   // Remove from room
@@ -5026,12 +5007,10 @@ io.on('connection', (socket) => {
                 if (firebaseUid) {
                   clearUserActiveRoom(firebaseUid);
                 }
-              } else {
-                console.log(`✅ [UID: ${firebaseUid || userId}] User returned to room during extended grace period`);
               }
 
               socketUserCleanup.delete(userId);
-            }, 10000); // Keep 10s extension for active calls
+            }, 10000); // Keep 10s extension for calls only
 
             socketUserCleanup.set(userId, extendedCleanup);
             return;
