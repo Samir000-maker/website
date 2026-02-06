@@ -4912,6 +4912,7 @@ io.on('connection', (socket) => {
     const userId = userData.userId;
     const firebaseUid = userData.firebaseUid;
     const username = userData.username;
+    const pfpUrl = userData.pfpUrl; // ✅ Capture pfpUrl for event
 
     console.log(`👤 Disconnecting user: ${username} (${userId})`);
 
@@ -4931,10 +4932,9 @@ io.on('connection', (socket) => {
       return; // Don't clean up room - user still connected on other device
     }
 
-    console.log(`📱 [UID: ${firebaseUid || userId}] Last device disconnected - starting grace period`);
+    console.log(`📱 [UID: ${firebaseUid || userId}] Last device disconnected - starting immediate cleanup`);
 
-    // Start grace period timer
-    // Start grace period timer
+    // ✅ FIX: Reduced grace period to near-zero (500ms) for "realtime" feel
     const cleanup = setTimeout(async () => {
       console.log(`⏰ [UID: ${firebaseUid || userId}] Grace period expired - checking if user reconnected`);
 
@@ -4983,15 +4983,15 @@ io.on('connection', (socket) => {
                   // Remove from room
                   currentRoom.removeUser(userId);
 
-                  // Notify partner
-                  const partner = currentRoom.users.find(u => u.userId !== userId);
-                  if (partner) {
-                    emitToUserAllDevices(partner.userId, 'partner_disconnected', {
-                      roomId: activeRoom.roomId,
-                      userId,
-                      username: username
-                    });
-                  }
+                  // ✅ FIX: Emit 'user_left' instead of 'partner_disconnected'
+                  console.log(`📢 Broadcasting user_left for ${username} (extended cleanup)`);
+                  io.to(activeRoom.roomId).emit('user_left', {
+                    userId,
+                    username,
+                    pfpUrl,
+                    remainingUsers: currentRoom.users.length,
+                    roomId: activeRoom.roomId
+                  });
                 }
 
                 // Clear active room state
@@ -5001,7 +5001,7 @@ io.on('connection', (socket) => {
               }
 
               socketUserCleanup.delete(userId);
-            }, 10000); // Additional 10 seconds for call navigation
+            }, 10000); // Keep 10s extension for calls only
 
             socketUserCleanup.set(userId, extendedCleanup);
             return;
@@ -5010,15 +5010,16 @@ io.on('connection', (socket) => {
           // No active call - remove from room normally
           room.removeUser(userId);
 
-          // Notify partner
-          const partner = room.users.find(u => u.userId !== userId);
-          if (partner) {
-            emitToUserAllDevices(partner.userId, 'partner_disconnected', {
-              roomId: activeRoom.roomId,
-              userId,
-              username: username
-            });
-          }
+          // ✅ FIX: Emit 'user_left' instead of 'partner_disconnected'
+          // This ensures the client UI updates the user list immediately
+          console.log(`📢 Broadcasting user_left for ${username} (immediate cleanup)`);
+          io.to(activeRoom.roomId).emit('user_left', {
+            userId,
+            username,
+            pfpUrl, // Include profile pic
+            remainingUsers: room.users.length,
+            roomId: activeRoom.roomId
+          });
         }
 
         // Clear active room state
@@ -5040,7 +5041,7 @@ io.on('connection', (socket) => {
 
       console.log(`🧹 [UID: ${firebaseUid || userId}] Full cleanup completed`);
 
-    }, DISCONNECT_GRACE_PERIOD);
+    }, 500); // ✅ Reduced from DISCONNECT_GRACE_PERIOD to 500ms
 
     socketUserCleanup.set(userId, cleanup);
   });
