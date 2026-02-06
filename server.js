@@ -4933,10 +4933,97 @@ io.on('connection', (socket) => {
       releaseLock();
     }
   });
+  
+  
+  // ============================================
+// HEARTBEAT SYSTEM FOR SESSION TRACKING
+// ============================================
+const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
+const userHeartbeats = new Map(); // userId -> { roomId, lastHeartbeat, timeoutId }
+
+socket.on('heartbeat', (data) => {
+  const { userId, roomId, timestamp } = data;
+  
+  // Validate data
+  if (!userId || !roomId) return;
+  
+  console.log(`💓 Heartbeat from ${userId} in room ${roomId}`);
+  
+  // Clear existing timeout
+  const existing = userHeartbeats.get(userId);
+  if (existing?.timeoutId) {
+    clearTimeout(existing.timeoutId);
+  }
+  
+  // Set new timeout - if no heartbeat in 15s, user is gone
+  const timeoutId = setTimeout(async () => {
+    console.log(`💔 Heartbeat timeout for ${userId} - cleaning up session`);
+    
+    // Get user data
+    const user = socketUsers.get(socket.id);
+    if (!user) {
+      userHeartbeats.delete(userId);
+      return;
+    }
+    
+    // Get room
+    const room = matchmaking.getRoom(roomId);
+    if (!room) {
+      userHeartbeats.delete(userId);
+      return;
+    }
+    
+    // Remove user from room
+    room.removeUser(userId);
+    
+    // Clear active room state
+    const firebaseUid = user.firebaseUid;
+    if (firebaseUid) {
+      clearUserActiveRoom(firebaseUid);
+    }
+    
+    // Remove from mood tracking
+    removeUserFromMood(userId, room.mood);
+    
+    // Broadcast user left
+    io.to(roomId).emit('user_left', {
+      userId,
+      username: user.username,
+      pfpUrl: user.pfpUrl,
+      remainingUsers: room.users.length,
+      reason: 'disconnected'
+    });
+    
+    console.log(`✅ Session cleanup completed for ${userId}`);
+    
+    // Clean up tracking
+    userHeartbeats.delete(userId);
+    
+  }, HEARTBEAT_TIMEOUT);
+  
+  // Store heartbeat data
+  userHeartbeats.set(userId, {
+    roomId,
+    lastHeartbeat: timestamp,
+    timeoutId
+  });
+});
 
 
   socket.on('disconnect', async (reason) => {
+    
     console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
+
+
+      const userData = socketUsers.get(socket.id);
+  if (userData?.userId && userHeartbeats.has(userData.userId)) {
+    const heartbeat = userHeartbeats.get(userData.userId);
+    if (heartbeat.timeoutId) {
+      clearTimeout(heartbeat.timeoutId);
+      console.log(`⏰ Cleared heartbeat timeout for ${userData.username}`);
+    }
+    userHeartbeats.delete(userData.userId);
+  }
 
     // CRITICAL FIX: Get user data from socketUsers Map, not from undefined currentUser
     const userData = socketUsers.get(socket.id);
@@ -5435,6 +5522,23 @@ async function performPeriodicCleanup() {
       console.log(`🗑️ Cleaned up ${cleanedMoodDebounce} mood count debounce timers`);
     }
 
+
+
+// Clean up orphaned heartbeat timeouts
+let orphanedHeartbeats = 0;
+for (const [userId, heartbeat] of userHeartbeats.entries()) {
+  // Check if user still has active socket
+  const hasActiveSocket = Array.from(socketUsers.values()).some(u => u.userId === userId);
+  
+  if (!hasActiveSocket) {
+    clearTimeout(heartbeat.timeoutId);
+    userHeartbeats.delete(userId);
+    orphanedHeartbeats++;
+  }
+}
+if (orphanedHeartbeats > 0) {
+  console.log(`🗑️ Cleaned up ${orphanedHeartbeats} orphaned heartbeat timeouts`);
+}
 
     // Log memory stats
     const cleanupDuration = Date.now() - startTime;
