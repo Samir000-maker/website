@@ -1505,6 +1505,51 @@
         }
       });
 
+      // ============================================
+      // TYPING INDICATOR STATE & FUNCTIONS
+      // ============================================
+      const typingUsers = new Map(); // userId -> username
+      let typingTimeout = null;
+      let isCurrentlyTyping = false;
+
+      function updateTypingUI() {
+        const typingIndicator = document.getElementById('typingIndicator');
+        const typingText = document.getElementById('typingText');
+
+        if (typingIndicator && typingText) {
+          if (typingUsers.size > 0) {
+            const names = Array.from(typingUsers.values());
+            if (names.length === 1) {
+              typingText.textContent = `${names[0]} is typing...`;
+            } else if (names.length === 2) {
+              typingText.textContent = `${names[0]} and ${names[1]} are typing...`;
+            } else {
+              typingText.textContent = "Multiple people are typing...";
+            }
+            typingIndicator.classList.remove('hidden');
+          } else {
+            typingIndicator.classList.add('hidden');
+          }
+        }
+      }
+
+      const stopTyping = () => {
+        if (isCurrentlyTyping && socketInstance?.connected) {
+          isCurrentlyTyping = false;
+          socketInstance.emit('user_stop_typing', { roomId: roomData?.roomId });
+        }
+      };
+
+      const handleTyping = () => {
+        if (!isCurrentlyTyping && socketInstance?.connected) {
+          isCurrentlyTyping = true;
+          socketInstance.emit('user_typing', { roomId: roomData?.roomId });
+        }
+
+        if (typingTimeout) clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(stopTyping, 2000); // 2 seconds of silence = stop
+      };
+
       // Listen for messages from call iframe
       window.addEventListener('message', (event) => {
         const action = event.data?.action || event.data?.type; // Support both for compatibility
@@ -3098,10 +3143,12 @@
 
 
       // Function to cleanup parent call.html page
-      function cleanupParentCallPage() {
+      function cleanupParentCallPage(targetUrl = null) {
         console.log('🧹 ========================================');
         console.log('🧹 CLEANING UP PARENT CALL PAGE');
         console.log('🧹 ========================================');
+
+        const finalUrl = targetUrl || '/mood.html';
 
         // Check if we're in an iframe (chat overlay on call.html)
         if (window.parent && window.parent !== window) {
@@ -3114,19 +3161,19 @@
               console.log('✅ Parent floating button hidden');
             }
 
-            // Navigate parent window to mood.html (this will trigger call.html cleanup)
-            console.log('🔄 Navigating parent window to mood.html');
-            window.parent.location.href = '/mood.html';
+            // Navigate parent window
+            console.log(`🔄 Navigating parent window to ${finalUrl}`);
+            window.parent.location.href = finalUrl;
 
             console.log('✅ Parent window navigation initiated');
           } catch (e) {
             console.error('❌ Cannot access parent window:', e);
             // Fallback: just navigate ourselves
-            window.location.href = '/mood.html';
+            window.location.href = finalUrl;
           }
         } else {
-          console.log('ℹ️ Not in iframe - navigating directly');
-          window.location.href = '/mood.html';
+          console.log(`ℹ️ Not in iframe - navigating directly to ${finalUrl}`);
+          window.location.href = finalUrl;
         }
 
         console.log('🧹 ========================================\n');
@@ -4143,7 +4190,7 @@
       // ============================================
       // BACK BUTTON HANDLER
       // ============================================
-      async function exitRoomSequence() {
+      async function exitRoomSequence(targetUrl = null) {
         console.log('🚪 ========================================');
         console.log('🚪 STARTING EXIT ROOM SEQUENCE');
         console.log('🚪 ========================================');
@@ -4180,7 +4227,8 @@
         if (socketInstance && socketInstance.connected) {
           console.log('📤 Emitting leave_room...');
           socketInstance.emit('leave_room');
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Wait longer to ensure server receives it before navigation
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         // 4. Clear chat state (deletes files, etc)
@@ -4188,7 +4236,7 @@
 
         // 5. Navigate (this handles iframe + standalone redirections)
         console.log('✅ Exit sequence complete - initiating redirection');
-        cleanupParentCallPage();
+        cleanupParentCallPage(targetUrl);
         console.log('🚪 ========================================\n');
       }
 
@@ -4327,32 +4375,7 @@
           showCachedCallModal(data);
         });
 
-        // ============================================
-        // TYPING INDICATOR LOGIC
-        // ============================================
-        const typingUsers = new Map(); // userId -> username
-        let typingTimeout = null;
-        let isCurrentlyTyping = false;
-
-        function updateTypingUI() {
-          const typingIndicator = document.getElementById('typingIndicator');
-          const typingText = document.getElementById('typingText');
-
-          if (typingUsers.size > 0) {
-            const names = Array.from(typingUsers.values());
-            if (names.length === 1) {
-              typingText.textContent = `${names[0]} is typing...`;
-            } else if (names.length === 2) {
-              typingText.textContent = `${names[0]} and ${names[1]} are typing...`;
-            } else {
-              typingText.textContent = "Multiple people are typing...";
-            }
-            typingIndicator.classList.remove('hidden');
-          } else {
-            typingIndicator.classList.add('hidden');
-          }
-        }
-
+        // Typing indicator events
         socketInstance.on('user_typing', ({ userId, username }) => {
           typingUsers.set(userId, username);
           updateTypingUI();
@@ -4362,23 +4385,6 @@
           typingUsers.delete(userId);
           updateTypingUI();
         });
-
-        const stopTyping = () => {
-          if (isCurrentlyTyping) {
-            isCurrentlyTyping = false;
-            socketInstance.emit('user_stop_typing', { roomId: roomData.roomId });
-          }
-        };
-
-        const handleTyping = () => {
-          if (!isCurrentlyTyping) {
-            isCurrentlyTyping = true;
-            socketInstance.emit('user_typing', { roomId: roomData.roomId });
-          }
-
-          if (typingTimeout) clearTimeout(typingTimeout);
-          typingTimeout = setTimeout(stopTyping, 2000); // 2 seconds of silence = stop
-        };
 
         // Add event listener to message input
         const messageInput = document.getElementById('messageInput');
@@ -5901,8 +5907,7 @@
         // ============================================
 
         // 1. Link Click Interceptor
-        // Detects when user clicks a link to another page
-        document.addEventListener('click', (e) => {
+        document.addEventListener('click', async (e) => {
           const link = e.target.closest('a');
           if (!link) return;
 
@@ -5916,29 +5921,35 @@
           if (isCallPage) {
             console.log('🏁 Navigating to call page - suppressing auto-leave');
             navigatingToCall = true;
-          } else {
-            console.log(`🚪 Navigating to ${url.pathname} - triggering leave room sequence`);
-            // Trigger same logic as leave button
-            exitRoomSequence().catch(console.error);
+          } else if (url.origin === window.location.origin) {
+            // Internal navigation to other pages
+            console.log(`🚪 Navigating to ${url.pathname} - triggering leave sequence`);
+            e.preventDefault();
+            await exitRoomSequence(url.href);
           }
-        }, { passive: true });
+        });
 
         // 2. BeforeUnload (Refresh/Close/Address Bar)
         window.addEventListener('beforeunload', (event) => {
           const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
-          if (navigatingToCall || hasBackgroundCall) {
+
+          if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
             console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
             return;
           }
 
-          console.log('🚪 Page unloading - triggering official leave');
-          // Most browsers will kill the process before completion, but it's a best-effort.
-          if (socketInstance && socketInstance.connected) {
+          console.log('🚪 Page unloading - triggering best-effort leave');
+
+          // Emitting leave_room (best effort)
+          if (socketInstance?.connected) {
             socketInstance.emit('leave_room');
           }
 
-          // Clear storage immediately (synchronous)
+          // Cleanup storage immediately
           clearChatState(true);
+
+          // Stop typing indicator
+          stopTyping();
         });
 
 
@@ -6470,44 +6481,6 @@
           } else {
             console.log('📱 Page visible');
           }
-        });
-
-        window.addEventListener('beforeunload', (e) => {
-          console.log('🚪 Chat page beforeunload event');
-          stopCachedCallMonitoring();
-
-
-          console.log('🧹 Cleaning up blob URLs...');
-          const images = document.querySelectorAll('img[data-blob-url]');
-          images.forEach(img => {
-            const blobUrl = img.dataset.blobUrl;
-            if (blobUrl) {
-              URL.revokeObjectURL(blobUrl);
-            }
-          });
-          console.log(`✅ Revoked ${images.length} blob URL(s)`);
-
-          // CRITICAL: Check if in background call mode
-          if (isInBackgroundCall) {
-            console.log('🔒 Background call active - preserving state');
-            saveChatState(roomData.roomId, messagesCache);
-            // socketInstance.disconnect() removed to allow for session persistence
-            return;
-          }
-
-          if (navigatingToCall) {
-            console.log('🔒 Navigating to call - keeping socket');
-            saveChatState(roomData.roomId, messagesCache);
-            return;
-          }
-
-          console.log('🗑️ Reload or navigation detected - preserving state via server grace period');
-          saveChatState(roomData.roomId, messagesCache);
-
-          // socketInstance.disconnect() and leave_room removed to allow for session persistence
-          // The server DISCONNECT_GRACE_PERIOD will handle real departures.
-          stopTyping();
-          if (timerInterval) clearInterval(timerInterval);
         });
       }
 
