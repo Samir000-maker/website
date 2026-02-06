@@ -5726,9 +5726,30 @@
             joinCallBtn.disabled = false;
           }
           if (acceptCallBtn) {
-            acceptCallBtn.classList.remove('join-btn-loading');
             acceptCallBtn.disabled = false;
           }
+
+          // ✅ CRITICAL FIX: Show call iframe IMMEDIATELY on successful join
+          console.log('📱 Showing call iframe for joined call');
+          let callIframeContainer = document.getElementById('callIframeContainer');
+
+          if (!callIframeContainer) {
+            console.log('📱 Call iframe container missing - creating it');
+            callIframeContainer = document.createElement('div');
+            callIframeContainer.id = 'callIframeContainer';
+            callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black'; // Visible immediately
+            callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
+            document.body.appendChild(callIframeContainer);
+            console.log('✅ Call iframe container created and call.html loaded');
+          } else {
+            callIframeContainer.classList.remove('hidden');
+            const iframe = document.getElementById('callIframe');
+            if (iframe) iframe.src = '/call.html'; // Reload to pick up new callId
+            console.log('✅ Call iframe shown');
+          }
+
+          activeCallConnectionState = 'connecting';
+          updateCallButtonStates();
 
         });
       }
@@ -6171,17 +6192,7 @@
               // User is already in call - show call iframe or navigate
               console.log('📞 BACK TO CALL MODE');
 
-              // CRITICAL: Check if we are running inside an iframe
-              if (window.parent && window.parent !== window) {
-                console.log('📱 In iframe - sending showCall to parent');
-                window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
-                return;
-              }
-
-              const activeCallData = JSON.parse(activeCallStr);
-              console.log(`   callId: ${activeCallData.callId}`);
-
-              // Check if call iframe exists (running in background)
+              // CRITICAL: Force show local iframe first
               let callIframeContainer = document.getElementById('callIframeContainer');
 
               if (!callIframeContainer) {
@@ -6197,6 +6208,12 @@
                 // Iframe exists, just show it
                 callIframeContainer.classList.remove('hidden');
                 console.log('✅ Call iframe shown');
+              }
+
+              // Fallback for iframe mode (if applicable)
+              if (window.parent && window.parent !== window) {
+                console.log('📱 In iframe - sending showCall to parent (redundant but safe)');
+                window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
               }
 
               // CRITICAL: Force UI update to show we are in call
