@@ -4532,74 +4532,56 @@
           if (data.isInitiator) {
             console.log('✅ We initiated this call - loading in iframe');
 
-            // Reset initiation state
-            isInitiatingCall = false;
-
-            // Clear loading states and timeouts
-            [audioCallBtn, videoCallBtn].forEach(btn => {
-              if (btn) {
-                btn.classList.remove('call-btn-loading', 'calling');
-                btn.disabled = false;
-                if (btn.dataset.timeoutId) {
-                  clearTimeout(parseInt(btn.dataset.timeoutId));
-                  delete btn.dataset.timeoutId;
-                }
-              }
-            });
+            // Clear loading states
+            if (audioCallBtn) {
+              audioCallBtn.classList.remove('call-btn-loading');
+              audioCallBtn.disabled = false;
+            }
+            if (videoCallBtn) {
+              videoCallBtn.classList.remove('call-btn-loading');
+              videoCallBtn.disabled = false;
+            }
 
             // Store call data
-            const activeCallData = {
+            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
               callId: data.callId,
               roomId: roomData.roomId,
               callType: data.callType,
-              connectionState: 'initializing',
-              participants: data.participants || []
-            };
-            localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(activeCallData));
+              users: data.participants || [],
+              connectionState: 'initializing' // Set initial state
+            }));
 
             console.log(`✅ Stored call data with initializing state`);
 
-            // CRITICAL: Immediate UI Transition
-            // Check if we are running in an iframe (e.g. inside call.html already? unlikely if starting NEW call, but good practice)
-            if (window.parent && window.parent !== window) {
-              console.log('📱 In iframe - sending REQUEST_SHOW_CALL to parent');
-              window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
+            // CRITICAL: Load call.html in iframe instead of navigating
+            console.log('📱 Loading call.html in iframe (background mode)');
+
+            // Create or show call iframe container
+            let callIframeContainer = document.getElementById('callIframeContainer');
+            if (!callIframeContainer) {
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black'; // ✅ Visible immediately
+              callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Created call iframe container (visible)');
             } else {
-              // We are top level - show the container
-              console.log('📱 Showing call iframe container immediately');
-              let callIframeContainer = document.getElementById('callIframeContainer');
-
-              if (!callIframeContainer) {
-                callIframeContainer = document.createElement('div');
-                callIframeContainer.id = 'callIframeContainer';
-                callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
-                // Remove 'hidden' class if it was added
-                callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
-                document.body.appendChild(callIframeContainer);
-                console.log('✅ Created call iframe container');
-              } else {
-                callIframeContainer.classList.remove('hidden');
-                console.log('✅ Showed existing call iframe container');
-              }
-
-              const callIframe = document.getElementById('callIframe');
-              if (callIframe) {
-                // Force reload/load of call.html
-                callIframe.src = '/call.html';
-                console.log('✅ Loading call.html in iframe');
-              }
+              callIframeContainer.classList.remove('hidden'); // ✅ Make visible if hidden
+              console.log('✅ Showing existing call iframe container');
             }
 
-            // Update UI state
+            const callIframe = document.getElementById('callIframe');
+            if (callIframe) {
+              callIframe.src = '/call.html';
+              console.log('✅ Loading call.html in iframe');
+            }
+
+            // Update UI state immediately
             activeCallConnectionState = 'initializing';
             updateCallButtonStates();
 
-            // Store return flag
-            sessionStorage.setItem('returningFromCall', 'true');
-
-            console.log('✅ UI Transition initiated');
+            console.log('✅ Call will initialize in background iframe');
             console.log('📞 ========================================\n');
-
           } else {
             console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
             console.log('📞 ========================================\n');
@@ -5748,54 +5730,6 @@
             acceptCallBtn.disabled = false;
           }
 
-          // Store active call in localStorage
-          const activeCallData = {
-            callId: data.callId,
-            roomId: data.roomId,
-            callType: data.callType,
-            connectionState: 'initializing',
-            participants: [] // We'll get this from call state update
-          };
-          localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(activeCallData));
-
-          console.log(`✅ Stored call data for joining user`);
-
-          // CRITICAL: Immediate UI Transition
-          if (window.parent && window.parent !== window) {
-            console.log('📱 In iframe - sending REQUEST_SHOW_CALL to parent');
-            window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
-          } else {
-            console.log('📱 Showing call iframe container immediately');
-            let callIframeContainer = document.getElementById('callIframeContainer');
-
-            if (!callIframeContainer) {
-              callIframeContainer = document.createElement('div');
-              callIframeContainer.id = 'callIframeContainer';
-              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
-              callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
-              document.body.appendChild(callIframeContainer);
-              console.log('✅ Created call iframe container');
-            } else {
-              callIframeContainer.classList.remove('hidden');
-              console.log('✅ Showed existing call iframe container');
-            }
-
-            const callIframe = document.getElementById('callIframe');
-            if (callIframe) {
-              callIframe.src = '/call.html';
-              console.log('✅ Loading call.html in iframe');
-            }
-          }
-
-          // Update UI state
-          activeCallConnectionState = 'initializing';
-          updateCallButtonStates();
-
-          // Store return flag
-          sessionStorage.setItem('returningFromCall', 'true');
-
-          console.log('✅ UI Transition initiated for joiner');
-          console.log('✅ ========================================\n');
         });
       }
 
