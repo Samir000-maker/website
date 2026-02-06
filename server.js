@@ -1815,12 +1815,13 @@ io.on('connection', (socket) => {
 
 
   socket.on('send_message', async (data, callback) => {
-    if (!currentUser) {
+    const userData = socketUsers.get(socket.id);
+    if (!userData) {
       return callback?.({ success: false, error: 'Not authenticated' });
     }
 
     const { roomId, message, type = 'text' } = data;
-    const userId = currentUser.userId;
+    const userId = userData.userId;
 
     // Validate room access
     const validation = validateRoomAccess(roomId, userId);
@@ -1830,11 +1831,10 @@ io.on('connection', (socket) => {
 
     const room = validation.room;
 
-    // Create message object
     const messageObj = {
       id: uuidv4(),
       userId,
-      username: currentUser.username,
+      username: userData.username,
       message,
       type,
       timestamp: Date.now()
@@ -3281,6 +3281,20 @@ io.on('connection', (socket) => {
   // ============================================
   // TYPING INDICATOR HANDLERS
   // ============================================
+  socket.on('typing', ({ roomId }) => {
+    const userData = socketUsers.get(socket.id);
+    if (!userData) return;
+
+    const userId = userData.userId;
+    const username = userData.username;
+
+    // Broadcast typing state to EVERYONE ELSE in the room
+    socket.to(roomId).emit('user_typing', {
+      userId: userId,
+      username: username
+    });
+  });
+
   socket.on('user_typing', ({ roomId }) => {
     const user = socketUsers.get(socket.id);
     if (!user) return;
@@ -4059,6 +4073,18 @@ io.on('connection', (socket) => {
         const participantSet = new Set(call.participants);
         const wasAlreadyInCall = participantSet.has(user.userId);
 
+        // Ensure media state exists
+        if (!call.userMediaStates.has(user.userId)) {
+          call.userMediaStates.set(user.userId, {
+            videoEnabled: call.callType === 'video',
+            audioEnabled: true
+          });
+          console.log(`📊 Initialized media state for ${user.username}`);
+        }
+
+        // Get current user's media state
+        const userMediaState = call.userMediaStates.get(user.userId);
+
         // ✅ FIX: Only broadcast if this is a NEW join (not re-join)
         if (!wasAlreadyInCall) {
           socket.to(`call-${callId}`).emit('user_joined_call', {
@@ -4079,15 +4105,6 @@ io.on('connection', (socket) => {
         }
 
         call.lastActivity = Date.now();
-
-        // Ensure media state exists
-        if (!call.userMediaStates.has(user.userId)) {
-          call.userMediaStates.set(user.userId, {
-            videoEnabled: call.callType === 'video',
-            audioEnabled: true
-          });
-          console.log(`📊 Initialized media state for ${user.username}`);
-        }
 
         // Clear grace period
         if (callGracePeriod.has(callId)) {
@@ -4143,10 +4160,6 @@ io.on('connection', (socket) => {
         }
 
         console.log(`📊 Sending ${participantsWithMediaStates.length} VALIDATED participants to ${user.username}`);
-
-
-        // Get current user's media state
-        const userMediaState = call.userMediaStates.get(user.userId);
 
 
         socket.emit('call_joined', {
