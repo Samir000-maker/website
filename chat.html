@@ -3182,6 +3182,14 @@
 
         const finalUrl = targetUrl || '/mood.html';
 
+        // ✅ CRITICAL: Clear any persistent matchmaking state from discovery.html
+        // This prevents automatic re-match if the user lands on discovery.html via back-button
+        try {
+          localStorage.removeItem('discovery_state');
+          localStorage.removeItem('discovery_state_timestamp');
+          console.log('🧹 [Cleanup] Matchmaking state cleared');
+        } catch (e) { }
+
         // Check if we're in an iframe (chat overlay on call.html)
         if (window.parent && window.parent !== window) {
           console.log('📱 We are in iframe - accessing parent window');
