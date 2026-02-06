@@ -4187,109 +4187,152 @@
         });
       }
 
-      // ============================================
-      // BACK BUTTON HANDLER
-      // ============================================
-      async function exitRoomSequence(targetUrl = null) {
-        console.log('🚪 ========================================');
-        console.log('🚪 STARTING EXIT ROOM SEQUENCE');
-        console.log('🚪 ========================================');
+      /**
+ * Synchronous cleanup that can run during page unload
+ * Uses sendBeacon for guaranteed delivery
+ */
+function backgroundCleanupSync() {
+  console.log('🧹 BACKGROUND CLEANUP (SYNC)');
+  
+  // Get required data
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  const roomStr = localStorage.getItem('currentRoom');
+  
+  let cleanupData = {
+    userId: currentUser?.userId,
+    roomId: roomData?.roomId,
+    timestamp: Date.now()
+  };
+  
+  // Add call data if exists
+  if (activeCallStr) {
+    try {
+      const callData = JSON.parse(activeCallStr);
+      cleanupData.callId = callData.callId;
+      cleanupData.hasActiveCall = true;
+    } catch (e) {
+      console.error('Failed to parse call data:', e);
+    }
+  }
+  
+  // Send beacon (guaranteed to send even if page unloads immediately)
+  const beaconUrl = `${window.location.origin}/api/rooms/cleanup-beacon`;
+  const blob = new Blob([JSON.stringify(cleanupData)], { type: 'application/json' });
+  
+  if (navigator.sendBeacon) {
+    const sent = navigator.sendBeacon(beaconUrl, blob);
+    console.log(`📡 Beacon sent: ${sent}`);
+  } else {
+    // Fallback for old browsers
+    fetch(beaconUrl, {
+      method: 'POST',
+      body: blob,
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' }
+    }).catch(err => console.error('Beacon fallback failed:', err));
+  }
+  
+  // Synchronous storage cleanup (safe in unload)
+  try {
+    localStorage.removeItem(CHAT_STATE_KEY);
+    localStorage.removeItem(CHAT_MESSAGES_KEY);
+    localStorage.removeItem(CHAT_TIMESTAMP_KEY);
+    console.log('✅ Storage cleared');
+  } catch (e) {
+    console.error('Storage cleanup failed:', e);
+  }
+}
 
-        // 1. Stop all monitoring and timers
-        stopCachedCallMonitoring();
-        if (timerInterval) clearInterval(timerInterval);
+/**
+ * Async cleanup for manual button clicks (can await operations)
+ */
+async function exitRoomSequence(targetUrl = null) {
+  console.log('🚪 ========================================');
+  console.log('🚪 STARTING EXIT ROOM SEQUENCE (MANUAL)');
+  console.log('🚪 ========================================');
 
-        // 2. Cleanup active call if exists
-        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        if (activeCallStr) {
-          console.log('📞 Active call detected - cleaning up...');
-          try {
-            const callData = JSON.parse(activeCallStr);
-            if (socketInstance && socketInstance.connected) {
-              socketInstance.emit('leave_call', { callId: callData.callId });
-              // Small delay to ensure emission
-              await new Promise(resolve => setTimeout(resolve, 300));
-            }
-          } catch (e) {
-            console.error('❌ Error during call cleanup:', e);
-          }
+  // Stop monitoring
+  stopCachedCallMonitoring();
+  if (timerInterval) clearInterval(timerInterval);
 
-          // Clear storage regardless of socket state
-          localStorage.removeItem(ACTIVE_CALL_KEY);
-          sessionStorage.removeItem('hasBackgroundCall');
-          sessionStorage.removeItem('returningFromCall');
-          sessionStorage.removeItem('backgroundCallMode');
-          sessionStorage.removeItem('returningToBackgroundCall');
-          console.log('✅ Call storage cleared');
-        }
-
-        // 3. Leave the chat room
-        if (socketInstance && socketInstance.connected) {
-          console.log('📤 Emitting leave_room...');
-          socketInstance.emit('leave_room');
-          // Wait longer to ensure server receives it before navigation
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        // 4. Clear chat state (deletes files, etc)
-        await clearChatState(true);
-
-        // 5. Navigate (this handles iframe + standalone redirections)
-        console.log('✅ Exit sequence complete - initiating redirection');
-        cleanupParentCallPage(targetUrl);
-        console.log('🚪 ========================================\n');
+  // Cleanup active call
+  const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+  if (activeCallStr) {
+    console.log('📞 Active call detected - cleaning up...');
+    try {
+      const callData = JSON.parse(activeCallStr);
+      if (socketInstance && socketInstance.connected) {
+        socketInstance.emit('leave_call', { callId: callData.callId });
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
+    } catch (e) {
+      console.error('❌ Error during call cleanup:', e);
+    }
+
+    localStorage.removeItem(ACTIVE_CALL_KEY);
+    sessionStorage.removeItem('hasBackgroundCall');
+    sessionStorage.removeItem('returningFromCall');
+    sessionStorage.removeItem('backgroundCallMode');
+    sessionStorage.removeItem('returningToBackgroundCall');
+    console.log('✅ Call storage cleared');
+  }
+
+  // Leave chat room
+  if (socketInstance && socketInstance.connected) {
+    console.log('📤 Emitting leave_room...');
+    socketInstance.emit('leave_room');
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  // Clear chat state (deletes files)
+  await clearChatState(true);
+
+  console.log('✅ Exit sequence complete - initiating redirection');
+  cleanupParentCallPage(targetUrl);
+  console.log('🚪 ========================================\n');
+}
 
       function setupBackButtonHandler() {
-        const TRAP_STATE = { page: 'chat', trap: true };
+  const TRAP_STATE = { page: 'chat', trap: true };
 
-        const ensureTrapState = () => {
-          // Only push if we're not already in the trap state
-          if (!history.state || !history.state.trap) {
-            console.log('🔒 Injecting back button trap state');
-            history.pushState(TRAP_STATE, '', window.location.href);
-          }
-        };
+  const ensureTrapState = () => {
+    if (!history.state || !history.state.trap) {
+      console.log('🔒 Injecting back button trap state');
+      history.pushState(TRAP_STATE, '', window.location.href);
+    }
+  };
 
-        // Initialize on load
-        ensureTrapState();
+  ensureTrapState();
 
-        // Re-initialize on page show (handles BFCache and Refresh)
-        window.addEventListener('pageshow', (event) => {
-          // event.persisted check is optional but good for debugging BFCache
-          console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
-          setTimeout(ensureTrapState, 0); // specialized timeout ensures it runs after browser restoration
-        });
+  window.addEventListener('pageshow', (event) => {
+    console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
+    setTimeout(ensureTrapState, 0);
+  });
 
-        // Handle the Back Button (popstate)
-        window.addEventListener('popstate', async (event) => {
-  if (backButtonHandled) return;
+  // Handle back button with async cleanup that doesn't block navigation
+  window.addEventListener('popstate', async (event) => {
+    if (backButtonHandled) return;
 
-  console.log('⬅️ Back button pressed - Trapped!');
+    console.log('⬅️ Back button pressed - Trapped!');
+    history.pushState(TRAP_STATE, '', window.location.href);
 
-  // Immediately push the state back to keep the user here while cleanup executes
-  history.pushState(TRAP_STATE, '', window.location.href);
+    const shouldLeave = await showConfirmationDialog();
 
-  const shouldLeave = await showConfirmationDialog();
+    if (shouldLeave) {
+      console.log('✅ User confirmed leaving');
+      backButtonHandled = true;
 
-if (shouldLeave) {
-  console.log('✅ User confirmed leaving');
-  backButtonHandled = true;
-
-  // CRITICAL: MUST await the exit sequence so socket emission completes
-  try {
-    await exitRoomSequence();
-  } catch (error) {
-    console.error('❌ Error during back button exit:', error);
-    // Fallback: force navigation even if cleanup fails
-    window.location.href = '/mood.html';
-  }
-} else {
-  console.log('❌ User staying in chat');
-  // State is already pushed back, so we stay here
-}
-});
+      try {
+        await exitRoomSequence();
+      } catch (error) {
+        console.error('❌ Error during back button exit:', error);
+        window.location.href = '/mood.html';
       }
+    } else {
+      console.log('❌ User staying in chat');
+    }
+  });
+}
 
       const updateTimer = () => {
         if (!serverExpiresAt) {
@@ -5739,6 +5782,7 @@ if (shouldLeave) {
 
           // Mark navigating
           navigatingToCall = true;
+          sessionStorage.setItem('navigatingToCall', 'true');
 
           // Save chat state (if not already saved)
           saveChatState(roomData.roomId, messagesCache);
@@ -5931,62 +5975,70 @@ if (shouldLeave) {
         }
 
 
-        // ============================================
-        // AUTO-LEAVE & NAVIGATION DETECTION
-        // ============================================
+document.addEventListener('click', async (e) => {
+  const link = e.target.closest('a');
+  if (!link) return;
 
-        // 1. Link Click Interceptor
-        document.addEventListener('click', async (e) => {
-          const link = e.target.closest('a');
-          if (!link) return;
+  const h = link.getAttribute('href');
+  if (!h || h.startsWith('#') || h.startsWith('javascript:')) return;
 
-          const h = link.getAttribute('href');
-          if (!h || h.startsWith('#') || h.startsWith('javascript:')) return;
+  // Normalize path
+  const url = new URL(link.href, window.location.origin);
+  const isCallPage = url.pathname === '/call.html' || url.pathname === 'call.html' || url.pathname.endsWith('/call.html');
 
-          // Normalize path
-          const url = new URL(link.href, window.location.origin);
-          const isCallPage = url.pathname === '/call.html' || url.pathname === 'call.html' || url.pathname.endsWith('/call.html');
+  if (isCallPage) {
+    console.log('🏁 Navigating to call page - setting flag');
+    navigatingToCall = true;
+    sessionStorage.setItem('navigatingToCall', 'true'); // Persist flag
+  } else if (url.origin === window.location.origin) {
+    // Internal navigation to other pages - let pagehide handle cleanup
+    console.log(`🚪 Navigating to ${url.pathname} - cleanup will run in pagehide`);
+    // Don't prevent default - let navigation happen naturally
+    // pagehide will fire and handle cleanup via backgroundCleanupSync()
+  }
+});
 
-          if (isCallPage) {
-            console.log('🏁 Navigating to call page - suppressing auto-leave');
-            navigatingToCall = true;
-          } else if (url.origin === window.location.origin) {
-            // Internal navigation to other pages
-            console.log(`🚪 Navigating to ${url.pathname} - triggering leave sequence`);
-            e.preventDefault();
-            await exitRoomSequence(url.href);
-          }
-        });
+// ============================================
+// BACKGROUND CLEANUP ON PAGE UNLOAD
+// ============================================
 
-// 2. BeforeUnload (Refresh/Close/Address Bar)
-window.addEventListener('beforeunload', (event) => {
-  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+// Primary cleanup handler using pagehide (most reliable)
+window.addEventListener('pagehide', (event) => {
+  console.log('🚪 ========================================');
+  console.log('🚪 PAGEHIDE EVENT - BACKGROUND CLEANUP');
+  console.log('🚪 ========================================');
+  console.log(`   Persisted: ${event.persisted}`);
+  console.log(`   Navigating to call: ${navigatingToCall}`);
+  console.log(`   Has background call: ${sessionStorage.getItem('hasBackgroundCall') === 'true'}`);
+  console.log(`   Is in background call: ${isInBackgroundCall}`);
 
-  if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
-    console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
+  // Skip cleanup if going to call page
+  if (navigatingToCall || sessionStorage.getItem('hasBackgroundCall') === 'true' || isInBackgroundCall) {
+    console.log('✅ Exception: navigating to call - skipping cleanup');
+    console.log('🚪 ========================================\n');
     return;
   }
 
-  // NOTE: beforeunload cannot guarantee async operations complete.
-  // For browser back, we intercept in popstate handler.
-  // For refresh/close, we do best-effort cleanup:
-  console.log('🚪 Page unloading - best-effort cleanup (refresh/close)');
+  // Execute background cleanup (synchronous, uses sendBeacon)
+  backgroundCleanupSync();
+  
+  console.log('🚪 ========================================\n');
+}, { capture: true }); // Use capture to ensure it fires
 
-  // Synchronous-only cleanup for refresh/close scenarios
-  if (socketInstance?.connected) {
-    // Send leave_room with keepalive flag (modern browsers may honor it)
-    navigator.sendBeacon?.('/api/rooms/leave-beacon', JSON.stringify({
-      roomId: roomData?.roomId,
-      userId: currentUser?.userId
-    }));
+// Fallback for older browsers that don't support pagehide
+const supportsPagehide = 'onpagehide' in window;
+if (!supportsPagehide) {
+  console.warn('⚠️ pagehide not supported - using beforeunload fallback');
+  
+  window.addEventListener('beforeunload', (event) => {
+    if (navigatingToCall || sessionStorage.getItem('hasBackgroundCall') === 'true' || isInBackgroundCall) {
+      return;
+    }
     
-    // Also emit via socket (may or may not succeed)
-    socketInstance.emit('leave_room');
-  }
-
-  clearChatState(true);
-  stopTyping();
-});
+    // Use same sync cleanup
+    backgroundCleanupSync();
+  });
+}
 
 
         if (audioCallBtn) {
@@ -6287,6 +6339,7 @@ window.addEventListener('beforeunload', (event) => {
 
               // Mark navigating
               navigatingToCall = true;
+              sessionStorage.setItem('navigatingToCall', 'true');
 
               // Add loading state
               acceptCallBtn.classList.add('join-btn-loading');
@@ -6596,6 +6649,7 @@ window.addEventListener('beforeunload', (event) => {
 
       try {
         // Check if we're returning from a call OR if we're in an iframe (chat overlay)
+        sessionStorage.removeItem('navigatingToCall');
         const returningFromCall = sessionStorage.getItem('returningFromCall') === 'true';
         const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
