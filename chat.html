@@ -5748,6 +5748,54 @@
             acceptCallBtn.disabled = false;
           }
 
+          // Store active call in localStorage
+          const activeCallData = {
+            callId: data.callId,
+            roomId: data.roomId,
+            callType: data.callType,
+            connectionState: 'initializing',
+            participants: [] // We'll get this from call state update
+          };
+          localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(activeCallData));
+
+          console.log(`✅ Stored call data for joining user`);
+
+          // CRITICAL: Immediate UI Transition
+          if (window.parent && window.parent !== window) {
+            console.log('📱 In iframe - sending REQUEST_SHOW_CALL to parent');
+            window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
+          } else {
+            console.log('📱 Showing call iframe container immediately');
+            let callIframeContainer = document.getElementById('callIframeContainer');
+
+            if (!callIframeContainer) {
+              callIframeContainer = document.createElement('div');
+              callIframeContainer.id = 'callIframeContainer';
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
+              callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
+              document.body.appendChild(callIframeContainer);
+              console.log('✅ Created call iframe container');
+            } else {
+              callIframeContainer.classList.remove('hidden');
+              console.log('✅ Showed existing call iframe container');
+            }
+
+            const callIframe = document.getElementById('callIframe');
+            if (callIframe) {
+              callIframe.src = '/call.html';
+              console.log('✅ Loading call.html in iframe');
+            }
+          }
+
+          // Update UI state
+          activeCallConnectionState = 'initializing';
+          updateCallButtonStates();
+
+          // Store return flag
+          sessionStorage.setItem('returningFromCall', 'true');
+
+          console.log('✅ UI Transition initiated for joiner');
+          console.log('✅ ========================================\n');
         });
       }
 
