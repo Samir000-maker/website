@@ -1699,8 +1699,12 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
   const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
 
   try {
-    // 1. Remove from matchmaking room
-    room.removeUser(userId);
+    // 1. Remove from matchmaking room (Authoritative Sync)
+    const leaveResult = matchmaking.leaveRoom(userId);
+    const remainingUsers = leaveResult.remainingUsers;
+    const roomDestroyed = leaveResult.destroyed;
+
+    console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}. Room Destroyed: ${roomDestroyed}`);
 
     // 2. Clear active room state for user records
     if (firebaseUid) clearUserActiveRoom(firebaseUid);
