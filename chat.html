@@ -1241,7 +1241,7 @@
             </button>
             <input type="text" id="messageInput" maxlength="500"
               class="flex-1 px-4 py-3 text-sm border border-gray-700 rounded-xl focus:border-[#33bfcc] focus:outline-none bg-[#2a2d33] text-gray-200"
-              placeholder="Type a message..." style="min-width: 0; -webkit-appearance: none;">
+              placeholder="Type a message..." style="min-width: 0; appearance: none; -webkit-appearance: none;">
             <button type="submit"
               class="w-11 h-11 flex-shrink-0 flex items-center justify-center bg-[#33bfcc] text-white rounded-xl hover:bg-[#2aa5b0] active:scale-95 transition-transform">
               <span class="material-symbols-outlined">send</span>
@@ -3215,6 +3215,7 @@
 
             returnBtn.onclick = () => {
               console.log('📞 Return to call clicked');
+              navigatingToCall = true; // Set flag for auto-leave detection
               sessionStorage.removeItem('hasBackgroundCall');
               window.location.href = '/call.html';
             };
@@ -5868,6 +5869,52 @@
             }
           }, { passive: true });
         }
+
+
+        // ============================================
+        // AUTO-LEAVE & NAVIGATION DETECTION
+        // ============================================
+
+        // 1. Link Click Interceptor
+        // Detects when user clicks a link to another page
+        document.addEventListener('click', (e) => {
+          const link = e.target.closest('a');
+          if (!link) return;
+
+          const h = link.getAttribute('href');
+          if (!h || h.startsWith('#') || h.startsWith('javascript:')) return;
+
+          // Normalize path
+          const url = new URL(link.href, window.location.origin);
+          const isCallPage = url.pathname === '/call.html' || url.pathname === 'call.html' || url.pathname.endsWith('/call.html');
+
+          if (isCallPage) {
+            console.log('🏁 Navigating to call page - suppressing auto-leave');
+            navigatingToCall = true;
+          } else {
+            console.log(`🚪 Navigating to ${url.pathname} - triggering leave room sequence`);
+            // Trigger same logic as leave button
+            exitRoomSequence().catch(console.error);
+          }
+        }, { passive: true });
+
+        // 2. BeforeUnload (Refresh/Close/Address Bar)
+        window.addEventListener('beforeunload', (event) => {
+          const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+          if (navigatingToCall || hasBackgroundCall) {
+            console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
+            return;
+          }
+
+          console.log('🚪 Page unloading - triggering official leave');
+          // Most browsers will kill the process before completion, but it's a best-effort.
+          if (socketInstance && socketInstance.connected) {
+            socketInstance.emit('leave_room');
+          }
+
+          // Clear storage immediately (synchronous)
+          clearChatState(true);
+        });
 
 
         if (audioCallBtn) {
