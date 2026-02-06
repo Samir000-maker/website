@@ -47,6 +47,12 @@ const moodUserCounts = new Map(); // mood -> count (derived)
 const moodCountBroadcastDebounce = new Map(); // mood -> timeout
 const userCurrentMood = new Map(); // userId -> mood (for cleanup)
 
+  // ============================================
+// HEARTBEAT SYSTEM FOR SESSION TRACKING
+// ============================================
+const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
+const userHeartbeats = new Map(); // userId -> { roomId, lastHeartbeat, timeoutId }
+
 // Initialize registries for all moods
 config.MOODS.forEach(mood => {
   moodUserRegistry.set(mood.id, new Set());
@@ -4935,11 +4941,7 @@ io.on('connection', (socket) => {
   });
   
   
-  // ============================================
-// HEARTBEAT SYSTEM FOR SESSION TRACKING
-// ============================================
-const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
-const userHeartbeats = new Map(); // userId -> { roomId, lastHeartbeat, timeoutId }
+
 
 socket.on('heartbeat', (data) => {
   const { userId, roomId, timestamp } = data;
