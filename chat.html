@@ -1352,7 +1352,9 @@
     // ============================================
     // PRESENCE & HEARTBEAT
     // ============================================
+    let socketInstance = null;
     let heartbeatInterval = null;
+
 
     function startHeartbeat() {
       if (heartbeatInterval) stopHeartbeat();
