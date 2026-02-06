@@ -995,6 +995,34 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
   }
 });
 
+// Beacon endpoint for background cleanup
+app.post('/api/rooms/cleanup-beacon', express.json(), async (req, res) => {
+  // Immediately respond to prevent blocking
+  res.status(204).send();
+  
+  // Process cleanup asynchronously
+  const { userId, roomId, callId, hasActiveCall } = req.body;
+  
+  console.log('📡 Cleanup beacon received:', { userId, roomId, callId, hasActiveCall });
+  
+  try {
+    // Perform cleanup operations
+    if (hasActiveCall && callId) {
+      // Remove user from call
+      await handleUserLeaveCall(callId, userId);
+    }
+    
+    if (roomId) {
+      // Remove user from room
+      await handleUserLeaveRoom(roomId, userId);
+    }
+    
+    console.log('✅ Background cleanup completed');
+  } catch (error) {
+    console.error('❌ Beacon cleanup error:', error);
+  }
+});
+
 app.post('/api/check-username', async (req, res) => {
   try {
     const { username } = req.body;
