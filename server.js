@@ -1673,11 +1673,22 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     return { success: true, alreadyGone: true };
   }
 
-  // Get user data
+  // Get user data - AUTHORITY SOURCE: Room object users list
+  const roomUser = room.users.find(u => u.userId === userId);
   let userData = null;
-  socketUsers.forEach(u => {
-    if (u.userId === userId) userData = u;
-  });
+
+  if (roomUser) {
+    userData = {
+      userId: roomUser.userId,
+      username: roomUser.username,
+      firebaseUid: roomUser.firebaseUid
+    };
+  } else {
+    // Fallback to socketUsers if room user not found (rare)
+    socketUsers.forEach(u => {
+      if (u.userId === userId) userData = u;
+    });
+  }
 
   const firebaseUid = userData?.firebaseUid;
   const username = userData?.username || userId;
@@ -4956,7 +4967,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    console.log(`👤 [Presence] Last device disconnected for ${username}. Starting 5s grace period.`);
+    console.log(`👤 [Presence] Last device disconnected for ${username}. Starting 500ms grace period.`);
 
     const cleanupKey = firebaseUid || userId;
 
