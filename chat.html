@@ -3569,6 +3569,15 @@
           }
         }
 
+
+
+        // ✅ NEW: Check for active call in room data (from matchmaking/restoration)
+        if (roomData?.activeCall && roomData.activeCall.isActive && roomData.activeCall.participantCount > 0) {
+          console.log('📞 Active call detected in room data - showing "Join Call" button');
+          updateCallButtonState(true, roomData.activeCall);
+          return true;
+        }
+
         // No active call - show normal buttons
         console.log('ℹ️ No active call - showing audio/video buttons');
         if (audioCallBtn) {
@@ -4768,6 +4777,9 @@
               participantCount: data.activeCall.participantCount
             };
             console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
+
+            // ✅ CRITICAL: Update button state immediately
+            updateCallButtonState(true, data.activeCall);
           }
 
           console.log('⏰ Starting timer updates with server-synced time...');
