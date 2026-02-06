@@ -4966,13 +4966,24 @@ io.on('connection', (socket) => {
     }
 
     const cleanup = setTimeout(async () => {
-      // Final cleanup
+      // ✅ Authoritative cleanup on disconnect
+      const presence = userPresence.get(userId);
+      const roomId = presence?.roomId;
+
+      // Skip if user is in call mode
+      if (presence?.status === 'call_active') {
+        console.log(`📱 [Presence] Skipping disconnect cleanup for ${username} (In Call)`);
+      } else if (roomId) {
+        console.log(`🧹 [Disconnect] Triggering authoritative leave for ${username} in room ${roomId}`);
+        await performUserLeaveChat(userId, roomId, 'disconnect');
+      }
+
+      // Final cleanup of tracking maps
       userToSocketId.delete(userId);
       socketUserCleanup.delete(userId);
 
-      console.log(`🧹 [UID: ${firebaseUid || userId}] Full cleanup completed`);
-
-    }, 500); // ✅ Reduced from DISCONNECT_GRACE_PERIOD to 500ms
+      console.log(`🧹 [UID: ${firebaseUid || userId}] Full disconnect cleanup completed`);
+    }, 500); // 500ms grace period for re-connections
 
     socketUserCleanup.set(userId, cleanup);
   });
