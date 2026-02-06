@@ -2425,6 +2425,13 @@
         if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
         if (durationInterval) clearInterval(durationInterval);
         localStorage.removeItem('activeCall');
+
+        // ✅ CRITICAL: Notify parent frame to hide us immediately
+        if (window.parent && window.parent !== window) {
+          console.log('📤 Sending FORCE_HIDE_CALL to parent frame');
+          window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*');
+        }
+
         setTimeout(() => { window.location.href = '/chat.html'; }, 500);
       }
 
