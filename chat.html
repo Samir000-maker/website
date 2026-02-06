@@ -4263,36 +4263,25 @@
 
         // Handle the Back Button (popstate)
         window.addEventListener('popstate', async (event) => {
-          if (backButtonHandled) return;
+  if (backButtonHandled) return;
 
-          console.log('⬅️ Back button pressed - Trapped!');
+  console.log('⬅️ Back button pressed - Trapped!');
 
-          // Immediately push the state back to keep the user here while the modal shows
-          // This effectively "cancels" the back navigation from the browser's perspective
-          history.pushState(TRAP_STATE, '', window.location.href);
+  // Immediately push the state back to keep the user here while cleanup executes
+  history.pushState(TRAP_STATE, '', window.location.href);
 
-          const shouldLeave = await showConfirmationDialog();
+  const shouldLeave = await showConfirmationDialog();
 
-          if (shouldLeave) {
-            console.log('✅ User confirmed leaving');
-            backButtonHandled = true;
+  if (shouldLeave) {
+    console.log('✅ User confirmed leaving');
+    backButtonHandled = true;
 
-            if (socketInstance?.connected) {
-              socketInstance.emit('leave_room');
-            }
-
-            // Cleanup call if exists
-            // CRITICAL: Call cleanup before navigating
-            if (activeCallInRoom) {
-              // ... minimal cleanup if needed, but 'leaveBtn' handler does it better
-            }
-
-            exitRoomSequence().catch(console.error);
-          } else {
-            console.log('❌ User staying in chat');
-            // State is already pushed back, so we stay here
-          }
-        });
+    // CRITICAL FIX: Execute full exit sequence (includes leave_room emission)
+    await exitRoomSequence();
+  } else {
+    console.log('❌ User staying in chat');
+  }
+});
       }
 
       const updateTimer = () => {
@@ -5962,28 +5951,35 @@
           }
         });
 
-        // 2. BeforeUnload (Refresh/Close/Address Bar)
-        window.addEventListener('beforeunload', (event) => {
-          const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+// 2. BeforeUnload (Refresh/Close/Address Bar)
+window.addEventListener('beforeunload', (event) => {
+  const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
 
-          if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
-            console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
-            return;
-          }
+  if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
+    console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
+    return;
+  }
 
-          console.log('🚪 Page unloading - triggering best-effort leave');
+  // NOTE: beforeunload cannot guarantee async operations complete.
+  // For browser back, we intercept in popstate handler.
+  // For refresh/close, we do best-effort cleanup:
+  console.log('🚪 Page unloading - best-effort cleanup (refresh/close)');
 
-          // Emitting leave_room (best effort)
-          if (socketInstance?.connected) {
-            socketInstance.emit('leave_room');
-          }
+  // Synchronous-only cleanup for refresh/close scenarios
+  if (socketInstance?.connected) {
+    // Send leave_room with keepalive flag (modern browsers may honor it)
+    navigator.sendBeacon?.('/api/rooms/leave-beacon', JSON.stringify({
+      roomId: roomData?.roomId,
+      userId: currentUser?.userId
+    }));
+    
+    // Also emit via socket (may or may not succeed)
+    socketInstance.emit('leave_room');
+  }
 
-          // Cleanup storage immediately
-          clearChatState(true);
-
-          // Stop typing indicator
-          stopTyping();
-        });
+  clearChatState(true);
+  stopTyping();
+});
 
 
         if (audioCallBtn) {
