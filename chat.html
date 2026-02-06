@@ -4292,45 +4292,13 @@ async function exitRoomSequence(targetUrl = null) {
   console.log('🚪 ========================================\n');
 }
 
-      function setupBackButtonHandler() {
-  const TRAP_STATE = { page: 'chat', trap: true };
-
-  const ensureTrapState = () => {
-    if (!history.state || !history.state.trap) {
-      console.log('🔒 Injecting back button trap state');
-      history.pushState(TRAP_STATE, '', window.location.href);
-    }
-  };
-
-  ensureTrapState();
-
-  window.addEventListener('pageshow', (event) => {
-    console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
-    setTimeout(ensureTrapState, 0);
-  });
-
-  // Handle back button with async cleanup that doesn't block navigation
-  window.addEventListener('popstate', async (event) => {
-    if (backButtonHandled) return;
-
-    console.log('⬅️ Back button pressed - Trapped!');
-    history.pushState(TRAP_STATE, '', window.location.href);
-
-    const shouldLeave = await showConfirmationDialog();
-
-    if (shouldLeave) {
-      console.log('✅ User confirmed leaving');
-      backButtonHandled = true;
-
-      try {
-        await exitRoomSequence();
-      } catch (error) {
-        console.error('❌ Error during back button exit:', error);
-        window.location.href = '/mood.html';
-      }
-    } else {
-      console.log('❌ User staying in chat');
-    }
+     function setupBackButtonHandler() {
+  // Natural navigation - server will handle cleanup via heartbeat timeout
+  console.log('🔓 Back button: natural navigation (server-tracked)');
+  
+  // Store flag for pagehide best-effort cleanup
+  window.addEventListener('popstate', () => {
+    sessionStorage.setItem('navigatingAway', 'true');
   });
 }
 
@@ -4505,6 +4473,30 @@ async function exitRoomSequence(targetUrl = null) {
           socketInstance.emit('join_room', { roomId: roomData.roomId });
 
           console.log('✅ ========================================\n');
+          
+          
+            // START HEARTBEAT
+  let heartbeatInterval = setInterval(() => {
+    if (socketInstance && socketInstance.connected && roomData?.roomId) {
+      socketInstance.emit('heartbeat', {
+        roomId: roomData.roomId,
+        userId: currentUser.userId,
+        timestamp: Date.now()
+      });
+    }
+  }, 5000); // Every 5 seconds
+  
+  console.log('💓 Heartbeat started (5s interval)');
+  
+  // Stop heartbeat on disconnect
+  socketInstance.on('disconnect', () => {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+      console.log('💔 Heartbeat stopped');
+    }
+  });
+          
         });
 
 
@@ -5998,46 +5990,40 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-// ============================================
-// BACKGROUND CLEANUP ON PAGE UNLOAD
-// ============================================
 
-// Primary cleanup handler using pagehide (most reliable)
-window.addEventListener('pagehide', (event) => {
-  console.log('🚪 ========================================');
-  console.log('🚪 PAGEHIDE EVENT - BACKGROUND CLEANUP');
-  console.log('🚪 ========================================');
-  console.log(`   Persisted: ${event.persisted}`);
-  console.log(`   Navigating to call: ${navigatingToCall}`);
-  console.log(`   Has background call: ${sessionStorage.getItem('hasBackgroundCall') === 'true'}`);
-  console.log(`   Is in background call: ${isInBackgroundCall}`);
-
-  // Skip cleanup if going to call page
-  if (navigatingToCall || sessionStorage.getItem('hasBackgroundCall') === 'true' || isInBackgroundCall) {
-    console.log('✅ Exception: navigating to call - skipping cleanup');
-    console.log('🚪 ========================================\n');
-    return;
-  }
-
-  // Execute background cleanup (synchronous, uses sendBeacon)
-  backgroundCleanupSync();
-  
-  console.log('🚪 ========================================\n');
-}, { capture: true }); // Use capture to ensure it fires
 
 // Fallback for older browsers that don't support pagehide
 const supportsPagehide = 'onpagehide' in window;
 if (!supportsPagehide) {
   console.warn('⚠️ pagehide not supported - using beforeunload fallback');
   
-  window.addEventListener('beforeunload', (event) => {
-    if (navigatingToCall || sessionStorage.getItem('hasBackgroundCall') === 'true' || isInBackgroundCall) {
-      return;
-    }
+// Best-effort cleanup on page unload (NOT guaranteed)
+window.addEventListener('pagehide', (event) => {
+  console.log('🚪 PAGEHIDE - best-effort beacon (delivery not guaranteed)');
+  
+  // Skip if going to call page
+  if (navigatingToCall || sessionStorage.getItem('hasBackgroundCall') === 'true') {
+    return;
+  }
+
+  // Send beacon (may or may not arrive)
+  try {
+    const beaconData = {
+      userId: currentUser?.userId,
+      roomId: roomData?.roomId,
+      timestamp: Date.now()
+    };
     
-    // Use same sync cleanup
-    backgroundCleanupSync();
-  });
+    const beaconUrl = `${window.location.origin}/api/rooms/cleanup-beacon`;
+    const blob = new Blob([JSON.stringify(beaconData)], { type: 'application/json' });
+    
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(beaconUrl, blob);
+    }
+  } catch (error) {
+    // Silently fail - server heartbeat will handle cleanup
+  }
+}, { capture: true });
 }
 
 
