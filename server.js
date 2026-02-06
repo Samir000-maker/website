@@ -5025,9 +5025,6 @@ socket.on('heartbeat', (data) => {
     userHeartbeats.delete(userData.userId);
   }
 
-    // CRITICAL FIX: Get user data from socketUsers Map, not from undefined currentUser
-    const userData = socketUsers.get(socket.id);
-
     if (!userData) {
       console.log(`ℹ️ Socket ${socket.id} was not authenticated or already cleaned up`);
       return;
