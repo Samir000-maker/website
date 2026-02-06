@@ -350,28 +350,6 @@
             console.log(`💬 Hiding chat overlay as requested by iframe (${action})`);
             hideChat();
             history.pushState({ view: 'call' }, 'Call', window.location.href);
-
-            // CRITICAL FIX: If call was cleaned up (user left), we need to restart it
-            if (!callData || !socketInstance || !socketInstance.connected) {
-              console.log('🔄 Call appears inactive - attempting to re-initialize from localStorage');
-
-              // Allow some time for localStorage to sync
-              setTimeout(() => {
-                const storedCall = localStorage.getItem('activeCall');
-                if (storedCall) {
-                  console.log('📱 Found active call in storage - restarting call logic');
-                  // Reset state flags
-                  isInitializing = false;
-                  hasJoinedCall = false;
-                  callData = JSON.parse(storedCall);
-
-                  // Re-run initialization
-                  initCall();
-                } else {
-                  console.warn('⚠️ No active call data found in storage to restart call');
-                }
-              }, 100);
-            }
           } else if (action === 'REQUEST_SHOW_CHAT') {
             console.log('💬 Showing chat overlay as requested by iframe');
             showChat();
