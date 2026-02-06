@@ -5430,13 +5430,28 @@
         });
 
         socketInstance.on('user_left', (data) => {
+          console.log(`👤 User left: ${data.username} (${data.userId})`);
+
           const msgEl = document.createElement('div');
           msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
           msgEl.textContent = `${data.username || 'A user'} left the room`;
           messagesList?.appendChild(msgEl);
 
+          // Update online count
           if (onlineCount && data.remainingUsers !== undefined) {
+            console.log(`👥 Online count updated: ${data.remainingUsers}`);
             onlineCount.textContent = `${data.remainingUsers} Online`;
+          }
+
+          // Remove user from sidebar list
+          const userEl = document.getElementById(`user-${data.userId}`);
+          if (userEl) {
+            userEl.style.opacity = '0';
+            userEl.style.transform = 'translateX(-10px)';
+            setTimeout(() => userEl.remove(), 300);
+            console.log(`✅ Removed user element for ${data.userId}`);
+          } else {
+            console.warn(`⚠️ Could not find user element for ${data.userId} to remove`);
           }
 
           if (data.remainingUsers <= 1) {
@@ -5459,6 +5474,24 @@
               toast('Room closing...', 'warning');
               exitRoomSequence().catch(console.error);
             }
+          }
+        });
+
+        socketInstance.on('user_joined', (data) => {
+          console.log(`👤 User joined: ${data.username} (${data.userId})`);
+
+          // Update online count
+          if (onlineCount && data.onlineCount !== undefined) {
+            onlineCount.textContent = `${data.onlineCount} Online`;
+          }
+
+          // Update user list if provided
+          if (data.users && Array.isArray(data.users)) {
+            console.log(`👥 Receiving full user list: ${data.users.length} users`);
+            renderUserList(data.users);
+          } else {
+            console.warn('⚠️ user_joined event received without user list');
+            // Fallback: append single user? (Wait, server sends full list)
           }
         });
 
@@ -6488,6 +6521,52 @@
       // INITIALIZATION
       // ============================================
 
+
+      function renderUserList(users) {
+        const usersListEl = document.getElementById('usersList');
+        if (!usersListEl) return;
+
+        // Clear current list to prevent duplicates (since we get full list)
+        usersListEl.innerHTML = '';
+
+        users.forEach(user => {
+          const isMe = currentUser && user.userId === currentUser.userId;
+
+          const userCard = document.createElement('div');
+          userCard.id = `user-${user.userId}`;
+          userCard.className = 'user-card flex items-center gap-3 p-2 rounded-lg bg-[#2a2d33] border border-gray-700 transition-all duration-300 animate-fade-in';
+
+          // Profile Picture
+          const pfpContainer = document.createElement('div');
+          pfpContainer.className = 'w-8 h-8 rounded-full overflow-hidden flex-shrink-0 border border-gray-600';
+
+          if (user.pfpUrl) {
+            const img = document.createElement('img');
+            img.src = user.pfpUrl;
+            img.className = 'w-full h-full object-cover';
+            img.alt = user.username;
+            pfpContainer.appendChild(img);
+          } else {
+            pfpContainer.className += ' bg-gray-600 flex items-center justify-center';
+            pfpContainer.innerHTML = `<span class="text-xs text-white font-bold">${(user.username || 'U').charAt(0).toUpperCase()}</span>`;
+          }
+
+          // Username
+          const infoContainer = document.createElement('div');
+          infoContainer.className = 'min-w-0 flex-1';
+
+          const nameEl = document.createElement('div');
+          nameEl.className = 'text-sm font-medium text-gray-200 truncate';
+          nameEl.textContent = user.username + (isMe ? ' (You)' : '');
+
+          infoContainer.appendChild(nameEl);
+
+          userCard.appendChild(pfpContainer);
+          userCard.appendChild(infoContainer);
+
+          usersListEl.appendChild(userCard);
+        });
+      }
 
       try {
         await initFileDB();
