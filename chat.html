@@ -4272,15 +4272,22 @@
 
   const shouldLeave = await showConfirmationDialog();
 
-  if (shouldLeave) {
-    console.log('✅ User confirmed leaving');
-    backButtonHandled = true;
+if (shouldLeave) {
+  console.log('✅ User confirmed leaving');
+  backButtonHandled = true;
 
-    // CRITICAL FIX: Execute full exit sequence (includes leave_room emission)
+  // CRITICAL: MUST await the exit sequence so socket emission completes
+  try {
     await exitRoomSequence();
-  } else {
-    console.log('❌ User staying in chat');
+  } catch (error) {
+    console.error('❌ Error during back button exit:', error);
+    // Fallback: force navigation even if cleanup fails
+    window.location.href = '/mood.html';
   }
+} else {
+  console.log('❌ User staying in chat');
+  // State is already pushed back, so we stay here
+}
 });
       }
 
