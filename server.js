@@ -2115,32 +2115,49 @@ io.on('connection', (socket) => {
 
       const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
 
-      if (!chunkData || typeof chunkData !== 'string') {
-        console.error(`❌ Invalid chunk data at index ${chunkIndex}`);
+      const isBinary = Buffer.isBuffer(chunkData) || chunkData instanceof Uint8Array;
+
+      if (!chunkData || (typeof chunkData !== 'string' && !isBinary)) {
+        console.error(`❌ Invalid chunk data format at index ${chunkIndex}`);
         socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid chunk data' });
         return;
       }
 
-      const expectedBase64Length = Math.ceil(chunkSize * 1.37);
-      const maxAllowedLength = expectedBase64Length * 1.1;
+      let actualChunkSize;
 
-      if (chunkData.length > maxAllowedLength) {
-        console.error(`❌ Chunk data size mismatch for ${fileId} chunk ${chunkIndex}`);
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk data size exceeds claimed size.' });
-        activeFileTransfers.delete(fileId);
-        roomFileStore.delete(fileId);
-        return;
+      if (!isBinary) {
+        // Base64 Validation (Legacy/History)
+        const expectedBase64Length = Math.ceil(chunkSize * 1.37);
+        const maxAllowedLength = expectedBase64Length * 1.1;
+
+        if (chunkData.length > maxAllowedLength) {
+          console.error(`❌ Chunk data size mismatch for ${fileId} chunk ${chunkIndex}`);
+          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk data size exceeds claimed size.' });
+          activeFileTransfers.delete(fileId);
+          roomFileStore.delete(fileId);
+          return;
+        }
+
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(chunkData)) {
+          console.error(`❌ Invalid base64 data in chunk ${chunkIndex} of ${fileId}`);
+          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid file data encoding' });
+          activeFileTransfers.delete(fileId);
+          roomFileStore.delete(fileId);
+          return;
+        }
+        actualChunkSize = Math.floor(chunkData.length * 0.75);
+      } else {
+        // Binary Validation
+        actualChunkSize = chunkData.length || chunkData.byteLength;
+
+        if (actualChunkSize > chunkSize * 1.1) {
+          console.error(`❌ Binary chunk size mismatch for ${fileId} chunk ${chunkIndex}`);
+          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Binary chunk data size exceeds claimed size.' });
+          activeFileTransfers.delete(fileId);
+          roomFileStore.delete(fileId);
+          return;
+        }
       }
-
-      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(chunkData)) {
-        console.error(`❌ Invalid base64 data in chunk ${chunkIndex} of ${fileId}`);
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid file data encoding' });
-        activeFileTransfers.delete(fileId);
-        roomFileStore.delete(fileId);
-        return;
-      }
-
-      const actualChunkSize = Math.floor(chunkData.length * 0.75);
 
       // Initialize transfer tracking if first chunk
       if (!activeFileTransfers.has(fileId)) {
