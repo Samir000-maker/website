@@ -2246,6 +2246,19 @@ io.on('connection', (socket) => {
         fileRecord.assembledData = fileRecord.chunks.join('');
         fileRecord.chunks = null; // free individual chunk references
         console.log(`✅ File ${fileName} (${fileId}) fully assembled on server (${fileRecord.assembledData.length} base64 chars)`);
+
+        // CRITICAL FIX: Update room history so new users can see this file
+        const room = matchmaking.getRoom(roomId);
+        if (room && room.messages) {
+          const messageWithFile = room.messages.find(msg =>
+            msg.attachment && msg.attachment.fileId === fileId
+          );
+          if (messageWithFile) {
+            console.log(`📝 Updating message ${messageWithFile.messageId || messageWithFile.id} in room history with assembled data`);
+            messageWithFile.attachment.data = fileRecord.assembledData;
+            messageWithFile.attachment.chunked = false;
+          }
+        }
       }
 
     } catch (error) {
