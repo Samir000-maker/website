@@ -226,11 +226,6 @@
     </div>
 </button> -->
 
-<!-- Global script at the end of <body> -->
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>eruda.init();</script>
-
-  
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script>
@@ -860,17 +855,17 @@
         video.setAttribute('playsinline', '');
         video.setAttribute('webkit-playsinline', '');
 
-        video.style.transform = 'scaleX(1)';  // Normal orientation for everyone
+        video.style.transform = 'scaleX(1)';  // ✅ Always true orientation (no mirror) for everyone
 
         if (isSelf) {
           video.muted = true;
           video.volume = 0;
-          console.log(`📹 Self video: NO MIRROR (true orientation) (userId: ${user.userId})`);
+          console.log(`📹 Self video: TRUE ORIENTATION (no mirror) (userId: ${user.userId})`);
           console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
         } else {
           video.muted = false;
           video.volume = 1.0;
-          console.log(`📹 Remote video: NO MIRROR (true orientation) (userId: ${user.userId})`);
+          console.log(`📹 Remote video: TRUE ORIENTATION (no mirror) (userId: ${user.userId})`);
           console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
         }
 
@@ -912,7 +907,7 @@
 
         renderedParticipants.add(user.userId);
         console.log(`✅ Tile created for ${user.username} (${user.userId})`);
-        console.log(`   Mirror effect: ${isSelf ? 'YES (self view)' : 'NO (remote view)'}`);
+        console.log(`   Orientation: TRUE (non-mirrored) for all`);
         console.log(`📊 Rendered participants now:`, Array.from(renderedParticipants));
         return tile;
       }
@@ -953,9 +948,12 @@
               }
             });
 
-            // Only log significant changes or issues
-            if (connectionInfo.packetsLost > 10) {
-              console.warn(`⚠️ [Quality] Packet loss detected for ${userId}: ${connectionInfo.packetsLost} packets`);
+            // ✅ ADAPTIVE QUALITY HANDLING
+            if (connectionInfo.packetsLost > 50) { // Significant loss
+              console.warn(`⚠️ [Quality] High packet loss (${connectionInfo.packetsLost}), reducing quality for ${userId}`);
+              this.applyAdaptiveQuality(userId, pc, 'low');
+            } else if (connectionInfo.packetsLost > 10) {
+              console.warn(`⚠️ [Quality] Moderate packet loss (${connectionInfo.packetsLost}) detected for ${userId}`);
             }
 
             // Update connection stats
@@ -969,6 +967,32 @@
             console.warn(`⚠️ Failed to get stats for ${userId}:`, e.message);
           }
         }, 5000); // Check every 5 seconds
+
+        // Helper for adaptive quality
+        this.applyAdaptiveQuality = async (userId, pc, quality) => {
+          try {
+            const senders = pc.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+
+            if (videoSender) {
+              const params = videoSender.getParameters();
+              if (!params.encodings) params.encodings = [{}];
+
+              if (quality === 'low') {
+                params.encodings[0].maxBitrate = 100000; // 100kbps
+                params.encodings[0].scaleResolutionDownBy = 2; // Half resolution
+              } else {
+                params.encodings[0].maxBitrate = 1500000; // 1.5Mbps
+                params.encodings[0].scaleResolutionDownBy = 1;
+              }
+
+              await videoSender.setParameters(params);
+              console.log(`📡 [Quality] Applied ${quality} quality profile for ${userId}`);
+            }
+          } catch (err) {
+            console.warn(`⚠️ Failed to apply adaptive quality:`, err);
+          }
+        };
 
         // Store interval for cleanup
         if (!connectionStats.has(userId)) {
@@ -1585,6 +1609,14 @@
               console.log(`   Call state transition: ${callConnectionState} → connected`);
               hasEstablishedConnection = true;
               callConnectionState = 'connected';
+              const subtitle = document.getElementById('callSubtitle');
+              if (subtitle) {
+                // Determine connection type text
+                let statusText = 'Connected';
+                // Wait for the stats report below to set stats.connectionType before using it
+                // Or just use 'Connected' initially and let the next block refine it
+                subtitle.textContent = statusText;
+              }
               broadcastCallStateToChat();
               console.log('📞 ========================================\n');
             }
@@ -1631,6 +1663,15 @@
                       stats.connectionType = selectedPairType;
                       stats.localCandidateType = localCandidate.candidateType;
                       stats.remoteCandidateType = remoteCandidate.candidateType;
+
+                      // ✅ Update UI with granular connection type
+                      const subtitle = document.getElementById('callSubtitle');
+                      if (subtitle) {
+                        if (selectedPairType === 'TURN_RELAY') subtitle.textContent = 'Connected (Relay)';
+                        else if (selectedPairType === 'STUN_REFLEXIVE') subtitle.textContent = 'Connected (Direct)';
+                        else if (selectedPairType === 'DIRECT_HOST') subtitle.textContent = 'Connected (Local)';
+                        else subtitle.textContent = 'Connected';
+                      }
                     }
 
                     socketInstance.emit('connection_established', {
@@ -1757,11 +1798,14 @@
         const MAX_STUN_ATTEMPTS = 3;
         const currentAttempts = stats.stunAttemptCount || 0;
 
+        const subtitle = document.getElementById('callSubtitle');
+
         if (!useTurnFallback && currentAttempts < MAX_STUN_ATTEMPTS) {
           stats.stunAttemptCount = currentAttempts + 1;
           stats.iceRestartCount++;
 
           console.warn(`🔄 [RETRY] Triggering STUN retry ${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS} for ${userId}`);
+          if (subtitle) subtitle.textContent = `Reconnecting (Attempt ${stats.stunAttemptCount}/3)...`;
           toast(`Connection issues... Retrying (${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS})`, 'warning');
 
           // Small delay before retry
@@ -1779,10 +1823,12 @@
         } else if (!useTurnFallback && currentAttempts >= MAX_STUN_ATTEMPTS) {
           console.error(`❌ [FALLBACK] STUN failed after ${MAX_STUN_ATTEMPTS} attempts. Switching to TURN.`);
           useTurnFallback = true;
+          if (subtitle) subtitle.textContent = `Switching to Relay (TURN)...`;
           toast('Switching to alternative connection path...', 'warning');
 
           fetchIceServers().then(() => {
             console.log(`✅ TURN configuration loaded`);
+            if (subtitle) subtitle.textContent = `Connecting via Relay...`;
             const currentPC = peerConnections.get(userId);
             if (currentPC) currentPC.close();
             peerConnections.delete(userId);
@@ -1792,6 +1838,7 @@
           });
         } else if (useTurnFallback) {
           console.error(`❌ [CRITICAL] Connection failed even with TURN fallback for ${userId}`);
+          if (subtitle) subtitle.textContent = `Connection failed`;
           toast('Unstable network connection detected.', 'error');
         }
       }
@@ -2222,41 +2269,16 @@
             // ✅ CRITICAL: Add track to ALL existing peer connections
             const renegotiationPromises = [];
 
-            peerConnections.forEach((pc, userId) => {
+            peerConnections.forEach(async (pc, userId) => {
               try {
                 console.log(`📤 Adding video track to peer connection with ${userId}`);
 
                 // Add the track to the peer connection
-                const sender = pc.addTrack(track, localStream);
+                pc.addTrack(track, localStream);
                 console.log(`✅ Video track added to PC for ${userId}`);
 
-                // ✅ CRITICAL: Create new offer to renegotiate (same as video call initiation)
-                const renegotiationPromise = (async () => {
-                  try {
-                    console.log(`🔄 Creating renegotiation offer for ${userId}...`);
-
-                    const offer = await pc.createOffer({
-                      offerToReceiveAudio: true,
-                      offerToReceiveVideo: true
-                    });
-
-                    await pc.setLocalDescription(offer);
-                    console.log(`✅ Renegotiation offer created for ${userId}`);
-
-                    socketInstance.emit('webrtc_offer', {
-                      callId: callData.callId,
-                      targetUserId: userId,
-                      offer
-                    });
-
-                    console.log(`📤 Renegotiation offer sent to ${userId}`);
-                  } catch (e) {
-                    console.error(`❌ Renegotiation failed for ${userId}:`, e);
-                  }
-                })();
-
-                renegotiationPromises.push(renegotiationPromise);
-
+                // ✅ Let Perfect Negotiation (onnegotiationneeded) handle the offer/answer flow
+                // This prevents race conditions and ensures proper collision handling
               } catch (e) {
                 console.error(`❌ Failed to add track to PC ${userId}:`, e);
               }
