@@ -370,6 +370,80 @@
       let isInChatView = false;
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
 
+      // ============================================
+      // 🔄 BACKGROUND RECOVERY LOGIC
+      // ============================================
+      async function resumeAllMedia() {
+        if (document.hidden) return;
+
+        console.log('🔄 ========================================');
+        console.log('🔄 RESUMING ALL MEDIA CONTEXTS');
+        console.log('🔄 ========================================');
+
+        // 1. Resume AudioContexts
+        for (const [userId, ac] of audioContexts.entries()) {
+          if (ac.context && ac.context.state === 'suspended') {
+            try {
+              await ac.context.resume();
+              console.log(`   🔊 Resumed audio context for ${userId}`);
+            } catch (e) {
+              console.warn(`   ⚠️ Failed to resume audio context for ${userId}:`, e);
+            }
+          }
+        }
+
+        // 2. Resume Video playback
+        const allVideos = document.querySelectorAll('video');
+        for (const video of allVideos) {
+          if (video.srcObject && video.srcObject.active) {
+            try {
+              const userId = video.id.replace('video-', '');
+              if (!userId) continue;
+
+              // Check intended state
+              const intended = remoteMediaStates.get(userId) || (userId === currentUser.userId ? { video: isVideoEnabled } : null);
+              const shouldBeOn = intended ? intended.video : true;
+
+              if (shouldBeOn) {
+                await video.play().catch(e => console.warn(`   ⚠️ Play failed for ${video.id}:`, e));
+                console.log(`   ▶️ Attempted resume for ${video.id}`);
+
+                // Force visibility update to clear black tiles
+                updateVideoVisibility(userId, true, true);
+              }
+            } catch (e) {
+              console.warn(`   ⚠️ Error resuming ${video.id}:`, e);
+            }
+          }
+        }
+
+        // 3. Check for muted/ended local tracks
+        if (localStream) {
+          localStream.getTracks().forEach(track => {
+            if (track.readyState === 'ended') {
+              console.error(`   ❌ Local ${track.kind} track ENDED!`);
+            } else if (track.muted) {
+              console.warn(`   ⚠️ Local ${track.kind} track MUTED (backgrounded)`);
+            }
+          });
+        }
+
+        console.log('🔄 ========================================\n');
+      }
+
+      // Listen for visibility and focus
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          console.log('👀 Page became VISIBLE - initiating recovery');
+          resumeAllMedia();
+        }
+      });
+
+      window.addEventListener('focus', () => {
+        console.log('✨ Window gained FOCUS - checking media');
+        resumeAllMedia();
+      });
+
       function setupCallBackButtonHandler() {
         console.log('🔙 Setting up call page back button handler');
 
