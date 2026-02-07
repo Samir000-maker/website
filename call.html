@@ -158,6 +158,31 @@
     footer {
       visibility: hidden;
     }
+
+    /* ✅ Control Lockout Animation */
+    .controls-locked {
+      pointer-events: none !important;
+      opacity: 0.6 !important;
+      cursor: not-allowed !important;
+    }
+
+    .controls-locked span {
+      animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes pulse-ring {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(0.9);
+      }
+    }
   </style>
 </head>
 
@@ -233,17 +258,9 @@
         </button>
       </div>
 
-      <div class="hidden sm:flex items-center gap-2 px-2">
-        <button id="moodBtn"
-          class="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-slate-100 dark:bg-background-dark text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 hover:border-primary transition-all text-xs sm:text-sm">
-          <span class="text-base sm:text-xl">😊</span>
-          <span class="font-bold hidden md:inline">Update Mood</span>
-        </button>
-      </div>
-
-      <div class="pl-1 sm:pl-2 border-l border-slate-200 dark:border-slate-800">
+      <div class="pl-1 sm:pl-2">
         <button id="leaveCallBtn"
-          class="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-accent-red text-white hover:brightness-110 transition-all active:scale-95">
+          class="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 h-10 sm:h-12 rounded-lg sm:rounded-xl bg-accent-red text-white hover:brightness-110 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
           <span class="material-symbols-outlined font-bold text-lg sm:text-2xl">call_end</span>
           <span class="font-bold text-xs sm:text-sm">Leave</span>
         </button>
@@ -365,10 +382,9 @@
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
-      let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
-      let isNavigatingToChat = false;
-      let isInChatView = false;
+      let isControlsLocked = true; // ✅ Initial lockout
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
+      let loadingWatchdogs = new Map(); // ✅ userId -> timeoutId
 
       // ============================================
       // 🔄 BACKGROUND RECOVERY LOGIC
@@ -924,18 +940,75 @@
           pfp.classList.add('hidden');
           if (loading) loading.classList.add('hidden');
           console.log(`   ✅ Video SHOWN`);
+
+          // ✅ Clear watchdog if loading successful
+          if (loadingWatchdogs.has(userId)) {
+            clearTimeout(loadingWatchdogs.get(userId));
+            loadingWatchdogs.delete(userId);
+            console.log(`   🛡️ Watchdog CLEARED for ${userId}`);
+          }
         } else if (showLoading) {
           vid.classList.add('hidden');
           pfp.classList.add('hidden');
           if (loading) loading.classList.remove('hidden');
           console.log(`   ⏳ Video LOADING`);
+
+          // ✅ Start Watchdog if NOT already running
+          if (enabled && !loadingWatchdogs.has(userId)) {
+            console.log(`   🛡️ Watchdog STARTED for ${userId} (5s timeout)`);
+            const watchdogId = setTimeout(() => {
+              console.error(`❌ [WATCHDOG] Video stuck in LOADING for ${userId}. Triggering recovery...`);
+              handleStuckVideo(userId);
+            }, 5000);
+            loadingWatchdogs.set(userId, watchdogId);
+          }
         } else {
           vid.classList.add('hidden');
           pfp.classList.remove('hidden');
           if (loading) loading.classList.add('hidden');
           console.log(`   ✅ Profile Picture SHOWN`);
+
+          // ✅ Clear watchdog if user turned off video
+          if (loadingWatchdogs.has(userId)) {
+            clearTimeout(loadingWatchdogs.get(userId));
+            loadingWatchdogs.delete(userId);
+            console.log(`   🛡️ Watchdog REMOVED for ${userId} (Video OFF)`);
+          }
         }
         console.log(`📹 ========================================\n`);
+      }
+
+      // ✅ AGGRESSIVE VIDEO RECOVERY HANDLER
+      async function handleStuckVideo(userId) {
+        console.warn(`🛠️ Attempting aggressive recovery for ${userId}...`);
+
+        const pc = peerConnections.get(userId);
+        const vid = document.getElementById(`video-${userId}`);
+
+        if (!pc) {
+          console.warn(`   ⚠️ No PeerConnection for ${userId}. Cannot recover.`);
+          return;
+        }
+
+        // 1. Check if we have remote tracks in the PC
+        const remoteTracks = pc.getRemoteStreams().flatMap(s => s.getVideoTracks());
+        if (remoteTracks.length > 0) {
+          console.log(`   ✅ Remote tracks found in PC. Re-attaching srcObject.`);
+          vid.srcObject = pc.getRemoteStreams()[0];
+          try {
+            await vid.play();
+            updateVideoVisibility(userId, true, true);
+            toast('Video restored', 'success');
+          } catch (e) {
+            console.error(`   ❌ Failed to force play video:`, e);
+          }
+        } else {
+          console.warn(`   ⚠️ No remote video tracks found in PC. Requesting ICE restart...`);
+          handleIceFailure(userId);
+        }
+
+        // Reset watchdog to prevent loop if recovery fails
+        loadingWatchdogs.delete(userId);
       }
 
 
@@ -3189,9 +3262,20 @@
           const mic = document.getElementById('micBtn');
           const vid = document.getElementById('videoBtn');
           const leave = document.getElementById('leaveCallBtn');
-          if (mic) mic.addEventListener('click', toggleMic);
-          if (vid) vid.addEventListener('click', toggleVideo);
-          if (leave) leave.addEventListener('click', leaveCall, { passive: true });
+
+          if (mic) mic.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleMic());
+          if (vid) vid.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleVideo());
+          if (leave) leave.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : leaveCall());
+
+          // ✅ Apply initial visual lockout
+          [mic, vid, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
+
+          // ✅ Set 3-second unlock timer
+          setTimeout(() => {
+            isControlsLocked = false;
+            [mic, vid, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
+            console.log('🔓 Controls unlocked (3s grace period complete)');
+          }, 3000);
 
           // Setup back button handler for background call
           setupCallBackButtonHandler();
