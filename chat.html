@@ -2587,8 +2587,45 @@
         }
       }
 
+      /**
+       * Robust helper to convert base64 string to Blob
+       * Handles Data URL stripping, whitespace removal, and padding correction
+       */
+      function base64ToBlob(base64, contentType) {
+        if (!base64 || typeof base64 !== 'string') {
+          console.error('❌ Cannot convert to blob: base64 data is missing or not a string', { type: typeof base64 });
+          return null;
+        }
 
+        try {
+          // 1. Strip Data URL prefix if present
+          let cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
 
+          // 2. Remove any whitespace, newlines or non-base64 characters
+          // Valid base64 chars: A-Z, a-z, 0-9, +, /, and = for padding
+          cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, "");
+
+          // 3. Fix padding if necessary
+          while (cleanBase64.length % 4 !== 0) {
+            cleanBase64 += '=';
+          }
+
+          const byteCharacters = atob(cleanBase64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          return new Blob([byteArray], { type: contentType });
+        } catch (error) {
+          console.error('❌ base64ToBlob conversion failed:', error);
+          if (base64 && typeof base64 === 'string') {
+            console.log('   Data sample (first 50 chars):', base64.substring(0, 50));
+            console.log('   Data length:', base64.length);
+          }
+          return null;
+        }
+      }
 
       async function chunkFile(file) {
         console.log('✂️ ========================================');
@@ -2793,13 +2830,18 @@
                 throw new Error(`Missing chunk at index ${i}`);
               }
 
-              const base64Data = base64Chunk.includes(',') ? base64Chunk.split(',')[1] : base64Chunk;
-              const byteCharacters = atob(base64Data);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let j = 0; j < byteCharacters.length; j++) {
-                byteNumbers[j] = byteCharacters.charCodeAt(j);
+              const blob = base64ToBlob(base64Chunk, fileType);
+              if (!blob) {
+                throw new Error(`Failed to decode chunk at index ${i}`);
               }
-              const byteArray = new Uint8Array(byteNumbers);
+
+              // Read blob back as Uint8Array for concatenation
+              // (This is a bit round-about but ensures we use the centralized robust decoding)
+              const byteArray = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(new Uint8Array(reader.result));
+                reader.readAsArrayBuffer(blob);
+              });
 
               binaryChunks.push(byteArray);
               totalBytes += byteArray.length;
@@ -4719,26 +4761,22 @@
                     if (msg.attachment.data) {
                       console.log(`📦 Found inlined data for ${msg.attachment.name} in history - storing to IndexedDB`);
                       try {
-                        const base64Payload = msg.attachment.data;
-                        const base64Data = (typeof base64Payload === 'string' && base64Payload.includes(','))
-                          ? base64Payload.split(',')[1] : base64Payload;
-                        const byteCharacters = atob(base64Data);
-                        const byteNumbers = new Array(byteCharacters.length);
-                        for (let i = 0; i < byteCharacters.length; i++) {
-                          byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        const blob = base64ToBlob(msg.attachment.data, msg.attachment.type);
+
+                        if (blob) {
+                          const file = new File([blob], msg.attachment.name, { type: msg.attachment.type });
+
+                          // Use existing ID
+                          await storeFileToIndexedDB(file, roomData.roomId, msg.messageId, msg.attachment.fileId);
+                          console.log(`✅ Stored inlined file to IndexedDB: ${msg.attachment.fileId}`);
+
+                          // Clear data from memory after storing to keep cache light
+                          delete msg.attachment.data;
+                        } else {
+                          console.error('❌ Failed to process inlined attachment data: Conversion returned null');
                         }
-                        const byteArray = new Uint8Array(byteNumbers);
-                        const blob = new Blob([byteArray], { type: msg.attachment.type });
-                        const file = new File([blob], msg.attachment.name, { type: msg.attachment.type });
-
-                        // Use existing ID
-                        await storeFileToIndexedDB(file, roomData.roomId, msg.messageId, msg.attachment.fileId);
-                        console.log(`✅ Stored inlined file to IndexedDB: ${msg.attachment.fileId}`);
-
-                        // Clear data from memory after storing to keep cache light
-                        delete msg.attachment.data;
                       } catch (e) {
-                        console.error('❌ Failed to process inlined attachment data:', e);
+                        console.error('❌ Exception processing inlined attachment data:', e);
                       }
                     } else if (msg.userId !== currentUser.userId) {
                       // Only request if sent by someone else and no data present
@@ -4920,16 +4958,12 @@
           }
 
           try {
-            // Convert base64 back to blob
-            // CRITICAL FIX: Strip Data URL prefix if present (e.g., "data:image/png;base64,")
-            const base64Data = (typeof data === 'string' && data.includes(',')) ? data.split(',')[1] : data;
-            const byteCharacters = atob(base64Data);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            // Convert base64 back to blob using robust helper
+            const blob = base64ToBlob(data, metadata.type);
+
+            if (!blob) {
+              throw new Error('Base64 to Blob conversion returned null');
             }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: metadata.type });
 
             // Create File object
             const file = new File([blob], metadata.name, { type: metadata.type });
@@ -5490,22 +5524,18 @@
               console.log('📦 Legacy attachment format detected');
 
               try {
-                const base64Payload = data.attachment.data;
-                const base64Data = (typeof base64Payload === 'string' && base64Payload.includes(',')) ? base64Payload.split(',')[1] : base64Payload;
-                const byteCharacters = atob(base64Data);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+                const blob = base64ToBlob(data.attachment.data, data.attachment.type);
+
+                if (blob) {
+                  const file = new File([blob], data.attachment.name, { type: data.attachment.type });
+                  const storedFileId = await storeFileToIndexedDB(file, roomData.roomId, data.messageId);
+
+                  data.attachment.fileId = storedFileId;
+                  delete data.attachment.data;
+                  console.log(`✅ Legacy attachment stored: ${storedFileId}`);
+                } else {
+                  console.error('❌ Failed to process legacy attachment: Conversion returned null');
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray], { type: data.attachment.type });
-
-                const file = new File([blob], data.attachment.name, { type: data.attachment.type });
-                const storedFileId = await storeFileToIndexedDB(file, roomData.roomId, data.messageId);
-
-                data.attachment.fileId = storedFileId;
-                delete data.attachment.data;
-                console.log(`✅ Legacy attachment stored: ${storedFileId}`);
 
               } catch (error) {
                 console.error('❌ Failed to store legacy attachment:', error);
