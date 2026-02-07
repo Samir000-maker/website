@@ -34,11 +34,21 @@
                     animation: {
                         'pulse-slow': 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite',
                         'shimmer': 'shimmer 1s infinite',
+                        'fadeIn': 'fadeIn 0.3s ease-in-out',
+                        'slideIn': 'slideIn 0.3s ease-out',
                     },
                     keyframes: {
                         shimmer: {
                             '0%': { transform: 'translateX(-100%)' },
                             '100%': { transform: 'translateX(100%)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideIn: {
+                            '0%': { transform: 'translateY(-20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
                         }
                     }
                 },
@@ -55,6 +65,12 @@
             }
             .text-glow {
                 text-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
+            }
+            .modal-backdrop {
+                @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden;
+            }
+            .modal-backdrop.active {
+                @apply flex items-center justify-center animate-fadeIn;
             }
         }
     </style>
@@ -129,7 +145,7 @@
                     <div class="space-y-1.5">
                         <div class="flex justify-between items-center ml-1">
                             <label for="password" class="text-xs font-bold text-slate-300 uppercase tracking-wider">Password</label>
-                            <a href="#" class="text-xs font-medium text-primary hover:text-teal-300 transition-colors">Forgot Password?</a>
+                            <a href="#" id="forgotPasswordLink" class="text-xs font-medium text-primary hover:text-teal-300 transition-colors">Forgot Password?</a>
                         </div>
                         <div class="relative group/input">
                             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within/input:text-primary transition-colors duration-300">
@@ -142,101 +158,314 @@
                                 class="w-full h-12 pl-11 pr-11 rounded-xl glass-input focus:bg-slate-900/80 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm"
                                 placeholder="••••••••"
                             >
-                            <button type="button" class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-white transition-colors cursor-pointer">
+                            <button type="button" id="togglePassword" class="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-primary transition-colors duration-300 focus:outline-none">
                                 <span class="material-symbols-outlined text-[20px]">visibility</span>
                             </button>
                         </div>
                     </div>
 
                     <!-- Submit Button -->
-                    <button type="submit" class="mt-4 w-full h-12 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl font-bold text-sm tracking-wide shadow-lg shadow-teal-900/40 hover:shadow-teal-500/25 transform hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2 group/btn relative overflow-hidden">
-                        <div class="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover/btn:animate-shimmer pointer-events-none"></div>
-                        <span>Sign In</span>
-                        <span class="material-symbols-outlined text-[18px] group-hover/btn:translate-x-1 transition-transform">arrow_forward</span>
+                    <button 
+                        type="submit"
+                        class="w-full h-12 rounded-xl bg-gradient-to-r from-primary to-teal-400 text-slate-950 font-bold text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(45,212,191,0.3)] hover:shadow-[0_0_30px_rgba(45,212,191,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-primary/30 mt-3"
+                    >
+                        Sign In
                     </button>
-
-                    <!-- Divider -->
-                    <div class="relative flex py-2 items-center">
-                        <div class="flex-grow border-t border-white/10"></div>
-                        <span class="flex-shrink-0 mx-4 text-xs font-medium text-slate-500">Or continue with</span>
-                        <div class="flex-grow border-t border-white/10"></div>
-                    </div>
-
-                    <!-- Social Buttons -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <button type="button" id="googleSignIn" class="h-11 flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200">
-                            <img alt="Google" class="size-5" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M23.766 12.2764C23.766 11.4607 23.6999 10.6406 23.5588 9.83807H12.24V14.4591H18.7217C18.4528 15.9494 17.5885 17.2678 16.323 18.1056V21.1039H20.19C22.4608 19.0139 23.766 15.9274 23.766 12.2764Z'/%3E%3Cpath fill='%2334A853' d='M12.24 24.0008C15.4765 24.0008 18.2059 22.9382 20.1945 21.1039L16.3275 18.1055C15.2517 18.8375 13.8627 19.252 12.2445 19.252C9.11388 19.252 6.45946 17.1399 5.50705 14.3003H1.5166V17.3912C3.55371 21.4434 7.7029 24.0008 12.24 24.0008Z'/%3E%3Cpath fill='%23FBBC05' d='M5.50253 14.3003C5.00236 12.8099 5.00236 11.1961 5.50253 9.70575V6.61481H1.5166C-0.18551 10.0056 -0.18551 14.0004 1.5166 17.3912L5.50253 14.3003Z'/%3E%3Cpath fill='%23EA4335' d='M12.24 4.74966C13.9509 4.7232 15.6044 5.36697 16.8434 6.54867L20.2695 3.12262C18.1001 1.0855 15.2208 -0.034466 12.24 0.000808666C7.7029 0.000808666 3.55371 2.55822 1.5166 6.61481L5.50253 9.70575C6.45064 6.86173 9.10947 4.74966 12.24 4.74966Z'/%3E%3C/svg%3E">
-                            <span class="text-sm font-semibold text-slate-200">Google</span>
-                        </button>
-                        <button type="button" class="h-11 flex items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200">
-                            <span class="material-symbols-outlined text-white text-[22px]">ios</span>
-                            <span class="text-sm font-semibold text-slate-200">Apple</span>
-                        </button>
-                    </div>
                 </form>
 
-                <!-- Sign Up Link -->
-                <div class="mt-8 text-center relative z-10">
-                    <p class="text-sm text-slate-400">
-                        Don't have an account? 
-                        <a href="/signup.html" class="font-bold text-white hover:text-primary transition-colors ml-1 inline-flex items-center gap-0.5 group/link">
-                            Sign up
-                            <span class="material-symbols-outlined text-[16px] transition-transform group-hover/link:translate-x-0.5 text-primary">chevron_right</span>
-                        </a>
-                    </p>
+                <!-- Divider -->
+                <div class="flex items-center gap-4 my-8 relative z-10">
+                    <div class="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+                    <span class="text-xs text-slate-500 font-medium uppercase tracking-wider">Or continue with</span>
+                    <div class="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
                 </div>
-            </div>
 
-            <!-- Footer Links -->
-            <div class="mt-8 flex justify-center gap-8 opacity-40 hover:opacity-100 transition-opacity duration-300">
-                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Privacy Policy</a>
-                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Terms of Service</a>
-                <a href="#" class="text-xs font-medium text-slate-400 hover:text-primary transition-colors">Help Center</a>
+                <!-- Google Sign In -->
+                <button 
+                    type="button"
+                    id="googleSignIn"
+                    class="w-full h-12 rounded-xl glass-card hover:bg-slate-800/50 border-white/20 flex items-center justify-center gap-3 text-sm font-semibold text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-primary/10 relative z-10 group/google"
+                >
+                    <svg class="w-5 h-5 group-hover/google:scale-110 transition-transform duration-300" viewBox="0 0 24 24">
+                        <path fill="#EA4335" d="M5.26620003,9.76452941 C6.19878754,6.93863203 8.85444915,4.90909091 12,4.90909091 C13.6909091,4.90909091 15.2181818,5.50909091 16.4181818,6.49090909 L19.9090909,3 C17.7818182,1.14545455 15.0545455,0 12,0 C7.27006974,0 3.1977497,2.69829785 1.23999023,6.65002441 L5.26620003,9.76452941 Z"/>
+                        <path fill="#34A853" d="M16.0407269,18.0125889 C14.9509167,18.7163016 13.5660892,19.0909091 12,19.0909091 C8.86648613,19.0909091 6.21911939,17.076871 5.27698177,14.2678769 L1.23746264,17.3349879 C3.19279051,21.2936293 7.26500293,24 12,24 C14.9328362,24 17.7353462,22.9573905 19.834192,20.9995801 L16.0407269,18.0125889 Z"/>
+                        <path fill="#4A90E2" d="M19.834192,20.9995801 C22.0291676,18.9520994 23.4545455,15.903663 23.4545455,12 C23.4545455,11.2909091 23.3454545,10.5818182 23.1818182,9.90909091 L12,9.90909091 L12,14.4545455 L18.4363636,14.4545455 C18.1187732,16.013626 17.2662994,17.2212117 16.0407269,18.0125889 L19.834192,20.9995801 Z"/>
+                        <path fill="#FBBC05" d="M5.27698177,14.2678769 C5.03832634,13.556323 4.90909091,12.7937589 4.90909091,12 C4.90909091,11.2182781 5.03443647,10.4668121 5.26620003,9.76452941 L1.23999023,6.65002441 C0.43658717,8.26043162 0,10.0753848 0,12 C0,13.9195484 0.444780743,15.7301709 1.23746264,17.3349879 L5.27698177,14.2678769 Z"/>
+                    </svg>
+                    <span>Sign in with Google</span>
+                </button>
+
+                <!-- Sign Up Link -->
+                <p class="mt-8 text-center text-sm text-slate-400 relative z-10">
+                    Don't have an account? 
+                    <a href="/signup.html" class="text-primary font-semibold hover:text-teal-300 transition-colors ml-1">Sign Up</a>
+                </p>
             </div>
         </div>
     </main>
 
-    <script src="app.js"></script>
+    <!-- Forgot Password Modal -->
+    <div id="forgotPasswordModal" class="modal-backdrop">
+        <div class="glass-card rounded-2xl p-8 max-w-md w-full mx-4 shadow-glass animate-slideIn">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-white">Reset Password</h2>
+                <button id="closeModal" class="text-slate-400 hover:text-white transition-colors">
+                    <span class="material-symbols-outlined text-[24px]">close</span>
+                </button>
+            </div>
+            
+            <p class="text-slate-400 text-sm mb-6">
+                Enter your email address and we'll send you instructions to reset your password.
+            </p>
+
+            <form id="forgotPasswordForm" class="space-y-5">
+                <div class="space-y-1.5">
+                    <label for="resetEmail" class="text-xs font-bold text-slate-300 uppercase tracking-wider ml-1">Email Address</label>
+                    <div class="relative group/input">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within/input:text-primary transition-colors duration-300">
+                            <span class="material-symbols-outlined text-[20px]">mail</span>
+                        </div>
+                        <input 
+                            type="email" 
+                            id="resetEmail" 
+                            required
+                            class="w-full h-12 pl-11 pr-4 rounded-xl glass-input focus:bg-slate-900/80 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all duration-300 text-sm"
+                            placeholder="name@example.com"
+                        >
+                    </div>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                    <button 
+                        type="button"
+                        id="cancelReset"
+                        class="flex-1 h-12 rounded-xl glass-card hover:bg-slate-800/50 border-white/20 text-sm font-semibold text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-white/10"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        type="submit"
+                        class="flex-1 h-12 rounded-xl bg-gradient-to-r from-primary to-teal-400 text-slate-950 font-bold text-sm uppercase tracking-wider shadow-[0_0_20px_rgba(45,212,191,0.3)] hover:shadow-[0_0_30px_rgba(45,212,191,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-primary/30"
+                    >
+                        Send Reset Link
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed top-24 right-6 z-[60] flex flex-col gap-3 max-w-sm"></div>
 
     <script>
-        (function() {
-            const MoodApp = window.MoodApp || {};
-            const _Auth = MoodApp.Auth;
-            const _API = MoodApp.API;
-            const _Toast = MoodApp.Toast;
-            const _Loading = MoodApp.Loading;
-            const _PageTransition = MoodApp.PageTransition;
-            const _Validator = MoodApp.Validator;
+        // Initialize Firebase (Replace with your config)
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
 
-            const firebaseConfig = {
-                apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
-                authDomain: "projectt3-8c55e.firebaseapp.com",
-                projectId: "projectt3-8c55e",
-                storageBucket: "projectt3-8c55e.firebasestorage.app",
-                messagingSenderId: "64611387728",
-                appId: "1:64611387728:web:2e53a18151ab3de1b60455",
-                measurementId: "G-0Z91D0Q6EE"
-            };
+        // Initialize Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
 
-            try {
-                if (window.firebase && !firebase.apps?.length) {
-                    firebase.initializeApp(firebaseConfig);
+        // Toast notification system
+        const Toast = {
+            show: function(message, type = 'info', duration = 4000) {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                
+                const icons = {
+                    success: 'check_circle',
+                    error: 'error',
+                    info: 'info',
+                    warning: 'warning'
+                };
+
+                const colors = {
+                    success: 'from-green-500 to-emerald-500',
+                    error: 'from-red-500 to-rose-500',
+                    info: 'from-blue-500 to-cyan-500',
+                    warning: 'from-yellow-500 to-orange-500'
+                };
+
+                toast.className = `glass-card p-4 rounded-xl shadow-lg flex items-center gap-3 animate-slideIn min-w-[300px]`;
+                toast.innerHTML = `
+                    <div class="flex items-center justify-center size-10 rounded-lg bg-gradient-to-br ${colors[type]} flex-shrink-0">
+                        <span class="material-symbols-outlined text-white text-[20px]">${icons[type]}</span>
+                    </div>
+                    <p class="text-sm font-medium text-white flex-1">${message}</p>
+                    <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white transition-colors">
+                        <span class="material-symbols-outlined text-[20px]">close</span>
+                    </button>
+                `;
+
+                container.appendChild(toast);
+
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateX(100%)';
+                    toast.style.transition = 'all 0.3s ease-out';
+                    setTimeout(() => toast.remove(), 300);
+                }, duration);
+            },
+            success: function(message, duration) { this.show(message, 'success', duration); },
+            error: function(message, duration) { this.show(message, 'error', duration); },
+            info: function(message, duration) { this.show(message, 'info', duration); },
+            warning: function(message, duration) { this.show(message, 'warning', duration); }
+        };
+
+        // Loading overlay system
+        const Loading = {
+            overlay: null,
+            show: function(message = 'Loading...') {
+                if (!this.overlay) {
+                    this.overlay = document.createElement('div');
+                    this.overlay.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center';
+                    this.overlay.innerHTML = `
+                        <div class="glass-card p-8 rounded-2xl flex flex-col items-center gap-4 min-w-[200px]">
+                            <div class="relative">
+                                <div class="size-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+                            </div>
+                            <p class="text-sm font-medium text-white loading-message">${message}</p>
+                        </div>
+                    `;
                 }
-            } catch (error) {
-                console.error('Firebase init error:', error);
+                document.body.appendChild(this.overlay);
+            },
+            hide: function() {
+                if (this.overlay && this.overlay.parentNode) {
+                    this.overlay.remove();
+                }
+            }
+        };
+
+        // Email validator
+        const Validator = {
+            isValidEmail: function(email) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(email);
+            }
+        };
+
+        // Firebase error messages
+        const getFirebaseErrorMessage = (errorCode) => {
+            const errorMessages = {
+                'auth/invalid-email': 'Invalid email address format.',
+                'auth/user-disabled': 'This account has been disabled.',
+                'auth/user-not-found': 'No account found with this email.',
+                'auth/wrong-password': 'Incorrect password.',
+                'auth/invalid-credential': 'Invalid email or password.',
+                'auth/too-many-requests': 'Too many failed attempts. Please try again later.',
+                'auth/network-request-failed': 'Network error. Please check your connection.',
+                'auth/popup-blocked': 'Popup was blocked. Please allow popups for this site.',
+                'auth/popup-closed-by-user': 'Sign-in popup was closed.',
+                'auth/cancelled-popup-request': 'Only one popup request is allowed at a time.',
+                'auth/expired-action-code': 'The reset link has expired. Please request a new one.',
+                'auth/invalid-action-code': 'The reset link is invalid. Please request a new one.',
+            };
+            return errorMessages[errorCode] || 'An error occurred. Please try again.';
+        };
+
+        // Global variables
+        let isGoogleSignInInProgress = false;
+        const _Toast = Toast;
+        const _Loading = Loading;
+        const _Validator = Validator;
+
+        // Password toggle functionality
+        const togglePassword = document.getElementById('togglePassword');
+        const passwordInput = document.getElementById('password');
+
+        if (togglePassword && passwordInput) {
+            togglePassword.addEventListener('click', function() {
+                const icon = this.querySelector('span');
+                if (passwordInput.type === 'password') {
+                    passwordInput.type = 'text';
+                    icon.textContent = 'visibility_off';
+                } else {
+                    passwordInput.type = 'password';
+                    icon.textContent = 'visibility';
+                }
+            });
+        }
+
+        // Forgot Password Modal functionality
+        const forgotPasswordModal = document.getElementById('forgotPasswordModal');
+        const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+        const closeModal = document.getElementById('closeModal');
+        const cancelReset = document.getElementById('cancelReset');
+        const forgotPasswordForm = document.getElementById('forgotPasswordForm');
+
+        const openModal = () => {
+            forgotPasswordModal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        };
+
+        const closeModalFunc = () => {
+            forgotPasswordModal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+            document.getElementById('resetEmail').value = '';
+        };
+
+        forgotPasswordLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            openModal();
+        });
+
+        closeModal.addEventListener('click', closeModalFunc);
+        cancelReset.addEventListener('click', closeModalFunc);
+
+        // Close modal when clicking outside
+        forgotPasswordModal.addEventListener('click', (e) => {
+            if (e.target === forgotPasswordModal) {
+                closeModalFunc();
+            }
+        });
+
+        // Forgot Password Form submission
+        forgotPasswordForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('resetEmail').value.trim();
+
+            if (!Validator.isValidEmail(email)) {
+                Toast.error('Please enter a valid email address');
+                return;
             }
 
-            let isGoogleSignInInProgress = false;
+            Loading.show('Sending reset link...');
 
+            try {
+                // Send password reset email using Firebase
+                await firebase.auth().sendPasswordResetEmail(email);
+                
+                Loading.hide();
+                closeModalFunc();
+                Toast.success('Password reset link sent! Check your email.', 5000);
+            } catch (error) {
+                Loading.hide();
+                console.error('Password reset error:', error);
+                const errorMessage = getFirebaseErrorMessage(error.code);
+                Toast.error(errorMessage);
+            }
+        });
+
+        // Main authentication logic
+        (function() {
+            // Check if user is already signed in
             firebase.auth().onAuthStateChanged(async (user) => {
                 if (user && !isGoogleSignInInProgress) {
-                    console.log('User already signed in, checking profile...');
-                    
                     try {
                         const idToken = await user.getIdToken();
-                        const apiBaseUrl = getApiBaseUrl();
                         
-                        const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                        // Check if profile exists
+                        const apiBaseUrl = getApiBaseUrl();
+                        const response = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -244,18 +473,16 @@
                             }
                         });
 
-                        const checkData = await checkResponse.json();
-                        
-                        if (checkData.exists && checkData.hasUsername) {
-                            console.log('User has profile, redirecting to mood...');
-                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                        const data = await response.json();
+
+                        if (data.exists && data.hasUsername) {
+                            if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
                                 _PageTransition.navigateTo('/mood.html');
                             } else {
                                 window.location.href = '/mood.html';
                             }
                         } else {
-                            console.log('User profile incomplete, redirecting to username...');
-                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                            if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
                                 _PageTransition.navigateTo('/username.html');
                             } else {
                                 window.location.href = '/username.html';
@@ -268,7 +495,7 @@
             });
 
             const getApiBaseUrl = () => {
-                if (_API && typeof _API.BASE_URL !== 'undefined') {
+                if (typeof _API !== 'undefined' && typeof _API.BASE_URL !== 'undefined') {
                     return _API.BASE_URL;
                 }
                 try {
@@ -280,65 +507,62 @@
                 return window.location.origin;
             };
 
-            const toastError = (msg) => {
-                if (_Toast && typeof _Toast.error === 'function') return _Toast.error(msg);
-                console.error('Toast.error:', msg);
-            };
-            const toastSuccess = (msg) => {
-                if (_Toast && typeof _Toast.success === 'function') return _Toast.success(msg);
-                console.log('Toast.success:', msg);
-            };
-            const loadingShow = (msg) => { if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg); };
-            const loadingHide = () => { if (_Loading && typeof _Loading.hide === 'function') _Loading.hide(); };
-
+            // Login form submission
             const loginForm = document.getElementById('loginForm');
-            const googleBtn = document.getElementById('googleSignIn');
-
             if (loginForm) {
                 loginForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
 
-                    const email = document.getElementById('email')?.value.trim() || '';
-                    const password = document.getElementById('password')?.value || '';
+                    const email = document.getElementById('email').value.trim();
+                    const password = document.getElementById('password').value;
 
-                    if (!_Validator || typeof _Validator.isValidEmail !== 'function') {
-                        if (!email) { toastError('Please enter a valid email address'); return; }
-                    } else {
-                        if (!_Validator.isValidEmail(email)) { toastError('Please enter a valid email address'); return; }
+                    if (!Validator.isValidEmail(email)) {
+                        Toast.error('Please enter a valid email address');
+                        return;
                     }
 
-                    if (!password) { toastError('Please enter your password'); return; }
+                    if (!password) {
+                        Toast.error('Please enter your password');
+                        return;
+                    }
 
-                    loadingShow('Signing in...');
+                    Loading.show('Signing in...');
 
                     try {
                         const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
                         const idToken = await userCredential.user.getIdToken();
 
-                        if (_Auth && typeof _Auth.setAuth === 'function') {
+                        // Set auth if function exists
+                        if (typeof _Auth !== 'undefined' && typeof _Auth.setAuth === 'function') {
                             _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
                         }
 
-                        loadingHide();
-                        toastSuccess('Welcome back!');
+                        Loading.hide();
+                        Toast.success('Welcome back!');
 
-                        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                            _PageTransition.navigateTo('/mood.html');
-                        } else {
-                            window.location.href = '/mood.html';
-                        }
+                        // Navigate to mood page
+                        setTimeout(() => {
+                            if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/mood.html');
+                            } else {
+                                window.location.href = '/mood.html';
+                            }
+                        }, 1000);
                     } catch (error) {
-                        loadingHide();
+                        Loading.hide();
                         console.error('Login error:', error);
-                        toastError(error?.message || 'Failed to sign in');
+                        const errorMessage = getFirebaseErrorMessage(error.code);
+                        Toast.error(errorMessage);
                     }
                 });
             }
 
+            // Google Sign In
+            const googleBtn = document.getElementById('googleSignIn');
             if (googleBtn) {
                 googleBtn.addEventListener('click', async () => {
                     isGoogleSignInInProgress = true;
-                    loadingShow('Signing in with Google...');
+                    Loading.show('Signing in with Google...');
 
                     try {
                         const provider = new firebase.auth.GoogleAuthProvider();
@@ -356,7 +580,7 @@
 
                         const checkData = await checkResponse.json();
 
-                        if (_Auth && typeof _Auth.setAuth === 'function') {
+                        if (typeof _Auth !== 'undefined' && typeof _Auth.setAuth === 'function') {
                             _Auth.setAuth(idToken, {
                                 email: result.user.email,
                                 uid: result.user.uid,
@@ -365,22 +589,22 @@
                             });
                         }
 
-                        loadingHide();
+                        Loading.hide();
                         isGoogleSignInInProgress = false;
 
                         if (checkData.exists && checkData.hasUsername) {
-                            toastSuccess('Welcome back!');
+                            Toast.success('Welcome back!');
                             setTimeout(() => {
-                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
                                     _PageTransition.navigateTo('/mood.html');
                                 } else {
                                     window.location.href = '/mood.html';
                                 }
                             }, 1000);
                         } else {
-                            toastSuccess('Please complete your profile setup');
+                            Toast.success('Please complete your profile setup');
                             setTimeout(() => {
-                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
                                     _PageTransition.navigateTo('/username.html');
                                 } else {
                                     window.location.href = '/username.html';
@@ -388,10 +612,11 @@
                             }, 1000);
                         }
                     } catch (error) {
-                        loadingHide();
+                        Loading.hide();
                         isGoogleSignInInProgress = false;
                         console.error('Google sign in error:', error);
-                        toastError(error?.message || 'Failed to sign in with Google');
+                        const errorMessage = getFirebaseErrorMessage(error.code);
+                        Toast.error(errorMessage);
                     }
                 });
             }
