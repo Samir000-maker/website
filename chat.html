@@ -2747,6 +2747,13 @@
 
           const transfer = this.activeTransfers.get(fileId);
 
+          // CRITICAL: Skip duplicate chunks to prevent premature reconstruction
+          if (transfer.chunks[chunkIndex] !== undefined) {
+            console.warn(`⚠️ Duplicate chunk ${chunkIndex} received for ${fileName}, skipping`);
+            socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
+            return;
+          }
+
           transfer.chunks[chunkIndex] = chunkData;
           transfer.receivedCount++;
 
@@ -2778,6 +2785,12 @@
 
             for (let i = 0; i < chunks.length; i++) {
               const base64Chunk = chunks[i];
+
+              // CRITICAL: Validate chunk exists before attempting decode
+              if (!base64Chunk || typeof base64Chunk !== 'string') {
+                console.error(`❌ Chunk ${i} is missing or invalid (type: ${typeof base64Chunk})`);
+                throw new Error(`Missing chunk at index ${i}`);
+              }
 
               const byteCharacters = atob(base64Chunk);
               const byteNumbers = new Array(byteCharacters.length);
@@ -6448,6 +6461,9 @@
                   totalChunks: chunks.length
                 };
 
+                // IMMEDIATE: Hide attachment preview as soon as user clicks send
+                hideAttachmentPreview();
+
                 // Send message metadata first (creates message in UI)
                 console.log('📤 Emitting message metadata to server...');
                 socketInstance.emit('chat_message', serverMessageData);
@@ -6505,9 +6521,8 @@
             stopTyping();
             if (typingTimeout) clearTimeout(typingTimeout);
 
-            if (pendingAttachment) {
-              hideAttachmentPreview();
-            }
+            // Note: Attachment preview is now hidden immediately at start of send
+            // (moved earlier in the flow for instant feedback)
           });
         }
 
