@@ -2459,7 +2459,8 @@
       // ============================================
       // CHUNKED FILE TRANSMISSION CONFIGURATION
       // ============================================
-      const CHUNK_SIZE = 256 * 1024; // 256KB chunks (safe for Socket.IO)
+      // Use a multiple of 3 (262140) to ensure base64 chunks don't have internal padding
+      const CHUNK_SIZE = 262140; // ~256KB chunks (safe for Socket.IO)
       const CHUNK_TIMEOUT = 30000; // 30s timeout per chunk
       const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
 
@@ -2601,11 +2602,15 @@
           // 1. Strip Data URL prefix if present
           let cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
 
-          // 2. Remove any whitespace, newlines or non-base64 characters
-          // Valid base64 chars: A-Z, a-z, 0-9, +, /, and = for padding
-          cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/=]/g, "");
+          // 2. Handle URL-safe base64 (replace - with + and _ with /)
+          cleanBase64 = cleanBase64.replace(/-/g, '+').replace(/_/g, '/');
 
-          // 3. Fix padding if necessary
+          // 3. Remove any whitespace, newlines or non-base64 characters
+          // CRITICAL: We remove ALL '=' first, because chunked joining can have '=' in the middle
+          // Valid base64 chars: A-Z, a-z, 0-9, +, /
+          cleanBase64 = cleanBase64.replace(/[^A-Za-z0-9+/]/g, "");
+
+          // 4. Fix padding ONLY at the end
           while (cleanBase64.length % 4 !== 0) {
             cleanBase64 += '=';
           }
