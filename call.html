@@ -817,6 +817,7 @@
       function updateVideoVisibility(userId, enabled, trackReady = true) {
         const vid = document.getElementById(`video-${userId}`);
         const pfp = document.getElementById(`pfp-${userId}`);
+        const loading = document.getElementById(`video-loading-${userId}`);
 
         if (!vid || !pfp) {
           console.warn(`⚠️ Video elements not found for ${userId}`);
@@ -827,35 +828,31 @@
         const hasVideoTrack = vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
         const videoTrackEnabled = hasVideoTrack ? vid.srcObject.getVideoTracks()[0].enabled : false;
 
-        const shouldShowVideo = enabled && trackReady && hasVideoTrack && videoTrackEnabled;
+        // ✅ Determine states
+        const showVideo = enabled && trackReady && hasVideoTrack && videoTrackEnabled;
+        const showLoading = enabled && (!trackReady || !hasVideoTrack || !videoTrackEnabled);
 
         console.log(`📹 ========================================`);
         console.log(`📹 updateVideoVisibility(${userId})`);
         console.log(`📹 ========================================`);
-        console.log(`   enabled: ${enabled}`);
-        console.log(`   trackReady: ${trackReady}`);
-        console.log(`   hasVideoTrack: ${hasVideoTrack}`);
-        console.log(`   videoTrackEnabled: ${videoTrackEnabled}`);
-        console.log(`   shouldShowVideo: ${shouldShowVideo}`);
+        console.log(`   enabled: ${enabled}, trackReady: ${trackReady}`);
+        console.log(`   showVideo: ${showVideo}, showLoading: ${showLoading}`);
 
-        if (vid.srcObject) {
-          console.log(`   srcObject video tracks: ${vid.srcObject.getVideoTracks().length}`);
-          const tracks = vid.srcObject.getVideoTracks();
-          tracks.forEach((track, i) => {
-            console.log(`      [${i}] ${track.kind} - enabled:${track.enabled}, readyState:${track.readyState}, id:${track.id.substring(0, 8)}...`);
-          });
-        } else {
-          console.log(`   srcObject: null`);
-        }
-
-        if (shouldShowVideo) {
+        if (showVideo) {
           vid.classList.remove('hidden');
           pfp.classList.add('hidden');
-          console.log(`   ✅ Video SHOWN, profile picture HIDDEN`);
+          if (loading) loading.classList.add('hidden');
+          console.log(`   ✅ Video SHOWN`);
+        } else if (showLoading) {
+          vid.classList.add('hidden');
+          pfp.classList.add('hidden');
+          if (loading) loading.classList.remove('hidden');
+          console.log(`   ⏳ Video LOADING`);
         } else {
           vid.classList.add('hidden');
           pfp.classList.remove('hidden');
-          console.log(`   ✅ Video HIDDEN, profile picture SHOWN`);
+          if (loading) loading.classList.add('hidden');
+          console.log(`   ✅ Profile Picture SHOWN`);
         }
         console.log(`📹 ========================================\n`);
       }
@@ -910,6 +907,21 @@
         }
 
         videoContainer.appendChild(video);
+
+        // ✅ Small Loading Indicator for Video Tiles
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.id = `video-loading-${user.userId}`;
+        loadingIndicator.className = 'hidden absolute inset-0 flex flex-col items-center justify-center bg-background-dark/30 backdrop-blur-sm z-[5]';
+        loadingIndicator.innerHTML = `
+          <div class="relative">
+            <div class="w-12 h-12 border-3 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span class="material-symbols-outlined text-primary text-xl">videocam</span>
+            </div>
+          </div>
+          <span class="mt-2 text-[10px] font-bold text-primary uppercase tracking-widest animate-pulse">Loading Video</span>
+        `;
+        videoContainer.appendChild(loadingIndicator);
 
         const pfpOverlay = document.createElement('div');
         pfpOverlay.id = `pfp-${user.userId}`;
@@ -1751,9 +1763,19 @@
           } else if (state === 'disconnected') {
             console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
 
-            // Don't immediately enable TURN on disconnect - might reconnect
-
-          } else if (state === 'closed') {
+            // ✅ Proactive Retry: if still disconnected after 3 seconds, fire recovery
+            if (stats) {
+              if (stats.disconnectTimer) clearTimeout(stats.disconnectTimer);
+              stats.disconnectTimer = setTimeout(() => {
+                const currentPC = peerConnections.get(userId);
+                if (currentPC && (currentPC.iceConnectionState === 'disconnected' || currentPC.iceConnectionState === 'failed')) {
+                  console.error(`❌ [ICE] Restoration failed for ${userId}. Triggering ICE restart/fallback...`);
+                  handleIceFailure(userId);
+                }
+              }, 3000);
+            }
+          }
+          else if (state === 'closed') {
             console.log(`🔒 [ICE] Connection closed for ${userId}`);
           } else if (state === 'checking') {
             console.log(`🔍 [ICE] Checking connectivity for ${userId}...`);
@@ -2337,7 +2359,10 @@
           }
 
           // ✅ Toggle the track state
-          const newState = !track.enabled;
+          // FIX: If the track was JUST created (it's ON), newState should be true.
+          // This avoids the "double click to start" issue.
+          const newState = (track.enabled && track.readyState === 'live') ? !track.enabled : true;
+
           track.enabled = newState;
           isVideoEnabled = newState;
 
