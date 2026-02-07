@@ -6461,6 +6461,12 @@
                   totalChunks: chunks.length
                 };
 
+                // CRITICAL: Store attachment data before hideAttachmentPreview() clears pendingAttachment
+                const attachmentFileId = pendingAttachment.fileId;
+                const attachmentName = pendingAttachment.name;
+                const attachmentType = pendingAttachment.type;
+                const attachmentSize = pendingAttachment.size;
+
                 // IMMEDIATE: Hide attachment preview as soon as user clicks send
                 hideAttachmentPreview();
 
@@ -6472,10 +6478,10 @@
                 if (progressText) progressText.textContent = 'Uploading: 0%';
 
                 await sendFileInChunks(
-                  pendingAttachment.fileId,
-                  pendingAttachment.name,
-                  pendingAttachment.type,
-                  pendingAttachment.size,
+                  attachmentFileId,
+                  attachmentName,
+                  attachmentType,
+                  attachmentSize,
                   chunks,
                   roomData.roomId
                 );
@@ -6485,9 +6491,9 @@
                 // Remove progress UI
                 progressDiv.remove();
 
-                toast(`File uploaded: ${pendingAttachment.name}`, 'success');
+                toast(`File uploaded: ${attachmentName}`, 'success');
 
-                console.log('📎 ========================================\n');
+                console.log('📎 ========================================\\n');
 
               } catch (error) {
                 console.error('❌ Attachment transmission failed:', error);
