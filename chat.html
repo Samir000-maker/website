@@ -4284,17 +4284,21 @@
         }
 
         // 3. Trigger server-side leave sequence via API
+        // IMPORTANT: Only use socket emit as fallback if API fails to prevent duplicates
         if (typeof MoodApp !== 'undefined' && MoodApp.API && roomData?.roomId) {
           try {
             console.log('📤 Calling /api/leave-chat...');
             await MoodApp.API.post('/api/leave-chat', { roomId: roomData.roomId });
+            console.log('✅ API leave-chat succeeded');
+            // API succeeded - do NOT emit socket event (server already processed leave)
           } catch (e) {
-            console.warn('⚠️ API leave-chat failed, ensuring socket emission as fallback');
+            console.warn('⚠️ API leave-chat failed, using socket emission as fallback');
             if (socketInstance && socketInstance.connected) {
               socketInstance.emit('leave_room');
             }
           }
         } else if (socketInstance && socketInstance.connected) {
+          // No API available, use socket directly
           socketInstance.emit('leave_room');
         }
 
@@ -5555,6 +5559,19 @@
 
         socketInstance.on('user_joined', (data) => {
           console.log(`👤 User joined: ${data.username} (${data.userId})`);
+
+          // Display join message in chat (skip if it's the current user)
+          if (data.userId !== currentUser?.userId) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+            msgEl.textContent = `${data.username || 'A user'} joined the room`;
+            messagesList?.appendChild(msgEl);
+
+            // Scroll to show new message
+            if (messagesList) {
+              messagesList.scrollTop = messagesList.scrollHeight;
+            }
+          }
 
           // Update online count
           if (onlineCount && data.onlineCount !== undefined) {
