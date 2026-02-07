@@ -2212,12 +2212,18 @@ io.on('connection', (socket) => {
 
       // Store chunk server-side
       const fileRecord = roomFileStore.get(fileId);
-      if (fileRecord && fileRecord.chunks[chunkIndex] === null) {
-        fileRecord.chunks[chunkIndex] = chunkData;
-        fileRecord.receivedCount++;
+      if (fileRecord) {
+        // Handle both binary and base64 for compatibility during transition
+        const chunkBuffer = Buffer.isBuffer(chunkData) ? chunkData : Buffer.from(chunkData, 'base64');
+
+        if (fileRecord.chunks[chunkIndex] === null) {
+          fileRecord.chunks[chunkIndex] = chunkBuffer;
+          fileRecord.receivedCount++;
+        }
       }
 
       // Relay chunk to all OTHER users in room (live receivers)
+      // Socket.IO handles binary buffers natively and efficiently
       socket.to(roomId).emit('file_chunk', {
         fileId,
         fileName,
@@ -2226,7 +2232,7 @@ io.on('connection', (socket) => {
         chunkIndex,
         totalChunks,
         chunkSize: actualChunkSize,
-        chunkData
+        chunkData // Send original data (buffer or base64)
       });
 
       const progressPercent = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
@@ -2238,14 +2244,17 @@ io.on('connection', (socket) => {
         totalChunks
       });
 
-      // Acknowledge this chunk back to sender — sendFileInChunks() waits for this before sending next chunk
+      // Acknowledge this chunk back to sender
       socket.emit('file_chunk_ack', { fileId, chunkIndex });
 
-      // If all chunks are now stored, assemble the full base64 string
+      // If all chunks are now stored, assemble the full file
       if (fileRecord && fileRecord.receivedCount === fileRecord.totalChunks) {
-        fileRecord.assembledData = fileRecord.chunks.join('');
+        // Assembly using Buffer.concat is much faster than string joining
+        const fullBuffer = Buffer.concat(fileRecord.chunks);
+        fileRecord.assembledData = fullBuffer.toString('base64'); // Store as base64 for history compatibility
         fileRecord.chunks = null; // free individual chunk references
-        console.log(`✅ File ${fileName} (${fileId}) fully assembled on server (${fileRecord.assembledData.length} base64 chars)`);
+
+        console.log(`✅ File ${fileName} (${fileId}) fully assembled on server (${fullBuffer.length} bytes binary -> ${fileRecord.assembledData.length} base64 chars)`);
 
         // CRITICAL FIX: Update room history so new users can see this file
         const room = matchmaking.getRoom(roomId);
