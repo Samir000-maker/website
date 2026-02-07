@@ -392,7 +392,7 @@
           }
         }
 
-        // 2. Resume Video playback
+        // 2. Resume Video playback and clear stuck states
         const allVideos = document.querySelectorAll('video');
         for (const video of allVideos) {
           if (video.srcObject && video.srcObject.active) {
@@ -402,17 +402,21 @@
 
               // Check intended state
               const intended = remoteMediaStates.get(userId) || (userId === currentUser.userId ? { video: isVideoEnabled } : null);
-              const shouldBeOn = intended ? intended.video : true;
+              const shouldBeOn = intended ? intended.video : false;
+
+              console.log(`   🔍 Checking recovery for ${userId}: intended=${shouldBeOn}`);
 
               if (shouldBeOn) {
-                await video.play().catch(e => console.warn(`   ⚠️ Play failed for ${video.id}:`, e));
-                console.log(`   ▶️ Attempted resume for ${video.id}`);
-
-                // Force visibility update to clear black tiles
+                // Force visibility update to verify track state
                 updateVideoVisibility(userId, true, true);
+
+                if (video.paused) {
+                  await video.play().catch(e => console.warn(`   ⚠️ Play failed for ${video.id}:`, e));
+                  console.log(`   ▶️ Resumed playback for ${video.id}`);
+                }
               }
             } catch (e) {
-              console.warn(`   ⚠️ Error resuming ${video.id}:`, e);
+              console.warn(`   ⚠️ Error recovering ${video.id}:`, e);
             }
           }
         }
@@ -898,19 +902,22 @@
           return;
         }
 
-        // ✅ Enhanced check: verify video track exists in stream
+        // ✅ Verify actual track presence and health
         const hasVideoTrack = vid.srcObject && vid.srcObject.getVideoTracks().length > 0;
-        const videoTrackEnabled = hasVideoTrack ? vid.srcObject.getVideoTracks()[0].enabled : false;
+        const videoTrack = hasVideoTrack ? vid.srcObject.getVideoTracks()[0] : null;
+        const isTrackLive = videoTrack && videoTrack.readyState === 'live';
+        const isTrackEnabled = videoTrack && videoTrack.enabled;
 
-        // ✅ Determine states
-        const showVideo = enabled && trackReady && hasVideoTrack && videoTrackEnabled;
-        const showLoading = enabled && (!trackReady || !hasVideoTrack || !videoTrackEnabled);
+        // ✅ Final determination based on intent AND physical track state
+        const showVideo = enabled && trackReady && hasVideoTrack && isTrackLive && isTrackEnabled;
+        const showLoading = enabled && (!hasVideoTrack || !isTrackLive || !isTrackEnabled);
 
         console.log(`📹 ========================================`);
         console.log(`📹 updateVideoVisibility(${userId})`);
         console.log(`📹 ========================================`);
-        console.log(`   enabled: ${enabled}, trackReady: ${trackReady}`);
-        console.log(`   showVideo: ${showVideo}, showLoading: ${showLoading}`);
+        console.log(`   Intent: ${enabled ? 'ON' : 'OFF'}, trackReady: ${trackReady}`);
+        console.log(`   Physically: hasTrack=${hasVideoTrack}, live=${isTrackLive}, enabled=${isTrackEnabled}`);
+        console.log(`   Decision: showVideo=${showVideo}, showLoading=${showLoading}`);
 
         if (showVideo) {
           vid.classList.remove('hidden');
@@ -1597,48 +1604,33 @@
                     console.log(`▶️ Remote video playing for ${userId}`);
 
                     // ✅ Update visibility if this is a video track
-                    if (event.track.kind === 'video' && event.track.enabled) {
-                      console.log(`📹 Remote video track enabled for ${userId}, updating visibility`);
-                      updateVideoVisibility(userId, true, true);
+                    if (event.track.kind === 'video') {
+                      console.log(`📹 Video track ready for ${userId}, checking intended state...`);
+                      const intended = remoteMediaStates.get(userId);
+                      const shouldShow = intended ? intended.video : true;
+
+                      updateVideoVisibility(userId, shouldShow, true);
                     }
                   } catch (playError) {
                     console.error(`❌ Failed to play remote video for ${userId}:`, playError);
                   }
                 };
 
-                // If metadata already loaded, play immediately
                 if (remoteVideo.readyState >= 2) {
                   console.log(`📺 Metadata already loaded for ${userId}, playing now`);
                   remoteVideo.play().catch(e => {
                     console.error(`❌ Play failed for ${userId}:`, e);
                   });
-
-                  if (event.track.kind === 'video' && event.track.enabled) {
-                    updateVideoVisibility(userId, true, true);
-                  }
-                }
-                if (event.track.kind === 'video') {
-                  console.log(`📹 Video track received for ${userId}, checking intended state...`);
-                  const intendedState = remoteMediaStates.get(userId);
-                  const shouldShow = intendedState ? intendedState.video : true; // Default to true if unknown
-
-                  if (shouldShow) {
-                    console.log(`✅ Peer intended video ON, showing now`);
-                    updateVideoVisibility(userId, true, true);
-                  } else {
-                    console.log(`ℹ️ Peer intended video OFF, keeping profile picture`);
-                    updateVideoVisibility(userId, false, true);
-                  }
                 }
               } else {
                 console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
+              }
 
-                // ✅ Still update visibility for new video tracks
-                if (event.track.kind === 'video') {
-                  const intendedState = remoteMediaStates.get(userId);
-                  const shouldShow = intendedState ? intendedState.video : true;
-                  updateVideoVisibility(userId, shouldShow, true);
-                }
+              // ✅ Unified Visibility Update
+              if (event.track.kind === 'video') {
+                const intended = remoteMediaStates.get(userId);
+                const shouldShow = intended ? intended.video : true;
+                updateVideoVisibility(userId, shouldShow, true);
               }
 
               // Setup audio detection for remote streams
@@ -1670,7 +1662,9 @@
             // ✅ Handle video unmute event (dynamic video addition)
             if (event.track.kind === 'video') {
               console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
-              updateVideoVisibility(userId, true, true);
+              const intended = remoteMediaStates.get(userId);
+              const shouldShow = intended ? intended.video : true;
+              updateVideoVisibility(userId, shouldShow, true);
             }
           };
 
@@ -2369,9 +2363,17 @@
         }
       }
 
+      let videoToggleDebounceTimer = null;
+
       async function toggleVideo() {
         if (isTogglingVideo) {
           console.warn('⚠️ Video toggle already in progress, ignoring duplicate click');
+          return;
+        }
+
+        // ✅ Fast Toggle Protection (Debounce)
+        if (videoToggleDebounceTimer) {
+          console.warn('⏳ Video toggle debounced, please wait...');
           return;
         }
 
@@ -2425,20 +2427,21 @@
               }
 
               toast('Camera enabled', 'success');
+
+              // ✅ CRITICAL ONE-CLICK FIX: 
+              // New tracks are ON by default. We should just set isVideoEnabled to true.
+              isVideoEnabled = true;
+              track.enabled = true;
             } catch (camErr) {
               console.error('❌ Camera access failed:', camErr);
               toast('Failed to access camera', 'error');
               return;
             }
+          } else {
+            // ✅ Normal toggle for existing track
+            isVideoEnabled = !track.enabled;
+            track.enabled = isVideoEnabled;
           }
-
-          // ✅ Toggle the track state
-          // FIX: If the track was JUST created (it's ON), newState should be true.
-          // This avoids the "double click to start" issue.
-          const newState = (track.enabled && track.readyState === 'live') ? !track.enabled : true;
-
-          track.enabled = newState;
-          isVideoEnabled = newState;
 
           console.log(`📹 Video state changed: ${isVideoEnabled ? 'ON' : 'OFF'}`);
 
@@ -2452,13 +2455,20 @@
             enabled: isVideoEnabled
           });
 
-        } catch (e) {
-          console.error(`❌ Video toggle error:`, e);
+          // Set debounce timer
+          videoToggleDebounceTimer = setTimeout(() => {
+            videoToggleDebounceTimer = null;
+          }, 800);
+
+        } catch (error) {
+          console.error('❌ Error in toggleVideo:', error);
           toast('Error toggling video', 'error');
         } finally {
-          // ✅ ENFORCE UNLOCK
           isTogglingVideo = false;
-          console.log(`🔓 Video toggle lock released`);
+          console.log(`📹 ========================================`);
+          console.log(`📹 VIDEO TOGGLE COMPLETE`);
+          console.log(`📹 ========================================`);
+          console.log(`🔓 Video toggle unlocked`);
           console.log(`📹 ========================================\n`);
         }
       }
@@ -3166,16 +3176,9 @@
               return;
             }
 
-            // ✅ Update visibility immediately if tracks exist
-            const remoteVideo = document.getElementById(`video-${data.userId}`);
-            const hasTracks = remoteVideo && remoteVideo.srcObject && remoteVideo.srcObject.getVideoTracks().length > 0;
-
-            if (data.enabled && !hasTracks) {
-              console.log(`⏳ Video ON received, but no tracks yet. Will show when ontrack fires.`);
-              // We've already set remoteMediaStates, updateVideoVisibility will be called in ontrack
-            } else {
-              updateVideoVisibility(data.userId, data.enabled, true);
-            }
+            // ✅ Apply state transition immediately
+            // updateVideoVisibility now handles showing a loading spinner if enabled=true but no track yet
+            updateVideoVisibility(data.userId, data.enabled, true);
 
             console.log(`✅ Remote video state handled`);
             console.log(`📹 ========================================\n`);
