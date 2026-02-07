@@ -382,6 +382,9 @@
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
+      let renderedParticipants = new Set(); // ✅ Restore missing tracking set
+      let isNavigatingToChat = false; // ✅ Restore missing navigation flag
+      let isInChatView = false; // ✅ Restore missing view flag
       let isControlsLocked = true; // ✅ Initial lockout
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
       let loadingWatchdogs = new Map(); // ✅ userId -> timeoutId
