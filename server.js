@@ -270,7 +270,8 @@ async function restoreExistingRoom(socket, userId, existingRoom) {
     createdAt: room.createdAt,
     expiresAt: room.expiresAt,
     chatHistory: room.chatHistory || [], // CRITICAL: Include all cached messages
-    isRestored: true // Flag to indicate this is a restoration
+    isRestored: true, // Flag to indicate this is a restoration
+    activeCall: findActiveCallForRoom(room.roomId) // ✅ Add initial call state
   };
 
   // Emit room restoration to this socket
@@ -434,6 +435,20 @@ function broadcastCallStateUpdate(callId) {
   });
 
   console.log(`📢 Call state update: ${callId} - ${call.participants.length} participants`);
+}
+
+function findActiveCallForRoom(roomId) {
+  for (const [callId, call] of activeCalls.entries()) {
+    if (call.roomId === roomId && call.status === 'active' && call.participants.length > 0) {
+      return {
+        callId: callId,
+        callType: call.callType,
+        participantCount: call.participants.length,
+        isActive: true
+      };
+    }
+  }
+  return null;
 }
 
 function getUserDataForParticipant(participantId, socketUsers, room) {
@@ -2330,8 +2345,42 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // PRIORITY 1: Check if message already has inlined assembled data
+      if (messageWithFile.attachment.data && !messageWithFile.attachment.chunked) {
+        console.log(`✅ Serving file from message history (already assembled)`);
+        socket.emit('attachment_data_received', {
+          fileId,
+          data: messageWithFile.attachment.data,
+          metadata: {
+            name: messageWithFile.attachment.name,
+            type: messageWithFile.attachment.type,
+            size: messageWithFile.attachment.size
+          }
+        });
+        console.log('📂 ========================================\n');
+        return;
+      }
+
+      // PRIORITY 2: Check roomFileStore cache for assembled data
+      const cachedFile = roomFileStore.get(fileId);
+      if (cachedFile && cachedFile.assembledData) {
+        console.log(`✅ Serving file from server cache (roomFileStore)`);
+        socket.emit('attachment_data_received', {
+          fileId,
+          data: cachedFile.assembledData,
+          metadata: {
+            name: cachedFile.name || messageWithFile.attachment.name,
+            type: messageWithFile.attachment.type,
+            size: messageWithFile.attachment.size
+          }
+        });
+        console.log('📂 ========================================\n');
+        return;
+      }
+
+      // PRIORITY 3: Fallback to requesting from sender (peer-to-peer)
       const senderId = messageWithFile.userId;
-      console.log(`📤 Requesting file from sender: ${senderId}`);
+      console.log(`📤 No cached data, requesting file from sender: ${senderId}`);
 
       // Find sender's active socket
       const senderSocket = findActiveSocketForUser(senderId);
@@ -2963,7 +3012,8 @@ io.on('connection', (socket) => {
                 username: u.username,
                 pfpUrl: u.pfpUrl
               })),
-              expiresAt: room.expiresAt
+              expiresAt: room.expiresAt,
+              activeCall: findActiveCallForRoom(room.id) // ✅ Add initial call state
             };
 
             // If user is joining existing room, include previous messages
