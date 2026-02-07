@@ -2634,7 +2634,7 @@
 
       async function chunkFile(file) {
         console.log('✂️ ========================================');
-        console.log('✂️ CHUNKING FILE FOR TRANSMISSION');
+        console.log('✂️ CHUNKING FILE FOR TRANSMISSION (BINARY)');
         console.log('✂️ ========================================');
         console.log(`   File: ${file.name}`);
         console.log(`   Total size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
@@ -2649,20 +2649,17 @@
           const end = Math.min(start + CHUNK_SIZE, file.size);
           const blob = file.slice(start, end);
 
-          // Convert chunk to base64
-          const base64 = await new Promise((resolve, reject) => {
+          // Convert chunk to ArrayBuffer (Binary)
+          const arrayBuffer = await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => {
-              const base64Data = reader.result.split(',')[1];
-              resolve(base64Data);
-            };
+            reader.onload = () => resolve(reader.result);
             reader.onerror = reject;
-            reader.readAsDataURL(blob);
+            reader.readAsArrayBuffer(blob);
           });
 
           chunks.push({
             index: i,
-            data: base64,
+            data: arrayBuffer, // Store as ArrayBuffer
             size: blob.size
           });
 
@@ -2673,7 +2670,7 @@
           }
         }
 
-        console.log(`✅ File chunked: ${chunks.length} chunks ready`);
+        console.log(`✅ File chunked: ${chunks.length} binary chunks ready`);
         console.log('✂️ ========================================\n');
 
         return chunks;
@@ -2685,87 +2682,81 @@
        */
       async function sendFileInChunks(fileId, fileName, fileType, fileSize, chunks, roomId) {
         console.log('📤 ========================================');
-        console.log('📤 CHUNKED FILE TRANSMISSION START');
+        console.log('📤 PIPELINED BINARY TRANSMISSION START');
         console.log('📤 ========================================');
         console.log(`   FileID: ${fileId}`);
-        console.log(`   File: ${fileName}`);
+        console.log(`   Size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`);
         console.log(`   Chunks: ${chunks.length}`);
-        console.log(`   Room: ${roomId}`);
+
+        const WINDOW_SIZE = 10; // Allow 10 chunks to be in flight simultaneously
+        let currentChunkIndex = 0;
+        let acknowledgedCount = 0;
+        let chunksInFlight = 0;
 
         return new Promise((resolve, reject) => {
-          let currentChunk = 0;
-          let ackReceived = false;
-          let timeoutHandle = null;
-          let retryCount = 0;
+          let isFailed = false;
 
-          // Listen for chunk acknowledgments
           const ackHandler = (data) => {
             if (data.fileId !== fileId) return;
 
-            console.log(`✅ Chunk ${data.chunkIndex}/${chunks.length - 1} acknowledged`);
-            ackReceived = true;
-            clearTimeout(timeoutHandle);
-
-            currentChunk++;
+            acknowledgedCount++;
+            chunksInFlight--;
 
             // Update progress UI
-            const progress = Math.round((currentChunk / chunks.length) * 100);
+            const progress = Math.round((acknowledgedCount / chunks.length) * 100);
             const progressText = document.getElementById('uploadProgressText');
             if (progressText) {
               progressText.textContent = `Uploading: ${progress}%`;
             }
 
-            if (currentChunk < chunks.length) {
-              retryCount = 0; // Reset retry counter on success
-              sendNextChunk();
-            } else {
-              console.log('✅ All chunks transmitted successfully');
+            if (acknowledgedCount === chunks.length) {
+              console.log('✅ Pipelined transmission complete');
               socketInstance.off('file_chunk_ack', ackHandler);
               resolve();
+            } else if (!isFailed) {
+              sendMoreChunks();
             }
           };
 
           socketInstance.on('file_chunk_ack', ackHandler);
 
-          const sendNextChunk = () => {
-            if (currentChunk >= chunks.length) return;
+          const sendMoreChunks = () => {
+            while (chunksInFlight < WINDOW_SIZE && currentChunkIndex < chunks.length && !isFailed) {
+              const chunk = chunks[currentChunkIndex];
+              const index = currentChunkIndex;
 
-            ackReceived = false;
-            const chunk = chunks[currentChunk];
+              console.log(`📤 Sending binary chunk ${index}/${chunks.length - 1} (${(chunk.size / 1024).toFixed(2)} KB)`);
 
-            console.log(`📤 Sending chunk ${currentChunk}/${chunks.length - 1} (${(chunk.size / 1024).toFixed(2)} KB)`);
+              socketInstance.emit('file_chunk', {
+                fileId,
+                fileName,
+                fileType,
+                fileSize,
+                roomId,
+                chunkIndex: index,
+                totalChunks: chunks.length,
+                chunkData: chunk.data, // Binary ArrayBuffer
+                chunkSize: chunk.size
+              });
 
-            socketInstance.emit('file_chunk', {
-              fileId,
-              fileName,
-              fileType,
-              fileSize,
-              roomId,
-              chunkIndex: currentChunk,
-              totalChunks: chunks.length,
-              chunkData: chunk.data,
-              chunkSize: chunk.size
-            });
+              chunksInFlight++;
+              currentChunkIndex++;
 
-            // Set timeout for this chunk
-            timeoutHandle = setTimeout(() => {
-              if (!ackReceived) {
-                console.error(`❌ Chunk ${currentChunk} timeout (no ACK received)`);
-
-                if (retryCount < MAX_RETRIES) {
-                  retryCount++;
-                  console.log(`🔄 Retrying chunk ${currentChunk} (attempt ${retryCount}/${MAX_RETRIES})`);
-                  sendNextChunk();
-                } else {
+              // Small fail-safe: reject after timeout if no progress is made
+              const currentCapturedProgress = acknowledgedCount;
+              setTimeout(() => {
+                if (acknowledgedCount === currentCapturedProgress && acknowledgedCount < chunks.length && !isFailed) {
+                  isFailed = true;
+                  console.error('❌ Transmission stalled (timeout)');
                   socketInstance.off('file_chunk_ack', ackHandler);
-                  reject(new Error(`Chunk ${currentChunk} failed after ${MAX_RETRIES} retries`));
+                  reject(new Error('Transmission stalled'));
                 }
-              }
-            }, CHUNK_TIMEOUT);
+              }, 60000); // 60s stall timeout
+            }
           };
 
-          // Start transmission
-          sendNextChunk();
+          // Initial fill of the pipeline
+          sendMoreChunks();
         });
       }
 
@@ -2777,7 +2768,7 @@
         async handleChunk(data) {
           const { fileId, fileName, fileType, fileSize, roomId, chunkIndex, totalChunks, chunkData, chunkSize } = data;
 
-          console.log(`📥 Received chunk ${chunkIndex}/${totalChunks - 1} for ${fileName}`);
+          console.log(`📥 Received chunk ${chunkIndex}/${totalChunks - 1} for ${fileName} (${(chunkSize / 1024).toFixed(2)} KB)`);
 
           if (!this.activeTransfers.has(fileId)) {
             console.log(`🆕 Starting new file transfer: ${fileId}`);
@@ -2797,16 +2788,23 @@
             return;
           }
 
-          transfer.chunks[chunkIndex] = chunkData;
+          // Handle incoming binary data (could be ArrayBuffer or Buffer converted to Uint8Array by Socket.IO)
+          transfer.chunks[chunkIndex] = new Uint8Array(chunkData);
           transfer.receivedCount++;
 
+          // Acknowledge immediately to help sender pump the pipeline
           socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
 
           const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
-          console.log(`📊 Transfer progress: ${progress}% (${transfer.receivedCount}/${totalChunks})`);
+
+          // Update global progress text if this is a live upload/download
+          const progressText = document.getElementById('uploadProgressText');
+          if (progressText && fileName === (pendingAttachment?.name || progressText.dataset.fileName)) {
+            progressText.textContent = `Receiving: ${progress}%`;
+          }
 
           if (transfer.receivedCount === totalChunks) {
-            console.log('✅ All chunks received, reconstructing file...');
+            console.log('✅ All binary chunks received, reconstructing file...');
             await this.reconstructFile(fileId, transfer);
           }
         }
@@ -2816,50 +2814,22 @@
           const { fileName, fileType, fileSize, roomId } = metadata;
 
           console.log('🔧 ========================================');
-          console.log('🔧 RECONSTRUCTING FILE FROM CHUNKS');
+          console.log('🔧 RECONSTRUCTING BINARY FILE');
           console.log('🔧 ========================================');
-          console.log(`   FileID: ${fileId}`);
-          console.log(`   File: ${fileName}`);
-          console.log(`   Chunks: ${chunks.length}`);
 
           try {
-            const binaryChunks = [];
-            let totalBytes = 0;
-
-            for (let i = 0; i < chunks.length; i++) {
-              const base64Chunk = chunks[i];
-
-              // CRITICAL: Validate chunk exists before attempting decode
-              if (!base64Chunk || typeof base64Chunk !== 'string') {
-                console.error(`❌ Chunk ${i} is missing or invalid (type: ${typeof base64Chunk})`);
-                throw new Error(`Missing chunk at index ${i}`);
-              }
-
-              const blob = base64ToBlob(base64Chunk, fileType);
-              if (!blob) {
-                throw new Error(`Failed to decode chunk at index ${i}`);
-              }
-
-              // Read blob back as Uint8Array for concatenation
-              // (This is a bit round-about but ensures we use the centralized robust decoding)
-              const byteArray = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(new Uint8Array(reader.result));
-                reader.readAsArrayBuffer(blob);
-              });
-
-              binaryChunks.push(byteArray);
-              totalBytes += byteArray.length;
-            }
-
-            console.log(`✅ All chunks decoded: ${totalBytes} bytes`);
-
+            // Binary reconstruction is extremely fast
+            const totalBytes = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             const combinedArray = new Uint8Array(totalBytes);
             let offset = 0;
-            for (const chunk of binaryChunks) {
-              combinedArray.set(chunk, offset);
-              offset += chunk.length;
+
+            for (let i = 0; i < chunks.length; i++) {
+              if (!chunks[i]) throw new Error(`Missing chunk at index ${i}`);
+              combinedArray.set(chunks[i], offset);
+              offset += chunks[i].length;
             }
+
+            console.log(`✅ Binary data joined: ${totalBytes} bytes`);
 
             const blob = new Blob([combinedArray], { type: fileType });
             console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
@@ -4913,25 +4883,22 @@
 
             console.log(`✅ File found: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
 
-            // Convert blob to base64
-            const base64Data = await new Promise((resolve, reject) => {
+            // Convert blob to ArrayBuffer (Binary)
+            const arrayBuffer = await new Promise((resolve, reject) => {
               const reader = new FileReader();
-              reader.onload = () => {
-                const base64 = reader.result.split(',')[1];
-                resolve(base64);
-              };
+              reader.onload = () => resolve(reader.result);
               reader.onerror = reject;
-              reader.readAsDataURL(fileData.blob);
+              reader.readAsArrayBuffer(fileData.blob);
             });
 
-            console.log(`✅ Converted to base64: ${(base64Data.length / 1024).toFixed(2)} KB`);
+            console.log(`✅ Converted to binary: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB`);
 
             // Send to requester via server relay
             socketInstance.emit('attachment_data_response', {
               fileId,
               requesterId,
               requesterSocketId,
-              data: base64Data,
+              data: arrayBuffer, // Binary
               metadata: {
                 name: fileData.name,
                 type: fileData.type,
@@ -4939,7 +4906,7 @@
               }
             });
 
-            console.log(`📤 File data sent to requester`);
+            console.log(`📤 Binary file data sent to requester`);
             console.log('📤 ========================================\n');
 
           } catch (error) {
@@ -4950,11 +4917,10 @@
 
         socketInstance.on('attachment_data_received', async ({ fileId, data, metadata }) => {
           console.log('📥 ========================================');
-          console.log('📥 ATTACHMENT DATA RECEIVED FROM PEER');
+          console.log('📥 BINARY ATTACHMENT RECEIVED FROM PEER');
           console.log('📥 ========================================');
           console.log(`   FileID: ${fileId}`);
           console.log(`   File: ${metadata?.name}`);
-          console.log(`   Size: ${metadata?.size ? (metadata.size / 1024).toFixed(2) : 0} KB`);
 
           if (!data || !metadata) {
             console.error('❌ Invalid data received');
@@ -4963,11 +4929,19 @@
           }
 
           try {
-            // Convert base64 back to blob using robust helper
-            const blob = base64ToBlob(data, metadata.type);
+            let blob;
+            if (typeof data === 'string') {
+              // Legacy/History Base64 data
+              console.log('📦 Processing Base64 data (History/Legacy)');
+              blob = base64ToBlob(data, metadata.type);
+            } else {
+              // High-speed Binary data
+              console.log('⚡ Processing Binary data (Live P2P)');
+              blob = new Blob([data], { type: metadata.type });
+            }
 
             if (!blob) {
-              throw new Error('Base64 to Blob conversion returned null');
+              throw new Error('Blob creation failed');
             }
 
             // Create File object
