@@ -1688,25 +1688,24 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     return { success: true, alreadyGone: true };
   }
 
-  // Get user data - AUTHORITY SOURCE: Room object users list
+  // CRITICAL GUARD: Check if user is actually in the room BEFORE doing anything
+  // This prevents duplicate user_left emissions when called from multiple sources
   const roomUser = room.users.find(u => u.userId === userId);
-  let userData = null;
-
-  if (roomUser) {
-    userData = {
-      userId: roomUser.userId,
-      username: roomUser.username,
-      firebaseUid: roomUser.firebaseUid
-    };
-  } else {
-    // Fallback to socketUsers if room user not found (rare)
-    socketUsers.forEach(u => {
-      if (u.userId === userId) userData = u;
-    });
+  if (!roomUser) {
+    console.log(`ℹ️ [LeaveChat] User ${userId} already not in room ${roomId} - skipping duplicate leave`);
+    return { success: true, alreadyLeft: true };
   }
 
-  const firebaseUid = userData?.firebaseUid;
-  const username = userData?.username || userId;
+  // Get user data from room (guaranteed to exist since we just checked)
+  const userData = {
+    userId: roomUser.userId,
+    username: roomUser.username,
+    firebaseUid: roomUser.firebaseUid,
+    pfpUrl: roomUser.pfpUrl
+  };
+
+  const firebaseUid = userData.firebaseUid;
+  const username = userData.username || userId;
 
   console.log(`🚪 [LeaveChat] ${username} leaving room ${roomId} (Reason: ${reason})`);
 
