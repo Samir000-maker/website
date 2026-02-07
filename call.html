@@ -2430,9 +2430,12 @@
         if (window.parent && window.parent !== window) {
           console.log('📤 Sending FORCE_HIDE_CALL to parent frame');
           window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*');
+          // Don't reload chat inside iframe - just blank it out to stop scripts
+          setTimeout(() => { window.location.href = 'about:blank'; }, 100);
+        } else {
+          // Normal navigation for standalone window
+          setTimeout(() => { window.location.href = '/chat.html'; }, 500);
         }
-
-        setTimeout(() => { window.location.href = '/chat.html'; }, 500);
       }
 
 
