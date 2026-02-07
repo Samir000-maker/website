@@ -151,11 +151,18 @@
     .animate-bounce-slow {
       animation: bounce-slow 2s ease-in-out infinite;
     }
+
+    /* ✅ Zero-flicker layout hiding */
+    header,
+    main,
+    footer {
+      visibility: hidden;
+    }
   </style>
 </head>
 
 <body
-  class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display">
+  class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white min-h-screen flex flex-col font-display overflow-hidden">
   <header
     class="w-full border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between bg-background-light dark:bg-background-dark z-10">
     <div class="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -179,6 +186,34 @@
       </div>
     </div>
   </header>
+
+  <!-- ✅ Professional Loading Overlay -->
+  <div id="callLoadingOverlay"
+    class="fixed inset-0 z-[50] bg-background-light dark:bg-background-dark flex flex-col items-center justify-center transition-opacity duration-500">
+    <div class="relative mb-8">
+      <div class="w-20 h-20 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+      <div class="absolute inset-0 flex items-center justify-center">
+        <span class="material-symbols-outlined text-primary text-3xl animate-pulse">videocam</span>
+      </div>
+    </div>
+    <h2 class="text-xl font-bold mb-2 tracking-tight" id="loadingStatusText">Initializing Connection</h2>
+    <p class="text-slate-500 dark:text-slate-400 text-sm animate-pulse" id="loadingSubtext">Setting up your media
+      devices...</p>
+
+    <div class="mt-12 flex items-center gap-4 px-6 py-3 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
+      <div class="flex -space-x-3">
+        <div
+          class="w-8 h-8 rounded-full bg-primary/20 border-2 border-background-dark flex items-center justify-center overflow-hidden">
+          <span class="material-symbols-outlined text-primary text-xs">person</span>
+        </div>
+        <div
+          class="w-8 h-8 rounded-full bg-primary/40 border-2 border-background-dark flex items-center justify-center overflow-hidden">
+          <span class="material-symbols-outlined text-primary text-xs">shield</span>
+        </div>
+      </div>
+      <span class="text-xs text-slate-400 font-medium tracking-wide uppercase">Secure Peer-to-Peer</span>
+    </div>
+  </div>
 
   <main class="flex-1 overflow-y-auto">
     <div id="participantGrid" class="participant-grid"></div>
@@ -333,6 +368,7 @@
       let renderedParticipants = new Set(); // CRITICAL FIX: Track rendered participants
       let isNavigatingToChat = false;
       let isInChatView = false;
+      let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
 
       function setupCallBackButtonHandler() {
         console.log('🔙 Setting up call page back button handler');
@@ -1102,8 +1138,13 @@
       });
 
       async function initLocalMedia() {
+        const loadingText = document.getElementById('loadingStatusText');
+        const loadingSubtext = document.getElementById('loadingSubtext');
+
         const MAX_RETRIES = 3;
         let attempt = 0;
+
+        if (loadingText) loadingText.textContent = "Accessing Camera & Mic";
 
         while (attempt < MAX_RETRIES) {
           try {
@@ -1490,13 +1531,27 @@
                     updateVideoVisibility(userId, true, true);
                   }
                 }
+                if (event.track.kind === 'video') {
+                  console.log(`📹 Video track received for ${userId}, checking intended state...`);
+                  const intendedState = remoteMediaStates.get(userId);
+                  const shouldShow = intendedState ? intendedState.video : true; // Default to true if unknown
+
+                  if (shouldShow) {
+                    console.log(`✅ Peer intended video ON, showing now`);
+                    updateVideoVisibility(userId, true, true);
+                  } else {
+                    console.log(`ℹ️ Peer intended video OFF, keeping profile picture`);
+                    updateVideoVisibility(userId, false, true);
+                  }
+                }
               } else {
                 console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
 
                 // ✅ Still update visibility for new video tracks
-                if (event.track.kind === 'video' && event.track.enabled) {
-                  console.log(`📹 New video track added to existing stream, updating visibility`);
-                  updateVideoVisibility(userId, true, true);
+                if (event.track.kind === 'video') {
+                  const intendedState = remoteMediaStates.get(userId);
+                  const shouldShow = intendedState ? intendedState.video : true;
+                  updateVideoVisibility(userId, shouldShow, true);
                 }
               }
 
@@ -2515,6 +2570,8 @@
 
           socketInstance.on('connect', () => {
             console.log(`🔌 Connected: ${socketInstance.id}`);
+            const loadingText = document.getElementById('loadingStatusText');
+            if (loadingText) loadingText.textContent = "Connecting to Secure Server";
             socketInstance.emit('authenticate', { token, userId: currentUser.userId });
           });
 
@@ -2604,8 +2661,26 @@
 
               try {
                 console.log(`📞 Attempting to join call ${callData.callId}...`);
-                await attemptJoinCall(callData.callId);
-                console.log(`✅ Successfully joined call ${callData.callId}`);
+                const loadingText = document.getElementById('loadingStatusText');
+                const loadingSubtext = document.getElementById('loadingSubtext');
+                if (loadingText) loadingText.textContent = "Joining Secure Channel";
+                if (loadingSubtext) loadingSubtext.textContent = "Finalizing your encryption keys...";
+
+                const joinData = await attemptJoinCall(callData.callId);
+                console.log('✅ Joined call successfully');
+
+                // Dismiss loading overlay
+                const overlay = document.getElementById('callLoadingOverlay');
+                if (overlay) {
+                  overlay.style.opacity = '0';
+                  setTimeout(() => {
+                    overlay.classList.add('hidden');
+                    // Restore visibility of main elements if they were hidden
+                    document.querySelector('header').style.visibility = 'visible';
+                    document.querySelector('main').style.visibility = 'visible';
+                    document.querySelector('footer').style.visibility = 'visible';
+                  }, 500);
+                }
               } catch (error) {
                 console.error('❌ Failed to join call:', error);
                 toast('Failed to join call. Returning to chat...', 'error');
@@ -2703,9 +2778,17 @@
             broadcastCallStateToChat();
 
 
-            // Log all participants
+            // Log all participants and store their initial media states
             data.participants.forEach((p, i) => {
               console.log(`   [${i}] ${p.username} (${p.userId}) video:${p.videoEnabled} audio:${p.audioEnabled}`);
+
+              // ✅ Authoritative initial state from server
+              if (p.userId !== currentUser.userId) {
+                remoteMediaStates.set(p.userId, {
+                  video: p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video'),
+                  audio: p.audioEnabled !== undefined ? p.audioEnabled : true
+                });
+              }
             });
 
             if (!data.participants || data.participants.length === 0) {
@@ -2846,6 +2929,9 @@
 
             console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
 
+            // ✅ Store intended media state immediately
+            remoteMediaStates.set(data.user.userId, { video: videoState, audio: audioState });
+
             // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
             if (renderedParticipants.has(data.user.userId)) {
               console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
@@ -2971,38 +3057,28 @@
             console.log(`📹 ========================================`);
             console.log(`   From userId: ${data.userId}`);
             console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
-            console.log(`   My userId: ${currentUser.userId}`);
 
-            // Sanity check - should NEVER receive own state back
+            // ✅ Persist intended state immediately (eliminates delay)
+            remoteMediaStates.set(data.userId, { video: data.enabled });
+
             if (data.userId === currentUser.userId) {
-              console.error(`❌ CRITICAL: Received own video state from server!`);
-              console.error(`   This should not happen - server should exclude sender`);
-              console.error(`   Ignoring to prevent state desync`);
+              console.log(`📹 Own state reflected, ignoring UI update`);
               console.log(`📹 ========================================\n`);
               return;
             }
 
-            // ✅ Update remote user's video visibility
-            console.log(`📹 Updating remote user ${data.userId} video visibility: ${data.enabled}`);
-
-            // ✅ CRITICAL: Check if video element has video tracks
+            // ✅ Update visibility immediately if tracks exist
             const remoteVideo = document.getElementById(`video-${data.userId}`);
-            if (remoteVideo && remoteVideo.srcObject) {
-              const videoTracks = remoteVideo.srcObject.getVideoTracks();
-              console.log(`   Remote video element has ${videoTracks.length} video track(s)`);
+            const hasTracks = remoteVideo && remoteVideo.srcObject && remoteVideo.srcObject.getVideoTracks().length > 0;
 
-              if (videoTracks.length === 0 && data.enabled) {
-                console.warn(`⚠️ Remote wants to show video but no video tracks in stream yet`);
-                console.warn(`   Waiting for ontrack event to deliver video track...`);
-                // Don't update visibility yet - wait for track to arrive
-                console.log(`📹 ========================================\n`);
-                return;
-              }
+            if (data.enabled && !hasTracks) {
+              console.log(`⏳ Video ON received, but no tracks yet. Will show when ontrack fires.`);
+              // We've already set remoteMediaStates, updateVideoVisibility will be called in ontrack
+            } else {
+              updateVideoVisibility(data.userId, data.enabled, true);
             }
 
-            updateVideoVisibility(data.userId, data.enabled, true);
-
-            console.log(`✅ Remote video state updated successfully`);
+            console.log(`✅ Remote video state handled`);
             console.log(`📹 ========================================\n`);
           });
 
