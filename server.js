@@ -2831,6 +2831,12 @@ io.on('connection', (socket) => {
 
       console.log(`✅ [Auth] Socket authenticated for ${user.username} (${mongoUserId})`);
 
+      // ✅ FIX: Mark presence immediately so matchmaking sees the user as online
+      await updateUserPresence(mongoUserId, {
+        status: 'online',
+        lastSeen: Date.now()
+      });
+
       // ============================================
       // CHECK FOR ACTIVE ROOM (MULTI-DEVICE AWARE)
       // ============================================
@@ -3000,6 +3006,12 @@ io.on('connection', (socket) => {
 
       // ✅ ADD USER TO MOOD (deduplicated)
       addUserToMood(user.userId, mood);
+
+      // ✅ FIX: Refresh presence before joining queue to prevent race/stale state
+      await updateUserPresence(user.userId, {
+        status: 'matchmaking',
+        lastSeen: Date.now()
+      });
 
       // Clear any existing timeout for this user
       clearMatchmakingTimeout(user.userId);
