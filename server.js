@@ -1,4 +1,23 @@
 
+// ============================================
+// PM2 CLUSTER INSTANCE DETECTION
+// ============================================
+
+const instanceId = process.env.INSTANCE_ID || process.env.NODE_APP_INSTANCE || '0';
+const isClusterMode = process.env.NODE_APP_INSTANCE !== undefined;
+const processId = process.pid;
+
+console.log('');
+console.log('🚀 ========================================');
+console.log('🚀 INSTANCE INITIALIZATION');
+console.log('🚀 ========================================');
+console.log(`   Instance ID: ${instanceId}`);
+console.log(`   Process ID: ${processId}`);
+console.log(`   Cluster Mode: ${isClusterMode ? 'YES' : 'NO'}`);
+console.log(`   Node Version: ${process.version}`);
+console.log('🚀 ========================================');
+console.log('');
+
 // ENHANCED SERVER WITH STATE PRESERVATION AND DETERMINISTIC CLEANUP
 // Features:
 // 1. Persistent call state with grace periods
@@ -27,6 +46,7 @@ import { fileURLToPath } from 'url';
 // REDIS SETUP
 import Redis from 'ioredis';
 import { createAdapter } from '@socket.io/redis-adapter';
+import Redlock from 'redlock';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,24 +66,633 @@ const subClient = pubClient.duplicate();
 pubClient.on('error', (err) => console.error('Redis Pub Error:', err));
 subClient.on('error', (err) => console.error('Redis Sub Error:', err));
 
-// STATE MANAGEMENT MOVED TO REDIS
-// const callMutexes = new Map(); -> Use Redis Lock
-// const socketUserCleanup = new Map(); -> Handled by logic
-// const roomJoinState = new Map(); -> Redis
-// const userToSocketId = new Map(); -> Redis Adapter (rooms)
-// const socketUsers = new Map(); -> Redis
-// const joinCallDebounce = new Map(); -> Redis TTL
-// const userPresence = new Map(); -> Redis Hash 'user:presence'
+// ============================================
+// DISTRIBUTED LOCKING WITH REDLOCK
+// ============================================
 
+const redlock = new Redlock(
+  [pubClient],
+  {
+    driftFactor: 0.01,          // Clock drift factor
+    retryCount: 10,              // Retry 10 times
+    retryDelay: 200,             // Wait 200ms between retries
+    retryJitter: 200,            // Randomize retry timing
+    automaticExtensionThreshold: 500  // Auto-extend lock
+  }
+);
 
-const roomCallInitLocks = new Map(); // roomId -> Promise
-const userOperationLocks = new Map();
-const socketUsers = new Map(); // socket.id -> { userId, username, ... } (Local)
-const callMutexes = new Map(); // callId -> Promise (Local Queue)
-const socketUserCleanup = new Map(); // userId -> timeout handle
-const roomCleanupTimers = new Map(); // roomId -> timeout handle
+redlock.on('error', (error) => {
+  // Ignore errors from resource not locked (expected)
+  if (error.message && error.message.includes('exceeded')) {
+    console.error('❌ [Redlock] Lock acquisition exceeded retry limit:', error.message);
+  }
+});
 
-const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000; // 10 minutes default
+console.log('✅ Redlock initialized for distributed locking');
+
+// ============================================
+// REDIS-BACKED SOCKET USER TRACKING
+// ============================================
+
+/**
+ * Set socket user data in Redis
+ */
+async function setSocketUser(socketId, userData) {
+  try {
+    await pubClient.hset('socket:users', socketId, JSON.stringify({
+      ...userData,
+      lastSeen: Date.now()
+    }));
+    console.log(`📱 [Redis] Registered socket ${socketId} for user ${userData.userId}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to set socket user:`, error);
+    return false;
+  }
+}
+
+/**
+ * Get socket user data from Redis
+ */
+async function getSocketUser(socketId) {
+  try {
+    const data = await pubClient.hget('socket:users', socketId);
+    if (!data) return null;
+
+    const userData = JSON.parse(data);
+    // console.log(`📱 [Redis] Retrieved socket ${socketId} for user ${userData.userId}`);
+    return userData;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get socket user:`, error);
+    return null;
+  }
+}
+
+/**
+ * Delete socket user from Redis
+ */
+async function deleteSocketUser(socketId) {
+  try {
+    await pubClient.hdel('socket:users', socketId);
+    console.log(`📱 [Redis] Deleted socket ${socketId} from registry`);
+    return true;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to delete socket user:`, error);
+    return false;
+  }
+}
+
+/**
+ * Get all socket users from Redis
+ */
+async function getAllSocketUsers() {
+  try {
+    const data = await pubClient.hgetall('socket:users');
+    const users = {};
+
+    for (const [socketId, userDataStr] of Object.entries(data)) {
+      try {
+        users[socketId] = JSON.parse(userDataStr);
+      } catch (parseError) {
+        console.error(`❌ [Redis] Failed to parse socket user data for ${socketId}`);
+      }
+    }
+
+    return users;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get all socket users:`, error);
+    return {};
+  }
+}
+
+/**
+ * Get socket user by userId
+ */
+async function getSocketByUserId(userId) {
+  try {
+    const allUsers = await getAllSocketUsers();
+
+    for (const [socketId, userData] of Object.entries(allUsers)) {
+      if (userData.userId === userId) {
+        return { socketId, userData };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get socket by userId:`, error);
+    return null;
+  }
+}
+
+/**
+ * Clean up stale socket entries (last seen > 5 minutes)
+ */
+async function cleanupStaleSocketUsers() {
+  try {
+    const allUsers = await getAllSocketUsers();
+    const now = Date.now();
+    const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    let cleanedCount = 0;
+
+    for (const [socketId, userData] of Object.entries(allUsers)) {
+      if (now - userData.lastSeen > STALE_THRESHOLD) {
+        await deleteSocketUser(socketId);
+        cleanedCount++;
+      }
+    }
+
+    if (cleanedCount > 0) {
+      console.log(`🧹 [Redis] Cleaned up ${cleanedCount} stale socket users`);
+    }
+
+    return cleanedCount;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to cleanup stale socket users:`, error);
+    return 0;
+  }
+}
+
+// Redis helpers for file transfers
+async function getFileRecord(fileId) {
+  try {
+    const data = await pubClient.hgetall(`file:record:${fileId}`);
+    if (!data || !Object.keys(data).length) return null;
+    if (data.chunks) data.chunks = JSON.parse(data.chunks);
+    if (data.totalChunks) data.totalChunks = parseInt(data.totalChunks);
+    if (data.receivedCount) data.receivedCount = parseInt(data.receivedCount);
+    if (data.size) data.size = parseInt(data.size);
+    return data;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get file record ${fileId}:`, error.message);
+    return null;
+  }
+}
+
+async function saveFileRecord(fileId, record) {
+  try {
+    const data = { ...record };
+    if (data.chunks && Array.isArray(data.chunks)) {
+      data.chunks = JSON.stringify(data.chunks);
+    }
+    await pubClient.hset(`file:record:${fileId}`, data);
+    await pubClient.expire(`file:record:${fileId}`, 3600); // 1 hour TTL
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to save file record ${fileId}:`, error.message);
+  }
+}
+
+async function deleteFileRecord(fileId) {
+  try {
+    await pubClient.del(`file:record:${fileId}`);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to delete file record ${fileId}:`, error.message);
+  }
+}
+
+async function setFileChunk(fileId, index, data) {
+  try {
+    const key = `file:chunk:${fileId}:${index}`;
+    // Store as binary buffer
+    await pubClient.set(key, data);
+    await pubClient.expire(key, 3600); // 1 hour TTL
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to set file chunk ${fileId}:${index}:`, error.message);
+  }
+}
+
+async function getFileChunk(fileId, index) {
+  try {
+    return await pubClient.getBuffer(`file:chunk:${fileId}:${index}`);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get file chunk ${fileId}:${index}:`, error.message);
+    return null;
+  }
+}
+
+async function getActiveFileTransfer(fileId) {
+  try {
+    const data = await pubClient.hgetall(`file:transfer:${fileId}`);
+    if (!data || !Object.keys(data).length) return null;
+    if (data.bytesTransferred) data.bytesTransferred = parseInt(data.bytesTransferred);
+    if (data.startTime) data.startTime = parseInt(data.startTime);
+    return data;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function setActiveFileTransfer(fileId, data) {
+  try {
+    await pubClient.hset(`file:transfer:${fileId}`, data);
+    await pubClient.expire(`file:transfer:${fileId}`, 3600);
+  } catch (error) { }
+}
+
+async function deleteActiveFileTransfer(fileId) {
+  try {
+    await pubClient.del(`file:transfer:${fileId}`);
+  } catch (error) { }
+}
+
+// Signaling Debounce Helpers (Redis-backed)
+async function getRoomJoinState(roomId, userId) {
+  try {
+    const data = await pubClient.get(`debounce:room_join:${roomId}:${userId}`);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function setRoomJoinState(roomId, userId, state, ttlMs = 2000) {
+  try {
+    await pubClient.set(`debounce:room_join:${roomId}:${userId}`, JSON.stringify(state), 'PX', ttlMs);
+  } catch (error) { }
+}
+
+async function getJoinCallDebounce(userId) {
+  try {
+    const data = await pubClient.get(`debounce:join_call:${userId}`);
+    return data ? parseInt(data) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+async function setJoinCallDebounce(userId, timestamp, ttlMs = 2000) {
+  try {
+    await pubClient.set(`debounce:join_call:${userId}`, timestamp.toString(), 'PX', ttlMs);
+  } catch (error) { }
+}
+
+async function deleteJoinCallDebounce(userId) {
+  try {
+    await pubClient.del(`debounce:join_call:${userId}`);
+  } catch (error) { }
+}
+
+// Distributed state management with Redis
+// socketUsers, userToSocketId, roomCleanupTimers, etc. all moved to Redis
+
+// ============================================
+// REDIS KEYSPACE NOTIFICATIONS FOR EXPIRY
+// ============================================
+
+/**
+ * Setup Redis keyspace notifications to trigger on key expiry
+ * This replaces setTimeout for distributed timer functionality
+ */
+async function setupRedisExpiryNotifications() {
+  try {
+    // Enable keyspace notifications for expired events
+    await pubClient.config('SET', 'notify-keyspace-events', 'Ex');
+    console.log('✅ Redis keyspace notifications enabled');
+
+    // Create dedicated client for expiry subscriptions
+    const expiryClient = pubClient.duplicate();
+
+    await new Promise((resolve, reject) => {
+      expiryClient.on('ready', resolve);
+      expiryClient.on('error', reject);
+    });
+
+    // Subscribe to expiry events
+    expiryClient.psubscribe('__keyevent@0__:expired', (pattern, channel, key) => {
+      console.log(`⏰ [Redis] Expiry event received for key: ${key}`);
+
+      // Handle room expiry
+      if (key.startsWith('room:expiry:')) {
+        const roomId = key.replace('room:expiry:', '');
+        console.log(`⏰ [Redis] Room expiry triggered for ${roomId}`);
+        handleRoomExpiry(roomId).catch(error => {
+          console.error(`❌ Failed to handle room expiry for ${roomId}:`, error);
+        });
+      }
+
+      // Handle user cleanup
+      else if (key.startsWith('user:cleanup:')) {
+        const userId = key.replace('user:cleanup:', '');
+        console.log(`⏰ [Redis] User cleanup triggered for ${userId}`);
+        handleUserCleanup(userId).catch(error => {
+          console.error(`❌ Failed to handle user cleanup for ${userId}:`, error);
+        });
+      }
+
+      // Handle call cleanup
+      else if (key.startsWith('call:cleanup:')) {
+        const callId = key.replace('call:cleanup:', '');
+        console.log(`⏰ [Redis] Call cleanup triggered for ${callId}`);
+        handleCallExpiry(callId).catch(error => {
+          console.error(`❌ Failed to handle call expiry for ${callId}:`, error);
+        });
+      }
+    });
+
+    console.log('✅ Redis expiry notifications subscribed');
+
+    return expiryClient;
+  } catch (error) {
+    console.error('❌ Failed to setup Redis expiry notifications:', error);
+    throw error;
+  }
+}
+
+// Initialize expiry notifications
+let expiryClient;
+setupRedisExpiryNotifications()
+  .then(client => {
+    expiryClient = client;
+  })
+  .catch(error => {
+    console.error('💥 CRITICAL: Could not setup expiry notifications:', error);
+    process.exit(1);
+  });
+
+/**
+ * Schedule room cleanup using Redis TTL
+ */
+async function scheduleRoomCleanup(roomId, expiryMs) {
+  try {
+    const expirySeconds = Math.ceil(expiryMs / 1000);
+    const expiryData = JSON.stringify({
+      roomId,
+      scheduledAt: Date.now(),
+      expiryMs
+    });
+
+    await pubClient.setex(`room:expiry:${roomId}`, expirySeconds, expiryData);
+    console.log(`⏰ [Redis] Scheduled room cleanup for ${roomId} in ${expirySeconds}s`);
+
+    return true;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to schedule room cleanup for ${roomId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Cancel room cleanup
+ */
+async function cancelRoomCleanup(roomId) {
+  try {
+    const deleted = await pubClient.del(`room:expiry:${roomId}`);
+    if (deleted > 0) {
+      console.log(`⏰ [Redis] Cancelled room cleanup for ${roomId}`);
+    }
+    return deleted > 0;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to cancel room cleanup for ${roomId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Schedule user cleanup using Redis TTL
+ */
+async function scheduleUserCleanup(userId, delayMs) {
+  try {
+    const delaySeconds = Math.ceil(delayMs / 1000);
+    const cleanupData = JSON.stringify({
+      userId,
+      scheduledAt: Date.now(),
+      delayMs
+    });
+
+    await pubClient.setex(`user:cleanup:${userId}`, delaySeconds, cleanupData);
+    console.log(`⏰ [Redis] Scheduled user cleanup for ${userId} in ${delaySeconds}s`);
+
+    return true;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to schedule user cleanup for ${userId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Cancel user cleanup
+ */
+async function cancelUserCleanup(userId) {
+  try {
+    const deleted = await pubClient.del(`user:cleanup:${userId}`);
+    if (deleted > 0) {
+      console.log(`⏰ [Redis] Cancelled user cleanup for ${userId}`);
+    }
+    return deleted > 0;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to cancel user cleanup for ${userId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Acquire distributed lock for call operations
+ */
+async function acquireCallMutex(callId) {
+  const lockKey = `locks:call:${callId}`;
+  const lockTTL = 5000; // 5 seconds
+
+  try {
+    const lock = await redlock.acquire([lockKey], lockTTL);
+    console.log(`🔒 [Redlock] Acquired call lock for ${callId}`);
+
+    return async () => {
+      try {
+        await lock.release();
+        console.log(`🔓 [Redlock] Released call lock for ${callId}`);
+      } catch (error) {
+        console.warn(`⚠️ [Redlock] Lock release failed for ${callId}:`, error.message);
+      }
+    };
+  } catch (error) {
+    console.error(`❌ [Redlock] Failed to acquire call lock for ${callId}:`, error);
+    throw new Error(`Could not acquire lock for call ${callId}`);
+  }
+}
+
+/**
+ * Acquire distributed lock for user operations
+ */
+async function acquireUserLock(userId) {
+  const lockKey = `locks:user:${userId}`;
+  const lockTTL = 5000; // 5 seconds
+
+  try {
+    const lock = await redlock.acquire([lockKey], lockTTL);
+    console.log(`🔒 [Redlock] Acquired user lock for ${userId}`);
+
+    return async () => {
+      try {
+        await lock.release();
+        console.log(`🔓 [Redlock] Released user lock for ${userId}`);
+      } catch (error) {
+        console.warn(`⚠️ [Redlock] User lock release failed for ${userId}:`, error.message);
+      }
+    };
+  } catch (error) {
+    console.error(`❌ [Redlock] Failed to acquire user lock for ${userId}:`, error);
+    throw new Error(`Could not acquire lock for user ${userId}`);
+  }
+}
+
+/**
+ * Acquire distributed lock for room initialization
+ */
+async function acquireRoomInitLock(roomId) {
+  const lockKey = `locks:room:init:${roomId}`;
+  const lockTTL = 10000;
+
+  try {
+    const lock = await redlock.acquire([lockKey], lockTTL);
+    console.log(`🔒 [Redlock] Acquired room init lock for ${roomId}`);
+
+    return async () => {
+      try {
+        await lock.release();
+        console.log(`🔓 [Redlock] Released room init lock for ${roomId}`);
+      } catch (error) {
+        console.warn(`⚠️ [Redlock] Room init lock release failed for ${roomId}:`, error.message);
+      }
+    };
+  } catch (error) {
+    console.error(`❌ [Redlock] Failed to acquire room init lock for ${roomId}:`, error);
+    throw new Error(`Could not acquire room init lock for ${roomId}`);
+  }
+}
+
+/**
+ * Handle room expiry event (called when Redis key expires)
+ */
+async function handleRoomExpiry(roomId) {
+  console.log(`🧹 [Cleanup] Authoritative room expiry for ${roomId}`);
+
+  try {
+    const room = await matchmaking.getRoom(roomId);
+    if (!room) {
+      console.log(`⚠️ [Cleanup] Room ${roomId} already removed from memory`);
+      return;
+    }
+
+    // Mark room as expired
+    room.isExpired = true;
+
+    // 1. Notify all users and clear their records
+    const userIds = room.users.map(u => u.userId);
+    for (const userId of userIds) {
+      const userData = room.users.find(u => u.userId === userId);
+
+      // Notify cluster-wide
+      io.to(`user:${userId}`).emit('room_expired', {
+        roomId,
+        message: 'Chat room has expired',
+        cleanupFiles: true
+      });
+
+      // Clear records in Redis
+      if (userData?.firebaseUid) {
+        await clearUserActiveRoom(userData.firebaseUid);
+      }
+      await removeUserFromAllMoods(userId);
+      await removeUserPresence(userId);
+    }
+
+    // 2. Clean up associated call
+    const callId = await pubClient.get(`room:${roomId}:call`);
+    if (callId) {
+      console.log(`🧹 Room expiry: Triggering cleanup for associated call ${callId}`);
+      await handleCallExpiry(callId);
+    }
+
+    // 3. File stores are now in Redis or handled per-user, no local cleanup needed here
+
+    // 4. Remove room from matchmaking
+    await matchmaking.destroyRoom(roomId);
+
+    console.log(`✅ [Cleanup] Room ${roomId} fully purged across cluster`);
+  } catch (error) {
+    console.error(`❌ [Cleanup] Room purge failure for ${roomId}:`, error);
+  }
+}
+
+/**
+ * Handle call cleanup event (called when Redis key expires)
+ */
+async function handleCallExpiry(callId) {
+  console.log(`🧹 [Cleanup] Triggering authoritative call cleanup: ${callId}`);
+
+  try {
+    const release = await acquireCallMutex(callId);
+    try {
+      const call = await getCall(callId);
+      if (!call) {
+        console.log(`ℹ️ Call ${callId} already removed`);
+        return;
+      }
+
+      // End-of-life processing
+      call.status = 'ended';
+      call.endedAt = Date.now();
+      call.endReason = call.endReason || 'empty_grace_period';
+
+      // Notify remaining participants (if any)
+      io.to(call.roomId).emit('call_ended', {
+        callId,
+        reason: call.endReason
+      });
+
+      // Clear participant records
+      for (const userId of call.participants) {
+        await removeUserCall(userId);
+      }
+
+      // Final delete from Redis
+      await deleteCall(callId);
+      await pubClient.del(`room:${call.roomId}:call`);
+
+      console.log(`✅ [Cleanup] Call ${callId} purged from cluster`);
+    } finally {
+      await release();
+    }
+  } catch (error) {
+    console.error(`❌ [Cleanup] Call purge failure for ${callId}:`, error);
+  }
+}
+
+/**
+ * Schedule call cleanup using Redis TTL
+ */
+async function scheduleCallCleanup(callId, delayMs) {
+  try {
+    const seconds = Math.ceil(delayMs / 1000);
+    await pubClient.setex(`call:cleanup:${callId}`, seconds, 'expired');
+    console.log(`⏰ [Redis] Scheduled call cleanup for ${callId} in ${seconds}s`);
+    return true;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to schedule call cleanup for ${callId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Handle user cleanup event (called when Redis key expires)
+ */
+async function handleUserCleanup(userId) {
+  console.log(`🧹 [Cleanup] Handling user cleanup for ${userId}`);
+
+  try {
+    // Remove user from mood tracking
+    await removeUserFromAllMoods(userId);
+
+    // Clear active room
+    await clearUserActiveRoom(userId);
+
+    console.log(`✅ [Cleanup] User ${userId} cleaned up`);
+  } catch (error) {
+    console.error(`❌ [Cleanup] Error handling user cleanup for ${userId}:`, error);
+  }
+}
+
+const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000;
 const ROOM_CLEANUP_GRACE = 30000; // 30 seconds
 const ROOM_WARNING_TIME = 60000; // 60 seconds warning before expiry
 
@@ -152,20 +781,20 @@ async function clearUserActiveRoom(userId) {
 }
 
 
-function registerSocketForUser(userId, socketId) {
-  // socket.join('user:' + userId) is handled in the connection handler now
-  // We can still log it
-  console.log(`📱 [UID: ${userId}] Socket ${socketId} connected`);
+async function registerSocketForUser(userId, socketId, userData) {
+  await setSocketUser(socketId, { userId, ...userData });
+  console.log(`📱 [UID: ${userId}] Registered socket ${socketId} in Redis`);
 }
 
-function unregisterSocketForUser(userId, socketId) {
-  // standard socket.io cleanup handles room leaving
-  console.log(`📱 [UID: ${userId}] Socket ${socketId} disconnected`);
+async function unregisterSocketForUser(socketId) {
+  await deleteSocketUser(socketId);
+  console.log(`📱 Socket ${socketId} unregistered from Redis`);
 }
 
 // DEPRECATED: Use io.to(`user:${userId}`) or socket.to(`user:${userId}`)
-function getUserSocketIds(userId) {
-  return [];
+async function getUserSocketIds(userId) {
+  const socketData = await getSocketByUserId(userId);
+  return socketData ? [socketData.socketId] : [];
 }
 
 function emitToUserAllDevices(userId, event, data) {
@@ -185,7 +814,7 @@ async function validateMoodSelection(userId) {
 
     if (activeRoom) {
       // Verify room still exists and is valid
-      const room = matchmaking.getRoom(activeRoom.roomId);
+      const room = await matchmaking.getRoom(activeRoom.roomId);
 
       if (room && !room.isExpired && room.hasUser(userId)) {
         console.log(`❌ [UID: ${userId}] Blocked mood selection - already in room ${activeRoom.roomId}`);
@@ -216,7 +845,7 @@ async function validateMoodSelection(userId) {
 async function restoreExistingRoom(socket, userId, existingRoom) {
   console.log(`🔄 [UID: ${userId}] [Socket: ${socket.id}] Restoring room ${existingRoom.roomId}`);
 
-  const room = matchmaking.getRoom(existingRoom.roomId);
+  const room = await matchmaking.getRoom(existingRoom.roomId);
 
   if (!room || room.isExpired) {
     console.error(`❌ [UID: ${userId}] Cannot restore - room ${existingRoom.roomId} not found or expired`);
@@ -349,13 +978,6 @@ async function getAllMoodCounts() {
 }
 
 
-const activeFileTransfers = new Map(); // fileId -> { roomId, userId, bytesTransferred, startTime }
-const roomFileStore = new Map(); // fileId -> { roomId, chunks: [], totalChunks, name, type, size, senderId, senderUsername, assembledData: null }
-const ROOM_FILE_STORE_MAX = 50; // max files kept per room in memory
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
-const MAX_TRANSFER_TIME = 5 * 60 * 1000; // 5 minutes
-const MAX_CONCURRENT_TRANSFERS = 20000; // ✅ Global limit
-const MAX_MEMORY_FOR_TRANSFERS = 1000 * 1024 * 1024; // ✅ 500MB total cap
 
 const answerDebounce = new Map(); // userId:targetUserId -> timestamp
 const ANSWER_DEDUPE_WINDOW = 2000; // 2 seconds
@@ -389,8 +1011,8 @@ function getCurrentTransferMemory() {
 }
 
 // Add helper function at top
-function validateRoomAccess(roomId, userId) {
-  const room = matchmaking.getRoom(roomId);
+async function validateRoomAccess(roomId, userId) {
+  const room = await matchmaking.getRoom(roomId);
 
   if (!room) {
     return { valid: false, error: 'Room not found or expired', code: 'ROOM_NOT_FOUND' };
@@ -412,7 +1034,7 @@ async function broadcastCallStateUpdate(callId) {
   const call = await getCall(callId);
   if (!call) return;
 
-  const room = matchmaking.getRoom(call.roomId);
+  const room = await matchmaking.getRoom(call.roomId);
   if (!room) return;
 
   io.to(call.roomId).emit('call_state_update', {
@@ -441,7 +1063,7 @@ async function findActiveCallForRoom(roomId) {
   return null;
 }
 
-function getUserDataForParticipant(participantId, socketUsers, room) {
+async function getUserDataForParticipant(participantId, room) {
   console.log(`🔍 Resolving user data for ${participantId}`);
 
   // CRITICAL FIX: Prioritize room data (most reliable source)
@@ -457,29 +1079,24 @@ function getUserDataForParticipant(participantId, socketUsers, room) {
     } else {
       console.warn(`⚠️ User ${participantId} NOT found in room users!`);
     }
-  } else {
-    console.warn(`⚠️ No room provided for user lookup`);
   }
 
-  // Fallback to active socket connections
-  for (const [socketId, socketUser] of socketUsers.entries()) {
-    if (socketUser.userId === participantId) {
-      console.log(`✅ Found in active sockets: ${socketUser.username}`);
-      return {
-        userId: socketUser.userId,
-        username: socketUser.username,
-        pfpUrl: socketUser.pfpUrl
-      };
-    }
+  // Fallback to Redis global state
+  const socketEntry = await getSocketByUserId(participantId);
+  if (socketEntry) {
+    console.log(`✅ Found in Redis global state: ${socketEntry.username}`);
+    return {
+      userId: socketEntry.userId,
+      username: socketEntry.username,
+      pfpUrl: socketEntry.profilePicture // Mapping 'profilePicture' field from Redis to 'pfpUrl'
+    };
   }
 
-  // CRITICAL: Do NOT use fallback - return null to signal error
   console.error(`❌ CRITICAL: No user data found for ${participantId} anywhere!`);
   return null;
 }
 
-// Local mutex removed - using distributed Redis lock below
-// async function withCallMutex(callId, operation) { ... } -> See line ~769
+// Distributed locking logic below
 
 
 function validateCallState(call, operation) {
@@ -666,6 +1283,9 @@ const io = new Server(server, {
   adapter: createAdapter(pubClient, subClient)
 });
 
+// Initialize Redis-backed matchmaking
+matchmaking.init(pubClient, io);
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
@@ -683,17 +1303,8 @@ const upload = multer({
   }
 });
 
-// ============================================
 // ENHANCED STATE MANAGEMENT
-// ============================================
-
-// Active calls with persistence
-// const activeCalls = new Map(); // REMOVED: Managed by Redis
-// Active calls with persistence
-// const activeCalls = new Map(); // REMOVED: Managed by Redis
-const joinCallDebounce = new Map(); // userId -> timestamp
-// Local idempotency for room joins
-const roomJoinState = new Map(); // key -> { joined: boolean, timestamp: number }
+// MOVED TO GLOBAL REGISTRY (lines 219+)
 
 /* Presence Tracking: userId -> { lastSeen: timestamp, status: 'chat_active' | 'call_active', roomId: string } */
 // MOVED TO REDIS: user:presence Hash
@@ -798,40 +1409,9 @@ async function removeUserCall(userId) {
 }
 
 
-// Redis Distributed Lock
-async function acquireLock(key, ttl = 5000) {
-  // 'PX' = milliseconds, 'NX' = only if not exists
-  const result = await pubClient.set(key, 'LOCKED', 'PX', ttl, 'NX');
-  return result === 'OK';
-}
-
-async function releaseLock(key) {
-  await pubClient.del(key);
-}
-
+// DEPRECATED Manual Locks - using Redlock instead (lines 364+)
 const MAX_LOCK_RETRIES = 10;
 const LOCK_RETRY_DELAY = 100;
-
-async function withCallMutex(callId, fn) {
-  const lockKey = `lock:call:${callId}`;
-  let retries = MAX_LOCK_RETRIES;
-
-  while (retries > 0) {
-    if (await acquireLock(lockKey)) {
-      try {
-        return await fn();
-      } finally {
-        await releaseLock(lockKey);
-      }
-    }
-
-    // Wait before retry
-    await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_DELAY));
-    retries--;
-  }
-
-  throw new Error(`Could not acquire lock for call ${callId} after ${MAX_LOCK_RETRIES} retries`);
-}
 
 // WebRTC metrics - use atomic increment functions to prevent race conditions
 const webrtcMetrics = {
@@ -862,173 +1442,7 @@ const OFFER_DEDUPE_WINDOW = 2000; // 2 seconds
 // ROOM CLEANUP SYSTEM
 // ============================================
 
-function scheduleRoomCleanup(roomId, expiresAt) {
-  // CRITICAL: Clear AND delete old timer
-  if (roomCleanupTimers.has(roomId)) {
-    const oldTimer = roomCleanupTimers.get(roomId);
-    clearTimeout(oldTimer);
-    roomCleanupTimers.delete(roomId); // Prevent reference leak
-  }
-
-  const now = Date.now();
-  const timeUntilExpiry = expiresAt - now;
-
-  if (timeUntilExpiry <= 0) {
-    console.log(`⏰ Room ${roomId} already expired, cleaning up immediately`);
-    performRoomCleanup(roomId);
-    return;
-  }
-
-  console.log(`⏰ Scheduled cleanup for room ${roomId} in ${Math.round(timeUntilExpiry / 1000)}s`);
-
-  const timer = setTimeout(() => {
-    console.log(`⏰ Room ${roomId} expiry timer triggered`);
-    performRoomCleanup(roomId);
-    roomCleanupTimers.delete(roomId); // Self-cleanup
-  }, timeUntilExpiry + ROOM_CLEANUP_GRACE);
-
-  roomCleanupTimers.set(roomId, timer);
-}
-
-async function performRoomCleanup(roomId) {
-  try {
-    const room = matchmaking.getRoom(roomId);
-
-    if (!room) {
-      console.log(`🗑️ Room ${roomId} not found, already cleaned up`);
-      roomCleanupTimers.delete(roomId);
-      return;
-    }
-
-    console.log(`🗑️ ========================================`);
-    console.log(`🗑️ CLEANING UP ROOM: ${roomId}`);
-    console.log(`🗑️ ========================================`);
-    console.log(`   Users: ${room.users.length}`);
-
-    // CRITICAL FIX: Cancel ANY pending room lifecycle timers
-    if (room.expiryTimer) {
-      clearTimeout(room.expiryTimer);
-      room.expiryTimer = null;
-      console.log(`⏰ Canceled room's internal expiry timer`);
-    }
-    if (room.warningTimer) {
-      clearTimeout(room.warningTimer);
-      room.warningTimer = null;
-      console.log(`⏰ Canceled room's internal warning timer`);
-    }
-
-    // Notify all users to clean up their IndexedDB files AND clear all server state
-    const usersToClean = [...room.users]; // snapshot before any mutation
-    usersToClean.forEach(user => {
-      // Clear active room state so user is not stuck in ghost room
-      if (user.firebaseUid) {
-        clearUserActiveRoom(user.firebaseUid);
-      }
-
-      // Remove from mood tracking
-      removeUserFromMood(user.userId, room.mood);
-
-      // Leave the user out of matchmaking records
-      matchmaking.leaveRoom(user.userId);
-
-      // Emit expired event and leave socket room on every device
-      const socketIds = user.firebaseUid ? getUserSocketIds(user.firebaseUid) : [];
-      socketIds.forEach(sid => {
-        const s = io.sockets.sockets.get(sid);
-        if (s && s.connected) {
-          s.emit('room_expired', {
-            roomId,
-            message: 'Chat room has expired',
-            cleanupFiles: true
-          });
-          s.leave(roomId);
-        }
-      });
-
-      // Fallback: also try the legacy single-socket lookup
-      // REFACTORED FOR CLUSTER: Use io.to(user:userId)
-      io.to(`user:${user.userId}`).emit('room_expired', {
-        roomId,
-        message: 'Chat room has expired',
-        cleanupFiles: true
-      });
-      // We cannot force leave() on remote sockets easily without a global event or adapter 
-      // But room expiry usually triggers client-side handling.
-      // If we strictly need to make them leave socket.io room 'roomId', we rely on client handling 
-      // or use io.in('user:userId').socketsLeave(roomId) (Socket.io v4 feature!)
-      io.in(`user:${user.userId}`).socketsLeave(roomId);
-    });
-
-    // ✅ FIX: Clean up call associated with room using Redis index
-    const callId = await pubClient.get(`room:${roomId}:call`);
-
-    if (callId) {
-      console.log(`🗑️ Found call ${callId} to clean up in expired room`);
-      try {
-        await withCallMutex(callId, async () => {
-          const call = await getCall(callId);
-
-          if (!call) {
-            console.log(`ℹ️ Call ${callId} already cleaned up`);
-            return;
-          }
-
-          console.log(`🧹 Authoritatively ending call ${callId} due to room expiry`);
-          // Forcefully update call status and notify
-          call.status = 'ended';
-          call.endedAt = Date.now();
-          call.endReason = 'room_expired';
-          await saveCall(call);
-
-          io.to(roomId).emit('call_ended', {
-            callId,
-            reason: 'room_expired'
-          });
-
-          // Cleanup participants
-          for (const pId of call.participants) {
-            await removeUserCall(pId);
-          }
-
-          await deleteCall(callId);
-        });
-
-        if (callGracePeriod.has(callId)) {
-          clearTimeout(callGracePeriod.get(callId));
-          callGracePeriod.delete(callId);
-        }
-      } catch (err) {
-        console.error(`❌ Error cleaning up call ${callId} in room ${roomId}:`, err);
-      }
-    }
-
-    // Clean up any stored file data for this room
-    for (const [fileId, fileRecord] of roomFileStore.entries()) {
-      if (fileRecord.roomId === roomId) {
-        roomFileStore.delete(fileId);
-      }
-    }
-
-    // Remove the room from matchmaking
-    matchmaking.destroyRoom(roomId);
-
-    // Clear the cleanup timer
-    roomCleanupTimers.delete(roomId);
-
-    console.log(`✅ Room ${roomId} fully cleaned up and destroyed`);
-    console.log(`🗑️ ======================================== \n`);
-  } catch (error) {
-    console.error(`❌ [Cleanup] Critical failure in performRoomCleanup for ${roomId}:`, error);
-  }
-}
-
-function cancelRoomCleanup(roomId) {
-  if (roomCleanupTimers.has(roomId)) {
-    clearTimeout(roomCleanupTimers.get(roomId));
-    roomCleanupTimers.delete(roomId);
-    console.log(`❌ Cancelled cleanup timer for room ${roomId}`);
-  }
-}
+// Obsolete cleanup functions removed for clustering phase
 
 // ============================================
 // API ROUTES
@@ -1696,7 +2110,8 @@ app.get('/api/moods', (req, res) => {
  */
 async function handleCallLeaveInternal(userId, callId) {
   try {
-    await withCallMutex(callId, async () => {
+    const releaseCallLock = await acquireCallMutex(callId);
+    try {
       // Fetch fresh state inside lock
       let call = await getCall(callId);
       if (!call) return;
@@ -1711,18 +2126,26 @@ async function handleCallLeaveInternal(userId, callId) {
 
       // 1. Update Call Data
       call.participants.splice(participantIndex, 1);
-      call.userMediaStates.delete(userId);
 
-      // Save changes to Redis
-      await saveCall(call);
+      // Handle Map/Object discrepancy for userMediaStates
+      if (call.userMediaStates instanceof Map) {
+        call.userMediaStates.delete(userId);
+      } else if (call.userMediaStates) {
+        delete call.userMediaStates[userId];
+      }
+
+      call.lastActivity = Date.now();
+
+      // 2. Clear mapping in Redis
       await removeUserCall(userId);
 
-      console.log(`📵 User ${userId} left call ${callId} (internal cleanup)`);
+      // 3. Save updated call state
+      await saveCall(call);
 
-      // 2. Notify remaining participants
-      io.to(`call-${callId}`).emit('user_left_call', { userId });
+      console.log(`📉 User ${userId} left call ${callId}`);
+      console.log(`   Remaining participants: ${call.participants.length}`);
 
-      // 3. Broadcast state update to the room channel (no need for room object check)
+      // 4. Update room state broadcast
       io.to(call.roomId).emit('call_state_update', {
         callId: callId,
         isActive: call.participants.length > 0,
@@ -1730,36 +2153,19 @@ async function handleCallLeaveInternal(userId, callId) {
         callType: call.callType
       });
 
-      // 4. Handle Empty Call Grace Period
+      // 5. Broadcast to others in the call room
+      io.to(`call-${callId}`).emit('user_left_call', { userId });
+
+      // 6. If no one left, schedule grace period for cleanup
       if (call.participants.length === 0) {
-        console.log(`🕐 Call ${callId} empty - starting 5s grace period`);
-        // Note: activeCall flag in matchmaking room is not easily updatable across cluster
-        // unless we move room state to Redis. But clients use call_state_update to know status.
-
-        if (callGracePeriod.has(callId)) {
-          clearTimeout(callGracePeriod.get(callId));
-        }
-
-        const graceTimeout = setTimeout(async () => {
-          // Re-fetch to confirm still empty
-          const currentCall = await getCall(callId);
-          if (!currentCall || currentCall.participants.length > 0) {
-            callGracePeriod.delete(callId);
-            return;
-          }
-
-          console.log(`🗑️ Call ${callId} still empty - final cleanup`);
-          await deleteCall(callId);
-          callGracePeriod.delete(callId);
-
-          io.to(currentCall.roomId).emit('call_ended_notification', { callId });
-        }, 5000);
-
-        callGracePeriod.set(callId, graceTimeout);
+        console.log(`⏱️ Call ${callId} empty. Scheduling distributed cleanup.`);
+        await scheduleCallCleanup(callId, 5000); // 5s grace period
       }
-    }); // End Mutex
+    } finally {
+      await releaseCallLock();
+    }
   } catch (error) {
-    console.error(`❌ [Internal] handleCallLeaveInternal error:`, error);
+    console.error(`❌ Error handling call leave for user ${userId}:`, error);
   }
 }
 
@@ -1769,7 +2175,7 @@ async function handleCallLeaveInternal(userId, callId) {
  * Replaces redundant logic in leave_room, leave_call, and disconnect.
  */
 async function performUserLeaveChat(userId, roomId, reason = 'manual') {
-  const room = matchmaking.getRoom(roomId);
+  const room = await matchmaking.getRoom(roomId);
   if (!room) {
     // If room is gone, just clear local state for user
     await removeUserPresence(userId);
@@ -1803,17 +2209,16 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
 
   try {
     // 1. Remove from matchmaking room (Authoritative Sync)
-    const leaveResult = matchmaking.leaveRoom(userId);
+    const leaveResult = await matchmaking.leaveRoom(userId);
     const remainingUsers = leaveResult.remainingUsers;
-    const roomDestroyed = leaveResult.destroyed;
 
-    console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}. Room Destroyed: ${roomDestroyed}`);
+    console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}.`);
 
     // 2. Clear active room state for user records
-    if (firebaseUid) clearUserActiveRoom(firebaseUid);
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
 
     // 3. Remove from global mood tracking
-    removeUserFromMood(userId, room.mood);
+    await removeUserFromMood(userId, room.mood);
 
     // 4. Cleanup any active calls the user is in
     const activeCallId = await getUserCall(userId);
@@ -1906,7 +2311,7 @@ io.on('connection', (socket) => {
   // PRESENCE & HEARTBEAT EVENTS
   // ============================================
   socket.on('heartbeat', async ({ roomId }) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     // Update presence timestamp
@@ -1916,7 +2321,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('enter_call_mode', async ({ roomId }) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     console.log(`📱 [Presence] User ${userData.username} entered call mode (Room: ${roomId})`);
@@ -1927,7 +2332,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('exit_call_mode', async ({ roomId }) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     console.log(`💬 [Presence] User ${userData.username} returned to chat mode (Room: ${roomId})`);
@@ -1941,7 +2346,7 @@ io.on('connection', (socket) => {
 
 
   socket.on('send_message', async (data, callback) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) {
       return callback?.({ success: false, error: 'Not authenticated' });
     }
@@ -1979,7 +2384,7 @@ io.on('connection', (socket) => {
 
 
   socket.on('select_mood', async (data, callback) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
 
     if (!userData) {
       console.error(`❌ [select_mood] Socket ${socket.id} not authenticated`);
@@ -2039,7 +2444,7 @@ io.on('connection', (socket) => {
             // Check for active call before leaving matchmaking room
             const activeCallState = await findActiveCallForRoom(existingRoom.roomId);
             const hasActiveCall = !!activeCallState;
-            matchmaking.leaveRoom(userId, hasActiveCall);
+            await matchmaking.leaveRoom(userId, hasActiveCall);
             console.log(`🧹 [UID: ${firebaseUid}] Failed restoration cleaned up, proceeding with new selection`);
           }
         }
@@ -2049,7 +2454,7 @@ io.on('connection', (socket) => {
 
       addUserToMood(userId, mood);
 
-      const matchResult = matchmaking.addToQueue({
+      const matchResult = await matchmaking.addToQueue({
         userId,
         firebaseUid,
         username,
@@ -2063,9 +2468,8 @@ io.on('connection', (socket) => {
         setUserActiveRoom(firebaseUid, room.id, mood);
         socket.join(room.id);
 
-        if (!room.timerStartedAt) {
-          console.log(`⏱️ [Room: ${room.id}] Starting lifecycle timers`);
-          room.setupLifecycleTimers();
+        if (room) {
+          // Room lifecycle is now handled via Redis TTL in createRoomInternal
         }
 
         console.log(`🎯 [UID: ${firebaseUid}] Matched! Room: ${room.id}`);
@@ -2119,7 +2523,7 @@ io.on('connection', (socket) => {
         });
 
       } else {
-        const queuePosition = matchmaking.getQueueStatus(mood);
+        const queuePosition = await matchmaking.getQueueStatus(mood);
         console.log(`⏳ [UID: ${firebaseUid}] Waiting in queue for mood: ${mood} (position: ${queuePosition})`);
 
         return callback?.({
@@ -2163,9 +2567,9 @@ io.on('connection', (socket) => {
   });
 
 
-  socket.on('error', (error) => {
+  socket.on('error', async (error) => {
     console.error(`❌ Socket error [${socket.id}]:`, error);
-    const user = socketUsers.get(socket.id);
+    const user = await getSocketUser(socket.id);
     if (user) {
       console.error(`   User: ${user.username} (${user.userId})`);
     }
@@ -2187,399 +2591,163 @@ io.on('connection', (socket) => {
   // ============================================
 
 
-  socket.on('file_chunk', (data) => {
+  // ============================================
+  // CHUNKED FILE TRANSMISSION RELAY (STATELESS)
+  // ============================================
+
+  socket.on('file_chunk', async (data) => {
     try {
-      const user = socketUsers.get(socket.id);
-
-      if (!user) {
-        console.error('❌ Unauthenticated socket tried to send file chunk');
-        return;
-      }
-
-      if (!checkChunkRateLimit(user.userId)) {
-        console.warn(`⚠️ Rate limit exceeded for ${user.username} on file chunks`);
-        socket.emit('file_transmission_failed', {
-          fileId: data.fileId,
-          fileName: data.fileName,
-          reason: 'Rate limit exceeded. Please slow down.'
-        });
-        return;
-      }
+      const user = await getSocketUser(socket.id);
+      if (!user) return;
 
       const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
 
-      const isBinary = Buffer.isBuffer(chunkData) || chunkData instanceof Uint8Array;
-
-      if (!chunkData || (typeof chunkData !== 'string' && !isBinary)) {
-        console.error(`❌ Invalid chunk data format at index ${chunkIndex}`);
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid chunk data' });
-        return;
-      }
-
-      let actualChunkSize;
-
-      if (!isBinary) {
-        // Base64 Validation (Legacy/History)
-        const expectedBase64Length = Math.ceil(chunkSize * 1.37);
-        const maxAllowedLength = expectedBase64Length * 1.1;
-
-        if (chunkData.length > maxAllowedLength) {
-          console.error(`❌ Chunk data size mismatch for ${fileId} chunk ${chunkIndex}`);
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk data size exceeds claimed size.' });
-          activeFileTransfers.delete(fileId);
-          roomFileStore.delete(fileId);
-          return;
-        }
-
-        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(chunkData)) {
-          console.error(`❌ Invalid base64 data in chunk ${chunkIndex} of ${fileId}`);
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid file data encoding' });
-          activeFileTransfers.delete(fileId);
-          roomFileStore.delete(fileId);
+      // 1. Basic Validation
+      let actualChunkSize = 0;
+      if (typeof chunkData === 'string') {
+        const base64Clean = chunkData.replace(/^data:image\/\w+;base64,/, '');
+        if (!/^[a-zA-Z0-9+/]*={0,2}$/.test(base64Clean)) {
+          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid encoding' });
           return;
         }
         actualChunkSize = Math.floor(chunkData.length * 0.75);
       } else {
-        // Binary Validation
         actualChunkSize = chunkData.length || chunkData.byteLength;
-
-        if (actualChunkSize > chunkSize * 1.1) {
-          console.error(`❌ Binary chunk size mismatch for ${fileId} chunk ${chunkIndex}`);
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Binary chunk data size exceeds claimed size.' });
-          activeFileTransfers.delete(fileId);
-          roomFileStore.delete(fileId);
-          return;
-        }
       }
 
-      // Initialize transfer tracking if first chunk
-      if (!activeFileTransfers.has(fileId)) {
-        if (activeFileTransfers.size >= MAX_CONCURRENT_TRANSFERS) {
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Server at capacity. Please try again in a moment.' });
-          return;
-        }
+      // 2. Distributed Transfer Initializtion
+      let transfer = await getActiveFileTransfer(fileId);
+      if (!transfer) {
+        transfer = { roomId, userId: user.userId, bytesTransferred: 0, startTime: Date.now() };
+        await setActiveFileTransfer(fileId, transfer);
 
-        const currentMemory = getCurrentTransferMemory();
-        if (currentMemory >= MAX_MEMORY_FOR_TRANSFERS) {
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Server memory at capacity. Please try again shortly.' });
-          return;
-        }
-
-        activeFileTransfers.set(fileId, {
-          roomId,
-          userId: user.userId,
-          bytesTransferred: 0,
-          startTime: Date.now()
+        await saveFileRecord(fileId, {
+          roomId, totalChunks, receivedCount: 0,
+          name: fileName, senderId: user.userId, senderUsername: user.username
         });
-
-        // Initialize server-side chunk store for this file
-        roomFileStore.set(fileId, {
-          roomId,
-          chunks: new Array(totalChunks).fill(null),
-          totalChunks,
-          receivedCount: 0,
-          name: fileName,
-          type: null, // will be set from chat_message metadata
-          size: null,
-          senderId: user.userId,
-          senderUsername: user.username,
-          assembledData: null
-        });
-
-        console.log(`📦 New file transfer started: ${fileName} (${fileId}), ${totalChunks} chunks`);
+        console.log(`📦 [Cluster] Started transfer: ${fileName} (${fileId})`);
       }
 
-      // Update transfer tracking
-      const transfer = activeFileTransfers.get(fileId);
-      if (transfer) {
-        transfer.bytesTransferred += actualChunkSize;
-        if (transfer.bytesTransferred > MAX_FILE_SIZE) {
-          console.error(`❌ File ${fileId} exceeded size limit`);
-          activeFileTransfers.delete(fileId);
-          roomFileStore.delete(fileId);
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'File size limit exceeded' });
-          return;
-        }
-      }
-
-      // Validate room access
-      const room = matchmaking.getRoom(roomId);
-      if (!room) {
-        console.error(`❌ Room ${roomId} not found for file chunk`);
-        activeFileTransfers.delete(fileId);
-        roomFileStore.delete(fileId);
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Room not found or expired' });
+      // 3. Update transfer stats
+      transfer.bytesTransferred += actualChunkSize;
+      if (transfer.bytesTransferred > config.MAX_FILE_SIZE) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Size limit exceeded' });
+        await deleteActiveFileTransfer(fileId);
+        await deleteFileRecord(fileId);
         return;
       }
+      await setActiveFileTransfer(fileId, transfer);
 
-      if (!room.hasUser(user.userId)) {
-        console.error(`❌ User ${user.username} not in room ${roomId}`);
-        activeFileTransfers.delete(fileId);
-        roomFileStore.delete(fileId);
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'You are not in this room' });
-        return;
-      }
-
-      // Store chunk server-side
-      const fileRecord = roomFileStore.get(fileId);
+      // 4. Store chunk in Redis
+      const fileRecord = await getFileRecord(fileId);
       if (fileRecord) {
-        // Handle both binary and base64 for compatibility during transition
         const chunkBuffer = Buffer.isBuffer(chunkData) ? chunkData : Buffer.from(chunkData, 'base64');
-
-        if (fileRecord.chunks[chunkIndex] === null) {
-          fileRecord.chunks[chunkIndex] = chunkBuffer;
+        const alreadyReceived = await pubClient.exists(`file:chunk:${fileId}:${chunkIndex}`);
+        if (!alreadyReceived) {
+          await setFileChunk(fileId, chunkIndex, chunkBuffer);
           fileRecord.receivedCount++;
+          await saveFileRecord(fileId, fileRecord);
         }
       }
 
-      // Relay chunk to all OTHER users in room (live receivers)
-      // Socket.IO handles binary buffers natively and efficiently
+      // 5. Relay to other users in room
       socket.to(roomId).emit('file_chunk', {
-        fileId,
-        fileName,
-        senderId: user.userId,
-        senderUsername: user.username,
-        chunkIndex,
-        totalChunks,
-        chunkSize: actualChunkSize,
-        chunkData // Send original data (buffer or base64)
+        fileId, fileName, senderId: user.userId, senderUsername: user.username,
+        chunkIndex, totalChunks, chunkSize: actualChunkSize, chunkData
       });
 
-      const progressPercent = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
-      socket.emit('file_upload_progress', {
-        fileId,
-        fileName,
-        progress: progressPercent,
-        chunksReceived: fileRecord ? fileRecord.receivedCount : 0,
-        totalChunks
-      });
+      // 6. Assembly check
+      if (fileRecord && fileRecord.receivedCount === totalChunks) {
+        const allChunks = [];
+        for (let i = 0; i < totalChunks; i++) {
+          const chunk = await getFileChunk(fileId, i);
+          if (chunk) allChunks.push(chunk);
+        }
 
-      // Acknowledge this chunk back to sender
+        if (allChunks.length === totalChunks) {
+          const fullBuffer = Buffer.concat(allChunks);
+          fileRecord.assembledData = fullBuffer.toString('base64');
+          console.log(`✅ [Cluster] Assembled ${fileName} (${fileId})`);
+
+          // Patch room history (Matchmaking is currently local, but room records can be patched)
+          const room = await matchmaking.getRoom(roomId);
+          if (room && room.messages) {
+            const msg = room.messages.find(m => m.attachment && m.attachment.fileId === fileId);
+            if (msg) {
+              msg.attachment.data = fileRecord.assembledData;
+              msg.attachment.chunked = false;
+            }
+          }
+          await saveFileRecord(fileId, fileRecord);
+        }
+      }
+
+      // 7. Progress & ACK
+      const progress = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
+      socket.emit('file_upload_progress', { fileId, fileName, progress, totalChunks });
       socket.emit('file_chunk_ack', { fileId, chunkIndex });
 
-      // If all chunks are now stored, assemble the full file
-      if (fileRecord && fileRecord.receivedCount === fileRecord.totalChunks) {
-        // Assembly using Buffer.concat is much faster than string joining
-        const fullBuffer = Buffer.concat(fileRecord.chunks);
-        fileRecord.assembledData = fullBuffer.toString('base64'); // Store as base64 for history compatibility
-        fileRecord.chunks = null; // free individual chunk references
-
-        console.log(`✅ File ${fileName} (${fileId}) fully assembled on server (${fullBuffer.length} bytes binary -> ${fileRecord.assembledData.length} base64 chars)`);
-
-        // CRITICAL FIX: Update room history so new users can see this file
-        const room = matchmaking.getRoom(roomId);
-        if (room && room.messages) {
-          const messageWithFile = room.messages.find(msg =>
-            msg.attachment && msg.attachment.fileId === fileId
-          );
-          if (messageWithFile) {
-            console.log(`📝 Updating message ${messageWithFile.messageId || messageWithFile.id} in room history with assembled data`);
-            messageWithFile.attachment.data = fileRecord.assembledData;
-            messageWithFile.attachment.chunked = false;
-          }
-        }
-      }
-
     } catch (error) {
-      console.error('❌ File chunk relay error:', error);
-      if (data?.fileId) {
-        activeFileTransfers.delete(data.fileId);
-        roomFileStore.delete(data.fileId);
-      }
+      console.error('❌ [Cluster] file_chunk error:', error);
     }
   });
 
-  socket.on('file_transfer_complete', ({ fileId }) => {
-    if (activeFileTransfers.has(fileId)) {
-      const transfer = activeFileTransfers.get(fileId);
-      const transferTime = Date.now() - transfer.startTime;
-      const sizeMB = (transfer.bytesTransferred / 1024 / 1024).toFixed(2);
-
-      activeFileTransfers.delete(fileId);
-
-      console.log(`✅ File transfer ${fileId} completed`);
-      console.log(`   Size: ${sizeMB}MB, Time: ${(transferTime / 1000).toFixed(1)}s`);
-      console.log(`   Active transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}`);
+  socket.on('file_transfer_complete', async ({ fileId }) => {
+    const transfer = await getActiveFileTransfer(fileId);
+    if (transfer) {
+      console.log(`✅ [Cluster] Transfer ${fileId} marked complete`);
+      await deleteActiveFileTransfer(fileId);
     }
-
-    // Patch the stored room history message so it includes the full assembled data.
-    // This way any user who joins later gets the full file from chat history.
-    const fileRecord = roomFileStore.get(fileId);
-    if (fileRecord && fileRecord.assembledData) {
-      const room = matchmaking.getRoom(fileRecord.roomId);
-      if (room) {
-        const messages = room.getMessages ? room.getMessages() : (room.messages || []);
-        const msg = messages.find(m => m.attachment && m.attachment.fileId === fileId);
-        if (msg && msg.attachment) {
-          msg.attachment.data = fileRecord.assembledData;
-          msg.attachment.chunked = false; // mark as fully assembled
-          console.log(`📎 Patched room history message for ${fileRecord.name} with assembled data`);
-        }
-      }
-    }
-  });
-
-  socket.on('file_chunk_ack', (data) => {
-    // ACKs are sent TO sender, not relayed to room
-    // This handler can log or track reliability metrics if needed
-    const { fileId, chunkIndex } = data;
-
-    // Optional: Track chunk delivery success rate
-    // console.log(`✅ Chunk ${chunkIndex} of ${fileId} acknowledged by receiver`);
   });
 
   socket.on('request_attachment_data', async ({ fileId, roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
+      if (!user) return;
 
-      if (!user) {
-        socket.emit('error', { message: 'Not authenticated' });
-        return;
-      }
-
-      console.log('📂 ========================================');
-      console.log('📂 ATTACHMENT DATA REQUEST');
-      console.log('📂 ========================================');
-      console.log(`   Requester: ${user.username} (${user.userId})`);
-      console.log(`   FileID: ${fileId}`);
-      console.log(`   Room: ${roomId}`);
-
-      const room = matchmaking.getRoom(roomId);
-
-      if (!room) {
-        console.error(`❌ Room ${roomId} not found`);
-        socket.emit('attachment_data_unavailable', {
-          fileId,
-          reason: 'Room expired or not found'
-        });
-        return;
-      }
-
-      if (!room.hasUser(user.userId)) {
-        console.error(`❌ User not in room ${roomId}`);
-        socket.emit('error', { message: 'Not in room' });
-        return;
-      }
-
-      // Find the message with this attachment in room history
-      const messages = room.getMessages ? room.getMessages() : [];
-      const messageWithFile = messages.find(msg =>
-        msg.attachment && msg.attachment.fileId === fileId
-      );
-
-      if (!messageWithFile) {
-        console.error(`❌ Message with file ${fileId} not found in room history`);
-        socket.emit('attachment_data_unavailable', {
-          fileId,
-          reason: 'File not in room history'
-        });
-        return;
-      }
-
-      // PRIORITY 1: Check if message already has inlined assembled data
-      if (messageWithFile.attachment.data && !messageWithFile.attachment.chunked) {
-        console.log(`✅ Serving file from message history (already assembled)`);
+      const fileRecord = await getFileRecord(fileId);
+      if (fileRecord && fileRecord.assembledData) {
         socket.emit('attachment_data_received', {
           fileId,
-          data: messageWithFile.attachment.data,
-          metadata: {
-            name: messageWithFile.attachment.name,
-            type: messageWithFile.attachment.type,
-            size: messageWithFile.attachment.size
-          }
+          data: fileRecord.assembledData,
+          metadata: { name: fileRecord.name }
         });
-        console.log('📂 ========================================\n');
         return;
       }
 
-      // PRIORITY 2: Check roomFileStore cache for assembled data
-      const cachedFile = roomFileStore.get(fileId);
-      if (cachedFile && cachedFile.assembledData) {
-        console.log(`✅ Serving file from server cache (roomFileStore)`);
+      // Fallback: search room history
+      const room = await matchmaking.getRoom(roomId);
+      const msg = room?.messages?.find(m => m.attachment && m.attachment.fileId === fileId);
+      if (msg?.attachment?.data) {
         socket.emit('attachment_data_received', {
-          fileId,
-          data: cachedFile.assembledData,
-          metadata: {
-            name: cachedFile.name || messageWithFile.attachment.name,
-            type: messageWithFile.attachment.type,
-            size: messageWithFile.attachment.size
-          }
-        });
-        console.log('📂 ========================================\n');
-        return;
-      }
-
-      // PRIORITY 3: Fallback to requesting from sender (peer-to-peer)
-      const senderId = messageWithFile.userId;
-      console.log(`📤 No cached data, requesting file from sender: ${senderId}`);
-
-      // Query presence instead of socket direct lookup
-      const senderPresence = await getUserPresence(senderId);
-
-      if (!senderPresence) {
-        console.error(`❌ Sender ${senderId} not connected`);
-        socket.emit('attachment_data_unavailable', {
-          fileId,
-          reason: 'File owner not online'
+          fileId, data: msg.attachment.data, metadata: { name: msg.attachment.name }
         });
         return;
       }
 
-      // Request file data from sender via Redis broadcast
-      io.to(`user:${senderId}`).emit('send_attachment_to_peer', {
-        fileId,
-        requesterId: user.userId,
-        requesterSocketId: socket.id
-      });
-
-      console.log(`✅ File request forwarded to sender`);
-      console.log('📂 ========================================\n');
-
+      // Request from peer
+      if (msg) {
+        io.to(`user:${msg.userId}`).emit('send_attachment_to_peer', {
+          fileId, requesterId: user.userId, requesterSocketId: socket.id
+        });
+      }
     } catch (error) {
-      console.error('❌ Request attachment error:', error);
-      socket.emit('error', { message: 'Failed to request attachment' });
+      console.error('❌ request_attachment_data error:', error);
     }
   });
 
-  socket.on('attachment_data_response', ({ fileId, requesterId, requesterSocketId, data, metadata }) => {
+  socket.on('attachment_data_response', async ({ fileId, requesterId, requesterSocketId, data, metadata }) => {
     try {
-      const user = socketUsers.get(socket.id);
-
-      if (!user) return;
-
-      console.log('📤 ========================================');
-      console.log('📤 ATTACHMENT DATA RESPONSE');
-      console.log('📤 ========================================');
-      console.log(`   Sender: ${user.username}`);
-      console.log(`   FileID: ${fileId}`);
-      console.log(`   Data size: ${data ? (data.length / 1024).toFixed(2) : 0} KB`);
-      console.log(`   Target socket: ${requesterSocketId}`);
-
-      // Forward to requester
-      const requesterSocket = io.sockets.sockets.get(requesterSocketId);
-
-      if (requesterSocket) {
-        requesterSocket.emit('attachment_data_received', {
-          fileId,
-          data,
-          metadata
-        });
-        console.log(`✅ File data forwarded to requester`);
-      } else {
-        console.error(`❌ Requester socket ${requesterSocketId} not found`);
-      }
-
-      console.log('📤 ========================================\n');
-
+      io.to(requesterSocketId).emit('attachment_data_received', { fileId, data, metadata });
     } catch (error) {
-      console.error('❌ Attachment response error:', error);
+      console.error('❌ attachment_data_response error:', error);
     }
   });
 
 
   socket.on('validate_cached_call', async ({ callId, roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.warn('⚠️ Unauthenticated socket tried to validate cached call');
@@ -2612,7 +2780,7 @@ io.on('connection', (socket) => {
       // Call is still valid - send fresh call data
       console.log(`✅ Cached call ${callId} is valid, sending to ${user.username}`);
 
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
       const callerData = room?.users.find(u => u.userId === call.initiator);
 
       if (!callerData) {
@@ -2639,9 +2807,9 @@ io.on('connection', (socket) => {
   });
 
 
-  socket.on('validate_room', ({ roomId }) => {
+  socket.on('validate_room', async ({ roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.warn('⚠️ Unauthenticated socket tried to validate room');
@@ -2652,7 +2820,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
 
       if (!room) {
         console.log(`❌ Room ${roomId} not found (validation request from ${user.username})`);
@@ -2693,16 +2861,16 @@ io.on('connection', (socket) => {
   });
 
 
-  socket.on('request_room_sync', ({ roomId }) => {
+  socket.on('request_room_sync', async ({ roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.warn('⚠️ Unauthenticated socket requested room sync');
         return;
       }
 
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
 
       if (!room) {
         console.error(`❌ Room ${roomId} not found for sync request`);
@@ -2866,11 +3034,15 @@ io.on('connection', (socket) => {
       const firebaseUid = decodedToken.uid;
       const mongoUserId = user._id.toString();
 
-      // Register this socket under Firebase UID for multi-device tracking
-      registerSocketForUser(firebaseUid, socket.id);
+      // Register this socket in Redis for cluster-wide tracking
+      await registerSocketForUser(mongoUserId, socket.id, {
+        firebaseUid,
+        username: user.username,
+        email: user.email,
+        profilePicture: user.profilePicture
+      });
 
       // ✅ FIX: Join user-specific rooms for cluster-wide targeted emissions
-      // Join both IDs to ensure consistency across different logic patterns
       socket.join(`user:${mongoUserId}`);
       socket.join(`user:${firebaseUid}`);
       console.log(`📡 [Auth] Socket ${socket.id} joined rooms: user:${mongoUserId}, user:${firebaseUid}`);
@@ -2878,12 +3050,8 @@ io.on('connection', (socket) => {
       // ============================================
       // HANDLE EXISTING SOCKET FOR SAME USER (LEGACY)
       // ============================================
-      // Clean up any pending socket cleanup timers for this user
-      if (socketUserCleanup.has(mongoUserId)) {
-        clearTimeout(socketUserCleanup.get(mongoUserId));
-        socketUserCleanup.delete(mongoUserId);
-        console.log(`⏰ Cancelled pending cleanup for user ${mongoUserId}`);
-      }
+      // Clean up any pending distributed user cleanup
+      await cancelUserCleanup(mongoUserId);
 
       // ============================================
       // REGISTER NEW SOCKET
@@ -2897,9 +3065,9 @@ io.on('connection', (socket) => {
         authenticatedAt: Date.now()
       };
 
-      // Store in both directions for O(1) lookups
-      socketUsers.set(socket.id, userSocketData);
-      // userToSocketId removed - redundant with socketUsers and Redis adapter
+      // Store in Redis global tracking for cross-instance lookups
+      await setSocketUser(socket.id, userSocketData);
+      // socketUsers.set removed - redundant with Redis-backed state
 
       console.log(`✅ [Auth] Socket authenticated for ${user.username} (${mongoUserId})`);
 
@@ -2950,9 +3118,9 @@ io.on('connection', (socket) => {
       // RESTORE USER STATE (LEGACY FALLBACK)
       // ============================================
       // Check legacy room tracking (for backwards compatibility)
-      const legacyRoomId = matchmaking.getRoomIdByUser(mongoUserId);
+      const legacyRoomId = await matchmaking.getRoomIdByUser(mongoUserId);
       if (legacyRoomId && !activeRoom) {
-        const room = matchmaking.getRoom(legacyRoomId);
+        const room = await matchmaking.getRoom(legacyRoomId);
         if (room && !room.isExpired) {
           console.log(`🔄 [Auth] Restoring legacy room ${legacyRoomId}`);
 
@@ -2986,11 +3154,11 @@ io.on('connection', (socket) => {
             const activeCall = await findActiveCallForRoom(userRoom.roomId);
             if (activeCall) hasActiveCall = true;
           }
-          matchmaking.leaveRoom(mongoUserId, hasActiveCall);
+          await matchmaking.leaveRoom(mongoUserId, hasActiveCall);
         }
       } else if (activeRoom) {
         // User has active room in new system - auto-join socket to room
-        const room = matchmaking.getRoom(activeRoom.roomId);
+        const room = await matchmaking.getRoom(activeRoom.roomId);
         if (room && !room.isExpired) {
           console.log(`🔄 [Auth] Auto-joining socket to active room ${activeRoom.roomId}`);
 
@@ -3060,7 +3228,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_matchmaking', async ({ mood }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.error('❌ Unauthenticated socket tried to join matchmaking:', socket.id);
@@ -3089,17 +3257,17 @@ io.on('connection', (socket) => {
       clearMatchmakingTimeout(user.userId);
 
       // Try to add to queue or join existing room
-      let room = matchmaking.addToQueue({
+      let room = await matchmaking.addToQueue({
         ...user,
         mood,
         socketId: socket.id
       });
 
       if (!room) {
-        const queueStatus = matchmaking.getQueueStatus(mood);
+        const queueStatus = await matchmaking.getQueueStatus(mood);
         if (queueStatus >= config.MAX_USERS_PER_ROOM) {
           console.log(`🔄 Queue full detected (${queueStatus}/${config.MAX_USERS_PER_ROOM}), retrying match...`);
-          room = matchmaking.addToQueue({
+          room = await matchmaking.addToQueue({
             ...user,
             mood,
             socketId: socket.id
@@ -3172,7 +3340,7 @@ io.on('connection', (socket) => {
             // Check for active call before leaving matchmaking room
             const activeCall = await findActiveCallForRoom(room.id);
             const hasActiveCall = !!activeCall;
-            matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
+            await matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
           }
         }
 
@@ -3189,7 +3357,7 @@ io.on('connection', (socket) => {
 
       } else {
         // No match yet, user is in queue
-        const queuePosition = matchmaking.getQueueStatus(mood);
+        const queuePosition = await matchmaking.getQueueStatus(mood);
         socket.emit('queued', {
           mood,
           position: queuePosition
@@ -3197,8 +3365,8 @@ io.on('connection', (socket) => {
         console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MIN_USERS_FOR_ROOM})`);
 
         // ✅ START MATCHMAKING TIMEOUT
-        const timeoutHandle = setTimeout(() => {
-          const currentQueueStatus = matchmaking.getQueueStatus(mood);
+        const timeoutHandle = setTimeout(async () => {
+          const currentQueueStatus = await matchmaking.getQueueStatus(mood);
 
           console.log(`⏰ Matchmaking timeout for ${user.username} in ${mood} queue`);
           console.log(`   Queue status: ${currentQueueStatus} users`);
@@ -3206,7 +3374,7 @@ io.on('connection', (socket) => {
           if (currentQueueStatus < config.MIN_USERS_FOR_ROOM) {
             console.log(`❌ Insufficient users (${currentQueueStatus}/${config.MIN_USERS_FOR_ROOM}) - timing out`);
 
-            matchmaking.cancelMatchmaking(user.userId);
+            await matchmaking.cancelMatchmaking(user.userId, mood);
             removeUserFromAllMoods(user.userId);
             clearMatchmakingTimeout(user.userId);
 
@@ -3222,7 +3390,7 @@ io.on('connection', (socket) => {
             console.log(`🔄 User ${user.username} timed out, should redirect to mood selection`);
           } else {
             console.log(`✅ Sufficient users found (${currentQueueStatus}), creating room`);
-            const room = matchmaking.addToQueue({
+            const room = await matchmaking.addToQueue({
               ...user,
               mood,
               socketId: socket.id
@@ -3251,7 +3419,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_room', async ({ roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.error('❌ Unauthenticated socket tried to join room');
@@ -3270,7 +3438,7 @@ io.on('connection', (socket) => {
 
       console.log(`🚪 User ${user.username} (${user.userId}) confirming room ${roomId}`);
 
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
 
       if (!room) {
         console.error(`❌ Room ${roomId} not found!`);
@@ -3428,13 +3596,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('cancel_matchmaking', () => {
-    const user = socketUsers.get(socket.id);
+  socket.on('cancel_matchmaking', async () => {
+    const user = await getSocketUser(socket.id);
     if (user) {
       // Clear matchmaking timeout
       clearMatchmakingTimeout(user.userId);
 
-      matchmaking.cancelMatchmaking(user.userId);
+      await matchmaking.cancelMatchmaking(user.userId);
 
       // ✅ REMOVE USER FROM MOOD TRACKING
       removeUserFromAllMoods(user.userId);
@@ -3448,8 +3616,8 @@ io.on('connection', (socket) => {
   // ============================================
   // TYPING INDICATOR HANDLERS
   // ============================================
-  socket.on('typing', ({ roomId }) => {
-    const userData = socketUsers.get(socket.id);
+  socket.on('typing', async ({ roomId }) => {
+    const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     const userId = userData.userId;
@@ -3462,8 +3630,8 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('user_typing', ({ roomId }) => {
-    const user = socketUsers.get(socket.id);
+  socket.on('user_typing', async ({ roomId }) => {
+    const user = await getSocketUser(socket.id);
     if (!user) return;
 
     // Broadcast typing state to EVERYONE ELSE in the room
@@ -3473,8 +3641,8 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('user_stop_typing', ({ roomId }) => {
-    const user = socketUsers.get(socket.id);
+  socket.on('user_stop_typing', async ({ roomId }) => {
+    const user = await getSocketUser(socket.id);
     if (!user) return;
 
     // Broadcast stop state to EVERYONE ELSE in the room
@@ -3483,9 +3651,9 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('chat_message', ({ roomId, message, replyTo, attachment }) => {
+  socket.on('chat_message', async ({ roomId, message, replyTo, attachment }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.error('❌ Unauthenticated socket tried to send message');
@@ -3528,7 +3696,7 @@ io.on('connection', (socket) => {
       console.log(`   Room rate: ${rateLimitCheck.count}/${ROOM_MESSAGE_RATE_LIMIT}`);
 
       // Validate room access
-      const validation = validateRoomAccess(roomId, user.userId);
+      const validation = await validateRoomAccess(roomId, user.userId);
       if (!validation.valid) {
         console.error(`❌ ${validation.error} for user ${user.username}`);
         socket.emit('error', { message: validation.error, code: validation.code });
@@ -3707,7 +3875,7 @@ io.on('connection', (socket) => {
 
   socket.on('initiate_call', async ({ roomId, callType }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.error('❌ Unauthenticated socket tried to initiate call');
@@ -3722,7 +3890,7 @@ io.on('connection', (socket) => {
       console.log(`   Room: ${roomId}`);
       console.log(`   Type: ${callType}`);
 
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
 
       if (!room) {
         console.error(`❌ Room ${roomId} not found`);
@@ -3736,15 +3904,8 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // ✅ FIX: Redis Distributed Lock for Room Call Init
-      const lockKey = `lock:room:${roomId}:init_call`;
-      const acquired = await acquireLock(lockKey, 5000); // 5s lock
-
-      if (!acquired) {
-        // Previous initiation in progress
-        return;
-      }
-
+      // Room lock acquired (await acquireRoomInitLock either succeeds or throws)
+      const releaseRoomLock = await acquireRoomInitLock(roomId);
       try {
         // ✅ ATOMIC CHECK: Look for existing call using Redis Index
         const existingCall = await findActiveCallForRoom(roomId);
@@ -3840,7 +4001,7 @@ io.on('connection', (socket) => {
         console.error('❌ Call initiation error:', error);
         socket.emit('error', { message: 'Failed to initiate call' });
       } finally {
-        await releaseLock(lockKey);
+        await releaseRoomLock();
       }
 
     } catch (error) {
@@ -3851,7 +4012,7 @@ io.on('connection', (socket) => {
 
   socket.on('accept_call', async ({ callId, roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         socket.emit('error', { message: 'Not authenticated' });
@@ -3859,7 +4020,7 @@ io.on('connection', (socket) => {
       }
 
       // CRITICAL FIX: Validate room exists BEFORE proceeding
-      const room = matchmaking.getRoom(roomId);
+      const room = await matchmaking.getRoom(roomId);
       if (!room) {
         console.error(`❌ Room ${roomId} not found when ${user.username} tried to accept call ${callId}`);
         socket.emit('error', {
@@ -3878,7 +4039,8 @@ io.on('connection', (socket) => {
         return;
       }
 
-      await withCallMutex(callId, async () => {
+      const releaseCallLock = await acquireCallMutex(callId);
+      try {
         // Fetch fresh state from Redis
         const call = await getCall(callId);
 
@@ -3907,17 +4069,16 @@ io.on('connection', (socket) => {
               return null;
             }
 
-            const mediaState = call.userMediaStates.get(participantId) || {
+            const mediaState = (call.userMediaStates instanceof Map ? call.userMediaStates.get(participantId) : call.userMediaStates[participantId]) || {
               videoEnabled: call.callType === 'video',
               audioEnabled: true
             };
 
             return {
-              userId: participantId,
+              userId: roomUser.userId,
               username: roomUser.username,
               pfpUrl: roomUser.pfpUrl,
-              videoEnabled: mediaState.videoEnabled,
-              audioEnabled: mediaState.audioEnabled
+              ...mediaState
             };
           }).filter(u => u !== null);
 
@@ -4008,10 +4169,11 @@ io.on('connection', (socket) => {
 
 
         // REMOVED: No need for Promise.all - emits are synchronous
-
         // CRITICAL FIX: Single broadcast instead of duplicate
         broadcastCallStateUpdate(callId);
-      });
+      } finally {
+        await releaseCallLock();
+      }
     } catch (error) {
       console.error('❌ Accept call error:', error);
       socket.emit('error', { message: 'Failed to accept call' });
@@ -4020,15 +4182,15 @@ io.on('connection', (socket) => {
 
   socket.on('decline_call', async ({ callId, roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         socket.emit('error', { message: 'Not authenticated' });
         return;
       }
 
-      // ✅ FIX: Use mutex to prevent race with accept_call/join_call
-      await withCallMutex(callId, async () => {
+      const releaseCallLock = await acquireCallMutex(callId);
+      try {
         const call = await getCall(callId);
 
         if (!call) {
@@ -4046,8 +4208,9 @@ io.on('connection', (socket) => {
         // Notify room that user declined (optional)
         io.to(roomId).emit('user_declined_call', { userId: user.userId, callId });
 
-      });
-
+      } finally {
+        await releaseCallLock();
+      }
     } catch (error) {
       console.error('❌ Decline call error:', error);
       socket.emit('error', { message: 'Failed to decline call' });
@@ -4055,8 +4218,8 @@ io.on('connection', (socket) => {
   });
 
 
-  socket.on('connection_established', ({ callId, connectionType, localType, remoteType, protocol }) => {
-    const user = socketUsers.get(socket.id);
+  socket.on('connection_established', async ({ callId, connectionType, localType, remoteType, protocol }) => {
+    const user = await getSocketUser(socket.id);
     if (!user) return;
 
     console.log(`📊 [METRICS] Connection established for ${user.username}`);
@@ -4091,7 +4254,7 @@ io.on('connection', (socket) => {
   // Refactored webrtc_answer
   socket.on('webrtc_answer', async ({ callId, targetUserId, answer }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) return;
 
@@ -4137,10 +4300,9 @@ io.on('connection', (socket) => {
   });
 
 
-  // Refactored ice_candidate
   socket.on('ice_candidate', async ({ callId, targetUserId, candidate }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) return;
 
@@ -4177,7 +4339,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_call', async ({ callId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         socket.emit('error', { message: 'Not authenticated' });
@@ -4195,7 +4357,7 @@ io.on('connection', (socket) => {
         // ✅ Still send success if already in call (idempotent)
         const call = await getCall(callId);
         if (call && call.participants.includes(user.userId)) {
-          const room = matchmaking.getRoom(call.roomId);
+          const room = await matchmaking.getRoom(call.roomId);
           if (room) {
             const participantsWithMediaStates = call.participants.map(participantId => {
               const roomUser = room.users.find(u => u.userId === participantId);
@@ -4227,7 +4389,8 @@ io.on('connection', (socket) => {
 
       joinCallDebounce.set(debounceKey, now);
 
-      await withCallMutex(callId, async () => {
+      const releaseCallLock = await acquireCallMutex(callId);
+      try {
         const call = await getCall(callId);
 
         if (!call) {
@@ -4244,7 +4407,7 @@ io.on('connection', (socket) => {
         }
 
         // Validate room exists and user is in it
-        const room = matchmaking.getRoom(call.roomId);
+        const room = await matchmaking.getRoom(call.roomId);
         if (!room) {
           console.error(`❌ Room ${call.roomId} not found when ${user.username} tried to join call ${callId}`);
           socket.emit('error', {
@@ -4377,7 +4540,9 @@ io.on('connection', (socket) => {
         });
 
         console.log(`✅ ${user.username} successfully joined call ${callId} with ${call.participants.length} total participants`);
-      });
+      } finally {
+        await releaseCallLock();
+      }
 
       // Clear debounce after successful join
       setTimeout(() => {
@@ -4388,7 +4553,8 @@ io.on('connection', (socket) => {
       console.error('❌ Join call error:', error);
       socket.emit('error', { message: 'Failed to join call' });
 
-      const debounceKey = `${socketUsers.get(socket.id)?.userId}:${callId}`;
+      const user = await getSocketUser(socket.id);
+      const debounceKey = `${user?.userId}:${callId}`;
       joinCallDebounce.delete(debounceKey);
     }
   });
@@ -4396,7 +4562,7 @@ io.on('connection', (socket) => {
 
   socket.on('leave_call', async ({ callId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
       if (!user) {
         console.warn(`⚠️ Unauthenticated socket tried to leave call`);
         return;
@@ -4413,7 +4579,7 @@ io.on('connection', (socket) => {
 
   socket.on('join_existing_call', async ({ callId, roomId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.error('❌ Unauthenticated socket tried to join call');
@@ -4429,123 +4595,128 @@ io.on('connection', (socket) => {
       console.log(`   RoomID: ${roomId}`);
 
       // CRITICAL FIX: Use mutex to prevent race conditions
-      const updatedCall = await withCallMutex(callId, async () => {
-        const call = await getCall(callId);
+      const releaseCallLock = await acquireCallMutex(callId);
+      const updatedCall = await (async () => {
+        try {
+          const call = await getCall(callId);
 
-        if (!call) {
-          console.error(`❌ Call ${callId} not found`);
-          socket.emit('error', {
-            message: 'Call not found or has ended',
-            code: 'CALL_NOT_FOUND'
-          });
-          return null; // Return null to indicate failure
+          if (!call) {
+            console.error(`❌ Call ${callId} not found`);
+            socket.emit('error', {
+              message: 'Call not found or has ended',
+              code: 'CALL_NOT_FOUND'
+            });
+            return null; // Return null to indicate failure
+          }
+
+          // Validate call state
+          const validation = validateCallState(call, 'join_existing_call');
+          if (!validation.valid) {
+            socket.emit('error', { message: validation.error });
+            return null;
+          }
+
+          if (call.roomId !== roomId) {
+            console.error(`❌ Call ${callId} is in different room (${call.roomId} vs ${roomId})`);
+            socket.emit('error', {
+              message: 'Call is in a different room',
+              code: 'WRONG_ROOM'
+            });
+            return null;
+          }
+
+          // CRITICAL FIX: Don't check participant count - allow joining even if empty
+          // This handles the case where all users left but call is still "active"
+          if (call.status === 'ended') {
+            console.error(`❌ Call ${callId} has ended`);
+            socket.emit('error', {
+              message: 'Call has ended',
+              code: 'CALL_ENDED'
+            });
+            return null;
+          }
+
+          // Check if user is in the room
+          const room = await matchmaking.getRoom(roomId);
+          if (!room) {
+            console.error(`❌ Room ${roomId} not found`);
+            socket.emit('error', {
+              message: 'Room not found',
+              code: 'ROOM_NOT_FOUND'
+            });
+            return null;
+          }
+
+          if (!room.hasUser(user.userId)) {
+            console.error(`❌ User ${user.username} not in room ${roomId}`);
+            socket.emit('error', {
+              message: 'You are not in this room',
+              code: 'NOT_IN_ROOM'
+            });
+            return null;
+          }
+
+          console.log(`✅ User ${user.username} authorized to join call ${callId}`);
+          console.log(`📊 Current participants BEFORE add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
+
+          // CRITICAL FIX: Add user to participants atomically within mutex
+          if (!call.participants.includes(user.userId)) {
+            call.participants.push(user.userId);
+            await setUserCall(user.userId, callId);
+            console.log(`➕ Added ${user.username} to call participants (within mutex)`);
+            console.log(`📊 Current participants AFTER add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
+          } else {
+            console.log(`ℹ️ User ${user.username} already in call participants (re-joining)`);
+          }
+
+          // Mark call as active if it was in pending state
+          if (call.status === 'pending') {
+            call.status = 'active';
+            console.log(`📊 Call status changed: pending → active`);
+          }
+
+          call.lastActivity = Date.now();
+
+          // Initialize media state for joining user if not present
+          if (!call.userMediaStates.has(user.userId)) {
+            const defaultVideoState = call.callType === 'video';
+            call.userMediaStates.set(user.userId, {
+              videoEnabled: defaultVideoState,
+              audioEnabled: true
+            });
+            console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=true`);
+          }
+
+          // Clear any grace period on this call
+          if (callGracePeriod.has(callId)) {
+            clearTimeout(callGracePeriod.get(callId));
+            callGracePeriod.delete(callId);
+            console.log(`⏱️ Cleared grace period for call ${callId} (new participant joined)`);
+          }
+
+          // Save updates to Redis
+          await saveCall(call);
+
+          // Mark room as having active call
+          if (room && !room.hasActiveCall) {
+            room.setActiveCall(true);
+            console.log(`🛡️ Room ${roomId} marked as having active call`);
+          }
+
+          console.log('🔗 ========================================');
+          console.log('🔗 JOIN REQUEST COMPLETE (within mutex)');
+          console.log('🔗 ========================================');
+          console.log(`   ${user.username} is NOW in participants list`);
+          console.log(`   Total participants: ${call.participants.length}`);
+          console.log(`   Participants: [${call.participants.join(', ')}]`);
+          console.log(`   User will receive success event and navigate to call page`);
+          console.log('🔗 ========================================\n');
+
+          return call; // Return updated call object
+        } finally {
+          await releaseCallLock();
         }
-
-        // Validate call state
-        const validation = validateCallState(call, 'join_existing_call');
-        if (!validation.valid) {
-          socket.emit('error', { message: validation.error });
-          return null;
-        }
-
-        if (call.roomId !== roomId) {
-          console.error(`❌ Call ${callId} is in different room (${call.roomId} vs ${roomId})`);
-          socket.emit('error', {
-            message: 'Call is in a different room',
-            code: 'WRONG_ROOM'
-          });
-          return null;
-        }
-
-        // CRITICAL FIX: Don't check participant count - allow joining even if empty
-        // This handles the case where all users left but call is still "active"
-        if (call.status === 'ended') {
-          console.error(`❌ Call ${callId} has ended`);
-          socket.emit('error', {
-            message: 'Call has ended',
-            code: 'CALL_ENDED'
-          });
-          return null;
-        }
-
-        // Check if user is in the room
-        const room = matchmaking.getRoom(roomId);
-        if (!room) {
-          console.error(`❌ Room ${roomId} not found`);
-          socket.emit('error', {
-            message: 'Room not found',
-            code: 'ROOM_NOT_FOUND'
-          });
-          return null;
-        }
-
-        if (!room.hasUser(user.userId)) {
-          console.error(`❌ User ${user.username} not in room ${roomId}`);
-          socket.emit('error', {
-            message: 'You are not in this room',
-            code: 'NOT_IN_ROOM'
-          });
-          return null;
-        }
-
-        console.log(`✅ User ${user.username} authorized to join call ${callId}`);
-        console.log(`📊 Current participants BEFORE add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
-
-        // CRITICAL FIX: Add user to participants atomically within mutex
-        if (!call.participants.includes(user.userId)) {
-          call.participants.push(user.userId);
-          await setUserCall(user.userId, callId);
-          console.log(`➕ Added ${user.username} to call participants (within mutex)`);
-          console.log(`📊 Current participants AFTER add: [${call.participants.join(', ')}] (${call.participants.length} total)`);
-        } else {
-          console.log(`ℹ️ User ${user.username} already in call participants (re-joining)`);
-        }
-
-        // Mark call as active if it was in pending state
-        if (call.status === 'pending') {
-          call.status = 'active';
-          console.log(`📊 Call status changed: pending → active`);
-        }
-
-        call.lastActivity = Date.now();
-
-        // Initialize media state for joining user if not present
-        if (!call.userMediaStates.has(user.userId)) {
-          const defaultVideoState = call.callType === 'video';
-          call.userMediaStates.set(user.userId, {
-            videoEnabled: defaultVideoState,
-            audioEnabled: true
-          });
-          console.log(`📊 Set initial media state for ${user.username}: video=${defaultVideoState}, audio=true`);
-        }
-
-        // Clear any grace period on this call
-        if (callGracePeriod.has(callId)) {
-          clearTimeout(callGracePeriod.get(callId));
-          callGracePeriod.delete(callId);
-          console.log(`⏱️ Cleared grace period for call ${callId} (new participant joined)`);
-        }
-
-        // Save updates to Redis
-        await saveCall(call);
-
-        // Mark room as having active call
-        if (room && !room.hasActiveCall) {
-          room.setActiveCall(true);
-          console.log(`🛡️ Room ${roomId} marked as having active call`);
-        }
-
-        console.log('🔗 ========================================');
-        console.log('🔗 JOIN REQUEST COMPLETE (within mutex)');
-        console.log('🔗 ========================================');
-        console.log(`   ${user.username} is NOW in participants list`);
-        console.log(`   Total participants: ${call.participants.length}`);
-        console.log(`   Participants: [${call.participants.join(', ')}]`);
-        console.log(`   User will receive success event and navigate to call page`);
-        console.log('🔗 ========================================\n');
-
-        return call; // Return updated call object
-      }); // CRITICAL: Mutex releases HERE - state is now consistent
+      })(); // CRITICAL: Mutex releases HERE - state is now consistent
 
       // CRITICAL FIX: Emit success and broadcast AFTER mutex completes
       if (updatedCall && updatedCall.participants.includes(user.userId)) {
@@ -4667,7 +4838,7 @@ io.on('connection', (socket) => {
 
   socket.on('webrtc_offer', async ({ callId, targetUserId, offer, renegotiation }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) return;
 
@@ -4728,87 +4899,11 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Replace webrtc_answer handler (line 2876)
-  socket.on('webrtc_answer', ({ callId, targetUserId, answer }) => {
+
+
+  socket.on('ice_candidate', async ({ callId, targetUserId, candidate }) => {
     try {
-      const user = socketUsers.get(socket.id);
-
-      if (!user) return;
-
-      // ✅ FIX: Rate limiting
-      if (!checkSignalingRateLimit(user.userId)) {
-        console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
-        socket.emit('error', {
-          message: 'Too many signaling messages. Please slow down.',
-          code: 'RATE_LIMIT_EXCEEDED'
-        });
-        return;
-      }
-
-      // ✅ FIX: Validate answer structure
-      if (!answer || typeof answer !== 'object') {
-        console.error(`❌ Invalid answer structure from ${user.username}`);
-        return;
-      }
-
-      // ✅ FIX: Validate SDP size and structure
-      const sdpValidation = validateSDP(answer.sdp);
-      if (!sdpValidation.valid) {
-        console.error(`❌ Invalid SDP from ${user.username}: ${sdpValidation.error}`);
-        socket.emit('error', {
-          message: 'Invalid WebRTC answer',
-          code: 'INVALID_ANSWER'
-        });
-        return;
-      }
-
-      // Deduplication
-      const answerKey = `${user.userId}:${targetUserId}`;
-      const now = Date.now();
-
-      if (answerDebounce.has(answerKey)) {
-        const lastAnswerTime = answerDebounce.get(answerKey);
-        if (now - lastAnswerTime < ANSWER_DEDUPE_WINDOW) {
-          console.warn(`⚠️ Duplicate answer from ${user.username} to ${targetUserId} within ${now - lastAnswerTime}ms, ignoring`);
-          return;
-        }
-      }
-
-      // Track this answer
-      answerDebounce.set(answerKey, now);
-
-      console.log(`📤 WebRTC answer from ${user.username} to ${targetUserId}`);
-      console.log(`   Answer SDP length: ${answer.sdp.length} bytes (validated)`);
-
-      const targetSocket = findActiveSocketForUser(targetUserId);
-
-      if (targetSocket) {
-        targetSocket.emit('webrtc_answer', {
-          fromUserId: user.userId,
-          answer: {
-            type: answer.type,
-            sdp: answer.sdp
-          }
-        });
-        console.log(`✅ Answer forwarded to ${targetUserId}`);
-      } else {
-        console.warn(`⚠️ Target user ${targetUserId} not found for answer`);
-      }
-
-      // Clean up after window expires
-      setTimeout(() => {
-        answerDebounce.delete(answerKey);
-      }, ANSWER_DEDUPE_WINDOW);
-
-    } catch (error) {
-      console.error('❌ WebRTC answer error:', error);
-    }
-  });
-
-
-  socket.on('ice_candidate', ({ callId, targetUserId, candidate }) => {
-    try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) return;
 
@@ -4833,25 +4928,20 @@ io.on('connection', (socket) => {
         console.log(`🧊 [ICE] End-of-candidates from ${user.username} to ${targetUserId}`);
       }
 
-      const targetSocket = findActiveSocketForUser(targetUserId);
-
-      if (targetSocket) {
-        targetSocket.emit('ice_candidate', {
-          fromUserId: user.userId,
-          candidate: candidate
-        });
-        console.log(`✅ [ICE] Candidate forwarded to ${targetUserId}`);
-      } else {
-        console.warn(`⚠️ [ICE] Target user ${targetUserId} not found for ICE candidate`);
-      }
+      // Broadcast to specific user via Redis Adapter
+      io.to(`user:${targetUserId}`).emit('ice_candidate', {
+        fromUserId: user.userId,
+        candidate: candidate
+      });
+      console.log(`✅ [ICE] Candidate forwarded to ${targetUserId} via Redis`);
 
     } catch (error) {
       console.error('❌ [ICE] Candidate error:', error);
     }
   });
 
-  socket.on('connection_state_update', ({ callId, state, candidateType }) => {
-    const user = socketUsers.get(socket.id);
+  socket.on('connection_state_update', async ({ callId, state, candidateType }) => {
+    const user = await getSocketUser(socket.id);
     if (!user) return;
 
     console.log(`🔌 Connection state from ${user.username}: ${state}`);
@@ -4883,7 +4973,7 @@ io.on('connection', (socket) => {
   // ✅ FIX K: Server-authoritative state verification
   socket.on('verify_call_state', async ({ callId }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
       if (!user) return;
 
       console.log(`🔍 ========================================`);
@@ -4920,7 +5010,7 @@ io.on('connection', (socket) => {
       }
 
       // Provide authoritative participant list
-      const room = matchmaking.getRoom(call.roomId);
+      const room = await matchmaking.getRoom(call.roomId);
       const db = getDB();
       const usersCollection = db.collection('users');
 
@@ -4963,9 +5053,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('speaking_state', ({ callId, speaking }) => {
+  socket.on('speaking_state', async ({ callId, speaking }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
       if (!user) return;
 
       socket.to(`call-${callId}`).emit('speaking_state', {
@@ -4979,26 +5069,34 @@ io.on('connection', (socket) => {
 
   socket.on('audio_state_changed', async ({ callId, enabled }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) return;
 
-      await withCallMutex(callId, async () => {
+      const releaseCallLock = await acquireCallMutex(callId);
+      try {
         const call = await getCall(callId);
         if (!call) return;
 
         // Ensure map exists (getCall handles this, but safety check)
         if (!call.userMediaStates) call.userMediaStates = new Map();
 
-        const currentState = call.userMediaStates.get(user.userId) || {
+        const currentState = (call.userMediaStates instanceof Map ? call.userMediaStates.get(user.userId) : call.userMediaStates[user.userId]) || {
           videoEnabled: call.callType === 'video',
           audioEnabled: true
         };
 
-        call.userMediaStates.set(user.userId, {
-          ...currentState,
-          audioEnabled: enabled
-        });
+        if (call.userMediaStates instanceof Map) {
+          call.userMediaStates.set(user.userId, {
+            ...currentState,
+            audioEnabled: enabled
+          });
+        } else {
+          call.userMediaStates[user.userId] = {
+            ...currentState,
+            audioEnabled: enabled
+          };
+        }
 
         await saveCall(call);
 
@@ -5009,7 +5107,9 @@ io.on('connection', (socket) => {
           userId: user.userId,
           enabled
         });
-      });
+      } finally {
+        await releaseCallLock();
+      }
 
     } catch (error) {
       console.error('❌ Audio state error:', error);
@@ -5018,14 +5118,15 @@ io.on('connection', (socket) => {
 
   socket.on('video_state_changed', async ({ callId, enabled }) => {
     try {
-      const user = socketUsers.get(socket.id);
+      const user = await getSocketUser(socket.id);
 
       if (!user) {
         console.warn(`⚠️ Unauthenticated socket tried to change video state`);
         return;
       }
 
-      await withCallMutex(callId, async () => {
+      const releaseCallLock = await acquireCallMutex(callId);
+      try {
         const call = await getCall(callId);
         if (!call) {
           console.warn(`⚠️ Call ${callId} not found for video state change`);
@@ -5036,35 +5137,35 @@ io.on('connection', (socket) => {
           call.userMediaStates = new Map();
         }
 
-        const currentState = call.userMediaStates.get(user.userId) || {
+        const currentState = (call.userMediaStates instanceof Map ? call.userMediaStates.get(user.userId) : call.userMediaStates[user.userId]) || {
           videoEnabled: call.callType === 'video',
           audioEnabled: true
         };
 
-        call.userMediaStates.set(user.userId, {
-          ...currentState,
-          videoEnabled: enabled
-        });
+        if (call.userMediaStates instanceof Map) {
+          call.userMediaStates.set(user.userId, {
+            ...currentState,
+            videoEnabled: enabled
+          });
+        } else {
+          call.userMediaStates[user.userId] = {
+            ...currentState,
+            videoEnabled: enabled
+          };
+        }
 
         await saveCall(call);
 
-        console.log(`📹 ========================================`);
-        console.log(`📹 SERVER: VIDEO STATE CHANGE`);
-        console.log(`📹 ========================================`);
-        console.log(`   User: ${user.username} (${user.userId})`);
-        console.log(`   Call: ${callId}`);
-        console.log(`   New state: ${enabled ? 'ON' : 'OFF'}`);
-        console.log(`   Server state updated`);
+        console.log(`📹 SERVER: VIDEO STATE CHANGE - User: ${user.username}, State: ${enabled ? 'ON' : 'OFF'}`);
 
         // ✅ FIX: Broadcast to OTHER users only (exclude sender)
         socket.to(`call-${callId}`).emit('video_state_changed', {
           userId: user.userId,
           enabled: enabled
         });
-
-        console.log(`📤 Broadcasted to OTHER participants (sender excluded)`);
-        console.log(`📹 ========================================\n`);
-      });
+      } finally {
+        await releaseCallLock();
+      }
 
     } catch (error) {
       console.error('❌ Video state error:', error);
@@ -5075,7 +5176,7 @@ io.on('connection', (socket) => {
 
 
   socket.on('leave_room', async (data, callback) => {
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) {
       return callback?.({ success: false, error: 'Not authenticated' });
     }
@@ -5101,7 +5202,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async (reason) => {
     console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
 
-    const userData = socketUsers.get(socket.id);
+    const userData = await getSocketUser(socket.id);
     if (!userData) {
       console.log(`ℹ️ Socket ${socket.id} was not authenticated or already cleaned up`);
       return;
@@ -5113,11 +5214,11 @@ io.on('connection', (socket) => {
 
     // Unregister this socket from multi-device tracking
     if (firebaseUid) {
-      unregisterSocketForUser(firebaseUid, socket.id);
+      await unregisterSocketForUser(firebaseUid, socket.id);
     }
 
-    // Clean up socket user data mapping
-    socketUsers.delete(socket.id);
+    // Clean up socket user data mapping in Redis
+    await deleteSocketUser(socket.id);
 
     try {
       // Check if user has other active devices across the cluster
@@ -5129,42 +5230,10 @@ io.on('connection', (socket) => {
         return;
       }
 
-      console.log(`👤 [Presence] Last device disconnected for ${username}. Starting 500ms grace period.`);
+      console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
-      const cleanupKey = firebaseUid || userId;
-
-      // Clear any existing cleanup timer for this user
-      if (socketUserCleanup.has(cleanupKey)) {
-        clearTimeout(socketUserCleanup.get(cleanupKey));
-      }
-
-      const cleanup = setTimeout(async () => {
-        try {
-          // ✅ Authoritative cleanup on disconnect with Redis
-          const presence = await getUserPresence(userId);
-          const roomId = presence?.roomId;
-
-          // Skip if user is in call mode
-          if (presence?.status === 'call_active') {
-            // In distributed system, we might need verify if call is actually active
-            // But presence should be source of truth
-            console.log(`📱 [Presence] Skipping disconnect cleanup for ${username} (In Call)`);
-          } else if (roomId) {
-            console.log(`🧹 [Disconnect] Triggering authoritative leave for ${username} in room ${roomId}`);
-            await performUserLeaveChat(userId, roomId, 'disconnect');
-          }
-
-          // Final cleanup of tracking maps
-          // userToSocketId removed
-          socketUserCleanup.delete(userId);
-
-          console.log(`🧹 [UID: ${firebaseUid || userId}] Full disconnect cleanup completed`);
-        } catch (err) {
-          console.error(`❌ Error during disconnect cleanup for ${userId}:`, err);
-        }
-      }, 500); // 500ms grace period for re-connections
-
-      socketUserCleanup.set(userId, cleanup);
+      // Use Redis TTL based cleanup instead of local setTimeout
+      await scheduleUserCleanup(userId, 500); // 500ms grace period
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
@@ -5226,305 +5295,62 @@ async function performPeriodicCleanup() {
   const startTime = Date.now();
   console.log(`🧹 Starting periodic cleanup...`);
 
-
-  let cleanedMoodDebounce = 0;
-  for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
-    // If no users in this mood, clear the debounce
-    const count = await pubClient.scard(`mood:${mood}:users`);
-    if (count === 0) {
-      clearTimeout(timeout);
-      moodCountBroadcastDebounce.delete(mood);
-      cleanedMoodDebounce++;
-    }
-  }
-  if (cleanedMoodDebounce > 0) {
-    console.log(`🗑️ Cleaned up ${cleanedMoodDebounce} mood count debounce timers`);
-  }
-
   try {
     const now = Date.now();
-
-    // ✅ FIX: Process in batches to yield to event loop
     const BATCH_SIZE = 50;
 
-    // Clean up expired rooms
+    // Clean up expired rooms (Authoritative check in case keyspace notification was missed)
     const rooms = matchmaking.getActiveRooms();
-    console.log(`🧹 Checking ${rooms.length} active rooms`);
+    console.log(`🧹 Checking ${rooms.length} active rooms for expiry`);
 
     for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
       const batch = rooms.slice(i, i + BATCH_SIZE);
-
       for (const room of batch) {
         if (room.expiresAt <= now) {
-          console.log(`🕐 Room ${room.id} has expired (${((now - room.expiresAt) / 1000).toFixed(1)}s ago)`);
-          await performRoomCleanup(room.id); // ✅ AWAIT since performRoomCleanup is now async (Fix #16)
+          console.log(`🕐 Room ${room.id} has expired, cleaning up...`);
+          await performRoomCleanup(room.id);
         }
       }
-
-      // ✅ Yield to event loop after each batch
-      if (i + BATCH_SIZE < rooms.length) {
-        await new Promise(resolve => setImmediate(resolve));
-      }
+      if (i + BATCH_SIZE < rooms.length) await new Promise(resolve => setImmediate(resolve));
     }
 
-    // Clean up orphaned call grace periods
-    const orphanedGracePeriods = [];
-    for (const [callId, timeout] of callGracePeriod.entries()) {
-      // Check Redis for active call existence
-      const exists = await pubClient.exists(`call:${callId}`);
-      if (!exists) {
-        orphanedGracePeriods.push(callId);
-        clearTimeout(timeout);
-      }
-    }
-    if (orphanedGracePeriods.length > 0) {
-      orphanedGracePeriods.forEach(id => callGracePeriod.delete(id));
-      console.log(`🗑️ Cleaned up ${orphanedGracePeriods.length} orphaned call grace periods`);
-    }
-
-    // ✅ Yield to event loop
-    await new Promise(resolve => setImmediate(resolve));
-
-    // Clean up orphaned room cleanup timers
-    const orphanedRoomTimers = [];
-    for (const [roomId, timeout] of roomCleanupTimers.entries()) {
-      if (!matchmaking.getRoom(roomId)) {
-        orphanedRoomTimers.push(roomId);
-        clearTimeout(timeout);
-      }
-    }
-    if (orphanedRoomTimers.length > 0) {
-      orphanedRoomTimers.forEach(id => roomCleanupTimers.delete(id));
-      console.log(`🗑️ Cleaned up ${orphanedRoomTimers.length} orphaned room timers`);
-    }
-
-    // ✅ Yield to event loop
-    await new Promise(resolve => setImmediate(resolve));
-
-    // Clean up stale socketUserCleanup entries
-    const staleCleanups = [];
-    for (const [socketId, timeout] of socketUserCleanup.entries()) {
-      if (!socketUsers.has(socketId) && !io.sockets.sockets.has(socketId)) {
-        staleCleanups.push(socketId);
-        clearTimeout(timeout);
-      }
-    }
-    if (staleCleanups.length > 0) {
-      staleCleanups.forEach(id => socketUserCleanup.delete(id));
-      console.log(`🗑️ Cleaned up ${staleCleanups.length} stale socket cleanup entries`);
-    }
-
-    // ✅ Yield to event loop
-    await new Promise(resolve => setImmediate(resolve));
-
-    // Clean up orphaned mutex entries
-    const orphanedMutexes = [];
-    for (const [callId] of callMutexes.entries()) {
-      const exists = await pubClient.exists(`call:${callId}`);
-      if (!exists) {
-        orphanedMutexes.push(callId);
-      }
-    }
-    if (orphanedMutexes.length > 0) {
-      orphanedMutexes.forEach(id => callMutexes.delete(id));
-      console.log(`🗑️ Cleaned up ${orphanedMutexes.length} orphaned call mutexes`);
-    }
-
-    // ✅ FIX #16: Clean up orphaned room call init locks
-    let orphanedRoomLocks = 0;
-    for (const roomId of roomCallInitLocks.keys()) {
-      if (!matchmaking.getRoom(roomId)) {
-        roomCallInitLocks.delete(roomId);
-        orphanedRoomLocks++;
-      }
-    }
-    if (orphanedRoomLocks > 0) {
-      console.log(`🗑️ Cleaned up ${orphanedRoomLocks} orphaned room call init locks`);
-    }
-
-    // Clean up expired signaling rate limit entries
-    let expiredSignaling = 0;
-    for (const [userId, limit] of signalingRateLimiter.entries()) {
-      if (now > limit.resetTime) {
-        signalingRateLimiter.delete(userId);
-        expiredSignaling++;
-      }
-    }
-    if (expiredSignaling > 0) {
-      console.log(`🗑️ Cleaned up ${expiredSignaling} expired signaling rate limit entries`);
-    }
-
-    // ✅ Yield to event loop
-    await new Promise(resolve => setImmediate(resolve));
-
-    // Clean up stale file transfers
-    let staleTransfers = 0;
-    for (const [fileId, transfer] of activeFileTransfers.entries()) {
-      if (now - transfer.startTime > MAX_TRANSFER_TIME) {
-        activeFileTransfers.delete(fileId);
-        staleTransfers++;
-      }
-    }
-    if (staleTransfers > 0) {
-      console.log(`🗑️ Cleaned up ${staleTransfers} stale file transfers`);
-    }
-
-    // Clean up expired offers
-    let expiredOffers = 0;
-    for (const [key, timestamp] of activeOffers.entries()) {
-      if (now - timestamp > 5000) {
-        activeOffers.delete(key);
-        expiredOffers++;
-      }
-    }
-    if (expiredOffers > 0) {
-      console.log(`🗑️ Cleaned up ${expiredOffers} expired offers`);
-    }
-
-    // Clean up expired answer debounce
-    let expiredAnswers = 0;
-    for (const [key, timestamp] of answerDebounce.entries()) {
-      if (now - timestamp > 5000) {
-        answerDebounce.delete(key);
-        expiredAnswers++;
-      }
-    }
-    if (expiredAnswers > 0) {
-      console.log(`🗑️ Cleaned up ${expiredAnswers} expired answer debounce entries`);
-    }
-
-    // Clean up expired join debounce
-    let expiredJoins = 0;
-    for (const [key, timestamp] of joinCallDebounce.entries()) {
-      if (now - timestamp > 5000) {
-        joinCallDebounce.delete(key);
-        expiredJoins++;
-      }
-    }
-    if (expiredJoins > 0) {
-      console.log(`🗑️ Cleaned up ${expiredJoins} expired join debounce entries`);
-    }
-
-    // Clean up expired room join states
-    let expiredRoomJoins = 0;
-    for (const [key, data] of roomJoinState.entries()) {
-      if (now - data.timestamp > 15000) {
-        roomJoinState.delete(key);
-        expiredRoomJoins++;
-      }
-    }
-    if (expiredRoomJoins > 0) {
-      console.log(`🗑️ Cleaned up ${expiredRoomJoins} expired room join states`);
-    }
-
-    // ✅ Clean up room message rate limiter
-    let expiredRoomRates = 0;
-    for (const [roomId, limit] of roomMessageRateLimiter.entries()) {
-      if (now > limit.resetTime) {
-        roomMessageRateLimiter.delete(roomId);
-        expiredRoomRates++;
-      }
-    }
-    if (expiredRoomRates > 0) {
-      console.log(`🗑️ Cleaned up ${expiredRoomRates} expired room rate limit entries`);
-    }
-
-    // ✅ FIX #10: Verify connectionsByIP accuracy
-    let orphanedIPs = 0;
-    for (const [ip, ipData] of connectionsByIP.entries()) {
-      const validConnections = new Set();
-      for (const socketId of ipData.connections) {
-        if (io.sockets.sockets.has(socketId)) {
-          validConnections.add(socketId);
-        }
-      }
-
-      if (validConnections.size !== ipData.connections.size) {
-        console.log(`🔧 Fixed connection count for IP ${ip}: ${ipData.connections.size} → ${validConnections.size}`);
-        ipData.connections = validConnections;
-        ipData.count = validConnections.size;
-
-        if (ipData.count === 0) {
-          connectionsByIP.delete(ip);
-          orphanedIPs++;
-        }
-      }
-    }
-    if (orphanedIPs > 0) {
-      console.log(`🗑️ Removed ${orphanedIPs} orphaned IP entries`);
-    }
-
-    // ✅ FIX #10: Clean up expired connection rate limiters
+    // Cleanup Rate Limiters (Still using local Maps for rate limiting is okay 
+    // as it is per-instance protection, but for cluster-wide limits we'd use Redis)
     let cleanedRateLimiters = 0;
-    for (const [ip, limiter] of connectionRateLimiter.entries()) {
-      if (now > limiter.resetTime) {
-        connectionRateLimiter.delete(ip);
-        cleanedRateLimiters++;
-      }
+    for (const [key, limit] of signalingRateLimiter.entries()) {
+      if (now > limit.resetTime) { signalingRateLimiter.delete(key); cleanedRateLimiters++; }
     }
-    if (cleanedRateLimiters > 0) {
-      console.log(`🗑️ Cleaned up ${cleanedRateLimiters} expired connection rate limiters`);
+    for (const [key, limit] of fileChunkRateLimiter.entries()) {
+      if (now > limit.resetTime) { fileChunkRateLimiter.delete(key); cleanedRateLimiters++; }
     }
+    for (const [key, limit] of connectionRateLimiter.entries()) {
+      if (now > limit.resetTime) { connectionRateLimiter.delete(key); cleanedRateLimiters++; }
+    }
+    if (cleanedRateLimiters > 0) console.log(`🗑️ Cleaned up ${cleanedRateLimiters} expired rate limiters`);
 
-
-    // ✅ Audit mood registry for orphaned users in Redis
+    // Audit mood registry for orphaned users in Redis
     let orphanedUsers = 0;
     for (const moodConfig of config.MOODS) {
       const mood = moodConfig.id;
       const userIds = await pubClient.smembers(`mood:${mood}:users`);
-
       for (const userId of userIds) {
-        // Check Redis presence for user activity
         const presence = await getUserPresence(userId);
-        const hasPresence = presence && (now - presence.lastSeen < 60000); // 1 minute inactivity threshold
-
-        if (!hasPresence) {
+        if (!presence || (now - (presence.lastSeen || 0) > 300000)) { // 5 min threshold
           orphanedUsers++;
-          console.log(`🗑️ Removing orphaned user ${userId} from mood ${mood} (inactivity)`);
           await removeUserFromMood(userId, mood);
         }
       }
     }
+    if (orphanedUsers > 0) console.log(`🗑️ Cleaned up ${orphanedUsers} orphaned users from mood tracking`);
 
-    if (orphanedUsers > 0) {
-      console.log(`🗑️ Cleaned up ${orphanedUsers} orphaned user(s) from mood tracking`);
-    }
-
-    // ✅ Audit mood count broadcast debounce timers
-    let cleanedMoodDebounce = 0;
-    for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
-      const count = await pubClient.scard(`mood:${mood}:users`);
-      if (count === 0) {
-        clearTimeout(timeout);
-        moodCountBroadcastDebounce.delete(mood);
-        cleanedMoodDebounce++;
-      }
-    }
-    if (cleanedMoodDebounce > 0) {
-      console.log(`🗑️ Cleaned up ${cleanedMoodDebounce} mood count debounce timers`);
-    }
-
-
-    // Log memory stats
     const cleanupDuration = Date.now() - startTime;
+    const allUsers = await getAllSocketUsers();
+
     console.log(`📊 Periodic cleanup completed in ${cleanupDuration}ms`);
-    console.log(`📊 Memory stats:
-    - Active sockets: ${socketUsers.size}
-    - Global connections: ${io.engine.clientsCount}/${MAX_CONNECTIONS_GLOBAL}
-    - Unique IPs connected: ${connectionsByIP.size}
-    - Connection rate limiters: ${connectionRateLimiter.size}
-    - Call grace periods: ${callGracePeriod.size}
-    - Room cleanup timers: ${roomCleanupTimers.size}
-    - Room call init locks: ${roomCallInitLocks.size}
-    - Active offers: ${activeOffers.size}
-    - Call mutexes: ${callMutexes.size}
-    - Join debounce: ${joinCallDebounce.size}
-    - Room join states: ${roomJoinState.size}
-    - Signaling rate limiter: ${signalingRateLimiter.size}
-    - File chunk rate limiter: ${fileChunkRateLimiter.size}
-    - Room message rate limiter: ${roomMessageRateLimiter.size}
-    - Active file transfers: ${activeFileTransfers.size}/${MAX_CONCURRENT_TRANSFERS}
-    - File transfer memory: ${(getCurrentTransferMemory() / 1024 / 1024).toFixed(2)}MB/${(MAX_MEMORY_FOR_TRANSFERS / 1024 / 1024).toFixed(2)}MB`);
+    console.log(`📊 Statistics:
+    - Active sockets on this instance: ${io.engine.clientsCount}
+    - Total sockets in cluster (Redis): ${Object.keys(allUsers).length}
+    - Global connections limit: ${io.engine.clientsCount}/${MAX_CONNECTIONS_GLOBAL}`);
 
   } catch (error) {
     console.error('❌ Periodic cleanup error:', error);
@@ -5612,31 +5438,11 @@ setInterval(() => {
     console.log(`🗑️ Cleaned up ${expiredAnswers} expired answer debounce entries`);
   }
 
-  // Clean up expired join debounce (> 5 seconds old)
-  let expiredJoins = 0;
-  for (const [key, timestamp] of joinCallDebounce.entries()) {
-    if (now - timestamp > 5000) {
-      joinCallDebounce.delete(key);
-      expiredJoins++;
-    }
-  }
-  if (expiredJoins > 0) {
-    console.log(`🗑️ Cleaned up ${expiredJoins} expired join debounce entries`);
-  }
-
-  // Clean up expired room join states (> 15 seconds old)
-  let expiredRoomJoins = 0;
-  for (const [key, data] of roomJoinState.entries()) {
-    if (now - data.timestamp > 15000) {
-      roomJoinState.delete(key);
-      expiredRoomJoins++;
-    }
-  }
-  if (expiredRoomJoins > 0) {
-    console.log(`🗑️ Cleaned up ${expiredRoomJoins} expired room join states`);
-  }
+  // NOTE: joinCallDebounce and roomJoinState are now Redis-backed with TTL auto-expiry
+  // No local cleanup needed for those
 
 }, 30000); // Every 30 seconds
+
 
 
 // ============================================
@@ -5797,57 +5603,45 @@ async function startServer() {
       const shutdownPromises = [];
       let ackCount = 0;
 
-      // Notify all connected clients and wait for acknowledgments
-      for (const [socketId, user] of socketUsers.entries()) {
-        const clientSocket = io.sockets.sockets.get(socketId);
-        if (clientSocket && clientSocket.connected) {
-          const ackPromise = new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-              console.log(`⚠️ Shutdown ack timeout for ${user.username}`);
-              resolve();
-            }, 8000); // 8-second timeout per client
+      // Notify all connected clients of THIS instance and wait for acknowledgments
+      const localSockets = await io.fetchSockets();
+      console.log(`📢 Notifying ${localSockets.length} local connected clients, waiting for acknowledgments...`);
 
-            clientSocket.emit('server_shutdown', {
-              message: 'Server is shutting down for maintenance',
-              reconnectIn: 10000
-            }, () => {
-              clearTimeout(timeout);
-              ackCount++;
-              console.log(`✅ Shutdown ack received from ${user.username}`);
-              resolve();
-            });
+      for (const clientSocket of localSockets) {
+        const userData = await getSocketUser(clientSocket.id);
+        const username = userData?.username || clientSocket.id;
+
+        const ackPromise = new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            console.log(`⚠️ Shutdown ack timeout for ${username}`);
+            resolve();
+          }, 8000); // 8-second timeout per client
+
+          clientSocket.emit('server_shutdown', {
+            message: 'Server is shutting down for maintenance',
+            reconnectIn: 10000
+          }, () => {
+            clearTimeout(timeout);
+            ackCount++;
+            console.log(`✅ Shutdown ack received from ${username}`);
+            resolve();
           });
+        });
 
-          shutdownPromises.push(ackPromise);
-        }
+        shutdownPromises.push(ackPromise);
       }
 
-      console.log(`📢 Notified ${socketUsers.size} connected clients, waiting for acknowledgments...`);
-
-      // ✅ FIX: Wait for all clients or 10-second timeout (whichever comes first)
+      // ✅ FIX: Wait for all local clients or 10-second timeout (whichever comes first)
       await Promise.race([
         Promise.all(shutdownPromises),
         new Promise(resolve => setTimeout(resolve, 10000))
       ]);
 
-      console.log(`✅ Received ${ackCount}/${socketUsers.size} client acknowledgments`);
+      console.log(`✅ Received ${ackCount}/${localSockets.length} client acknowledgments`);
 
-      // Clean up all timers
-      let timerCount = 0;
-      roomCleanupTimers.forEach(timer => {
-        clearTimeout(timer);
-        timerCount++;
-      });
-      callGracePeriod.forEach(timer => {
-        clearTimeout(timer);
-        timerCount++;
-      });
-      socketUserCleanup.forEach(timer => {
-        clearTimeout(timer);
-        timerCount++;
-      });
-
-      console.log(`✅ Cleaned up ${timerCount} timers`);
+      // Timers in Redis (TTL) handle cleanup automatically across cluster
+      // No local maps of timers to clear in stateless mode
+      console.log(`✅ No local timers to clean up (handled via Redis TTL)`);
 
       // Close Socket.IO
       io.close(() => {
