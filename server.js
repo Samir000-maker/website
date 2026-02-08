@@ -32,7 +32,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Redis Clients
-const redisUrl = `redis://:${config.REDIS_PASSWORD || 'samir16121?'}@${config.REDIS_HOST || '127.0.0.1'}:${config.REDIS_PORT || 6379}`;
+// const redisUrl = `redis://:${config.REDIS_PASSWORD || 'samir16121?'}@${config.REDIS_HOST || '127.0.0.1'}:${config.REDIS_PORT || 6379}`;
+const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
+const redisPort = config.REDIS_PORT || 6379;
+const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
+
+// Redis connection URL
+const redisUrl = `redis://:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
+
+
 const pubClient = new Redis(redisUrl);
 const subClient = pubClient.duplicate();
 
