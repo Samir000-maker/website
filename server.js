@@ -3142,17 +3142,14 @@ io.on('connection', (socket) => {
             removeUserFromAllMoods(user.userId);
             clearMatchmakingTimeout(user.userId);
 
-            const userSocket = findActiveSocketForUser(user.userId);
-            if (userSocket) {
-              userSocket.emit('matchmaking_timeout', {
-                message: 'No matches found. Please try again.',
-                mood: mood,
-                queueStatus: currentQueueStatus,
-                minRequired: config.MIN_USERS_FOR_ROOM,
-                redirectTo: '/mood.html'
-              });
-              console.log(`📤 Sent matchmaking_timeout with redirect to ${user.username}`);
-            }
+            io.to(`user:${user.userId}`).emit('matchmaking_timeout', {
+              message: 'No matches found. Please try again.',
+              mood: mood,
+              queueStatus: currentQueueStatus,
+              minRequired: config.MIN_USERS_FOR_ROOM,
+              redirectTo: '/mood.html'
+            });
+            console.log(`📤 Sent matchmaking_timeout with redirect to ${user.username}`);
 
             console.log(`🔄 User ${user.username} timed out, should redirect to mood selection`);
           } else {
@@ -5402,29 +5399,22 @@ async function performPeriodicCleanup() {
     }
 
 
-    // ✅ Audit mood registry for orphaned users
+    // ✅ Audit mood registry for orphaned users in Redis
     let orphanedUsers = 0;
-    for (const [mood, userSet] of moodUserRegistry.entries()) {
-      const validUsers = new Set();
+    for (const moodConfig of config.MOODS) {
+      const mood = moodConfig.id;
+      const userIds = await pubClient.smembers(`mood:${mood}:users`);
 
-      for (const userId of userSet) {
-        // Check if user still has active socket
-        const hasActiveSocket = Array.from(socketUsers.values()).some(u => u.userId === userId);
+      for (const userId of userIds) {
+        // Check Redis presence for user activity
+        const presence = await getUserPresence(userId);
+        const hasPresence = presence && (now - presence.lastSeen < 60000); // 1 minute inactivity threshold
 
-        if (hasActiveSocket) {
-          validUsers.add(userId);
-        } else {
+        if (!hasPresence) {
           orphanedUsers++;
-          console.log(`🗑️ Removing orphaned user ${userId} from ${mood}`);
+          console.log(`🗑️ Removing orphaned user ${userId} from mood ${mood} (inactivity)`);
+          await removeUserFromMood(userId, mood);
         }
-      }
-
-      // Replace with validated set
-      if (validUsers.size !== userSet.size) {
-        moodUserRegistry.set(mood, validUsers);
-        const newCount = validUsers.size;
-        moodUserCounts.set(mood, newCount);
-        debouncedBroadcastMoodCount(mood);
       }
     }
 
