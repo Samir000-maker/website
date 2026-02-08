@@ -2803,6 +2803,12 @@ io.on('connection', (socket) => {
       // Register this socket under Firebase UID for multi-device tracking
       registerSocketForUser(firebaseUid, socket.id);
 
+      // ✅ FIX: Join user-specific rooms for cluster-wide targeted emissions
+      // Join both IDs to ensure consistency across different logic patterns
+      socket.join(`user:${mongoUserId}`);
+      socket.join(`user:${firebaseUid}`);
+      console.log(`📡 [Auth] Socket ${socket.id} joined rooms: user:${mongoUserId}, user:${firebaseUid}`);
+
       // ============================================
       // HANDLE EXISTING SOCKET FOR SAME USER (LEGACY)
       // ============================================
