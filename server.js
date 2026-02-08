@@ -660,7 +660,12 @@ const upload = multer({
 
 // Active calls with persistence
 // const activeCalls = new Map(); // REMOVED: Managed by Redis
+// Active calls with persistence
+// const activeCalls = new Map(); // REMOVED: Managed by Redis
 const joinCallDebounce = new Map(); // userId -> timestamp
+// Local idempotency for room joins
+const roomJoinState = new Map(); // key -> { joined: boolean, timestamp: number }
+
 /* Presence Tracking: userId -> { lastSeen: timestamp, status: 'chat_active' | 'call_active', roomId: string } */
 // MOVED TO REDIS: user:presence Hash
 
@@ -2811,14 +2816,11 @@ io.on('connection', (socket) => {
       // ============================================
       // HANDLE EXISTING SOCKET FOR SAME USER (LEGACY)
       // ============================================
-      const oldSocketId = userToSocketId.get(mongoUserId);
-
-      if (oldSocketId && oldSocketId !== socket.id) {
-        // Clean up any pending socket cleanup timers
-        if (socketUserCleanup.has(mongoUserId)) {
-          clearTimeout(socketUserCleanup.get(mongoUserId));
-          socketUserCleanup.delete(mongoUserId);
-        }
+      // Clean up any pending socket cleanup timers for this user
+      if (socketUserCleanup.has(mongoUserId)) {
+        clearTimeout(socketUserCleanup.get(mongoUserId));
+        socketUserCleanup.delete(mongoUserId);
+        console.log(`⏰ Cancelled pending cleanup for user ${mongoUserId}`);
       }
 
       // ============================================
@@ -2835,7 +2837,7 @@ io.on('connection', (socket) => {
 
       // Store in both directions for O(1) lookups
       socketUsers.set(socket.id, userSocketData);
-      userToSocketId.set(mongoUserId, socket.id); // Update to latest socket
+      // userToSocketId removed - redundant with socketUsers and Redis adapter
 
       console.log(`✅ [Auth] Socket authenticated for ${user.username} (${mongoUserId})`);
 
@@ -5082,7 +5084,7 @@ io.on('connection', (socket) => {
           }
 
           // Final cleanup of tracking maps
-          userToSocketId.delete(userId); // Local map, fine
+          // userToSocketId removed
           socketUserCleanup.delete(userId);
 
           console.log(`🧹 [UID: ${firebaseUid || userId}] Full disconnect cleanup completed`);
