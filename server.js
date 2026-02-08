@@ -32,7 +32,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Redis Clients
-// const redisUrl = `redis://:${config.REDIS_PASSWORD || 'samir16121?'}@${config.REDIS_HOST || '127.0.0.1'}:${config.REDIS_PORT || 6379}`;
 const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
 const redisPort = config.REDIS_PORT || 6379;
 const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
@@ -2678,6 +2677,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('authenticate', async ({ token, userId }) => {
+    const authStart = Date.now();
     try {
       // ============================================
       // INPUT VALIDATION
@@ -2710,7 +2710,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      console.log(`🔐 Authenticating socket for userId: ${userId}`);
+      console.log(`🔐 [Auth] Starting authentication for userId: ${userId} (Socket: ${socket.id})`);
 
       // ============================================
       // TOKEN VERIFICATION
@@ -2724,9 +2724,9 @@ io.on('connection', (socket) => {
           throw new Error('Invalid token structure');
         }
 
-        console.log(`✅ Token verified for Firebase UID: ${decodedToken.uid}`);
+        console.log(`✅ [Auth] Token verified for Firebase UID: ${decodedToken.uid}`);
       } catch (error) {
-        console.error('❌ Token verification failed:', error.message);
+        console.error('❌ [Auth] Token verification failed:', error.message);
         socket.emit('auth_error', {
           message: 'Invalid or expired token',
           code: 'TOKEN_VERIFICATION_FAILED'
@@ -2765,7 +2765,7 @@ io.on('connection', (socket) => {
           retryCount++;
 
           if (retryCount > MAX_RETRIES) {
-            console.error('❌ Database error during authentication (all retries exhausted):', dbError);
+            console.error('❌ [Auth] Database error during authentication (all retries exhausted):', dbError);
             socket.emit('auth_error', {
               message: 'Database temporarily unavailable. Please try again in a few seconds.',
               code: 'DB_ERROR',
@@ -2774,13 +2774,13 @@ io.on('connection', (socket) => {
             return;
           }
 
-          console.warn(`⚠️ Database query failed, retrying (${retryCount}/${MAX_RETRIES})...`);
+          console.warn(`⚠️ [Auth] Database query failed, retrying (${retryCount}/${MAX_RETRIES})...`);
           await new Promise(resolve => setTimeout(resolve, 500 * retryCount)); // ✅ FIX: Exponential backoff
         }
       }
 
       if (!user) {
-        console.error(`❌ User not found in database: ${userId}`);
+        console.error(`❌ [Auth] User not found in database: ${userId}`);
         socket.emit('auth_error', {
           message: 'User not found',
           code: 'USER_NOT_FOUND'
@@ -2790,7 +2790,7 @@ io.on('connection', (socket) => {
 
       // CRITICAL: Verify Firebase UID matches (prevent token spoofing)
       if (user.firebaseUid !== decodedToken.uid) {
-        console.error(`❌ Firebase UID mismatch for user ${userId}`);
+        console.error(`❌ [Auth] Firebase UID mismatch for user ${userId}`);
         console.error(`   Expected: ${user.firebaseUid}, Got: ${decodedToken.uid}`);
         socket.emit('auth_error', {
           message: 'Authentication mismatch',
@@ -2808,32 +2808,16 @@ io.on('connection', (socket) => {
       // Register this socket under Firebase UID for multi-device tracking
       registerSocketForUser(firebaseUid, socket.id);
 
-      console.log(`📱 [UID: ${firebaseUid}] Registered socket ${socket.id}`);
-      console.log(`📱 [UID: ${firebaseUid}] Total active devices: ${getUserSocketIds(firebaseUid).length}`);
-
       // ============================================
       // HANDLE EXISTING SOCKET FOR SAME USER (LEGACY)
       // ============================================
-      // Note: With multi-device support, we DON'T disconnect old sockets
-      // Instead, we allow multiple concurrent sessions
       const oldSocketId = userToSocketId.get(mongoUserId);
 
       if (oldSocketId && oldSocketId !== socket.id) {
-        console.log(`🔄 User ${user.username} has multiple active sessions`);
-        console.log(`   Previous socket: ${oldSocketId}`);
-        console.log(`   New socket: ${socket.id}`);
-
-        // Clean up old socket mapping from legacy tracking
-        const oldSocketData = socketUsers.get(oldSocketId);
-        if (oldSocketData) {
-          console.log(`ℹ️ Updating socket tracking for ${user.username}`);
-        }
-
         // Clean up any pending socket cleanup timers
         if (socketUserCleanup.has(mongoUserId)) {
           clearTimeout(socketUserCleanup.get(mongoUserId));
           socketUserCleanup.delete(mongoUserId);
-          console.log(`⏰ Cancelled pending cleanup for user ${mongoUserId}`);
         }
       }
 
@@ -2853,19 +2837,17 @@ io.on('connection', (socket) => {
       socketUsers.set(socket.id, userSocketData);
       userToSocketId.set(mongoUserId, socket.id); // Update to latest socket
 
-      console.log('✅ Socket authenticated successfully');
-      console.log(`   User: ${user.username} (${mongoUserId})`);
-      console.log(`   Firebase UID: ${firebaseUid}`);
-      console.log(`   Socket: ${socket.id}`);
-      console.log(`   Active sockets: ${socketUsers.size}`);
+      console.log(`✅ [Auth] Socket authenticated for ${user.username} (${mongoUserId})`);
 
       // ============================================
       // CHECK FOR ACTIVE ROOM (MULTI-DEVICE AWARE)
       // ============================================
-      const activeRoom = getUserActiveRoom(firebaseUid);
+      // ✅ FIX: Await the async Redis call
+      console.log(`🔍 [Auth] Checking active room for ${firebaseUid}...`);
+      const activeRoom = await getUserActiveRoom(firebaseUid);
 
       if (activeRoom) {
-        console.log(`ℹ️ [UID: ${firebaseUid}] User has active room: ${activeRoom.roomId}`);
+        console.log(`ℹ️ [Auth] User has active room: ${activeRoom.roomId}`);
       }
 
       // ============================================
@@ -2890,8 +2872,9 @@ io.on('connection', (socket) => {
         } : null
       });
 
-      // ✅ SEND INITIAL MOOD COUNTS
-      socket.emit('mood_counts_initial', getAllMoodCounts());
+      // ✅ FIX: Await mood counts before sending
+      const moodCounts = await getAllMoodCounts();
+      socket.emit('mood_counts_initial', moodCounts);
 
       // ============================================
       // RESTORE USER STATE (LEGACY FALLBACK)
@@ -2901,10 +2884,11 @@ io.on('connection', (socket) => {
       if (legacyRoomId && !activeRoom) {
         const room = matchmaking.getRoom(legacyRoomId);
         if (room && !room.isExpired) {
-          console.log(`🔄 [Legacy] User ${user.username} was in room ${legacyRoomId}, registering in new system`);
+          console.log(`🔄 [Auth] Restoring legacy room ${legacyRoomId}`);
 
           // Register in new system
-          setUserActiveRoom(firebaseUid, legacyRoomId, room.mood);
+          // ✅ FIX: Await the async Redis call
+          await setUserActiveRoom(firebaseUid, legacyRoomId, room.mood);
 
           socket.join(legacyRoomId);
 
@@ -2923,11 +2907,12 @@ io.on('connection', (socket) => {
           });
         } else {
           // Room expired while user was disconnected
-          console.log(`⚠️ User ${user.username} was in expired room ${legacyRoomId}`);
+          console.log(`⚠️ [Auth] Legacy room ${legacyRoomId} expired`);
           // Check for active call before leaving matchmaking room
           let hasActiveCall = false;
-          const userRoom = getUserActiveRoom(firebaseUid);
+          const userRoom = await getUserActiveRoom(firebaseUid); // ✅ FIX: Await here too just in case
           if (userRoom) {
+            // ✅ FIX: Await this too
             const activeCall = await findActiveCallForRoom(userRoom.roomId);
             if (activeCall) hasActiveCall = true;
           }
@@ -2937,7 +2922,7 @@ io.on('connection', (socket) => {
         // User has active room in new system - auto-join socket to room
         const room = matchmaking.getRoom(activeRoom.roomId);
         if (room && !room.isExpired) {
-          console.log(`🔄 [Multi-Device] Auto-joining socket ${socket.id} to existing room ${activeRoom.roomId}`);
+          console.log(`🔄 [Auth] Auto-joining socket to active room ${activeRoom.roomId}`);
 
           socket.join(activeRoom.roomId);
 
@@ -2958,8 +2943,8 @@ io.on('connection', (socket) => {
           });
         } else {
           // Room expired - clean up stale state
-          console.log(`⚠️ [UID: ${firebaseUid}] Active room ${activeRoom.roomId} is expired, cleaning up`);
-          clearUserActiveRoom(firebaseUid);
+          console.log(`⚠️ [Auth] Active room ${activeRoom.roomId} is expired, cleaning up`);
+          await clearUserActiveRoom(firebaseUid); // ✅ FIX: Await Redis call
         }
       }
 
@@ -2971,7 +2956,7 @@ io.on('connection', (socket) => {
       if (activeCallId) {
         const call = await getCall(activeCallId);
         if (call && call.status === 'active' && call.participants.includes(mongoUserId)) {
-          console.log(`📞 User ${user.username} was in call ${activeCallId}, notifying of reconnection opportunity`);
+          console.log(`📞 [Auth] User found in active call ${activeCallId}`);
 
           socket.emit('call_reconnect_available', {
             callId: activeCallId, // The ID from Redis 
@@ -2981,20 +2966,17 @@ io.on('connection', (socket) => {
           });
         } else {
           // Call ended while user was disconnected
-          console.log(`⚠️ User ${user.username} was in ended call ${activeCallId}`);
+          console.log(`⚠️ [Auth] Call ${activeCallId} ended or invalid`);
           await removeUserCall(mongoUserId);
         }
       }
 
-      // ============================================
-      // OPTIONAL: AUTO-RESTORE ROOM ON RECONNECT
-      // ============================================
-      // If client wants automatic room restoration on auth, they can listen for
-      // the 'authenticated' event and check hasActiveRoom, then call restore_room
-      // This gives the client control over when to show the room UI
+      const authDuration = Date.now() - authStart;
+      console.log(`✅ [Auth] Authentication completed in ${authDuration}ms`);
 
     } catch (error) {
       console.error(`❌ [authenticate] Unexpected error for user ${userId}:`, error);
+      console.error(error.stack); // Print stack trace
       socket.emit('auth_error', {
         message: 'Authentication failed due to server error',
         code: 'AUTH_FAILED',
