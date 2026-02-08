@@ -897,57 +897,46 @@ async function performRoomCleanup(roomId) {
     io.in(`user:${user.userId}`).socketsLeave(roomId);
   });
 
-  // ✅ FIX: Clean up calls with mutex protection
-  const callsToCleanup = [];
-  activeCalls.forEach((call, callId) => {
-    if (call.roomId === roomId) {
-      callsToCleanup.push(callId);
-    }
-  });
+  // ✅ FIX: Clean up call associated with room using Redis index
+  const callId = await pubClient.get(`room:${roomId}:call`);
 
-  console.log(`🗑️ Found ${callsToCleanup.length} call(s) to clean up in expired room`);
-
-  // ✅ Clean up each call with mutex to prevent race with join/leave
-  for (const callId of callsToCleanup) {
+  if (callId) {
+    console.log(`🗑️ Found call ${callId} to clean up in expired room`);
     try {
       await withCallMutex(callId, async () => {
-        const call = activeCalls.get(callId);
+        const call = await getCall(callId);
 
         if (!call) {
           console.log(`ℹ️ Call ${callId} already cleaned up`);
           return;
         }
 
-        console.log(`🗑️ Cleaning up call ${callId} in expired room (inside mutex)`);
-        console.log(`   Participants: [${call.participants.join(', ')}]`);
+        console.log(`🧹 Authoritatively ending call ${callId} due to room expiry`);
+        // Forcefully update call status and notify
+        call.status = 'ended';
+        call.endedAt = Date.now();
+        call.endReason = 'room_expired';
+        await saveCall(call);
 
-        // Notify participants that call ended due to room expiry
-        call.participants.forEach(userId => {
-          io.to(`user:${userId}`).emit('call_ended', {
-            callId,
-            reason: 'Room expired'
-          });
-          io.in(`user:${userId}`).socketsLeave(`call-${callId}`);
-
-          removeUserCall(userId); // Async, no await needed here as we are in loop
+        io.to(roomId).emit('call_ended', {
+          callId,
+          reason: 'room_expired'
         });
 
-        // Delete call state
-        activeCalls.delete(callId);
-        call.userMediaStates.clear();
+        // Cleanup participants
+        for (const pId of call.participants) {
+          await removeUserCall(pId);
+        }
 
-        console.log(`✅ Call ${callId} cleaned up safely (mutex protected)`);
+        await deleteCall(callId);
       });
 
-      // Clear grace period if exists
       if (callGracePeriod.has(callId)) {
         clearTimeout(callGracePeriod.get(callId));
         callGracePeriod.delete(callId);
       }
-
-    } catch (error) {
-      console.error(`❌ Error cleaning up call ${callId}:`, error);
-      // Continue with other calls
+    } catch (err) {
+      console.error(`❌ Error cleaning up call ${callId} in room ${roomId}:`, err);
     }
   }
 
@@ -989,7 +978,6 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     activeRooms: matchmaking.getActiveRooms().length,
-    activeCalls: activeCalls.size,
     webrtcMetrics: webrtcMetrics.getAll(),
     turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
     server: 'running'
@@ -1720,7 +1708,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
   if (!room) {
     // If room is gone, just clear local state for user
     await removeUserPresence(userId);
-    userCalls.delete(userId);
+    await removeUserCall(userId);
     return { success: true, alreadyGone: true };
   }
 
@@ -1763,7 +1751,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     removeUserFromMood(userId, room.mood);
 
     // 4. Cleanup any active calls the user is in
-    const activeCallId = userCalls.get(userId);
+    const activeCallId = await getUserCall(userId);
     if (activeCallId) {
       await handleCallLeaveInternal(userId, activeCallId);
     }
@@ -1956,10 +1944,8 @@ io.on('connection', (socket) => {
           console.log(`🧹 [UID: ${firebaseUid}] Existing room is expired, clearing state`);
           clearUserActiveRoom(firebaseUid);
           // Check for active call before leaving matchmaking room
-          let hasActiveCall = false;
-          activeCalls.forEach(call => {
-            if (call.roomId === roomId && call.participants.length > 0) hasActiveCall = true;
-          });
+          const activeCallState = await findActiveCallForRoom(existingRoom.roomId);
+          const hasActiveCall = !!activeCallState;
           matchmaking.leaveRoom(userId, hasActiveCall);
 
           // Continue with new mood selection
@@ -1985,10 +1971,8 @@ io.on('connection', (socket) => {
             // Clear failed state and allow re-entry
             clearUserActiveRoom(firebaseUid);
             // Check for active call before leaving matchmaking room
-            let hasActiveCall = false;
-            activeCalls.forEach(call => {
-              if (call.roomId === roomId && call.participants.length > 0) hasActiveCall = true;
-            });
+            const activeCallState = await findActiveCallForRoom(existingRoom.roomId);
+            const hasActiveCall = !!activeCallState;
             matchmaking.leaveRoom(userId, hasActiveCall);
             console.log(`🧹 [UID: ${firebaseUid}] Failed restoration cleaned up, proceeding with new selection`);
           }
@@ -3102,7 +3086,7 @@ io.on('connection', (socket) => {
           } else {
             console.error(`❌ User ${roomUser.username} not connected (Presence Check Failed)`);
             // Check for active call before leaving matchmaking room
-            const activeCall = await findActiveCallForRoom(roomId);
+            const activeCall = await findActiveCallForRoom(room.id);
             const hasActiveCall = !!activeCall;
             matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
           }
@@ -5422,25 +5406,10 @@ async function performPeriodicCleanup() {
       console.log(`🗑️ Cleaned up ${orphanedUsers} orphaned user(s) from mood tracking`);
     }
 
-    // Clean up orphaned userCurrentMood entries
-    let orphanedMoodMappings = 0;
-    for (const [userId] of userCurrentMood.entries()) {
-      const hasActiveSocket = Array.from(socketUsers.values()).some(u => u.userId === userId);
-
-      if (!hasActiveSocket) {
-        userCurrentMood.delete(userId);
-        orphanedMoodMappings++;
-      }
-    }
-
-    if (orphanedMoodMappings > 0) {
-      console.log(`🗑️ Cleaned up ${orphanedMoodMappings} orphaned mood mapping(s)`);
-    }
-
-    // Clean up mood count broadcast debounce timers
+    // ✅ Audit mood count broadcast debounce timers
     let cleanedMoodDebounce = 0;
     for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
-      const count = moodUserCounts.get(mood) || 0;
+      const count = await pubClient.scard(`mood:${mood}:users`);
       if (count === 0) {
         clearTimeout(timeout);
         moodCountBroadcastDebounce.delete(mood);
@@ -5460,7 +5429,6 @@ async function performPeriodicCleanup() {
     - Global connections: ${io.engine.clientsCount}/${MAX_CONNECTIONS_GLOBAL}
     - Unique IPs connected: ${connectionsByIP.size}
     - Connection rate limiters: ${connectionRateLimiter.size}
-    - Active calls: ${activeCalls.size}
     - Call grace periods: ${callGracePeriod.size}
     - Room cleanup timers: ${roomCleanupTimers.size}
     - Room call init locks: ${roomCallInitLocks.size}
@@ -5468,7 +5436,6 @@ async function performPeriodicCleanup() {
     - Call mutexes: ${callMutexes.size}
     - Join debounce: ${joinCallDebounce.size}
     - Room join states: ${roomJoinState.size}
-    - User-to-socket index: ${userToSocketId.size}
     - Signaling rate limiter: ${signalingRateLimiter.size}
     - File chunk rate limiter: ${fileChunkRateLimiter.size}
     - Room message rate limiter: ${roomMessageRateLimiter.size}
