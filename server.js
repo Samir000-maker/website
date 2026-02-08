@@ -80,56 +80,75 @@ const ROOM_WARNING_TIME = 60000; // 60 seconds warning before expiry
  * Add user to mood tracking (Redis)
  */
 async function addUserToMood(userId, mood) {
-  const isValidMood = config.MOODS.some(m => m.id === mood);
-  if (!isValidMood) {
-    console.error(`❌ Invalid mood: ${mood}`);
-    return;
+  try {
+    const isValidMood = config.MOODS.some(m => m.id === mood);
+    if (!isValidMood) {
+      console.error(`❌ Invalid mood: ${mood}`);
+      return;
+    }
+
+    // Remove from old mood if exists
+    const oldMood = await pubClient.hget('user:moods', userId);
+    if (oldMood && oldMood !== mood) {
+      await removeUserFromMood(userId, oldMood);
+    }
+
+    // Add to new mood set
+    await pubClient.sadd(`mood:${mood}:users`, userId);
+    // Track user's current mood
+    await pubClient.hset('user:moods', userId, mood);
+
+    // Broadcast update
+    await debouncedBroadcastMoodCount(mood);
+    console.log(`📊 [Redis] Added ${userId} to mood ${mood}`);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to add user ${userId} to mood ${mood}:`, error.message);
   }
-
-  // Remove from old mood if exists
-  const oldMood = await pubClient.hget('user:moods', userId);
-  if (oldMood && oldMood !== mood) {
-    await removeUserFromMood(userId, oldMood);
-  }
-
-  // Add to new mood set
-  await pubClient.sadd(`mood:${mood}:users`, userId);
-  // Track user's current mood
-  await pubClient.hset('user:moods', userId, mood);
-
-  // Broadcast update
-  await debouncedBroadcastMoodCount(mood);
-  console.log(`📊 [Redis] Added ${userId} to mood ${mood}`);
 }
 
 // User Locks - centralized Redis lock would be better, but keeping local for now as it's per-user operation serialization
 // const userOperationLocks = new Map(); // Keep local or use Redlock
 
 async function getUserActiveRoom(userId) {
-  const data = await pubClient.hget('user:active_rooms', userId);
-  return data ? JSON.parse(data) : null;
+  try {
+    const data = await pubClient.hget('user:active_rooms', userId);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get active room for ${userId}:`, error.message);
+    return null;
+  }
 }
 
 async function setUserActiveRoom(userId, roomId, mood) {
-  const roomData = {
-    roomId,
-    joinedAt: Date.now(),
-    mood
-  };
+  try {
+    const roomData = {
+      roomId,
+      joinedAt: Date.now(),
+      mood
+    };
 
-  await pubClient.hset('user:active_rooms', userId, JSON.stringify(roomData));
-  console.log(`🔐 [UID: ${userId}] Set active room: ${roomId} (mood: ${mood})`);
+    await pubClient.hset('user:active_rooms', userId, JSON.stringify(roomData));
+    console.log(`🔐 [UID: ${userId}] Set active room: ${roomId} (mood: ${mood})`);
 
-  return roomData;
+    return roomData;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to set active room for ${userId}:`, error.message);
+    return null;
+  }
 }
 
 async function clearUserActiveRoom(userId) {
-  const activeRoom = await getUserActiveRoom(userId);
-  if (activeRoom) {
-    await pubClient.hdel('user:active_rooms', userId);
-    console.log(`🔓 [UID: ${userId}] Cleared active room: ${activeRoom.roomId}`);
+  try {
+    const activeRoom = await getUserActiveRoom(userId);
+    if (activeRoom) {
+      await pubClient.hdel('user:active_rooms', userId);
+      console.log(`🔓 [UID: ${userId}] Cleared active room: ${activeRoom.roomId}`);
+    }
+    return activeRoom;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to clear active room for ${userId}:`, error.message);
+    return null;
   }
-  return activeRoom;
 }
 
 
@@ -276,18 +295,22 @@ async function restoreExistingRoom(socket, userId, existingRoom) {
  * Remove user from mood tracking (Redis)
  */
 async function removeUserFromMood(userId, mood) {
-  // Remove from Set
-  const wasRemoved = await pubClient.srem(`mood:${mood}:users`, userId);
+  try {
+    // Remove from Set
+    const wasRemoved = await pubClient.srem(`mood:${mood}:users`, userId);
 
-  if (wasRemoved) {
-    // Clear user's mood tracking if it matches
-    const currentMood = await pubClient.hget('user:moods', userId);
-    if (currentMood === mood) {
-      await pubClient.hdel('user:moods', userId);
+    if (wasRemoved) {
+      // Clear user's mood tracking if it matches
+      const currentMood = await pubClient.hget('user:moods', userId);
+      if (currentMood === mood) {
+        await pubClient.hdel('user:moods', userId);
+      }
+
+      await debouncedBroadcastMoodCount(mood);
+      console.log(`📊 [Redis] Removed ${userId} from mood ${mood}`);
     }
-
-    await debouncedBroadcastMoodCount(mood);
-    console.log(`📊 [Redis] Removed ${userId} from mood ${mood}`);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to remove user ${userId} from mood ${mood}:`, error.message);
   }
 }
 
@@ -676,64 +699,102 @@ const roomJoinState = new Map(); // key -> { joined: boolean, timestamp: number 
 // MOVED TO REDIS: user:presence Hash
 
 async function updateUserPresence(userId, data) {
-  // Merge with existing
-  const current = await getUserPresence(userId) || {};
-  const updated = { ...current, ...data, lastSeen: Date.now() };
-  await pubClient.hset('user:presence', userId, JSON.stringify(updated));
-  return updated;
+  try {
+    // Merge with existing
+    const current = await getUserPresence(userId) || {};
+    const updated = { ...current, ...data, lastSeen: Date.now() };
+    await pubClient.hset('user:presence', userId, JSON.stringify(updated));
+    return updated;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to update presence for ${userId}:`, error.message);
+    return null;
+  }
 }
 
 async function getUserPresence(userId) {
-  const data = await pubClient.hget('user:presence', userId);
-  return data ? JSON.parse(data) : null;
+  try {
+    const data = await pubClient.hget('user:presence', userId);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get presence for ${userId}:`, error.message);
+    return null;
+  }
 }
 
 async function removeUserPresence(userId) {
-  await pubClient.hdel('user:presence', userId);
+  try {
+    await pubClient.hdel('user:presence', userId);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to remove presence for ${userId}:`, error.message);
+  }
 }
 const callGracePeriod = new Map(); // callId -> timeout
 
 async function getCall(callId) {
-  const data = await pubClient.hgetall(`call:${callId}`);
-  if (!Object.keys(data).length) return null;
+  try {
+    const data = await pubClient.hgetall(`call:${callId}`);
+    if (!Object.keys(data).length) return null;
 
-  // Deserialize
-  if (data.participants) data.participants = JSON.parse(data.participants);
-  if (data.userMediaStates) data.userMediaStates = new Map(JSON.parse(data.userMediaStates));
-  if (data.createdAt) data.createdAt = parseInt(data.createdAt);
-  if (data.lastActivity) data.lastActivity = parseInt(data.lastActivity);
+    // Deserialize
+    if (data.participants) data.participants = JSON.parse(data.participants);
+    if (data.userMediaStates) data.userMediaStates = new Map(JSON.parse(data.userMediaStates));
+    if (data.createdAt) data.createdAt = parseInt(data.createdAt);
+    if (data.lastActivity) data.lastActivity = parseInt(data.lastActivity);
 
-  return data;
+    return data;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get call ${callId}:`, error.message);
+    return null;
+  }
 }
 
 async function saveCall(call) {
-  const data = { ...call };
-  if (data.participants) data.participants = JSON.stringify(data.participants);
-  if (data.userMediaStates) data.userMediaStates = JSON.stringify(Array.from(data.userMediaStates.entries()));
-  await pubClient.hset(`call:${call.callId}`, data);
-  await pubClient.set(`room:${call.roomId}:call`, call.callId); // Index
+  try {
+    const data = { ...call };
+    if (data.participants) data.participants = JSON.stringify(data.participants);
+    if (data.userMediaStates) data.userMediaStates = JSON.stringify(Array.from(data.userMediaStates.entries()));
+    await pubClient.hset(`call:${call.callId}`, data);
+    await pubClient.set(`room:${call.roomId}:call`, call.callId); // Index
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to save call ${call.callId}:`, error.message);
+  }
 }
 
 async function deleteCall(callId) {
-  const call = await getCall(callId);
-  if (call) {
-    await pubClient.del(`call:${callId}`);
-    await pubClient.del(`room:${call.roomId}:call`);
-    // Also clean up participants' userCalls mapping?
-    // We should do that in logic
+  try {
+    const call = await getCall(callId);
+    if (call) {
+      await pubClient.del(`call:${callId}`);
+      await pubClient.del(`room:${call.roomId}:call`);
+    }
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to delete call ${callId}:`, error.message);
   }
 }
 
 async function getUserCall(userId) {
-  return await pubClient.hget('user:calls', userId);
+  try {
+    return await pubClient.hget('user:calls', userId);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to get user call for ${userId}:`, error.message);
+    return null;
+  }
 }
 
 async function setUserCall(userId, callId) {
-  await pubClient.hset('user:calls', userId, callId);
+  try {
+    await pubClient.hset('user:calls', userId, callId);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to set user call for ${userId}:`, error.message);
+  }
 }
 
 async function removeUserCall(userId) {
-  await pubClient.hdel('user:calls', userId);
+  try {
+    await pubClient.hdel('user:calls', userId);
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to remove user call for ${userId}:`, error.message);
+  }
 }
 
 
@@ -830,131 +891,135 @@ function scheduleRoomCleanup(roomId, expiresAt) {
 }
 
 async function performRoomCleanup(roomId) {
-  const room = matchmaking.getRoom(roomId);
+  try {
+    const room = matchmaking.getRoom(roomId);
 
-  if (!room) {
-    console.log(`🗑️ Room ${roomId} not found, already cleaned up`);
-    roomCleanupTimers.delete(roomId);
-    return;
-  }
-
-  console.log(`🗑️ ========================================`);
-  console.log(`🗑️ CLEANING UP ROOM: ${roomId}`);
-  console.log(`🗑️ ========================================`);
-  console.log(`   Users: ${room.users.length}`);
-
-  // CRITICAL FIX: Cancel ANY pending room lifecycle timers
-  if (room.expiryTimer) {
-    clearTimeout(room.expiryTimer);
-    room.expiryTimer = null;
-    console.log(`⏰ Canceled room's internal expiry timer`);
-  }
-  if (room.warningTimer) {
-    clearTimeout(room.warningTimer);
-    room.warningTimer = null;
-    console.log(`⏰ Canceled room's internal warning timer`);
-  }
-
-  // Notify all users to clean up their IndexedDB files AND clear all server state
-  const usersToClean = [...room.users]; // snapshot before any mutation
-  usersToClean.forEach(user => {
-    // Clear active room state so user is not stuck in ghost room
-    if (user.firebaseUid) {
-      clearUserActiveRoom(user.firebaseUid);
+    if (!room) {
+      console.log(`🗑️ Room ${roomId} not found, already cleaned up`);
+      roomCleanupTimers.delete(roomId);
+      return;
     }
 
-    // Remove from mood tracking
-    removeUserFromMood(user.userId, room.mood);
+    console.log(`🗑️ ========================================`);
+    console.log(`🗑️ CLEANING UP ROOM: ${roomId}`);
+    console.log(`🗑️ ========================================`);
+    console.log(`   Users: ${room.users.length}`);
 
-    // Leave the user out of matchmaking records
-    matchmaking.leaveRoom(user.userId);
+    // CRITICAL FIX: Cancel ANY pending room lifecycle timers
+    if (room.expiryTimer) {
+      clearTimeout(room.expiryTimer);
+      room.expiryTimer = null;
+      console.log(`⏰ Canceled room's internal expiry timer`);
+    }
+    if (room.warningTimer) {
+      clearTimeout(room.warningTimer);
+      room.warningTimer = null;
+      console.log(`⏰ Canceled room's internal warning timer`);
+    }
 
-    // Emit expired event and leave socket room on every device
-    const socketIds = user.firebaseUid ? getUserSocketIds(user.firebaseUid) : [];
-    socketIds.forEach(sid => {
-      const s = io.sockets.sockets.get(sid);
-      if (s && s.connected) {
-        s.emit('room_expired', {
-          roomId,
-          message: 'Chat room has expired',
-          cleanupFiles: true
-        });
-        s.leave(roomId);
+    // Notify all users to clean up their IndexedDB files AND clear all server state
+    const usersToClean = [...room.users]; // snapshot before any mutation
+    usersToClean.forEach(user => {
+      // Clear active room state so user is not stuck in ghost room
+      if (user.firebaseUid) {
+        clearUserActiveRoom(user.firebaseUid);
       }
-    });
 
-    // Fallback: also try the legacy single-socket lookup
-    // REFACTORED FOR CLUSTER: Use io.to(user:userId)
-    io.to(`user:${user.userId}`).emit('room_expired', {
-      roomId,
-      message: 'Chat room has expired',
-      cleanupFiles: true
-    });
-    // We cannot force leave() on remote sockets easily without a global event or adapter 
-    // But room expiry usually triggers client-side handling.
-    // If we strictly need to make them leave socket.io room 'roomId', we rely on client handling 
-    // or use io.in('user:userId').socketsLeave(roomId) (Socket.io v4 feature!)
-    io.in(`user:${user.userId}`).socketsLeave(roomId);
-  });
+      // Remove from mood tracking
+      removeUserFromMood(user.userId, room.mood);
 
-  // ✅ FIX: Clean up call associated with room using Redis index
-  const callId = await pubClient.get(`room:${roomId}:call`);
+      // Leave the user out of matchmaking records
+      matchmaking.leaveRoom(user.userId);
 
-  if (callId) {
-    console.log(`🗑️ Found call ${callId} to clean up in expired room`);
-    try {
-      await withCallMutex(callId, async () => {
-        const call = await getCall(callId);
-
-        if (!call) {
-          console.log(`ℹ️ Call ${callId} already cleaned up`);
-          return;
+      // Emit expired event and leave socket room on every device
+      const socketIds = user.firebaseUid ? getUserSocketIds(user.firebaseUid) : [];
+      socketIds.forEach(sid => {
+        const s = io.sockets.sockets.get(sid);
+        if (s && s.connected) {
+          s.emit('room_expired', {
+            roomId,
+            message: 'Chat room has expired',
+            cleanupFiles: true
+          });
+          s.leave(roomId);
         }
-
-        console.log(`🧹 Authoritatively ending call ${callId} due to room expiry`);
-        // Forcefully update call status and notify
-        call.status = 'ended';
-        call.endedAt = Date.now();
-        call.endReason = 'room_expired';
-        await saveCall(call);
-
-        io.to(roomId).emit('call_ended', {
-          callId,
-          reason: 'room_expired'
-        });
-
-        // Cleanup participants
-        for (const pId of call.participants) {
-          await removeUserCall(pId);
-        }
-
-        await deleteCall(callId);
       });
 
-      if (callGracePeriod.has(callId)) {
-        clearTimeout(callGracePeriod.get(callId));
-        callGracePeriod.delete(callId);
+      // Fallback: also try the legacy single-socket lookup
+      // REFACTORED FOR CLUSTER: Use io.to(user:userId)
+      io.to(`user:${user.userId}`).emit('room_expired', {
+        roomId,
+        message: 'Chat room has expired',
+        cleanupFiles: true
+      });
+      // We cannot force leave() on remote sockets easily without a global event or adapter 
+      // But room expiry usually triggers client-side handling.
+      // If we strictly need to make them leave socket.io room 'roomId', we rely on client handling 
+      // or use io.in('user:userId').socketsLeave(roomId) (Socket.io v4 feature!)
+      io.in(`user:${user.userId}`).socketsLeave(roomId);
+    });
+
+    // ✅ FIX: Clean up call associated with room using Redis index
+    const callId = await pubClient.get(`room:${roomId}:call`);
+
+    if (callId) {
+      console.log(`🗑️ Found call ${callId} to clean up in expired room`);
+      try {
+        await withCallMutex(callId, async () => {
+          const call = await getCall(callId);
+
+          if (!call) {
+            console.log(`ℹ️ Call ${callId} already cleaned up`);
+            return;
+          }
+
+          console.log(`🧹 Authoritatively ending call ${callId} due to room expiry`);
+          // Forcefully update call status and notify
+          call.status = 'ended';
+          call.endedAt = Date.now();
+          call.endReason = 'room_expired';
+          await saveCall(call);
+
+          io.to(roomId).emit('call_ended', {
+            callId,
+            reason: 'room_expired'
+          });
+
+          // Cleanup participants
+          for (const pId of call.participants) {
+            await removeUserCall(pId);
+          }
+
+          await deleteCall(callId);
+        });
+
+        if (callGracePeriod.has(callId)) {
+          clearTimeout(callGracePeriod.get(callId));
+          callGracePeriod.delete(callId);
+        }
+      } catch (err) {
+        console.error(`❌ Error cleaning up call ${callId} in room ${roomId}:`, err);
       }
-    } catch (err) {
-      console.error(`❌ Error cleaning up call ${callId} in room ${roomId}:`, err);
     }
-  }
 
-  // Clean up any stored file data for this room
-  for (const [fileId, fileRecord] of roomFileStore.entries()) {
-    if (fileRecord.roomId === roomId) {
-      roomFileStore.delete(fileId);
+    // Clean up any stored file data for this room
+    for (const [fileId, fileRecord] of roomFileStore.entries()) {
+      if (fileRecord.roomId === roomId) {
+        roomFileStore.delete(fileId);
+      }
     }
+
+    // Remove the room from matchmaking
+    matchmaking.destroyRoom(roomId);
+
+    // Clear the cleanup timer
+    roomCleanupTimers.delete(roomId);
+
+    console.log(`✅ Room ${roomId} fully cleaned up and destroyed`);
+    console.log(`🗑️ ======================================== \n`);
+  } catch (error) {
+    console.error(`❌ [Cleanup] Critical failure in performRoomCleanup for ${roomId}:`, error);
   }
-
-  // Remove the room from matchmaking
-  matchmaking.destroyRoom(roomId);
-
-  // Clear the cleanup timer
-  roomCleanupTimers.delete(roomId);
-
-  console.log(`✅ Room ${roomId} fully cleaned up and destroyed`);
-  console.log(`🗑️ ========================================\n`);
 }
 
 function cancelRoomCleanup(roomId) {
@@ -1814,7 +1879,8 @@ setInterval(async () => {
         if (presence.status === 'call_active') continue;
 
         if (now - presence.lastSeen > HEARTBEAT_TIMEOUT) {
-          console.log(`⏱️ [Presence] Heartbeat timeout for ${userId} in room ${presence.roomId}`);
+          const roomInfo = presence.roomId ? `in room ${presence.roomId}` : '(not in room)';
+          console.log(`⏱️ [Presence] Heartbeat timeout for ${userId} ${roomInfo}`);
           await performUserLeaveChat(userId, presence.roomId, 'heartbeat_timeout');
         }
       } catch (parseError) {
