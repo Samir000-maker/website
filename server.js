@@ -60,6 +60,12 @@ const roomCallInitLocks = new Map(); // roomId -> Promise
 const userOperationLocks = new Map();
 const socketUsers = new Map(); // socket.id -> { userId, username, ... } (Local)
 const callMutexes = new Map(); // callId -> Promise (Local Queue)
+const socketUserCleanup = new Map(); // userId -> timeout handle
+const roomCleanupTimers = new Map(); // roomId -> timeout handle
+
+const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000; // 10 minutes default
+const ROOM_CLEANUP_GRACE = 30000; // 30 seconds
+const ROOM_WARNING_TIME = 60000; // 60 seconds warning before expiry
 
 // ============================================
 // REAL-TIME MOOD USER COUNTERS (REDIS-BACKED)
@@ -5159,7 +5165,7 @@ async function performPeriodicCleanup() {
   let cleanedMoodDebounce = 0;
   for (const [mood, timeout] of moodCountBroadcastDebounce.entries()) {
     // If no users in this mood, clear the debounce
-    const count = moodUserCounts.get(mood) || 0;
+    const count = await pubClient.scard(`mood:${mood}:users`);
     if (count === 0) {
       clearTimeout(timeout);
       moodCountBroadcastDebounce.delete(mood);
