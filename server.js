@@ -1300,6 +1300,56 @@ matchmaking.init(pubClient, io);
 
 app.use(cors());
 app.use(express.json());
+
+// GLOBAL ERROR HANDLER (EARLY ATTACH)
+app.use((err, req, res, next) => {
+  if (err) {
+    console.error('💥 [Global Error Handler] UNCAUGHT ERROR:', err.stack || err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Global server error', details: err.message });
+    }
+  } else {
+    next();
+  }
+});
+
+// ISOLATED LEAVE-CHAT ROUTE (MOVED UP)
+app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
+  const requestId = uuidv4().substring(0, 8);
+  console.log(`[API-DEBUG][${requestId}] START /api/leave-chat`);
+  try {
+    const { roomId } = req.body;
+    const firebaseUid = req.firebaseUser?.uid;
+    console.log(`[API-DEBUG][${requestId}] Resolved UID: ${firebaseUid}, Room: ${roomId}`);
+
+    if (!firebaseUid) {
+      console.error(`❌ [API-DEBUG][${requestId}] No UID in request!`);
+      return res.status(401).json({ error: 'Auth context missing' });
+    }
+
+    const db = getDB();
+    const user = await db.collection('users').findOne(
+      { firebaseUid },
+      { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
+    );
+
+    if (!user) {
+      console.warn(`⚠️ [API-DEBUG][${requestId}] User not found for UID: ${firebaseUid}`);
+      return res.status(404).json({ error: 'User record not found' });
+    }
+
+    const userId = user._id.toString();
+    console.log(`[API-DEBUG][${requestId}] Authorized: ${user.username} (${userId})`);
+
+    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
+    console.log(`[API-DEBUG][${requestId}] Result:`, result);
+    return res.json(result);
+  } catch (error) {
+    console.error(`❌ [API-DEBUG][${requestId}] ERROR:`, error.stack);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 app.use(express.static(__dirname));
 
 const upload = multer({
@@ -1524,63 +1574,7 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
 });
 
 
-// ULTRA-VERBOSE DIAGNOSTIC FOR LEAVE-CHAT
-app.use('/api/leave-chat', (req, res, next) => {
-  console.log(`[LATENCY-DEBUG] Incoming ${req.method} to /api/leave-chat from ${req.ip}`);
-  next();
-});
-
-app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
-  console.log(`[API-ENTRY] Reached /api/leave-chat handler body`);
-  const requestId = uuidv4().substring(0, 8);
-  console.log(`[API-ENTRY][${requestId}] START`);
-
-  try {
-    const { roomId } = req.body;
-    const firebaseUid = req.firebaseUser?.uid;
-    console.log(`[ROUTE-DEBUG][${requestId}] User UID: ${firebaseUid}, Room: ${roomId}`);
-
-    if (!req.firebaseUser) {
-      console.error(`❌ [API][${requestId}] No firebaseUser in request!`);
-      return res.status(401).json({ error: 'Auth context missing' });
-    }
-
-    console.log(`📡 [API][${requestId}] Leave request received: Room=${roomId}, User UID=${firebaseUid}`);
-
-    if (!roomId) {
-      console.warn(`⚠️ [API][${requestId}] Missing roomId in request body`);
-      return res.status(400).json({ error: 'Room ID is required' });
-    }
-
-    const db = getDB();
-    const user = await db.collection('users').findOne(
-      { firebaseUid },
-      { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
-    );
-
-    if (!user) {
-      console.warn(`⚠️ [API][${requestId}] Unknown Firebase UID: ${firebaseUid}`);
-      return res.status(404).json({ error: 'User record not found' });
-    }
-
-    const userId = user._id.toString();
-    console.log(`📡 [API][${requestId}] Authorized: ${user.username} (${userId})`);
-
-    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
-
-    console.log(`📡 [API][${requestId}] Result:`, result);
-
-    if (result.success) {
-      return res.json({ success: true, message: 'Successfully left room' });
-    } else {
-      console.error(`❌ [API][${requestId}] performUserLeaveChat reported failure:`, result.error);
-      return res.status(500).json({ success: false, error: result.error });
-    }
-  } catch (error) {
-    console.error(`❌ [API][${requestId}] CRITICAL ROUTE ERROR:`, error.stack);
-    return res.status(500).json({ error: 'Internal server error', details: error.message });
-  }
-});
+// [api/leave-chat route moved to top]
 
 app.post('/api/check-username', async (req, res) => {
   try {
