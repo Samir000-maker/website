@@ -1524,10 +1524,17 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
 });
 
 
+// ULTRA-VERBOSE DIAGNOSTIC FOR LEAVE-CHAT
+app.use('/api/leave-chat', (req, res, next) => {
+  console.log(`[LATENCY-DEBUG] Incoming ${req.method} to /api/leave-chat from ${req.ip}`);
+  next();
+});
+
 app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
+  console.log(`[API-ENTRY] Reached /api/leave-chat handler body`);
   const requestId = uuidv4().substring(0, 8);
-  console.log(`[ROUTE-DEBUG][${requestId}] START /api/leave-chat. Body:`, JSON.stringify(req.body));
-  console.log(`[ROUTE-DEBUG][${requestId}] Headers:`, JSON.stringify(req.headers));
+  console.log(`[API-ENTRY][${requestId}] START`);
+
   try {
     const { roomId } = req.body;
     const firebaseUid = req.firebaseUser?.uid;
