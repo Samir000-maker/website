@@ -1523,11 +1523,15 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
 
 
 app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
+  const requestId = uuidv4().substring(0, 8);
   try {
     const { roomId } = req.body;
     const firebaseUid = req.firebaseUser.uid;
 
+    console.log(`📡 [API][${requestId}] Leave request received: Room=${roomId}, User UID=${firebaseUid}`);
+
     if (!roomId) {
+      console.warn(`⚠️ [API][${requestId}] Missing roomId in request body`);
       return res.status(400).json({ error: 'Room ID is required' });
     }
 
@@ -1538,23 +1542,26 @@ app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
     );
 
     if (!user) {
-      console.warn(`⚠️ [API] Leave attempt by unknown Firebase UID: ${firebaseUid}`);
+      console.warn(`⚠️ [API][${requestId}] Unknown Firebase UID: ${firebaseUid}`);
       return res.status(404).json({ error: 'User record not found' });
     }
 
     const userId = user._id.toString();
-    console.log(`📡 [API] Manual leave request: ${user.username} (${userId}) -> Room: ${roomId}`);
+    console.log(`📡 [API][${requestId}] Authorized: ${user.username} (${userId})`);
 
     const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
 
+    console.log(`📡 [API][${requestId}] Result:`, result);
+
     if (result.success) {
-      res.json({ success: true, message: 'Successfully left room' });
+      return res.json({ success: true, message: 'Successfully left room' });
     } else {
-      res.status(500).json({ success: false, error: result.error });
+      console.error(`❌ [API][${requestId}] performUserLeaveChat reported failure:`, result.error);
+      return res.status(500).json({ success: false, error: result.error });
     }
   } catch (error) {
-    console.error('❌ [API] Leave chat error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error(`❌ [API][${requestId}] CRITICAL ROUTE ERROR:`, error.stack);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -2187,110 +2194,126 @@ async function handleCallLeaveInternal(userId, callId) {
  */
 async function performUserLeaveChat(userId, roomId, reason = 'manual', providedFirebaseUid = null) {
   const startTime = Date.now();
-  console.log(`🏁 [LeaveChat] START sequence for ${userId} (Room: ${roomId}, Reason: ${reason})`);
-
-  // Try to determine firebaseUid from provided arg OR from presence record
-  let firebaseUid = providedFirebaseUid;
-  if (!firebaseUid) {
-    const presence = await getUserPresence(userId);
-    firebaseUid = presence?.firebaseUid;
-    if (firebaseUid) console.log(`🔍 [LeaveChat] Resolved firebaseUid ${firebaseUid} from presence`);
-  }
-
-  const room = await matchmaking.getRoom(roomId);
-  if (!room) {
-    console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user markers`);
-    await clearUserActiveRoom(userId);
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
-    await removeUserPresence(userId);
-    await removeUserCall(userId);
-    // Also try matchmaking leave to clear legacy marker
-    await matchmaking.leaveRoom(userId);
-    return { success: true, alreadyGone: true };
-  }
-
-  // Check if user is in the room list
-  const roomUser = room.users.find(u => u.userId === userId);
-
-  if (!roomUser) {
-    console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing all markers`);
-    await clearUserActiveRoom(userId);
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
-    await removeUserPresence(userId);
-    await removeUserCall(userId);
-    await matchmaking.leaveRoom(userId);
-    return { success: true, alreadyLeft: true };
-  }
-
-  const userData = {
-    userId: roomUser.userId,
-    username: roomUser.username,
-    firebaseUid: roomUser.firebaseUid || firebaseUid,
-    pfpUrl: roomUser.pfpUrl
-  };
-
-  firebaseUid = userData.firebaseUid;
-  const username = userData.username || userId;
-
-  console.log(`🚪 [LeaveChat] ${username} identified. Proceeding with authoritative cleanup.`);
-
-  // Acquire user lock
-  const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
+  const sequenceId = uuidv4().substring(0, 8);
+  console.log(`🏁 [LeaveSequence][${sequenceId}] START: user=${userId}, room=${roomId}, reason=${reason}`);
 
   try {
-    console.log(`🏠 [LeaveChat][1/8] Removing from matchmaking...`);
-    const leaveResult = await matchmaking.leaveRoom(userId);
-
-    console.log(`🏠 [LeaveChat][2/8] Clearing Redis active room markers...`);
-    await clearUserActiveRoom(userId);
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
-
-    console.log(`📊 [LeaveChat][3/8] Removing from mood tracking...`);
-    await removeUserFromMood(userId, room.mood);
-
-    console.log(`📞 [LeaveChat][4/8] Cleaning up active calls...`);
-    const activeCallId = await getUserCall(userId);
-    if (activeCallId) {
-      await handleCallLeaveInternal(userId, activeCallId);
+    // 0. Resolve Identifiers
+    let firebaseUid = providedFirebaseUid;
+    if (!firebaseUid) {
+      const presence = await getUserPresence(userId);
+      firebaseUid = presence?.firebaseUid;
+      if (firebaseUid) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from presence`);
     }
 
-    console.log(`📡 [LeaveChat][5/8] Broadcasting user_left...`);
-    io.to(roomId).emit('user_left', {
-      userId,
-      username,
-      pfpUrl: userData?.pfpUrl,
-      remainingUsers: leaveResult?.remainingUsers || 0,
-      roomId
-    });
+    // 1. Get Room State
+    console.log(`🏠 [LeaveSequence][${sequenceId}][1/9] Fetching room ${roomId}...`);
+    const room = await matchmaking.getRoom(roomId);
 
-    console.log(`📱 [LeaveChat][6/8] Forcing socket room exit...`);
-    const socketIds = await getUserSocketIds(userId);
-    socketIds.forEach(sid => {
-      const s = io.sockets.sockets.get(sid);
-      if (s) s.leave(roomId);
-    });
+    if (!room) {
+      console.log(`ℹ️ [LeaveSequence][${sequenceId}][1/9] Room already gone. Cleaning markers for UID: ${firebaseUid} / ID: ${userId}`);
+      await clearUserActiveRoom(userId);
+      if (firebaseUid) await clearUserActiveRoom(firebaseUid);
+      await removeUserPresence(userId);
+      await removeUserCall(userId);
+      await matchmaking.leaveRoom(userId);
+      return { success: true, alreadyGone: true };
+    }
 
-    console.log(`📢 [LeaveChat][7/8] Notifying user devices...`);
-    if (firebaseUid) {
-      emitToUserAllDevices(firebaseUid, 'left_room', {
-        roomId,
-        success: true,
-        reason,
-        forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
+    // 2. Identify User in Room
+    const roomUser = room.users.find(u => u.userId === userId);
+    if (!roomUser) {
+      console.log(`ℹ️ [LeaveSequence][${sequenceId}][2/9] User not in room user list. Authoritative cleanup.`);
+      await clearUserActiveRoom(userId);
+      if (firebaseUid) await clearUserActiveRoom(firebaseUid);
+      await removeUserPresence(userId);
+      await removeUserCall(userId);
+      await matchmaking.leaveRoom(userId);
+      return { success: true, alreadyLeft: true };
+    }
+
+    const userData = {
+      userId: roomUser.userId,
+      username: roomUser.username,
+      firebaseUid: roomUser.firebaseUid || firebaseUid,
+      pfpUrl: roomUser.pfpUrl
+    };
+    firebaseUid = userData.firebaseUid;
+    const username = userData.username || userId;
+
+    // 3. Locking
+    console.log(`🔒 [LeaveSequence][${sequenceId}][3/9] Acquiring user lock...`);
+    const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
+
+    try {
+      // 4. Matchmaking Leave
+      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave...`);
+      const leaveResult = await matchmaking.leaveRoom(userId);
+      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave result:`, leaveResult);
+
+      // 5. Active Room Cleanup
+      console.log(`🏠 [LeaveSequence][${sequenceId}][5/9] Clearing markers...`);
+      await clearUserActiveRoom(userId);
+      if (firebaseUid) await clearUserActiveRoom(firebaseUid);
+
+      // 6. Mood & Call Cleanup
+      console.log(`📊 [LeaveSequence][${sequenceId}][6/9] Mood/Call cleanup...`);
+      await removeUserFromMood(userId, room.mood);
+      const activeCallId = await getUserCall(userId);
+      if (activeCallId) {
+        console.log(`📞 [LeaveSequence][${sequenceId}][6/9] User in call ${activeCallId}, leaving...`);
+        await handleCallLeaveInternal(userId, activeCallId);
+      }
+
+      // 7. Socket Broadcasting
+      console.log(`📡 [LeaveSequence][${sequenceId}][7/9] Broadcasting leave event...`);
+      io.to(roomId).emit('user_left', {
+        userId,
+        username,
+        pfpUrl: userData?.pfpUrl,
+        remainingUsers: leaveResult?.remainingUsers || 0,
+        roomId
       });
+
+      // 8. Socket Room Exit
+      console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Forcing socket room departure...`);
+      const socketIds = await getUserSocketIds(userId);
+      console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Found ${socketIds.length} sockets:`, socketIds);
+      socketIds.forEach(sid => {
+        const s = io.sockets.sockets.get(sid);
+        if (s) {
+          s.leave(roomId);
+          console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Socket ${sid} left room ${roomId}`);
+        }
+      });
+
+      // 9. Final Notifications
+      console.log(`📢 [LeaveSequence][${sequenceId}][9/9] Syncing other devices...`);
+      if (firebaseUid) {
+        emitToUserAllDevices(firebaseUid, 'left_room', {
+          roomId,
+          success: true,
+          reason,
+          forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
+        });
+      }
+
+      await removeUserPresence(userId);
+      console.log(`✅ [LeaveSequence][${sequenceId}] FINISHED in ${Date.now() - startTime}ms`);
+      return { success: true };
+
+    } catch (innerError) {
+      console.error(`❌ [LeaveSequence][${sequenceId}] INNER ERROR:`, innerError.stack);
+      return { success: false, error: innerError.message };
+    } finally {
+      if (typeof releaseLock === 'function') {
+        await releaseLock();
+        console.log(`🔓 [LeaveSequence][${sequenceId}] Lock released`);
+      }
     }
-
-    console.log(`👤 [LeaveChat][8/8] Finalizing presence cleanup...`);
-    await removeUserPresence(userId);
-
-    const duration = Date.now() - startTime;
-    console.log(`✅ [LeaveChat] Success for ${username} in ${duration}ms`);
-    return { success: true };
-  } catch (error) {
-    console.error(`❌ [LeaveChat] CRITICAL FAILURE for ${userId}:`, error);
-    return { success: false, error: error.message || 'Unknown error' };
-  } finally {
-    if (typeof releaseLock === 'function') await releaseLock();
+  } catch (outerError) {
+    console.error(`❌ [LeaveSequence][${sequenceId}] OUTER ERROR:`, outerError.stack);
+    return { success: false, error: outerError.message };
   }
 }
 
