@@ -680,11 +680,20 @@ async function handleUserCleanup(userId) {
   console.log(`🧹 [Cleanup] Handling user cleanup for ${userId}`);
 
   try {
-    // Remove user from mood tracking
+    // 1. Remove user from all mood tracking
     await removeUserFromAllMoods(userId);
 
-    // Clear active room
+    // 2. Clear active room markers (Try both userId and firebaseUid)
     await clearUserActiveRoom(userId);
+
+    // Attempt to find firebaseUid from presence for thorough cleanup
+    const presence = await getUserPresence(userId);
+    if (presence && presence.firebaseUid) {
+      await clearUserActiveRoom(presence.firebaseUid);
+    }
+
+    // 3. Clear presence record
+    await removeUserPresence(userId);
 
     console.log(`✅ [Cleanup] User ${userId} cleaned up`);
   } catch (error) {
@@ -768,15 +777,13 @@ async function setUserActiveRoom(userId, roomId, mood) {
 
 async function clearUserActiveRoom(userId) {
   try {
-    const activeRoom = await getUserActiveRoom(userId);
-    if (activeRoom) {
-      await pubClient.hdel('user:active_rooms', userId);
-      console.log(`🔓 [UID: ${userId}] Cleared active room: ${activeRoom.roomId}`);
-    }
-    return activeRoom;
+    // ALWAYS attempt delete in Redis to be safe
+    await pubClient.hdel('user:active_rooms', userId);
+    console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker`);
+    return true;
   } catch (error) {
     console.error(`❌ [Redis] Failed to clear active room for ${userId}:`, error.message);
-    return null;
+    return false;
   }
 }
 
@@ -1535,7 +1542,7 @@ app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
     const userId = user._id.toString();
     console.log(`📡 [API] Manual leave request: ${user.username} (${userId}) -> Room: ${roomId}`);
 
-    const result = await performUserLeaveChat(userId, roomId, 'manual');
+    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
 
     if (result.success) {
       res.json({ success: true, message: 'Successfully left room' });
@@ -2174,13 +2181,16 @@ async function handleCallLeaveInternal(userId, callId) {
  * Centralizes all cleanup logic for chat/call exits.
  * Replaces redundant logic in leave_room, leave_call, and disconnect.
  */
-async function performUserLeaveChat(userId, roomId, reason = 'manual') {
+async function performUserLeaveChat(userId, roomId, reason = 'manual', providedFirebaseUid = null) {
+  // Try to determine firebaseUid from provided arg OR from room data
+  let firebaseUid = providedFirebaseUid;
+
   const room = await matchmaking.getRoom(roomId);
   if (!room) {
     // If room is gone, just clear local state for user
     console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user ${userId}`);
-    await clearUserActiveRoom(userId); // Use userId as internal key
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid); // Also try firebaseUid just in case
+    await clearUserActiveRoom(userId);
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
     await removeUserPresence(userId);
     await removeUserCall(userId);
     return { success: true, alreadyGone: true };
@@ -2189,25 +2199,31 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
   // CRITICAL GUARD: Check if user is actually in the room BEFORE doing anything
   // This prevents duplicate user_left emissions when called from multiple sources
   const roomUser = room.users.find(u => u.userId === userId);
+
+  // If user not in room list, we still want to ensure Redis markers are cleared
   if (!roomUser) {
-    console.log(`ℹ️ [LeaveChat] User ${userId} already not in room ${roomId} - skipping duplicate leave`);
+    console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing markers anyway`);
+    await clearUserActiveRoom(userId);
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
+    await removeUserPresence(userId);
+    await removeUserCall(userId);
     return { success: true, alreadyLeft: true };
   }
 
-  // Get user data from room (guaranteed to exist since we just checked)
+  // Get user data from room
   const userData = {
     userId: roomUser.userId,
     username: roomUser.username,
-    firebaseUid: roomUser.firebaseUid,
+    firebaseUid: roomUser.firebaseUid || firebaseUid,
     pfpUrl: roomUser.pfpUrl
   };
 
-  const firebaseUid = userData.firebaseUid;
+  firebaseUid = userData.firebaseUid;
   const username = userData.username || userId;
 
   console.log(`🚪 [LeaveChat] ${username} leaving room ${roomId} (Reason: ${reason})`);
 
-  // Acquire user lock to prevent concurrent modifications (e.g., multiple device exits)
+  // Acquire user lock to prevent concurrent modifications
   const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
 
   try {
@@ -2240,7 +2256,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     });
 
     // 6. Force all user's sockets to leave the socket.io room
-    const socketIds = firebaseUid ? await getUserSocketIds(firebaseUid) : [];
+    const socketIds = await getUserSocketIds(userId);
     socketIds.forEach(sid => {
       const s = io.sockets.sockets.get(sid);
       if (s) s.leave(roomId);
@@ -2290,7 +2306,7 @@ setInterval(async () => {
         if (now - presence.lastSeen > HEARTBEAT_TIMEOUT) {
           const roomInfo = presence.roomId ? `in room ${presence.roomId}` : '(not in room)';
           console.log(`⏱️ [Presence] Heartbeat timeout for ${userId} ${roomInfo}`);
-          await performUserLeaveChat(userId, presence.roomId, 'heartbeat_timeout');
+          await performUserLeaveChat(userId, presence.roomId, 'heartbeat_timeout', presence.firebaseUid);
         }
       } catch (parseError) {
         console.error(`❌ Invalid presence data for ${userId}:`, parseError);
@@ -3078,6 +3094,7 @@ io.on('connection', (socket) => {
       // ✅ FIX: Mark presence immediately so matchmaking sees the user as online
       await updateUserPresence(mongoUserId, {
         status: 'online',
+        firebaseUid: firebaseUid,
         lastSeen: Date.now()
       });
 
@@ -5193,7 +5210,7 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const result = await performUserLeaveChat(userData.userId, activeRoom.roomId, 'manual');
+      const result = await performUserLeaveChat(userData.userId, activeRoom.roomId, 'manual', firebaseUid);
       callback?.(result);
     } catch (error) {
       console.error(`❌ [leave_room] Error:`, error);
