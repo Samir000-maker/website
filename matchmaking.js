@@ -159,17 +159,18 @@ export async function leaveRoom(userId) {
   const roomId = await getRoomIdByUser(userId);
   if (!roomId) return { roomId: null, remainingUsers: 0 };
 
+  // CRITICAL: Always delete the user-to-room mapping even if room data is gone
+  await redis.del(`user:room:${userId}`);
+
   const room = await getRoom(roomId);
   if (room) {
     room.users = room.users.filter(u => u.userId !== userId);
     await room.save();
-    await redis.del(`user:room:${userId}`);
-
-    // If room almost empty, start shorter TTL? 
-    // For now, let the initial 10min TTL stand.
-
+    console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${room.users.length}`);
     return { roomId, remainingUsers: room.users.length };
   }
+
+  console.log(`🏠 [Matchmaking] Legacy marker for ${userId} cleared (room ${roomId} was already gone)`);
   return { roomId, remainingUsers: 0 };
 }
 
