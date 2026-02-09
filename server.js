@@ -2251,6 +2251,8 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
         username,
         pfpUrl: userData?.pfpUrl,
         remainingUsers: leaveResult?.remainingUsers || 0,
+        destroyed: leaveResult?.destroyed || false,
+        users: leaveResult?.users || [], // Send full list for reliable UI update
         roomId
       });
 
@@ -5215,7 +5217,13 @@ io.on('connection', (socket) => {
       const firebaseUid = userData.firebaseUid;
       // Also check user:active_room marker for consistency
       const activeRoom = await getUserActiveRoom(firebaseUid);
-      const roomId = data?.roomId || activeRoom?.roomId;
+
+      // DEEP LOOKUP: If roomId is missing, try to find it from MMR mapping as last resort
+      let roomId = data?.roomId || activeRoom?.roomId;
+      if (!roomId) {
+        console.log(`🔍 [Socket][${sequenceId}] roomId missing, checking MMR mapping for ${userData.userId}`);
+        roomId = await matchmaking.getRoomIdByUser(userData.userId);
+      }
 
       if (!roomId) {
         console.warn(`⚠️ [Socket][${sequenceId}] Leave request missing room context`);
