@@ -68,7 +68,7 @@ class Room {
   async addMessage(message) {
     this.messages.push({ ...message, timestamp: Date.now() });
     if (this.messages.length > 200) this.messages = this.messages.slice(-100);
-    await this.save();
+    await saveRoomToRedis(this);
     await this.updateActivity();
   }
 
@@ -124,7 +124,7 @@ export async function addToQueue(userData) {
  */
 async function createRoomInternal(mood, users) {
   const room = new Room(mood, users);
-  await room.save();
+  await saveRoomToRedis(room);
 
   for (const user of users) {
     await redis.set(`user:room:${user.userId}`, room.id, 'EX', 3600);
@@ -165,7 +165,7 @@ export async function leaveRoom(userId) {
   const room = await getRoom(roomId);
   if (room) {
     room.users = room.users.filter(u => u.userId !== userId);
-    await room.save();
+    await saveRoomToRedis(room);
     console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${room.users.length}`);
     return { roomId, remainingUsers: room.users.length };
   }
