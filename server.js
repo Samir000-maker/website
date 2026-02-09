@@ -5319,7 +5319,8 @@ io.on('connection', (socket) => {
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
       // Use Redis TTL based cleanup instead of local setTimeout
-      await scheduleUserCleanup(userId, 500); // 500ms grace period
+      // Increased to 10 seconds to handle network jitter and page refreshes
+      await scheduleUserCleanup(userId, 10000);
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
