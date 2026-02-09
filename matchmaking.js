@@ -16,12 +16,20 @@ export function init(redisClient, ioInstance) {
   console.log('📡 [Matchmaking] Initialized with Redis and Socket.IO');
 }
 
-// Helper: Serialize/Deserialize Room
 async function saveRoomToRedis(roomData) {
   const data = { ...roomData };
+  const id = data.id;
+  console.log(`💾 [Redis] Saving room ${id}...`);
   if (data.users && typeof data.users !== 'string') data.users = JSON.stringify(data.users);
   if (data.messages && typeof data.messages !== 'string') data.messages = JSON.stringify(data.messages);
-  await redis.hset(`room:data:${data.id}`, data);
+
+  try {
+    const result = await redis.hset(`room:data:${id}`, data);
+    console.log(`💾 [Redis] Room ${id} saved. Result:`, result);
+  } catch (error) {
+    console.error(`❌ [Redis] Save failure for room ${id}:`, error.stack);
+    throw error;
+  }
 }
 
 async function getRoomFromRedis(roomId) {
@@ -156,15 +164,26 @@ export async function getRoomIdByUser(userId) {
 }
 
 export async function leaveRoom(userId) {
+  console.log(`🏠 [MMR] leaveRoom request for ${userId}`);
   const roomId = await getRoomIdByUser(userId);
-  if (!roomId) return { roomId: null, remainingUsers: 0 };
+  if (!roomId) {
+    console.log(`🏠 [MMR] No room mapping found for ${userId}`);
+    return { roomId: null, remainingUsers: 0 };
+  }
 
   // CRITICAL: Always delete the user-to-room mapping even if room data is gone
-  await redis.del(`user:room:${userId}`);
+  console.log(`🏠 [MMR] Deleting mapping user:room:${userId} (Room: ${roomId})`);
+  const delResult = await redis.del(`user:room:${userId}`);
+  console.log(`🏠 [MMR] Mapping delete result:`, delResult);
 
   const room = await getRoom(roomId);
   if (room) {
+    const initialCount = room.users.length;
     room.users = room.users.filter(u => u.userId !== userId);
+    const finalCount = room.users.length;
+
+    console.log(`🏠 [MMR] User filter: ${initialCount} -> ${finalCount} users`);
+
     await saveRoomToRedis(room);
     console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${room.users.length}`);
     return { roomId, remainingUsers: room.users.length };
