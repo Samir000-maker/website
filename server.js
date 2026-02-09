@@ -505,8 +505,9 @@ async function acquireCallMutex(callId) {
       }
     };
   } catch (error) {
-    console.error(`❌ [Redlock] Failed to acquire call lock for ${callId}:`, error);
-    throw new Error(`Could not acquire lock for call ${callId}`);
+    console.warn(`⚠️ [Redlock] Failed to acquire call lock for ${callId}:`, error.message);
+    // Return a No-Op function instead of throwing to avoid 500 errors on contention
+    return () => { };
   }
 }
 
@@ -556,8 +557,9 @@ async function acquireRoomInitLock(roomId) {
       }
     };
   } catch (error) {
-    console.error(`❌ [Redlock] Failed to acquire room init lock for ${roomId}:`, error);
-    throw new Error(`Could not acquire room init lock for ${roomId}`);
+    console.warn(`⚠️ [Redlock] Failed to acquire room init lock for ${roomId}:`, error.message);
+    // Return a No-Op function instead of throwing to avoid 500 errors on contention
+    return () => { };
   }
 }
 
@@ -2238,7 +2240,6 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
   try {
     console.log(`🏠 [LeaveChat][1/8] Removing from matchmaking...`);
     const leaveResult = await matchmaking.leaveRoom(userId);
-    const remainingUsers = leaveResult.remainingUsers;
 
     console.log(`🏠 [LeaveChat][2/8] Clearing Redis active room markers...`);
     await clearUserActiveRoom(userId);
