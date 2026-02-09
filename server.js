@@ -402,6 +402,7 @@ async function setupRedisExpiryNotifications() {
 
 // Initialize expiry notifications
 const joinCallDebounce = new Map(); // Global debounce for joining calls
+const roomFileStore = new Map(); // Global storage for chunked file uploads
 
 // Initialize expiry notifications
 let expiryClient;
