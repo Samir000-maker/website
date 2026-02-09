@@ -401,6 +401,9 @@ async function setupRedisExpiryNotifications() {
 }
 
 // Initialize expiry notifications
+const joinCallDebounce = new Map(); // Global debounce for joining calls
+
+// Initialize expiry notifications
 let expiryClient;
 setupRedisExpiryNotifications()
   .then(client => {
@@ -500,7 +503,11 @@ async function acquireCallMutex(callId) {
 
     return async () => {
       try {
-        await lock.release();
+        if (typeof lock.release === 'function') {
+          await lock.release();
+        } else if (typeof lock.unlock === 'function') {
+          await lock.unlock();
+        }
         console.log(`🔓 [Redlock] Released call lock for ${callId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] Lock release failed for ${callId}:`, error.message);
