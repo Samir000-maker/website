@@ -1301,55 +1301,6 @@ matchmaking.init(pubClient, io);
 app.use(cors());
 app.use(express.json());
 
-// GLOBAL ERROR HANDLER (EARLY ATTACH)
-app.use((err, req, res, next) => {
-  if (err) {
-    console.error('💥 [Global Error Handler] UNCAUGHT ERROR:', err.stack || err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Global server error', details: err.message });
-    }
-  } else {
-    next();
-  }
-});
-
-// ISOLATED LEAVE-CHAT ROUTE (MOVED UP)
-app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
-  const requestId = uuidv4().substring(0, 8);
-  console.log(`[API-DEBUG][${requestId}] START /api/leave-chat`);
-  try {
-    const { roomId } = req.body;
-    const firebaseUid = req.firebaseUser?.uid;
-    console.log(`[API-DEBUG][${requestId}] Resolved UID: ${firebaseUid}, Room: ${roomId}`);
-
-    if (!firebaseUid) {
-      console.error(`❌ [API-DEBUG][${requestId}] No UID in request!`);
-      return res.status(401).json({ error: 'Auth context missing' });
-    }
-
-    const db = getDB();
-    const user = await db.collection('users').findOne(
-      { firebaseUid },
-      { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
-    );
-
-    if (!user) {
-      console.warn(`⚠️ [API-DEBUG][${requestId}] User not found for UID: ${firebaseUid}`);
-      return res.status(404).json({ error: 'User record not found' });
-    }
-
-    const userId = user._id.toString();
-    console.log(`[API-DEBUG][${requestId}] Authorized: ${user.username} (${userId})`);
-
-    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
-    console.log(`[API-DEBUG][${requestId}] Result:`, result);
-    return res.json(result);
-  } catch (error) {
-    console.error(`❌ [API-DEBUG][${requestId}] ERROR:`, error.stack);
-    return res.status(500).json({ error: error.message });
-  }
-});
-
 app.use(express.static(__dirname));
 
 const upload = multer({
@@ -5251,24 +5202,34 @@ io.on('connection', (socket) => {
 
 
   socket.on('leave_room', async (data, callback) => {
-    const userData = await getSocketUser(socket.id);
-    if (!userData) {
-      return callback?.({ success: false, error: 'Not authenticated' });
-    }
-
-    const firebaseUid = userData.firebaseUid;
-    const activeRoom = await getUserActiveRoom(firebaseUid);
-
-    if (!activeRoom) {
-      return callback?.({ success: true, message: 'No active room' });
-    }
+    const sequenceId = uuidv4().substring(0, 8);
+    console.log(`👋 [Socket][${sequenceId}] 'leave_room' event received from ${socket.id}`);
 
     try {
-      const result = await performUserLeaveChat(userData.userId, activeRoom.roomId, 'manual', firebaseUid);
+      const userData = await getSocketUser(socket.id);
+      if (!userData) {
+        console.warn(`⚠️ [Socket][${sequenceId}] Unauthorized leave attempt`);
+        return callback?.({ success: false, error: 'Not authenticated' });
+      }
+
+      const firebaseUid = userData.firebaseUid;
+      // Also check user:active_room marker for consistency
+      const activeRoom = await getUserActiveRoom(firebaseUid);
+      const roomId = data?.roomId || activeRoom?.roomId;
+
+      if (!roomId) {
+        console.warn(`⚠️ [Socket][${sequenceId}] Leave request missing room context`);
+        return callback?.({ success: true, message: 'No active room found to leave' });
+      }
+
+      console.log(`👋 [Socket][${sequenceId}] User ${userData.username} leaving room ${roomId}`);
+      const result = await performUserLeaveChat(userData.userId, roomId, 'manual', firebaseUid);
+
+      console.log(`✅ [Socket][${sequenceId}] Leave result:`, result.success);
       callback?.(result);
     } catch (error) {
-      console.error(`❌ [leave_room] Error:`, error);
-      callback?.({ success: false, error: error.message });
+      console.error(`❌ [Socket][${sequenceId}] Error in leave_room handler:`, error.stack);
+      callback?.({ success: false, error: 'Internal server error during leave' });
     }
   });
 
