@@ -530,8 +530,9 @@ async function acquireUserLock(userId) {
       }
     };
   } catch (error) {
-    console.error(`❌ [Redlock] Failed to acquire user lock for ${userId}:`, error);
-    throw new Error(`Could not acquire lock for user ${userId}`);
+    console.warn(`⚠️ [Redlock] Failed to acquire user lock for ${userId}:`, error.message);
+    // Return a No-Op function instead of throwing to avoid 500 errors on concurrent leave attempts
+    return () => { };
   }
 }
 
@@ -2116,6 +2117,7 @@ app.get('/api/moods', (req, res) => {
  * Handles removing a user from a call and triggering grace period cleanup.
  */
 async function handleCallLeaveInternal(userId, callId) {
+  console.log(`📞 [CallCleanup] Triggering leave for user ${userId} from call ${callId}`);
   try {
     const releaseCallLock = await acquireCallMutex(callId);
     try {
@@ -2182,35 +2184,42 @@ async function handleCallLeaveInternal(userId, callId) {
  * Replaces redundant logic in leave_room, leave_call, and disconnect.
  */
 async function performUserLeaveChat(userId, roomId, reason = 'manual', providedFirebaseUid = null) {
-  // Try to determine firebaseUid from provided arg OR from room data
+  const startTime = Date.now();
+  console.log(`🏁 [LeaveChat] START sequence for ${userId} (Room: ${roomId}, Reason: ${reason})`);
+
+  // Try to determine firebaseUid from provided arg OR from presence record
   let firebaseUid = providedFirebaseUid;
+  if (!firebaseUid) {
+    const presence = await getUserPresence(userId);
+    firebaseUid = presence?.firebaseUid;
+    if (firebaseUid) console.log(`🔍 [LeaveChat] Resolved firebaseUid ${firebaseUid} from presence`);
+  }
 
   const room = await matchmaking.getRoom(roomId);
   if (!room) {
-    // If room is gone, just clear local state for user
-    console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user ${userId}`);
+    console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user markers`);
     await clearUserActiveRoom(userId);
     if (firebaseUid) await clearUserActiveRoom(firebaseUid);
     await removeUserPresence(userId);
     await removeUserCall(userId);
+    // Also try matchmaking leave to clear legacy marker
+    await matchmaking.leaveRoom(userId);
     return { success: true, alreadyGone: true };
   }
 
-  // CRITICAL GUARD: Check if user is actually in the room BEFORE doing anything
-  // This prevents duplicate user_left emissions when called from multiple sources
+  // Check if user is in the room list
   const roomUser = room.users.find(u => u.userId === userId);
 
-  // If user not in room list, we still want to ensure Redis markers are cleared
   if (!roomUser) {
-    console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing markers anyway`);
+    console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing all markers`);
     await clearUserActiveRoom(userId);
     if (firebaseUid) await clearUserActiveRoom(firebaseUid);
     await removeUserPresence(userId);
     await removeUserCall(userId);
+    await matchmaking.leaveRoom(userId);
     return { success: true, alreadyLeft: true };
   }
 
-  // Get user data from room
   const userData = {
     userId: roomUser.userId,
     username: roomUser.username,
@@ -2221,48 +2230,46 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
   firebaseUid = userData.firebaseUid;
   const username = userData.username || userId;
 
-  console.log(`🚪 [LeaveChat] ${username} leaving room ${roomId} (Reason: ${reason})`);
+  console.log(`🚪 [LeaveChat] ${username} identified. Proceeding with authoritative cleanup.`);
 
-  // Acquire user lock to prevent concurrent modifications
+  // Acquire user lock
   const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
 
   try {
-    // 1. Remove from matchmaking room (Authoritative Sync)
+    console.log(`🏠 [LeaveChat][1/8] Removing from matchmaking...`);
     const leaveResult = await matchmaking.leaveRoom(userId);
     const remainingUsers = leaveResult.remainingUsers;
 
-    console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}.`);
+    console.log(`🏠 [LeaveChat][2/8] Clearing Redis active room markers...`);
+    await clearUserActiveRoom(userId);
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
 
-    // 2. Clear active room state for user records
-    await clearUserActiveRoom(userId); // Use userId as internal key
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid); // Also try firebaseUid
-
-    // 3. Remove from global mood tracking
+    console.log(`📊 [LeaveChat][3/8] Removing from mood tracking...`);
     await removeUserFromMood(userId, room.mood);
 
-    // 4. Cleanup any active calls the user is in
+    console.log(`📞 [LeaveChat][4/8] Cleaning up active calls...`);
     const activeCallId = await getUserCall(userId);
     if (activeCallId) {
       await handleCallLeaveInternal(userId, activeCallId);
     }
 
-    // 5. Broadcast user_left to all users in the room
+    console.log(`📡 [LeaveChat][5/8] Broadcasting user_left...`);
     io.to(roomId).emit('user_left', {
       userId,
       username,
       pfpUrl: userData?.pfpUrl,
-      remainingUsers: room.users.length,
+      remainingUsers: leaveResult?.remainingUsers || 0,
       roomId
     });
 
-    // 6. Force all user's sockets to leave the socket.io room
+    console.log(`📱 [LeaveChat][6/8] Forcing socket room exit...`);
     const socketIds = await getUserSocketIds(userId);
     socketIds.forEach(sid => {
       const s = io.sockets.sockets.get(sid);
       if (s) s.leave(roomId);
     });
 
-    // 7. Notify all user's devices about the exit (for UI redirection)
+    console.log(`📢 [LeaveChat][7/8] Notifying user devices...`);
     if (firebaseUid) {
       emitToUserAllDevices(firebaseUid, 'left_room', {
         roomId,
@@ -2272,16 +2279,17 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
       });
     }
 
-    // 8. Clear presence record
+    console.log(`👤 [LeaveChat][8/8] Finalizing presence cleanup...`);
     await removeUserPresence(userId);
 
-    console.log(`✅ [LeaveChat] ${username} successfully cleared from room ${roomId}`);
+    const duration = Date.now() - startTime;
+    console.log(`✅ [LeaveChat] Success for ${username} in ${duration}ms`);
     return { success: true };
   } catch (error) {
-    console.error(`❌ [LeaveChat] Critical failure for ${userId}:`, error);
-    return { success: false, error: error.message };
+    console.error(`❌ [LeaveChat] CRITICAL FAILURE for ${userId}:`, error);
+    return { success: false, error: error.message || 'Unknown error' };
   } finally {
-    releaseLock();
+    if (typeof releaseLock === 'function') await releaseLock();
   }
 }
 
