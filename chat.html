@@ -5550,32 +5550,40 @@
         });
 
         socketInstance.on('user_left', (data) => {
-          console.log(`👤 User left: ${data.username} (${data.userId})`);
+          const sequenceId = Math.random().toString(36).substring(2, 6).toUpperCase();
+          console.log(`👤 [${sequenceId}] User left: ${data.username} (${data.userId}). Remaining: ${data.remainingUsers}`);
 
+          // 1. Show message
           const msgEl = document.createElement('div');
           msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
           msgEl.textContent = `${data.username || 'A user'} left the room`;
           messagesList?.appendChild(msgEl);
+          if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
 
-          // Update online count
+          // 2. Authoritative User List Update (mirroring user_joined)
+          if (data.users && Array.isArray(data.users)) {
+            console.log(`👥 [${sequenceId}] Updating sidebar with ${data.users.length} users`);
+            renderUserList(data.users);
+          } else {
+            // Fallback for older server versions/single element remove
+            const userEl = document.getElementById(`user-${data.userId}`);
+            if (userEl) {
+              userEl.style.opacity = '0';
+              setTimeout(() => userEl.remove(), 300);
+            }
+          }
+
+          // 3. Update online count UI
           if (onlineCount && data.remainingUsers !== undefined) {
-            console.log(`👥 Online count updated: ${data.remainingUsers}`);
             onlineCount.textContent = `${data.remainingUsers} Online`;
           }
 
-          // Remove user from sidebar list
-          const userEl = document.getElementById(`user-${data.userId}`);
-          if (userEl) {
-            userEl.style.opacity = '0';
-            userEl.style.transform = 'translateX(-10px)';
-            setTimeout(() => userEl.remove(), 300);
-            console.log(`✅ Removed user element for ${data.userId}`);
-          } else {
-            console.warn(`⚠️ Could not find user element for ${data.userId} to remove`);
-          }
+          // 4. Room Destruction Logic
+          // Trigger exit if server says destroyed OR users drop below 2
+          if (data.destroyed || data.remainingUsers < 2) {
+            console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
 
-          if (data.remainingUsers <= 1) {
-            // CRITICAL: Check if we are in an active call before exiting
+            // Partner left room - check call status
             const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
             let isInActiveCall = false;
             if (activeCallStr) {
@@ -5588,9 +5596,10 @@
             }
 
             if (isInActiveCall) {
-              console.log('🛡️ Partner left room but call is active — PRESERVING UI');
+              console.log(`🛡️ [${sequenceId}] Partner left room but call is active — PRESERVING UI`);
               toast('Partner left chat, but call remains active', 'warning');
             } else {
+              console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
               toast('Room closing...', 'warning');
               exitRoomSequence().catch(console.error);
             }
