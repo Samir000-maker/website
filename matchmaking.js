@@ -17,15 +17,26 @@ export function init(redisClient, ioInstance) {
 }
 
 async function saveRoomToRedis(roomData) {
+  // Create a shallow copy to avoid mutating the original object during serialization
   const data = { ...roomData };
   const id = data.id;
-  console.log(`💾 [Redis] Saving room ${id}...`);
+
+  // Serialize complex arrays/objects for Redis HSET
   if (data.users && typeof data.users !== 'string') data.users = JSON.stringify(data.users);
   if (data.messages && typeof data.messages !== 'string') data.messages = JSON.stringify(data.messages);
 
+  // Ensure dates are numbers
+  if (data.createdAt instanceof Date) data.createdAt = data.createdAt.getTime();
+  if (data.lastActivity instanceof Date) data.lastActivity = data.lastActivity.getTime();
+  if (data.expiresAt instanceof Date) data.expiresAt = data.expiresAt.getTime();
+
   try {
-    const result = await redis.hset(`room:data:${id}`, data);
-    console.log(`💾 [Redis] Room ${id} saved. Result:`, result);
+    await redis.hset(`room:data:${id}`, data);
+    // Set Redis key expiry to match room expiry (plus safety buffer)
+    if (data.expiresAt) {
+      const ttl = Math.floor((data.expiresAt - Date.now()) / 1000) + 300; // +5 mins
+      if (ttl > 0) await redis.expire(`room:data:${id}`, ttl);
+    }
   } catch (error) {
     console.error(`❌ [Redis] Save failure for room ${id}:`, error.stack);
     throw error;
