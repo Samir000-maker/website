@@ -810,7 +810,7 @@ async function validateMoodSelection(userId) {
 
   try {
     // Check if user already in active room
-    const activeRoom = getUserActiveRoom(userId);
+    const activeRoom = await getUserActiveRoom(userId);
 
     if (activeRoom) {
       // Verify room still exists and is valid
@@ -2178,6 +2178,9 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
   const room = await matchmaking.getRoom(roomId);
   if (!room) {
     // If room is gone, just clear local state for user
+    console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user ${userId}`);
+    await clearUserActiveRoom(userId); // Use userId as internal key
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid); // Also try firebaseUid just in case
     await removeUserPresence(userId);
     await removeUserCall(userId);
     return { success: true, alreadyGone: true };
@@ -2215,7 +2218,8 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}.`);
 
     // 2. Clear active room state for user records
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
+    await clearUserActiveRoom(userId); // Use userId as internal key
+    if (firebaseUid) await clearUserActiveRoom(firebaseUid); // Also try firebaseUid
 
     // 3. Remove from global mood tracking
     await removeUserFromMood(userId, room.mood);
@@ -2236,7 +2240,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual') {
     });
 
     // 6. Force all user's sockets to leave the socket.io room
-    const socketIds = firebaseUid ? getUserSocketIds(firebaseUid) : [];
+    const socketIds = firebaseUid ? await getUserSocketIds(firebaseUid) : [];
     socketIds.forEach(sid => {
       const s = io.sockets.sockets.get(sid);
       if (s) s.leave(roomId);
@@ -2440,7 +2444,7 @@ io.on('connection', (socket) => {
             console.error(`❌ [UID: ${firebaseUid}] Room restoration failed: ${restoration.error}`);
 
             // Clear failed state and allow re-entry
-            clearUserActiveRoom(firebaseUid);
+            await clearUserActiveRoom(firebaseUid);
             // Check for active call before leaving matchmaking room
             const activeCallState = await findActiveCallForRoom(existingRoom.roomId);
             const hasActiveCall = !!activeCallState;
@@ -2465,7 +2469,7 @@ io.on('connection', (socket) => {
       if (matchResult) {
         const room = matchResult;
 
-        setUserActiveRoom(firebaseUid, room.id, mood);
+        await setUserActiveRoom(firebaseUid, room.id, mood);
         socket.join(room.id);
 
         if (room) {
@@ -2554,7 +2558,7 @@ io.on('connection', (socket) => {
     }
 
     const userId = currentUser.userId;
-    const activeRoom = getUserActiveRoom(userId);
+    const activeRoom = await getUserActiveRoom(userId);
 
     if (!activeRoom) {
       return callback?.({ success: false, error: 'No active room to restore' });
@@ -3324,9 +3328,9 @@ io.on('connection', (socket) => {
 
             // ✅ CRITICAL FIX: Track active room for disconnect handler
             if (roomUser.firebaseUid) {
-              setUserActiveRoom(roomUser.firebaseUid, room.id, room.mood);
+              await setUserActiveRoom(roomUser.firebaseUid, room.id, room.mood);
             } else {
-              setUserActiveRoom(roomUser.userId, room.id, room.mood);
+              await setUserActiveRoom(roomUser.userId, room.id, room.mood);
             }
 
             // ✅ Keep user in mood count when moved to room
@@ -3453,7 +3457,7 @@ io.on('connection', (socket) => {
         console.warn(`⚠️ User ${user.username} (${user.userId}) not in room ${roomId} - attempting to re-add`);
 
         // Check if user was recently in this room (grace period reconnection)
-        const activeRoom = firebaseUid ? getUserActiveRoom(firebaseUid) : null;
+        const activeRoom = firebaseUid ? await getUserActiveRoom(firebaseUid) : null;
 
         if (activeRoom && activeRoom.roomId === roomId) {
           // User is reconnecting to their active room - re-add them
@@ -5182,7 +5186,7 @@ io.on('connection', (socket) => {
     }
 
     const firebaseUid = userData.firebaseUid;
-    const activeRoom = getUserActiveRoom(firebaseUid);
+    const activeRoom = await getUserActiveRoom(firebaseUid);
 
     if (!activeRoom) {
       return callback?.({ success: true, message: 'No active room' });
