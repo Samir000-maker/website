@@ -101,6 +101,9 @@ export async function verifyToken(idToken) {
 export async function authenticateFirebase(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
+    if (req.originalUrl === '/api/leave-chat') {
+      console.log(`🔐 [Auth-Debug] Authenticating /api/leave-chat. Auth: ${authHeader ? 'Present' : 'Missing'}`);
+    }
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
