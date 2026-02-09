@@ -796,8 +796,8 @@ async function setUserActiveRoom(userId, roomId, mood) {
 async function clearUserActiveRoom(userId) {
   try {
     // ALWAYS attempt delete in Redis to be safe
-    await pubClient.hdel('user:active_rooms', userId);
-    console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker`);
+    const result = await pubClient.hdel('user:active_rooms', userId);
+    console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker. Deleted: ${result}`);
     return true;
   } catch (error) {
     console.error(`❌ [Redis] Failed to clear active room for ${userId}:`, error.message);
@@ -2188,7 +2188,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
     let resolvedRoomId = roomId;
 
     if (!firebaseUid || !resolvedRoomId) {
-      console.log(`🔍 [LeaveSequence][${sequenceId}] Resolving missing data...`);
+      console.log(`🔍 [LeaveSequence][${sequenceId}] Resolving missing data... (Provided UID: ${firebaseUid}, Room: ${resolvedRoomId})`);
       const presence = await getUserPresence(userId);
       if (!firebaseUid) firebaseUid = presence?.firebaseUid;
       if (!resolvedRoomId) resolvedRoomId = presence?.roomId;
@@ -5268,11 +5268,11 @@ io.on('connection', (socket) => {
       }
 
       if (!roomId) {
-        console.warn(`⚠️ [Socket][${sequenceId}] Leave request missing room context`);
+        console.warn(`⚠️ [Socket][${sequenceId}] Leave request missing room context (Active: ${activeRoom?.roomId})`);
         return callback?.({ success: true, message: 'No active room found to leave' });
       }
 
-      console.log(`👋 [Socket][${sequenceId}] User ${userData.username} leaving room ${roomId}`);
+      console.log(`👋 [Socket][${sequenceId}] User ${userData.username} (UID: ${firebaseUid}) leaving room ${roomId}`);
       const result = await performUserLeaveChat(userData.userId, roomId, 'manual', firebaseUid);
 
       console.log(`✅ [Socket][${sequenceId}] Leave result:`, result.success);
