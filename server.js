@@ -2204,6 +2204,11 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
           if (!resolvedRoomId) {
             resolvedRoomId = await matchmaking.getRoomIdByUser(userId);
           }
+          if (!resolvedRoomId) {
+            // Final fallback: Check user:active_rooms hash
+            const activeRoom = await getUserActiveRoom(userId);
+            resolvedRoomId = activeRoom?.roomId;
+          }
         } catch (e) {
           console.error(`❌ [LeaveSequence][${sequenceId}] Deep lookup failed:`, e.message);
         }
@@ -2531,6 +2536,11 @@ io.on('connection', (socket) => {
         // Set active room markers (Redundant for both ID formats for cluster resilience)
         await setUserActiveRoom(firebaseUid, room.id, mood);
         await setUserActiveRoom(userId, room.id, mood);
+
+        // CRITICAL: Seed presence immediately so we don't wait for first heartbeat
+        // This closes the race condition window where mood.html heartbeat could wipe state
+        await updateUserPresence(userId, { roomId: room.id, status: 'chat_active' });
+
         socket.join(room.id);
 
         if (room) {
