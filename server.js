@@ -697,7 +697,10 @@ async function handleUserCleanup(userId) {
       await clearUserActiveRoom(presence.firebaseUid);
     }
 
-    // 3. Clear presence record
+    // 3. Clear presence record & matchmaking mapping
+    // CRITICAL: Must call leaveRoom to clear user:room:{userId} mapping!
+    // This prevents "zombie" restoration in auth logic upon reconnection
+    await matchmaking.leaveRoom(userId);
     await removeUserPresence(userId);
 
     console.log(`✅ [Cleanup] User ${userId} cleaned up`);
@@ -2964,7 +2967,7 @@ io.on('connection', (socket) => {
         expiresAt: room.expiresAt,
         timerStartedAt: room.timerStartedAt,
         serverTime: Date.now(), // CRITICAL: Current server time for clock sync
-        timeRemaining: room.getTimeUntilExpiration()
+        timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
       };
 
       console.log(`📤 Sending room sync to ${user.username}:`);
@@ -3204,7 +3207,7 @@ io.on('connection', (socket) => {
           socket.emit('room_reconnected', {
             roomId: room.id,
             expiresAt: room.expiresAt,
-            timeRemaining: room.getTimeUntilExpiration()
+            timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
           });
 
           // Notify other users in room
@@ -3498,8 +3501,6 @@ io.on('connection', (socket) => {
       }
 
       const joinKey = `${user.userId}:${roomId}`;
-
-      // CRITICAL FIX: Idempotency check
       const existingJoin = roomJoinState.get(joinKey);
       if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
         console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
@@ -5334,6 +5335,7 @@ io.on('connection', (socket) => {
 
 
 const fileChunkRateLimiter = new Map(); // userId -> { count, resetTime }
+const roomJoinState = new Map(); // userId:roomId -> { timestamp }
 const CHUNK_RATE_LIMIT = 100; // Max chunks per 10 seconds
 const RATE_WINDOW = 10000; // 10 seconds
 
