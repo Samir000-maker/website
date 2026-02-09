@@ -72,6 +72,15 @@ async function getRoomFromRedis(roomId) {
     if (data.createdAt) data.createdAt = parseInt(data.createdAt);
     if (data.lastActivity) data.lastActivity = parseInt(data.lastActivity);
     if (data.expiresAt) data.expiresAt = parseInt(data.expiresAt);
+    if (data.timerStartedAt) data.timerStartedAt = parseInt(data.timerStartedAt);
+    if (data.maxUsers) data.maxUsers = parseInt(data.maxUsers); // Ensure maxUsers is a number
+
+    // Parse Booleans
+    if (data.isExpired) data.isExpired = (data.isExpired === 'true');
+    else data.isExpired = false; // Default to false if missing
+
+    if (data.hasActiveCall) data.hasActiveCall = (data.hasActiveCall === 'true');
+    else data.hasActiveCall = false;
 
     // Ensure arrays exist
     if (!data.users) data.users = [];
