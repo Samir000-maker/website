@@ -1529,10 +1529,24 @@ app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-    const user = await db.collection('users').findOne(
-      { firebaseUid },
-      { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
-    );
+    
+    // Database lookup with timeout handling
+    let user;
+    try {
+      user = await db.collection('users').findOne(
+        { firebaseUid },
+        { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
+      );
+    } catch (dbError) {
+      if (dbError.code === 50) { // MongoDB timeout
+        console.error('❌ [API] Database timeout in leave-chat');
+        return res.status(503).json({ 
+          error: 'Database temporarily slow',
+          retryable: true 
+        });
+      }
+      throw dbError;
+    }
 
     if (!user) {
       console.warn(`⚠️ [API] Leave attempt by unknown Firebase UID: ${firebaseUid}`);
@@ -1542,16 +1556,29 @@ app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
     const userId = user._id.toString();
     console.log(`📡 [API] Manual leave request: ${user.username} (${userId}) -> Room: ${roomId}`);
 
-    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
+    // Add 10-second timeout to the entire operation
+    const result = await Promise.race([
+      performUserLeaveChat(userId, roomId, 'manual', firebaseUid),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Leave operation timeout')), 10000)
+      )
+    ]);
 
     if (result.success) {
       res.json({ success: true, message: 'Successfully left room' });
     } else {
+      console.error('❌ [API] Leave operation failed:', result.error);
       res.status(500).json({ success: false, error: result.error });
     }
+    
   } catch (error) {
-    console.error('❌ [API] Leave chat error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ [API] Leave chat error:', error.message);
+    console.error('Stack trace:', error.stack);
+    
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Failed to leave room'
+    });
   }
 });
 
@@ -2182,107 +2209,178 @@ async function handleCallLeaveInternal(userId, callId) {
  * Replaces redundant logic in leave_room, leave_call, and disconnect.
  */
 async function performUserLeaveChat(userId, roomId, reason = 'manual', providedFirebaseUid = null) {
-  // Try to determine firebaseUid from provided arg OR from room data
   let firebaseUid = providedFirebaseUid;
-
-  const room = await matchmaking.getRoom(roomId);
-  if (!room) {
-    // If room is gone, just clear local state for user
-    console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user ${userId}`);
-    await clearUserActiveRoom(userId);
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
-    await removeUserPresence(userId);
-    await removeUserCall(userId);
-    return { success: true, alreadyGone: true };
-  }
-
-  // CRITICAL GUARD: Check if user is actually in the room BEFORE doing anything
-  // This prevents duplicate user_left emissions when called from multiple sources
-  const roomUser = room.users.find(u => u.userId === userId);
-
-  // If user not in room list, we still want to ensure Redis markers are cleared
-  if (!roomUser) {
-    console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing markers anyway`);
-    await clearUserActiveRoom(userId);
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid);
-    await removeUserPresence(userId);
-    await removeUserCall(userId);
-    return { success: true, alreadyLeft: true };
-  }
-
-  // Get user data from room
-  const userData = {
-    userId: roomUser.userId,
-    username: roomUser.username,
-    firebaseUid: roomUser.firebaseUid || firebaseUid,
-    pfpUrl: roomUser.pfpUrl
-  };
-
-  firebaseUid = userData.firebaseUid;
-  const username = userData.username || userId;
-
-  console.log(`🚪 [LeaveChat] ${username} leaving room ${roomId} (Reason: ${reason})`);
-
-  // Acquire user lock to prevent concurrent modifications
-  const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
+  let releaseLock = () => {}; // Default no-op
 
   try {
-    // 1. Remove from matchmaking room (Authoritative Sync)
-    const leaveResult = await matchmaking.leaveRoom(userId);
-    const remainingUsers = leaveResult.remainingUsers;
-
-    console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}.`);
-
-    // 2. Clear active room state for user records
-    await clearUserActiveRoom(userId); // Use userId as internal key
-    if (firebaseUid) await clearUserActiveRoom(firebaseUid); // Also try firebaseUid
-
-    // 3. Remove from global mood tracking
-    await removeUserFromMood(userId, room.mood);
-
-    // 4. Cleanup any active calls the user is in
-    const activeCallId = await getUserCall(userId);
-    if (activeCallId) {
-      await handleCallLeaveInternal(userId, activeCallId);
+    const room = await matchmaking.getRoom(roomId);
+    
+    if (!room) {
+      console.log(`ℹ️ [LeaveChat] Room ${roomId} already gone - cleaning up user ${userId}`);
+      await safeRedisCleanup(userId, firebaseUid);
+      return { success: true, alreadyGone: true };
     }
 
-    // 5. Broadcast user_left to all users in the room
-    io.to(roomId).emit('user_left', {
-      userId,
-      username,
-      pfpUrl: userData?.pfpUrl,
-      remainingUsers: room.users.length,
-      roomId
-    });
+    const roomUser = room.users.find(u => u.userId === userId);
 
-    // 6. Force all user's sockets to leave the socket.io room
-    const socketIds = await getUserSocketIds(userId);
-    socketIds.forEach(sid => {
-      const s = io.sockets.sockets.get(sid);
-      if (s) s.leave(roomId);
-    });
+    if (!roomUser) {
+      console.log(`ℹ️ [LeaveChat] User ${userId} not in room ${roomId} list - clearing markers anyway`);
+      await safeRedisCleanup(userId, firebaseUid);
+      return { success: true, alreadyLeft: true };
+    }
 
-    // 7. Notify all user's devices about the exit (for UI redirection)
+    const userData = {
+      userId: roomUser.userId,
+      username: roomUser.username,
+      firebaseUid: roomUser.firebaseUid || firebaseUid,
+      pfpUrl: roomUser.pfpUrl
+    };
+
+    firebaseUid = userData.firebaseUid;
+    const username = userData.username || userId;
+
+    console.log(`🚪 [LeaveChat] ${username} leaving room ${roomId} (Reason: ${reason})`);
+
+    // ✅ FIX: Wrap lock acquisition in try-catch BEFORE the main try block
     if (firebaseUid) {
-      emitToUserAllDevices(firebaseUid, 'left_room', {
-        roomId,
-        success: true,
-        reason,
-        forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
-      });
+      try {
+        releaseLock = await Promise.race([
+          acquireUserLock(firebaseUid),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Lock acquisition timeout')), 5000)
+          )
+        ]);
+        console.log(`🔒 Lock acquired for ${firebaseUid}`);
+      } catch (lockError) {
+        console.error(`⚠️ [LeaveChat] Failed to acquire lock for ${firebaseUid}: ${lockError.message}`);
+        console.log(`⚠️ [LeaveChat] Proceeding without lock (degraded mode)`);
+        // Continue without lock - better to cleanup without lock than fail completely
+      }
     }
 
-    // 8. Clear presence record
-    await removeUserPresence(userId);
+    // Main cleanup logic with comprehensive error handling
+    try {
+      // 1. Remove from matchmaking room
+      let remainingUsers = 0;
+      try {
+        const leaveResult = await matchmaking.leaveRoom(userId);
+        remainingUsers = leaveResult.remainingUsers;
+        console.log(`🏠 [Matchmaking] User ${username} removed. Remaining: ${remainingUsers}`);
+      } catch (matchmakingError) {
+        console.error(`⚠️ [LeaveChat] Matchmaking leave failed: ${matchmakingError.message}`);
+        // Continue with cleanup even if matchmaking fails
+      }
 
-    console.log(`✅ [LeaveChat] ${username} successfully cleared from room ${roomId}`);
-    return { success: true };
-  } catch (error) {
-    console.error(`❌ [LeaveChat] Critical failure for ${userId}:`, error);
-    return { success: false, error: error.message };
+      // 2. Clear active room state
+      await safeRedisCleanup(userId, firebaseUid);
+
+      // 3. Remove from global mood tracking
+      try {
+        await removeUserFromMood(userId, room.mood);
+      } catch (moodError) {
+        console.error(`⚠️ [LeaveChat] Mood removal failed: ${moodError.message}`);
+      }
+
+      // 4. Cleanup any active calls
+      try {
+        const activeCallId = await getUserCall(userId);
+        if (activeCallId) {
+          await handleCallLeaveInternal(userId, activeCallId);
+        }
+      } catch (callError) {
+        console.error(`⚠️ [LeaveChat] Call cleanup failed: ${callError.message}`);
+      }
+
+      // 5. Broadcast user_left to room
+      try {
+        io.to(roomId).emit('user_left', {
+          userId,
+          username,
+          pfpUrl: userData?.pfpUrl,
+          remainingUsers: room.users.length,
+          roomId
+        });
+      } catch (emitError) {
+        console.error(`⚠️ [LeaveChat] Emit failed: ${emitError.message}`);
+      }
+
+      // 6. Force socket room leave
+      try {
+        const socketIds = await getUserSocketIds(userId);
+        socketIds.forEach(sid => {
+          const s = io.sockets.sockets.get(sid);
+          if (s) s.leave(roomId);
+        });
+      } catch (socketError) {
+        console.error(`⚠️ [LeaveChat] Socket leave failed: ${socketError.message}`);
+      }
+
+      // 7. Notify user's devices
+      if (firebaseUid) {
+        try {
+          emitToUserAllDevices(firebaseUid, 'left_room', {
+            roomId,
+            success: true,
+            reason,
+            forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
+          });
+        } catch (emitError) {
+          console.error(`⚠️ [LeaveChat] Device notification failed: ${emitError.message}`);
+        }
+      }
+
+      // 8. Clear presence record
+      try {
+        await removeUserPresence(userId);
+      } catch (presenceError) {
+        console.error(`⚠️ [LeaveChat] Presence removal failed: ${presenceError.message}`);
+      }
+
+      console.log(`✅ [LeaveChat] ${username} successfully cleared from room ${roomId}`);
+      return { success: true };
+      
+    } catch (error) {
+      console.error(`❌ [LeaveChat] Critical failure during cleanup for ${userId}:`, error);
+      console.error('Stack:', error.stack);
+      return { success: false, error: error.message };
+    }
+    
+  } catch (outerError) {
+    console.error(`❌ [LeaveChat] Outer error for ${userId}:`, outerError);
+    console.error('Stack:', outerError.stack);
+    return { success: false, error: outerError.message };
   } finally {
-    releaseLock();
+    // Always release lock, even if it's a no-op
+    try {
+      await releaseLock();
+    } catch (releaseError) {
+      console.warn(`⚠️ [LeaveChat] Lock release error: ${releaseError.message}`);
+    }
   }
+}
+
+async function safeRedisCleanup(userId, firebaseUid) {
+  const cleanupPromises = [
+    clearUserActiveRoom(userId).catch(e => 
+      console.error(`⚠️ Clear active room (userId) failed: ${e.message}`)
+    ),
+    removeUserPresence(userId).catch(e => 
+      console.error(`⚠️ Remove presence failed: ${e.message}`)
+    ),
+    removeUserCall(userId).catch(e => 
+      console.error(`⚠️ Remove user call failed: ${e.message}`)
+    )
+  ];
+
+  if (firebaseUid) {
+    cleanupPromises.push(
+      clearUserActiveRoom(firebaseUid).catch(e => 
+        console.error(`⚠️ Clear active room (firebaseUid) failed: ${e.message}`)
+      )
+    );
+  }
+
+  await Promise.allSettled(cleanupPromises);
 }
 
 /**
