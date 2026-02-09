@@ -34,15 +34,41 @@ async function saveRoomToRedis(roomData) {
 
 async function getRoomFromRedis(roomId) {
   try {
+    console.log(`🔍 [Redis][getRoom] Fetching room:data:${roomId}...`);
     const data = await redis.hgetall(`room:data:${roomId}`);
-    if (!data || !Object.keys(data).length) return null;
-    if (data.users) data.users = JSON.parse(data.users);
-    if (data.messages) data.messages = JSON.parse(data.messages);
+
+    if (!data || !Object.keys(data).length) {
+      console.log(`ℹ️ [Redis][getRoom] No data found for room ${roomId}`);
+      return null;
+    }
+
+    console.log(`🔍 [Redis][getRoom] Data found for ${roomId}. Keys:`, Object.keys(data).join(', '));
+
+    try {
+      if (data.users) {
+        console.log(`🔍 [Redis][getRoom] Parsing users for ${roomId}...`);
+        data.users = JSON.parse(data.users);
+      }
+      if (data.messages) {
+        console.log(`🔍 [Redis][getRoom] Parsing messages for ${roomId}...`);
+        data.messages = JSON.parse(data.messages);
+      }
+    } catch (parseError) {
+      console.error(`❌ [Redis][getRoom] JSON Parse error for room ${roomId}:`, parseError.message);
+      return null;
+    }
+
     if (data.createdAt) data.createdAt = parseInt(data.createdAt);
     if (data.lastActivity) data.lastActivity = parseInt(data.lastActivity);
     if (data.expiresAt) data.expiresAt = parseInt(data.expiresAt);
+
+    // Ensure arrays exist
+    if (!data.users) data.users = [];
+    if (!data.messages) data.messages = [];
+
     return data;
   } catch (error) {
+    console.error(`❌ [Redis][getRoom] Command failed for room ${roomId}:`, error.stack);
     return null;
   }
 }
