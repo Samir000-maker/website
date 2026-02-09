@@ -2971,7 +2971,11 @@ io.on('connection', (socket) => {
       };
 
       console.log(`📤 Sending room sync to ${user.username}:`);
-      console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
+      if (room.expiresAt) {
+        console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
+      } else {
+        console.log(`   expiresAt: null`);
+      }
       console.log(`   serverTime: ${new Date(syncData.serverTime).toISOString()}`);
       console.log(`   timeRemaining: ${(syncData.timeRemaining / 1000).toFixed(1)}s`);
 
