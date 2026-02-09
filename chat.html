@@ -4302,23 +4302,23 @@
           sessionStorage.removeItem('hasBackgroundCall');
         }
 
-        // 3. Trigger server-side leave sequence via API
-        // IMPORTANT: Only use socket emit as fallback if API fails to prevent duplicates
-        if (typeof MoodApp !== 'undefined' && MoodApp.API && roomData?.roomId) {
-          try {
-            console.log('📤 Calling /api/leave-chat...');
-            await MoodApp.API.post('/api/leave-chat', { roomId: roomData.roomId });
-            console.log('✅ API leave-chat succeeded');
-            // API succeeded - do NOT emit socket event (server already processed leave)
-          } catch (e) {
-            console.warn('⚠️ API leave-chat failed, using socket emission as fallback');
-            if (socketInstance && socketInstance.connected) {
-              socketInstance.emit('leave_room');
-            }
-          }
-        } else if (socketInstance && socketInstance.connected) {
-          // No API available, use socket directly
-          socketInstance.emit('leave_room');
+        // 3. Trigger server-side leave sequence via Socket
+        if (socketInstance && socketInstance.connected) {
+          console.log('📤 Emitting leave_room via socket...');
+          // Wrap in promise to allow sequence to continue after acknowledgment
+          const leavePromise = new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              console.warn('⚠️ leave_room acknowledgment timed out');
+              resolve();
+            }, 2000);
+
+            socketInstance.emit('leave_room', { roomId: roomData.roomId }, (response) => {
+              clearTimeout(timeout);
+              console.log('✅ leave_room acknowledgment received:', response);
+              resolve();
+            });
+          });
+          await leavePromise;
         }
 
         // 4. Clear chat state
@@ -6031,30 +6031,10 @@
 
           console.log('🚪 Page unloading - triggering best-effort leave');
 
-          // ✅ Authoritative Exit Signal (Beacon API style)
-          const roomStr = localStorage.getItem('currentRoom');
-          if (roomStr) {
-            try {
-              const roomData = JSON.parse(roomStr);
-              const currentUserStr = localStorage.getItem('currentUser');
-              const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
-
-              if (roomData.roomId) {
-                // We use a keepalive fetch to ensure the request is processed after page close
-                // Note: Auth token is retrieved from storage if possible for speed
-                const token = sessionStorage.getItem('vibe_auth_token'); // Assuming app.js might store it here, otherwise we skip headers and rely on server-side socket link if still active
-
-                fetch('/api/leave-chat', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                  },
-                  body: JSON.stringify({ roomId: roomData.roomId }),
-                  keepalive: true
-                }).catch(() => { });
-              }
-            } catch (e) { }
+          // Manual socket emission as best-effort during unload
+          if (socketInstance?.connected) {
+            console.log('📤 Best-effort socket leave_room emission...');
+            socketInstance.emit('leave_room', { roomId: roomData?.roomId });
           }
 
           // Socket emission (legacy/fallback)
