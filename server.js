@@ -358,13 +358,14 @@ async function setupRedisExpiryNotifications() {
     });
 
     // Subscribe to expiry events
-    expiryClient.psubscribe('__keyevent@0__:expired', (pattern, channel, key) => {
-      console.log(`⏰ [Redis] Expiry event received for key: ${key}`);
+    // Correct subscription for ioredis
+    expiryClient.on('pmessage', (pattern, channel, key) => {
+      console.log(`⏰ [Redis][EXPIRY] Event: ${key}`);
 
       // Handle room expiry
       if (key.startsWith('room:expiry:')) {
         const roomId = key.replace('room:expiry:', '');
-        console.log(`⏰ [Redis] Room expiry triggered for ${roomId}`);
+        console.log(`⏰ [Redis][ROOM-EXPIRY] ID: ${roomId}`);
         handleRoomExpiry(roomId).catch(error => {
           console.error(`❌ Failed to handle room expiry for ${roomId}:`, error);
         });
@@ -373,7 +374,7 @@ async function setupRedisExpiryNotifications() {
       // Handle user cleanup
       else if (key.startsWith('user:cleanup:')) {
         const userId = key.replace('user:cleanup:', '');
-        console.log(`⏰ [Redis] User cleanup triggered for ${userId}`);
+        console.log(`⏰ [Redis][USER-CLEANUP] ID: ${userId}`);
         handleUserCleanup(userId).catch(error => {
           console.error(`❌ Failed to handle user cleanup for ${userId}:`, error);
         });
@@ -382,13 +383,14 @@ async function setupRedisExpiryNotifications() {
       // Handle call cleanup
       else if (key.startsWith('call:cleanup:')) {
         const callId = key.replace('call:cleanup:', '');
-        console.log(`⏰ [Redis] Call cleanup triggered for ${callId}`);
+        console.log(`⏰ [Redis][CALL-CLEANUP] ID: ${callId}`);
         handleCallExpiry(callId).catch(error => {
           console.error(`❌ Failed to handle call expiry for ${callId}:`, error);
         });
       }
     });
 
+    await expiryClient.psubscribe('__keyevent@0__:expired');
     console.log('✅ Redis expiry notifications subscribed');
 
     return expiryClient;
@@ -1524,9 +1526,17 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
 
 app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
   const requestId = uuidv4().substring(0, 8);
+  console.log(`[ROUTE-DEBUG][${requestId}] START /api/leave-chat. Body:`, JSON.stringify(req.body));
+  console.log(`[ROUTE-DEBUG][${requestId}] Headers:`, JSON.stringify(req.headers));
   try {
     const { roomId } = req.body;
-    const firebaseUid = req.firebaseUser.uid;
+    const firebaseUid = req.firebaseUser?.uid;
+    console.log(`[ROUTE-DEBUG][${requestId}] User UID: ${firebaseUid}, Room: ${roomId}`);
+
+    if (!req.firebaseUser) {
+      console.error(`❌ [API][${requestId}] No firebaseUser in request!`);
+      return res.status(401).json({ error: 'Auth context missing' });
+    }
 
     console.log(`📡 [API][${requestId}] Leave request received: Room=${roomId}, User UID=${firebaseUid}`);
 
@@ -2198,12 +2208,29 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
   console.log(`🏁 [LeaveSequence][${sequenceId}] START: user=${userId}, room=${roomId}, reason=${reason}`);
 
   try {
-    // 0. Resolve Identifiers
+    // 0. Resolve Identifiers (Enhanced with DB Fallback)
     let firebaseUid = providedFirebaseUid;
     if (!firebaseUid) {
+      console.log(`🔍 [LeaveSequence][${sequenceId}] firebaseUid missing, checking presence...`);
       const presence = await getUserPresence(userId);
       firebaseUid = presence?.firebaseUid;
-      if (firebaseUid) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from presence`);
+
+      if (!firebaseUid) {
+        console.log(`🔍 [LeaveSequence][${sequenceId}] firebaseUid not in presence, checking DB...`);
+        try {
+          const db = getDB();
+          const userDoc = await db.collection('users').findOne(
+            { _id: new ObjectId(userId) },
+            { projection: { firebaseUid: 1 }, maxTimeMS: 2000 }
+          );
+          firebaseUid = userDoc?.firebaseUid;
+          if (firebaseUid) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from DB`);
+        } catch (dbError) {
+          console.error(`❌ [LeaveSequence][${sequenceId}] DB Lookup failed:`, dbError.message);
+        }
+      } else {
+        console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from presence`);
+      }
     }
 
     // 1. Get Room State
@@ -3172,18 +3199,12 @@ io.on('connection', (socket) => {
       // ============================================
       // Check legacy room tracking (for backwards compatibility)
       const legacyRoomId = await matchmaking.getRoomIdByUser(mongoUserId);
-      if (legacyRoomId && !activeRoom) {
+      if (legacyRoomId) {
+        console.log(`🔍 [Auth] Found legacy room mapping: ${legacyRoomId}. Fetching data...`);
         const room = await matchmaking.getRoom(legacyRoomId);
-        if (room && !room.isExpired) {
-          console.log(`🔄 [Auth] Restoring legacy room ${legacyRoomId}`);
-
-          // Register in new system
-          // ✅ FIX: Await the async Redis call
+        if (room && room.users.some(u => u.userId === mongoUserId)) {
+          console.log(`ℹ️ [Auth] Restoring active room marker for ${firebaseUid} from legacy ${legacyRoomId}`);
           await setUserActiveRoom(firebaseUid, legacyRoomId, room.mood);
-
-          socket.join(legacyRoomId);
-
-          // Notify user they can resume
           socket.emit('room_reconnected', {
             roomId: room.id,
             expiresAt: room.expiresAt,
