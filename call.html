@@ -57,7 +57,6 @@
       position: absolute;
       inset: 0;
     }
-
 video {
   position: absolute;
   inset: 0;
@@ -1046,26 +1045,39 @@ video.remote-view {
 
 const video = document.createElement('video');
 video.id = `video-${user.userId}`;
+video.className = 'hidden';
 video.autoplay = true;
 video.playsInline = true;
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 
 if (isSelf) {
-  video.className = 'hidden self-view';
   video.muted = true;
   video.volume = 0;
   console.log(`📹 Self video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
   console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
 } else {
-  video.className = 'hidden remote-view';
   video.muted = false;
   video.volume = 1.0;
   console.log(`📹 Remote video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
   console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
 }
 
+video.style.setProperty('transform', 'scaleX(1)', 'important');
+video.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+video.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+
         videoContainer.appendChild(video);
+        
+        requestAnimationFrame(() => {
+  const vid = document.getElementById(`video-${user.userId}`);
+  if (vid) {
+    vid.style.setProperty('transform', 'scaleX(1)', 'important');
+    vid.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+    vid.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+    console.log(`🔒 FORCED non-mirror for ${user.userId}`);
+  }
+});
 
         // ✅ Small Loading Indicator for Video Tiles
         const loadingIndicator = document.createElement('div');
@@ -1464,7 +1476,12 @@ if (isSelf) {
 localVid.srcObject = localStream;
 localVid.muted = true;
 localVid.volume = 0;
-console.log(`✅ Local stream attached to video element (non-mirrored view)`);
+
+localVid.style.setProperty('transform', 'scaleX(1)', 'important');
+localVid.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+localVid.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+
+console.log(`✅ Local stream attached with FORCED non-mirror`);
 
           // ✅ FIX: Gate UI updates on actual media readiness
           if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
@@ -3288,6 +3305,17 @@ console.log(`✅ Local stream attached to video element (non-mirrored view)`);
           setupCallCleanup();
 
           console.log('✅ Call page event handlers initialized');
+          
+          setInterval(() => {
+  document.querySelectorAll('video').forEach(vid => {
+    const currentTransform = window.getComputedStyle(vid).transform;
+    if (currentTransform.includes('matrix(-1') || currentTransform === 'scaleX(-1)') {
+      vid.style.setProperty('transform', 'scaleX(1)', 'important');
+      vid.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+      console.warn(`⚠️ Fixed unwanted mirror on ${vid.id}`);
+    }
+  });
+}, 500);
 
         } catch (e) {
           console.error('❌ Init error:', e);
