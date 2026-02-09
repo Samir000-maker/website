@@ -135,6 +135,11 @@ class Room {
   }
 
   // Legacy/Compatibility Methods
+  setActiveCall(status) {
+    this.hasActiveCall = status;
+    this.save();
+  }
+
   startLifecycleTimers() {
     if (this.expiresAt) return; // Already started
     this.timerStartedAt = Date.now();
