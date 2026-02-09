@@ -526,7 +526,11 @@ async function acquireUserLock(userId) {
 
     return async () => {
       try {
-        await lock.release();
+        if (typeof lock.release === 'function') {
+          await lock.release();
+        } else if (typeof lock.unlock === 'function') {
+          await lock.unlock();
+        }
         console.log(`🔓 [Redlock] Released user lock for ${userId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] User lock release failed for ${userId}:`, error.message);
