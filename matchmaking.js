@@ -113,6 +113,23 @@ class Room {
   hasSpace() {
     return this.users.length < this.maxUsers && !this.isExpired;
   }
+
+  // Legacy/Compatibility Methods
+  startLifecycleTimers() {
+    if (this.expiresAt) return; // Already started
+    this.timerStartedAt = Date.now();
+    this.expiresAt = Date.now() + (config.ROOM_DURATION_MINUTES * 60 * 1000);
+    this.save(); // Sync to Redis
+  }
+
+  getTimeUntilExpiration() {
+    if (!this.expiresAt) return 0;
+    return Math.max(0, this.expiresAt - Date.now());
+  }
+
+  getMessages() {
+    return this.messages || [];
+  }
 }
 
 /**
