@@ -197,26 +197,32 @@ export async function leaveRoom(userId) {
     return { roomId: null, remainingUsers: 0 };
   }
 
-  // CRITICAL: Always delete the user-to-room mapping even if room data is gone
+  // CRITICAL: Always delete the user-to-room mapping immediately
   console.log(`🏠 [MMR] Deleting mapping user:room:${userId} (Room: ${roomId})`);
-  const delResult = await redis.del(`user:room:${userId}`);
-  console.log(`🏠 [MMR] Mapping delete result:`, delResult);
+  await redis.del(`user:room:${userId}`);
 
   const room = await getRoom(roomId);
   if (room) {
     const initialCount = room.users.length;
     room.users = room.users.filter(u => u.userId !== userId);
-    const finalCount = room.users.length;
+    const remainingUsers = room.users.length;
 
-    console.log(`🏠 [MMR] User filter: ${initialCount} -> ${finalCount} users`);
+    console.log(`🏠 [MMR] User filter: ${initialCount} -> ${remainingUsers} users`);
+
+    // AUTO-DESTROY LOGIC: If less than 2 users remain, destroy the room
+    if (remainingUsers < 2) {
+      console.log(`💥 [MMR] Room ${roomId} has ${remainingUsers} users. Auto-destroying...`);
+      await destroyRoom(roomId);
+      return { roomId, remainingUsers: 0, destroyed: true, users: [] };
+    }
 
     await saveRoomToRedis(room);
-    console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${room.users.length}`);
-    return { roomId, remainingUsers: room.users.length };
+    console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
+    return { roomId, remainingUsers, destroyed: false, users: room.users };
   }
 
   console.log(`🏠 [Matchmaking] Legacy marker for ${userId} cleared (room ${roomId} was already gone)`);
-  return { roomId, remainingUsers: 0 };
+  return { roomId, remainingUsers: 0, destroyed: true, users: [] };
 }
 
 export async function destroyRoom(roomId) {
