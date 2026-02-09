@@ -556,7 +556,11 @@ async function acquireRoomInitLock(roomId) {
 
     return async () => {
       try {
-        await lock.release();
+        if (typeof lock.release === 'function') {
+          await lock.release();
+        } else if (typeof lock.unlock === 'function') {
+          await lock.unlock();
+        }
         console.log(`🔓 [Redlock] Released room init lock for ${roomId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] Room init lock release failed for ${roomId}:`, error.message);
