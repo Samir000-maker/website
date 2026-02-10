@@ -701,6 +701,34 @@ async function handleUserCleanup(userId) {
   console.log(`🧹 [Cleanup] Handling user cleanup for ${userId}`);
 
   try {
+    // ✅ RECONNECTION CHECK: Before cleaning up, verify the user hasn't reconnected
+    // during the grace period (e.g., page navigation, iframe transition)
+    const activeSockets = await io.in(`user:${userId}`).fetchSockets();
+    if (activeSockets.length > 0) {
+      console.log(`✅ [Cleanup] ABORT: User ${userId} has ${activeSockets.length} active socket(s) — reconnected during grace period`);
+      return; // User is back online, skip cleanup entirely
+    }
+
+    // Also check if presence was recently updated (within last 15s)
+    const presence = await getUserPresence(userId);
+    if (presence && (Date.now() - presence.lastSeen) < 15000) {
+      console.log(`✅ [Cleanup] ABORT: User ${userId} presence is fresh (${Date.now() - presence.lastSeen}ms ago)`);
+      return;
+    }
+
+    // ✅ ROOM PROTECTION: Before leaving the room, check if there's an active call
+    // to prevent destroying rooms mid-call
+    const roomId = await matchmaking.getRoomIdByUser(userId);
+    if (roomId) {
+      const activeCall = await findActiveCallForRoom(roomId);
+      if (activeCall) {
+        console.log(`🛡️ [Cleanup] ABORT: User ${userId} has active call in room ${roomId} — protecting room`);
+        return; // Don't destroy room during active call
+      }
+    }
+
+    console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (no active sockets, no recent presence, no active call)`);
+
     // 1. Remove user from all mood tracking
     await removeUserFromAllMoods(userId);
 
@@ -708,7 +736,6 @@ async function handleUserCleanup(userId) {
     await clearUserActiveRoom(userId);
 
     // Attempt to find firebaseUid from presence for thorough cleanup
-    const presence = await getUserPresence(userId);
     if (presence && presence.firebaseUid) {
       await clearUserActiveRoom(presence.firebaseUid);
     }
@@ -3337,6 +3364,45 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // ✅ DUPLICATE ACCOUNT PREVENTION: Check if user is already in a room
+      const existingRoomId = await matchmaking.getRoomIdByUser(user.userId);
+      if (existingRoomId) {
+        const existingRoom = await matchmaking.getRoom(existingRoomId);
+        if (existingRoom && existingRoom.hasUser(user.userId)) {
+          console.log(`⚠️ [Matchmaking] User ${user.username} already in room ${existingRoomId} — redirecting to existing room`);
+
+          // Cancel any pending cleanup since user is actively reconnecting
+          await cancelUserCleanup(user.userId);
+
+          // Join the socket to the room
+          socket.join(existingRoomId);
+          io.in(`user:${user.userId}`).socketsJoin(existingRoomId);
+
+          // Emit match_found with existing room data
+          const matchData = {
+            roomId: existingRoom.id,
+            mood: existingRoom.mood,
+            users: existingRoom.users.map(u => ({
+              userId: u.userId,
+              username: u.username,
+              pfpUrl: u.pfpUrl
+            })),
+            expiresAt: existingRoom.expiresAt,
+            previousMessages: existingRoom.getMessages ? existingRoom.getMessages() : [],
+            activeCall: await findActiveCallForRoom(existingRoomId)
+          };
+          socket.emit('match_found', matchData);
+
+          // Update tracking
+          if (user.firebaseUid) {
+            await setUserActiveRoom(user.firebaseUid, existingRoomId, existingRoom.mood);
+          }
+          addUserToMood(user.userId, existingRoom.mood);
+
+          return; // Don't re-queue
+        }
+      }
+
       // ✅ ADD USER TO MOOD (deduplicated)
       addUserToMood(user.userId, mood);
 
@@ -3348,6 +3414,9 @@ io.on('connection', (socket) => {
 
       // Clear any existing timeout for this user
       clearMatchmakingTimeout(user.userId);
+
+      // Cancel any pending user cleanup (user is actively reconnecting)
+      await cancelUserCleanup(user.userId);
 
       // Try to add to queue or join existing room
       let room = await matchmaking.addToQueue({
@@ -5340,8 +5409,8 @@ io.on('connection', (socket) => {
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
       // Use Redis TTL based cleanup instead of local setTimeout
-      // Increased to 10 seconds to handle network jitter and page refreshes
-      await scheduleUserCleanup(userId, 10000);
+      // Increased to 20 seconds to handle network jitter, page refreshes, and iframe transitions
+      await scheduleUserCleanup(userId, 20000);
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
