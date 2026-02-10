@@ -1079,7 +1079,9 @@ async function validateRoomAccess(roomId, userId) {
     return { valid: false, error: 'Room has expired', code: 'ROOM_EXPIRED' };
   }
 
-  if (!room.hasUser(userId)) {
+  const isInRoom = Array.isArray(room.users) && room.users.some(u => u.userId === userId);
+  if (!isInRoom) {
+    console.error(`❌ You are not in this room for user ${userId}`);
     return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
   }
 
@@ -2486,7 +2488,7 @@ io.on('connection', (socket) => {
     const userId = userData.userId;
 
     // Validate room access
-    const validation = validateRoomAccess(roomId, userId);
+    const validation = await validateRoomAccess(roomId, userId);
     if (!validation.valid) {
       return callback?.({ success: false, error: validation.error });
     }
@@ -3607,11 +3609,11 @@ io.on('connection', (socket) => {
       }
 
       const joinKey = `${user.userId}:${roomId}`;
-      const existingJoin = roomJoinState.get(joinKey);
-      if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
-        console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
-        return;
-      }
+const existingJoin = await getRoomJoinState(roomId, user.userId);
+if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
+  console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
+  return;
+}
 
       console.log(`🚪 User ${user.username} (${user.userId}) confirming room ${roomId}`);
 
@@ -3725,13 +3727,7 @@ io.on('connection', (socket) => {
 
       socket.emit('room_joined', responseData);
 
-      // CRITICAL FIX: Mark this join as completed
-      roomJoinState.set(joinKey, { joined: true, timestamp: Date.now() });
-
-      // Clean up old join states (older than 10 seconds)
-      setTimeout(() => {
-        roomJoinState.delete(joinKey);
-      }, 10000);
+await setRoomJoinState(roomId, user.userId, { joined: true, timestamp: Date.now() }, 10000);
 
       // ============================================
       // CRITICAL FIX: BROADCAST USER JOIN TO ROOM
@@ -5407,7 +5403,7 @@ io.on('connection', (socket) => {
 
     // Unregister this socket from multi-device tracking
     if (firebaseUid) {
-      await unregisterSocketForUser(firebaseUid, socket.id);
+      await unregisterSocketForUser(socket.id);
     }
 
     // Clean up socket user data mapping in Redis
