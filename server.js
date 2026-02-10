@@ -90,6 +90,16 @@ redlock.on('error', (error) => {
 
 console.log('✅ Redlock initialized for distributed locking');
 
+function logLifecycle(event, data = {}) {
+  const payload = {
+    event,
+    instanceId,
+    timestamp: new Date().toISOString(),
+    ...data
+  };
+  console.log(`📘 [Lifecycle] ${JSON.stringify(payload)}`);
+}
+
 // ============================================
 // REDIS-BACKED SOCKET USER TRACKING
 // ============================================
@@ -456,17 +466,33 @@ async function cancelRoomCleanup(roomId) {
 /**
  * Schedule user cleanup using Redis TTL
  */
-async function scheduleUserCleanup(userId, delayMs) {
+async function scheduleUserCleanup(userId, delayMs, options = {}) {
   try {
-    const delaySeconds = Math.ceil(delayMs / 1000);
-    const cleanupData = JSON.stringify({
+    if (!userId) return false;
+    const { reason = 'unspecified', onlyIfAbsent = false, context = {} } = options;
+    const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
+    const cleanupDataPayload = {
       userId,
+      reason,
       scheduledAt: Date.now(),
-      delayMs
-    });
+      delayMs,
+      ...context
+    };
+    const cleanupData = JSON.stringify(cleanupDataPayload);
 
-    await pubClient.setex(`user:cleanup:${userId}`, delaySeconds, cleanupData);
-    console.log(`⏰ [Redis] Scheduled user cleanup for ${userId} in ${delaySeconds}s`);
+    let result;
+    if (onlyIfAbsent) {
+      result = await pubClient.set(`user:cleanup:${userId}`, cleanupData, 'EX', delaySeconds, 'NX');
+      if (result !== 'OK') {
+        return false;
+      }
+    } else {
+      await pubClient.setex(`user:cleanup:${userId}`, delaySeconds, cleanupData);
+    }
+
+    await pubClient.hset('user:cleanup:meta', userId, cleanupData);
+
+    console.log(`⏰ [Redis] Scheduled user cleanup for ${userId} in ${delaySeconds}s (reason: ${reason})`);
 
     return true;
   } catch (error) {
@@ -480,7 +506,9 @@ async function scheduleUserCleanup(userId, delayMs) {
  */
 async function cancelUserCleanup(userId) {
   try {
+    if (!userId) return false;
     const deleted = await pubClient.del(`user:cleanup:${userId}`);
+    await pubClient.hdel('user:cleanup:meta', userId);
     if (deleted > 0) {
       console.log(`⏰ [Redis] Cancelled user cleanup for ${userId}`);
     }
@@ -488,6 +516,17 @@ async function cancelUserCleanup(userId) {
   } catch (error) {
     console.error(`❌ [Redis] Failed to cancel user cleanup for ${userId}:`, error);
     return false;
+  }
+}
+
+async function getScheduledUserCleanupMeta(userId) {
+  try {
+    if (!userId) return null;
+    const raw = await pubClient.hget('user:cleanup:meta', userId);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    console.error(`❌ [Redis] Failed to read user cleanup metadata for ${userId}:`, error.message);
+    return null;
   }
 }
 
@@ -586,6 +625,7 @@ async function acquireRoomInitLock(roomId) {
  */
 async function handleRoomExpiry(roomId) {
   console.log(`🧹 [Cleanup] Authoritative room expiry for ${roomId}`);
+  logLifecycle('room_expiry_triggered', { roomId, trigger: 'redis_expiry' });
 
   try {
     const room = await matchmaking.getRoom(roomId);
@@ -627,9 +667,13 @@ async function handleRoomExpiry(roomId) {
     // 3. File stores are now in Redis or handled per-user, no local cleanup needed here
 
     // 4. Remove room from matchmaking
-    await matchmaking.destroyRoom(roomId);
+    await matchmaking.destroyRoom(roomId, 'timer_expired');
 
     console.log(`✅ [Cleanup] Room ${roomId} fully purged across cluster`);
+    logLifecycle('room_destroyed', {
+      roomId,
+      reason: 'timer_expired'
+    });
   } catch (error) {
     console.error(`❌ [Cleanup] Room purge failure for ${roomId}:`, error);
   }
@@ -697,44 +741,120 @@ async function scheduleCallCleanup(callId, delayMs) {
 /**
  * Handle user cleanup event (called when Redis key expires)
  */
+const HEARTBEAT_TIMEOUT_MS = 35000; // 35 seconds
+const HEARTBEAT_GRACE_MS = 60000; // additional verification window
+const MIN_AUTOMATED_LEAVE_STALENESS_MS = HEARTBEAT_TIMEOUT_MS + HEARTBEAT_GRACE_MS;
+const SOCKET_DISCONNECT_GRACE_MS = 45000;
+const CLEANUP_RECHECK_MIN_MS = 10000;
+
 async function handleUserCleanup(userId) {
-  console.log(`🧹 [Cleanup] Handling user cleanup for ${userId}`);
+  const startedAt = Date.now();
+  const cleanupMeta = await getScheduledUserCleanupMeta(userId);
+  const cleanupReason = cleanupMeta?.reason || 'cleanup_timeout';
+  console.log(`🧹 [Cleanup] Handling user cleanup for ${userId} (reason: ${cleanupReason})`);
+  logLifecycle('user_cleanup_started', {
+    userId,
+    reason: cleanupReason,
+    scheduledAt: cleanupMeta?.scheduledAt || null
+  });
 
   try {
-    // ✅ RECONNECTION CHECK: Before cleaning up, verify the user hasn't reconnected
-    // during the grace period (e.g., page navigation, iframe transition)
+    // Authoritative reconnection check across the cluster.
     const activeSockets = await io.in(`user:${userId}`).fetchSockets();
     if (activeSockets.length > 0) {
-      console.log(`✅ [Cleanup] ABORT: User ${userId} has ${activeSockets.length} active socket(s) — reconnected during grace period`);
-      return; // User is back online, skip cleanup entirely
-    }
-
-    // Also check if presence was recently updated (within last 15s)
-    const presence = await getUserPresence(userId);
-    if (presence && (Date.now() - presence.lastSeen) < 15000) {
-      console.log(`✅ [Cleanup] ABORT: User ${userId} presence is fresh (${Date.now() - presence.lastSeen}ms ago)`);
+      console.log(`✅ [Cleanup] ABORT: User ${userId} has ${activeSockets.length} active socket(s)`);
+      await cancelUserCleanup(userId);
+      logLifecycle('user_cleanup_aborted_active_sockets', {
+        userId,
+        reason: cleanupReason,
+        activeSockets: activeSockets.length
+      });
       return;
     }
 
-    // ✅ ROOM PROTECTION: Before leaving the room, check if there's an active call
-    // to prevent destroying rooms mid-call
-    const roomId = await matchmaking.getRoomIdByUser(userId);
+    const now = Date.now();
+    const presence = await getUserPresence(userId);
+    const staleMs = presence?.lastSeen ? (now - presence.lastSeen) : Number.POSITIVE_INFINITY;
+    const minimumStaleMsForLeave = cleanupReason === 'socket_disconnect'
+      ? SOCKET_DISCONNECT_GRACE_MS
+      : MIN_AUTOMATED_LEAVE_STALENESS_MS;
+
+    // Heartbeat drop alone must not eject users. Require sustained staleness.
+    if (presence && staleMs < minimumStaleMsForLeave) {
+      const rescheduleMs = Math.max(CLEANUP_RECHECK_MIN_MS, minimumStaleMsForLeave - staleMs);
+      await scheduleUserCleanup(userId, rescheduleMs, {
+        reason: cleanupReason,
+        context: { deferredFrom: 'fresh_presence' }
+      });
+      console.log(`✅ [Cleanup] DEFER: User ${userId} presence is not stale enough (${staleMs}ms)`);
+      logLifecycle('user_cleanup_deferred_fresh_presence', {
+        userId,
+        reason: cleanupReason,
+        staleMs,
+        rescheduleMs
+      });
+      return;
+    }
+
+    const mappedRoomId = await matchmaking.getRoomIdByUser(userId);
+    const activeRoomByUserId = await getUserActiveRoom(userId);
+    const activeRoomByUid = presence?.firebaseUid ? await getUserActiveRoom(presence.firebaseUid) : null;
+    const roomId = mappedRoomId || activeRoomByUserId?.roomId || activeRoomByUid?.roomId || presence?.roomId;
+
+    if (!roomId) {
+      // No room to leave; just clear stale presence/call state.
+      await removeUserPresence(userId);
+      await removeUserCall(userId);
+      await cancelUserCleanup(userId);
+      logLifecycle('user_cleanup_completed_no_room', {
+        userId,
+        reason: cleanupReason,
+        staleMs
+      });
+      return;
+    }
+
+    // Protect active calls from incidental cleanup.
     if (roomId) {
       const activeCall = await findActiveCallForRoom(roomId);
       if (activeCall) {
-        console.log(`🛡️ [Cleanup] ABORT: User ${userId} has active call in room ${roomId} — protecting room`);
-        return; // Don't destroy room during active call
+        const rescheduleMs = CLEANUP_RECHECK_MIN_MS * 3;
+        await scheduleUserCleanup(userId, rescheduleMs, {
+          reason: cleanupReason,
+          context: { deferredFrom: 'active_call', roomId }
+        });
+        console.log(`🛡️ [Cleanup] DEFER: User ${userId} has active call in room ${roomId}`);
+        logLifecycle('user_cleanup_deferred_active_call', {
+          userId,
+          roomId,
+          reason: cleanupReason,
+          rescheduleMs
+        });
+        return;
       }
     }
 
-    console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (no active sockets, no recent presence, no active call)`);
+    console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (verified disconnect)`);
+    const leaveReason = cleanupReason === 'heartbeat_timeout'
+      ? 'verified_disconnect'
+      : 'cleanup_timeout';
 
-    // ✅ FIX: Use central performUserLeaveChat for authoritative cleanup
-    await performUserLeaveChat(userId, roomId, 'cleanup_timeout', presence?.firebaseUid);
+    // Authoritative leave after verification checks.
+    const leaveResult = await performUserLeaveChat(userId, roomId, leaveReason, presence?.firebaseUid);
+    await cancelUserCleanup(userId);
 
     console.log(`✅ [Cleanup] User ${userId} cleaned up via LeaveSequence`);
+    logLifecycle('user_cleanup_completed', {
+      userId,
+      roomId,
+      reason: cleanupReason,
+      leaveReason,
+      success: !!leaveResult?.success,
+      durationMs: Date.now() - startedAt
+    });
   } catch (error) {
     console.error(`❌ [Cleanup] Error handling user cleanup for ${userId}:`, error);
+    await pubClient.hdel('user:cleanup:meta', userId).catch(() => { });
   }
 }
 
@@ -827,6 +947,7 @@ async function setUserActiveRoom(userId, roomId, mood) {
 
 async function clearUserActiveRoom(userId) {
   try {
+    if (!userId) return false;
     // ALWAYS attempt delete in Redis to be safe
     const result = await pubClient.hdel('user:active_rooms', userId);
     console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker. Deleted: ${result}`);
@@ -850,8 +971,13 @@ async function unregisterSocketForUser(socketId) {
 
 // DEPRECATED: Use io.to(`user:${userId}`) or socket.to(`user:${userId}`)
 async function getUserSocketIds(userId) {
-  const socketData = await getSocketByUserId(userId);
-  return socketData ? [socketData.socketId] : [];
+  try {
+    const sockets = await io.in(`user:${userId}`).fetchSockets();
+    return sockets.map(s => s.id);
+  } catch (error) {
+    console.error(`❌ Failed to fetch socket IDs for ${userId}:`, error.message);
+    return [];
+  }
 }
 
 function emitToUserAllDevices(userId, event, data) {
@@ -1067,9 +1193,15 @@ function getCurrentTransferMemory() {
   return total;
 }
 
-// Add helper function at top
-async function validateRoomAccess(roomId, userId) {
-  const room = await matchmaking.getRoom(roomId);
+// Room access validator with optional membership recovery for reconnection races.
+async function validateRoomAccess(roomId, userId, options = {}) {
+  const {
+    allowRecovery = false,
+    socket = null,
+    userData = null
+  } = options;
+
+  let room = await matchmaking.getRoom(roomId);
 
   if (!room) {
     return { valid: false, error: 'Room not found or expired', code: 'ROOM_NOT_FOUND' };
@@ -1079,7 +1211,65 @@ async function validateRoomAccess(roomId, userId) {
     return { valid: false, error: 'Room has expired', code: 'ROOM_EXPIRED' };
   }
 
+  if (!room.hasUser(userId) && allowRecovery && userData) {
+    try {
+      const firebaseUid = userData.firebaseUid || null;
+      const activeRoomByUid = firebaseUid ? await getUserActiveRoom(firebaseUid) : null;
+      const activeRoomByUser = await getUserActiveRoom(userId);
+      const mappedRoomId = await matchmaking.getRoomIdByUser(userId);
+
+      const canRecoverMembership = (
+        mappedRoomId === roomId ||
+        activeRoomByUid?.roomId === roomId ||
+        activeRoomByUser?.roomId === roomId
+      );
+
+      if (canRecoverMembership) {
+        logLifecycle('room_membership_recovery_attempt', {
+          userId,
+          roomId,
+          source: mappedRoomId === roomId
+            ? 'mmr_mapping'
+            : (activeRoomByUid?.roomId === roomId ? 'active_room_uid' : 'active_room_user')
+        });
+
+        const added = await room.addUser({
+          userId,
+          username: userData.username,
+          pfpUrl: userData.pfpUrl,
+          firebaseUid
+        });
+
+        if (added) {
+          room = await matchmaking.getRoom(roomId);
+          if (room?.hasUser(userId)) {
+            await setUserActiveRoom(userId, roomId, room.mood);
+            if (firebaseUid) await setUserActiveRoom(firebaseUid, roomId, room.mood);
+            await updateUserPresence(userId, {
+              roomId,
+              status: 'chat_active',
+              firebaseUid
+            });
+            if (socket && !socket.rooms.has(roomId)) {
+              socket.join(roomId);
+            }
+
+            logLifecycle('room_membership_recovered', { userId, roomId });
+            return { valid: true, room, recoveredMembership: true };
+          }
+        }
+      }
+    } catch (recoveryError) {
+      console.error(`❌ Room membership recovery failed for ${userId} in ${roomId}:`, recoveryError.message);
+    }
+  }
+
   if (!room.hasUser(userId)) {
+    logLifecycle('room_access_denied', {
+      userId,
+      roomId,
+      code: 'NOT_IN_ROOM'
+    });
     return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
   }
 
@@ -1371,14 +1561,16 @@ async function updateUserPresence(userId, data) {
   try {
     // Merge with existing
     const current = await getUserPresence(userId) || {};
+    const hasRoomId = Object.prototype.hasOwnProperty.call(data, 'roomId');
+    const hasStatus = Object.prototype.hasOwnProperty.call(data, 'status');
 
     // FIX: Preserve existing roomId and status if not explicitly provided in 'data'
     // This prevents heartbeats from other tabs (mood.html/app.js) from wiping out chat state
     const mergedData = {
       ...current,
       ...data,
-      roomId: data.roomId || current.roomId,
-      status: data.status || current.status || 'chat_active',
+      roomId: hasRoomId ? data.roomId : current.roomId,
+      status: hasStatus ? data.status : (current.status || 'chat_active'),
       lastSeen: Date.now()
     };
 
@@ -2142,13 +2334,30 @@ app.get('/api/moods', (req, res) => {
  */
 app.post('/api/leave-room', authenticateFirebase, async (req, res) => {
   const { roomId } = req.body;
-  const userId = req.firebaseUser.userId;
-  const firebaseUid = req.firebaseUser.uid;
+  const firebaseUid = req.firebaseUser?.uid;
+  let userId = req.firebaseUser?.userId || null;
+
+  if (!userId && firebaseUid) {
+    try {
+      const db = getDB();
+      const userDoc = await db.collection('users').findOne(
+        { firebaseUid },
+        { projection: { _id: 1 }, maxTimeMS: 3000 }
+      );
+      userId = userDoc?._id?.toString() || null;
+    } catch (lookupError) {
+      console.error(`❌ [API] Failed to resolve userId from Firebase UID ${firebaseUid}:`, lookupError.message);
+    }
+  }
 
   console.log(`📡 [API] Leave request via Beacon/Fetch: user=${userId}, room=${roomId}`);
 
   if (!roomId) {
     return res.status(400).json({ error: 'roomId is required' });
+  }
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unable to resolve authenticated user' });
   }
 
   try {
@@ -2244,8 +2453,47 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
   const startTime = Date.now();
   const sequenceId = uuidv4().substring(0, 8);
   console.log(`🏁 [LeaveSequence][${sequenceId}] START: user=${userId}, room=${roomId}, reason=${reason}`);
+  logLifecycle('leave_sequence_started', { sequenceId, userId, roomId, reason });
+
+  if (!userId || typeof userId !== 'string') {
+    console.warn(`⚠️ [LeaveSequence][${sequenceId}] Invalid userId supplied: ${userId}`);
+    return { success: false, error: 'Invalid userId' };
+  }
+
+  const inflightKey = `leave:inflight:${userId}`;
+  let isInflightOwner = false;
 
   try {
+    const claim = await pubClient.set(
+      inflightKey,
+      JSON.stringify({ sequenceId, roomId, reason, startedAt: Date.now() }),
+      'PX',
+      20000,
+      'NX'
+    );
+
+    if (claim !== 'OK') {
+      console.warn(`⚠️ [LeaveSequence][${sequenceId}] Duplicate leave suppressed for user ${userId}`);
+      logLifecycle('leave_sequence_deduped', { sequenceId, userId, roomId, reason });
+      return { success: true, deduped: true };
+    }
+    isInflightOwner = true;
+
+    if (reason !== 'manual' && reason !== 'api_beacon') {
+      const activeSockets = await io.in(`user:${userId}`).fetchSockets();
+      if (activeSockets.length > 0) {
+        console.log(`✅ [LeaveSequence][${sequenceId}] Skipping automated leave; user has ${activeSockets.length} active socket(s)`);
+        logLifecycle('leave_sequence_skipped_active_sockets', {
+          sequenceId,
+          userId,
+          roomId,
+          reason,
+          activeSockets: activeSockets.length
+        });
+        return { success: true, skipped: 'active_sockets' };
+      }
+    }
+
     // 0. Resolve Identifiers & Room ID (Deep Lookup)
     let firebaseUid = providedFirebaseUid;
     let resolvedRoomId = roomId;
@@ -2328,6 +2576,13 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
       console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave (Authoritative)...`);
       const leaveResult = await matchmaking.leaveRoom(userId);
       console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave result:`, leaveResult.success, `Remaining:`, leaveResult.remainingUsers);
+      if (leaveResult?.destroyed) {
+        logLifecycle('room_destroyed', {
+          roomId: finalRoomId,
+          reason: 'below_min_users',
+          triggeredByUserId: userId
+        });
+      }
 
       // 5. Active Room Cleanup
       console.log(`🏠 [LeaveSequence][${sequenceId}][5/9] Clearing markers...`);
@@ -2373,16 +2628,30 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
           roomId: finalRoomId,
           success: true,
           reason,
-          forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
+          forceRedirect: (reason === 'manual' || reason === 'api_beacon')
         });
       }
 
       await removeUserPresence(userId);
       console.log(`✅ [LeaveSequence][${sequenceId}] FINISHED in ${Date.now() - startTime}ms`);
+      logLifecycle('leave_sequence_finished', {
+        sequenceId,
+        userId,
+        roomId: finalRoomId,
+        reason,
+        durationMs: Date.now() - startTime
+      });
       return { success: true };
 
     } catch (innerError) {
       console.error(`❌ [LeaveSequence][${sequenceId}] INNER ERROR:`, innerError.stack);
+      logLifecycle('leave_sequence_inner_error', {
+        sequenceId,
+        userId,
+        roomId: finalRoomId,
+        reason,
+        error: innerError.message
+      });
       return { success: false, error: innerError.message };
     } finally {
       if (typeof releaseLock === 'function') {
@@ -2392,17 +2661,31 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
     }
   } catch (outerError) {
     console.error(`❌ [LeaveSequence][${sequenceId}] OUTER ERROR:`, outerError.stack);
+    logLifecycle('leave_sequence_outer_error', {
+      sequenceId,
+      userId,
+      roomId,
+      reason,
+      error: outerError.message
+    });
     return { success: false, error: outerError.message };
+  } finally {
+    if (isInflightOwner) {
+      try {
+        await pubClient.del(inflightKey);
+      } catch (cleanupError) {
+        console.warn(`⚠️ [LeaveSequence][${sequenceId}] Failed to clear inflight key: ${cleanupError.message}`);
+      }
+    }
   }
 }
 
 /**
  * Presence Monitoring System
- * Checks for users who stopped sending heartbeats and cleans them up.
+ * Marks users for delayed verification on heartbeat loss.
  */
 setInterval(async () => {
   const now = Date.now();
-  const HEARTBEAT_TIMEOUT = 35000; // 35 seconds (allows for some network jitter)
 
   try {
     const allPresence = await pubClient.hgetall('user:presence');
@@ -2414,10 +2697,33 @@ setInterval(async () => {
         // Skip cleanup if user is in an active call (navigation exception)
         if (presence.status === 'call_active') continue;
 
-        if (now - presence.lastSeen > HEARTBEAT_TIMEOUT) {
+        const staleMs = now - (presence.lastSeen || 0);
+        if (staleMs > HEARTBEAT_TIMEOUT_MS) {
           const roomInfo = presence.roomId ? `in room ${presence.roomId}` : '(not in room)';
-          console.log(`⏱️ [Presence] Heartbeat timeout for ${userId} ${roomInfo}`);
-          await performUserLeaveChat(userId, presence.roomId, 'heartbeat_timeout', presence.firebaseUid);
+          const activeSockets = await io.in(`user:${userId}`).fetchSockets();
+
+          if (activeSockets.length > 0) {
+            console.log(`⏱️ [Presence] Heartbeat stale for ${userId} ${roomInfo}, but socket(s) still active (${activeSockets.length})`);
+            continue;
+          }
+
+          const scheduled = await scheduleUserCleanup(userId, HEARTBEAT_GRACE_MS, {
+            reason: 'heartbeat_timeout',
+            onlyIfAbsent: true,
+            context: {
+              roomId: presence.roomId || null,
+              staleMs
+            }
+          });
+
+          if (scheduled) {
+            console.log(`⏱️ [Presence] Heartbeat timeout for ${userId} ${roomInfo} — scheduled verification cleanup in ${HEARTBEAT_GRACE_MS / 1000}s`);
+            logLifecycle('heartbeat_timeout_scheduled_cleanup', {
+              userId,
+              roomId: presence.roomId || null,
+              staleMs
+            });
+          }
         }
       } catch (parseError) {
         console.error(`❌ Invalid presence data for ${userId}:`, parseError);
@@ -2445,10 +2751,15 @@ io.on('connection', (socket) => {
     const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
-    // Update presence timestamp
-    await updateUserPresence(userData.userId, {
-      roomId: roomId // merges with existing lastSeen/status automatically in helper
-    });
+    // Heartbeat updates presence only; it does not trigger leave directly.
+    const heartbeatPresencePatch = {};
+    if (roomId) {
+      heartbeatPresencePatch.roomId = roomId;
+    }
+    await updateUserPresence(userData.userId, heartbeatPresencePatch);
+
+    // If user is actively heartbeating again, cancel any pending disconnect cleanup.
+    await cancelUserCleanup(userData.userId);
   });
 
   socket.on('enter_call_mode', async ({ roomId }) => {
@@ -2486,12 +2797,22 @@ io.on('connection', (socket) => {
     const userId = userData.userId;
 
     // Validate room access
-    const validation = validateRoomAccess(roomId, userId);
+    const validation = await validateRoomAccess(roomId, userId, {
+      allowRecovery: true,
+      socket,
+      userData
+    });
     if (!validation.valid) {
       return callback?.({ success: false, error: validation.error });
     }
 
     const room = validation.room;
+
+    await updateUserPresence(userId, {
+      roomId,
+      status: 'chat_active',
+      firebaseUid: userData.firebaseUid
+    });
 
     const messageObj = {
       id: uuidv4(),
@@ -2503,7 +2824,7 @@ io.on('connection', (socket) => {
     };
 
     // CRITICAL: Add to room's chat history for persistence
-    room.addMessage(messageObj);
+    await room.addMessage(messageObj);
 
     // Broadcast to room (all devices of both users)
     io.to(roomId).emit('new_message', messageObj);
@@ -3008,6 +3329,13 @@ io.on('connection', (socket) => {
         return;
       }
 
+      await cancelUserCleanup(user.userId);
+      await updateUserPresence(user.userId, {
+        roomId,
+        status: 'chat_active',
+        firebaseUid: user.firebaseUid
+      });
+
       const room = await matchmaking.getRoom(roomId);
 
       if (!room) {
@@ -3229,6 +3557,11 @@ io.on('connection', (socket) => {
 
       if (activeRoom) {
         console.log(`ℹ️ [Auth] User has active room: ${activeRoom.roomId}`);
+        await updateUserPresence(mongoUserId, {
+          roomId: activeRoom.roomId,
+          status: 'chat_active',
+          firebaseUid
+        });
       }
 
       // ============================================
@@ -3273,6 +3606,11 @@ io.on('connection', (socket) => {
             expiresAt: room.expiresAt,
             timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
           });
+          logLifecycle('room_reconnected', {
+            userId: mongoUserId,
+            roomId: room.id,
+            source: 'legacy_mapping'
+          });
 
           // Notify other users in room
           socket.to(legacyRoomId).emit('user_reconnected', {
@@ -3307,6 +3645,11 @@ io.on('connection', (socket) => {
             expiresAt: room.expiresAt,
             timeRemaining: room.getTimeUntilExpiration(),
             isMultiDevice: true
+          });
+          logLifecycle('room_reconnected', {
+            userId: mongoUserId,
+            roomId: room.id,
+            source: 'active_room_marker'
           });
 
           // Notify other users in room about this device joining
@@ -3606,6 +3949,14 @@ io.on('connection', (socket) => {
         return;
       }
 
+      await cancelUserCleanup(user.userId);
+      logLifecycle('join_room_requested', {
+        userId: user.userId,
+        username: user.username,
+        roomId,
+        socketId: socket.id
+      });
+
       const joinKey = `${user.userId}:${roomId}`;
       const existingJoin = roomJoinState.get(joinKey);
       if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
@@ -3631,20 +3982,31 @@ io.on('connection', (socket) => {
 
         // Check if user was recently in this room (grace period reconnection)
         const activeRoom = user.firebaseUid ? await getUserActiveRoom(user.firebaseUid) : null;
+        const mappedRoomId = await matchmaking.getRoomIdByUser(user.userId);
 
-        if (activeRoom && activeRoom.roomId === roomId) {
+        if ((activeRoom && activeRoom.roomId === roomId) || mappedRoomId === roomId) {
           // User is reconnecting to their active room - re-add them
           console.log(`🔄 Re-adding ${user.username} to room ${roomId} (reconnection)`);
 
           try {
             // Re-add user to room
-            room.addUser({
+            const added = await room.addUser({
               userId: user.userId,
               username: user.username,
-              pfpUrl: user.pfpUrl
+              pfpUrl: user.pfpUrl,
+              firebaseUid: user.firebaseUid
             });
 
+            if (!added) {
+              throw new Error('Room is full or unavailable for rejoin');
+            }
+
             console.log(`✅ Successfully re-added ${user.username} to room ${roomId}`);
+            logLifecycle('join_room_membership_recovered', {
+              userId: user.userId,
+              roomId,
+              source: mappedRoomId === roomId ? 'mmr_mapping' : 'active_room_marker'
+            });
           } catch (error) {
             console.error(`❌ Failed to re-add user to room:`, error);
             socket.emit('error', {
@@ -3667,24 +4029,49 @@ io.on('connection', (socket) => {
       if (!socket.rooms.has(roomId)) {
         socket.join(roomId);
         console.log(`✅ User ${user.username} joined Socket.IO room ${roomId}`);
+        logLifecycle('join_room_socket_joined', {
+          userId: user.userId,
+          roomId,
+          socketId: socket.id
+        });
       } else {
         console.log(`ℹ️ User ${user.username} already in Socket.IO room ${roomId}`);
       }
 
-      // CRITICAL: Start room lifecycle timers when FIRST user actually joins
-      if (!room.userJoinedRoom) {
-        room.userJoinedRoom = true;
-        room.startLifecycleTimers();
+      // Refresh presence and active room markers on every room join/rejoin.
+      await updateUserPresence(user.userId, {
+        roomId,
+        status: 'chat_active',
+        firebaseUid: user.firebaseUid
+      });
+      await setUserActiveRoom(user.userId, roomId, room.mood);
+      if (user.firebaseUid) {
+        await setUserActiveRoom(user.firebaseUid, roomId, room.mood);
+      }
+
+      // Start room lifecycle timers authoritatively on first actual room join.
+      const timerStarted = await room.startLifecycleTimers();
+      if (timerStarted) {
         console.log(`⏱️ Room ${roomId} lifecycle timers STARTED by ${user.username}`);
         console.log(`   Timer started at: ${new Date(room.timerStartedAt).toISOString()}`);
         console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
+        logLifecycle('room_timer_started', {
+          roomId,
+          startedBy: user.userId,
+          timerStartedAt: room.timerStartedAt,
+          expiresAt: room.expiresAt
+        });
       } else {
-        const timeElapsed = Date.now() - room.timerStartedAt;
-        const timeRemaining = room.getTimeUntilExpiration();
-        console.log(`ℹ️ User ${user.username} joining room ${roomId} (timer already running)`);
-        console.log(`   Time elapsed since first join: ${(timeElapsed / 1000).toFixed(1)}s`);
-        console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
-        console.log(`   Expires at: ${new Date(room.expiresAt).toISOString()}`);
+        if (room.timerStartedAt && room.expiresAt) {
+          const timeElapsed = Date.now() - room.timerStartedAt;
+          const timeRemaining = room.getTimeUntilExpiration();
+          console.log(`ℹ️ User ${user.username} joining room ${roomId} (timer already running)`);
+          console.log(`   Time elapsed since first join: ${(timeElapsed / 1000).toFixed(1)}s`);
+          console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
+          console.log(`   Expires at: ${new Date(room.expiresAt).toISOString()}`);
+        } else {
+          console.warn(`⚠️ Room ${roomId} timer state incomplete after join`);
+        }
       }
 
       // Get chat history from the room, and attach any assembled file data for chunked attachments
@@ -3720,8 +4107,13 @@ io.on('connection', (socket) => {
       }
 
       console.log(`📤 Sending room_joined to ${user.username}:`);
-      console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
-      console.log(`   timeRemaining: ${(room.getTimeUntilExpiration() / 1000).toFixed(1)}s`);
+      if (room.expiresAt) {
+        console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
+        console.log(`   timeRemaining: ${(room.getTimeUntilExpiration() / 1000).toFixed(1)}s`);
+      } else {
+        console.log(`   expiresAt: null`);
+        console.log(`   timeRemaining: 0.0s`);
+      }
 
       socket.emit('room_joined', responseData);
 
@@ -3873,7 +4265,11 @@ io.on('connection', (socket) => {
       console.log(`   Room rate: ${rateLimitCheck.count}/${ROOM_MESSAGE_RATE_LIMIT}`);
 
       // Validate room access
-      const validation = await validateRoomAccess(roomId, user.userId);
+      const validation = await validateRoomAccess(roomId, user.userId, {
+        allowRecovery: true,
+        socket,
+        userData: user
+      });
       if (!validation.valid) {
         console.error(`❌ ${validation.error} for user ${user.username}`);
         socket.emit('error', { message: validation.error, code: validation.code });
@@ -3881,6 +4277,13 @@ io.on('connection', (socket) => {
       }
 
       const room = validation.room;
+
+      // Message activity also refreshes authoritative presence for resilience.
+      await updateUserPresence(user.userId, {
+        roomId,
+        status: 'chat_active',
+        firebaseUid: user.firebaseUid
+      });
 
       const timestamp = Date.now();
       const messageData = {
@@ -4001,7 +4404,7 @@ io.on('connection', (socket) => {
       }
 
       // Store to room history
-      room.addMessage(storedMessage);
+      await room.addMessage(storedMessage);
       console.log(`💾 Message stored to room history`);
 
       console.log('📡 ========================================');
@@ -5380,6 +5783,13 @@ io.on('connection', (socket) => {
       }
 
       console.log(`👋 [Socket][${sequenceId}] User ${userData.username} (UID: ${firebaseUid}) leaving room ${roomId}`);
+      logLifecycle('leave_room_requested', {
+        sequenceId,
+        userId: userData.userId,
+        firebaseUid,
+        roomId,
+        socketId: socket.id
+      });
       const result = await performUserLeaveChat(userData.userId, roomId, 'manual', firebaseUid);
 
       console.log(`✅ [Socket][${sequenceId}] Leave result:`, result.success);
@@ -5404,10 +5814,16 @@ io.on('connection', (socket) => {
     const userId = userData.userId;
     const firebaseUid = userData.firebaseUid;
     const username = userData.username;
+    logLifecycle('socket_disconnected', {
+      userId,
+      firebaseUid,
+      socketId: socket.id,
+      reason
+    });
 
     // Unregister this socket from multi-device tracking
     if (firebaseUid) {
-      await unregisterSocketForUser(firebaseUid, socket.id);
+      await unregisterSocketForUser(socket.id);
     }
 
     // Clean up socket user data mapping in Redis
@@ -5426,8 +5842,14 @@ io.on('connection', (socket) => {
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
       // Use Redis TTL based cleanup instead of local setTimeout
-      // Increased to 20 seconds to handle network jitter, page refreshes, and iframe transitions
-      await scheduleUserCleanup(userId, 20000);
+      // Longer grace period to survive transient transport disconnects and reconnect races.
+      await scheduleUserCleanup(userId, SOCKET_DISCONNECT_GRACE_MS, {
+        reason: 'socket_disconnect',
+        context: {
+          socketId: socket.id,
+          disconnectReason: reason
+        }
+      });
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
