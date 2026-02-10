@@ -1079,9 +1079,7 @@ async function validateRoomAccess(roomId, userId) {
     return { valid: false, error: 'Room has expired', code: 'ROOM_EXPIRED' };
   }
 
-  const isInRoom = Array.isArray(room.users) && room.users.some(u => u.userId === userId);
-  if (!isInRoom) {
-    console.error(`❌ You are not in this room for user ${userId}`);
+  if (!room.hasUser(userId)) {
     return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
   }
 
@@ -2404,7 +2402,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
  */
 setInterval(async () => {
   const now = Date.now();
-  const HEARTBEAT_TIMEOUT = 600000; // 35 seconds (allows for some network jitter)
+  const HEARTBEAT_TIMEOUT = 35000; // 35 seconds (allows for some network jitter)
 
   try {
     const allPresence = await pubClient.hgetall('user:presence');
@@ -2488,7 +2486,7 @@ io.on('connection', (socket) => {
     const userId = userData.userId;
 
     // Validate room access
-    const validation = await validateRoomAccess(roomId, userId);
+    const validation = validateRoomAccess(roomId, userId);
     if (!validation.valid) {
       return callback?.({ success: false, error: validation.error });
     }
@@ -3609,11 +3607,11 @@ io.on('connection', (socket) => {
       }
 
       const joinKey = `${user.userId}:${roomId}`;
-const existingJoin = await getRoomJoinState(roomId, user.userId);
-if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
-  console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
-  return;
-}
+      const existingJoin = roomJoinState.get(joinKey);
+      if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
+        console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
+        return;
+      }
 
       console.log(`🚪 User ${user.username} (${user.userId}) confirming room ${roomId}`);
 
@@ -3727,7 +3725,13 @@ if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
 
       socket.emit('room_joined', responseData);
 
-await setRoomJoinState(roomId, user.userId, { joined: true, timestamp: Date.now() }, 10000);
+      // CRITICAL FIX: Mark this join as completed
+      roomJoinState.set(joinKey, { joined: true, timestamp: Date.now() });
+
+      // Clean up old join states (older than 10 seconds)
+      setTimeout(() => {
+        roomJoinState.delete(joinKey);
+      }, 10000);
 
       // ============================================
       // CRITICAL FIX: BROADCAST USER JOIN TO ROOM
@@ -5403,7 +5407,7 @@ await setRoomJoinState(roomId, user.userId, { joined: true, timestamp: Date.now(
 
     // Unregister this socket from multi-device tracking
     if (firebaseUid) {
-      await unregisterSocketForUser(socket.id);
+      await unregisterSocketForUser(firebaseUid, socket.id);
     }
 
     // Clean up socket user data mapping in Redis
@@ -5423,7 +5427,7 @@ await setRoomJoinState(roomId, user.userId, { joined: true, timestamp: Date.now(
 
       // Use Redis TTL based cleanup instead of local setTimeout
       // Increased to 20 seconds to handle network jitter, page refreshes, and iframe transitions
-      await scheduleUserCleanup(userId, 600000);
+      await scheduleUserCleanup(userId, 20000);
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
