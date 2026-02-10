@@ -401,10 +401,6 @@ async function setupRedisExpiryNotifications() {
 }
 
 // Initialize expiry notifications
-const joinCallDebounce = new Map(); // Global debounce for joining calls
-const roomFileStore = new Map(); // Global storage for chunked file uploads
-
-// Initialize expiry notifications
 let expiryClient;
 setupRedisExpiryNotifications()
   .then(client => {
@@ -504,11 +500,7 @@ async function acquireCallMutex(callId) {
 
     return async () => {
       try {
-        if (typeof lock.release === 'function') {
-          await lock.release();
-        } else if (typeof lock.unlock === 'function') {
-          await lock.unlock();
-        }
+        await lock.release();
         console.log(`🔓 [Redlock] Released call lock for ${callId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] Lock release failed for ${callId}:`, error.message);
@@ -534,11 +526,7 @@ async function acquireUserLock(userId) {
 
     return async () => {
       try {
-        if (typeof lock.release === 'function') {
-          await lock.release();
-        } else if (typeof lock.unlock === 'function') {
-          await lock.unlock();
-        }
+        await lock.release();
         console.log(`🔓 [Redlock] Released user lock for ${userId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] User lock release failed for ${userId}:`, error.message);
@@ -564,11 +552,7 @@ async function acquireRoomInitLock(roomId) {
 
     return async () => {
       try {
-        if (typeof lock.release === 'function') {
-          await lock.release();
-        } else if (typeof lock.unlock === 'function') {
-          await lock.unlock();
-        }
+        await lock.release();
         console.log(`🔓 [Redlock] Released room init lock for ${roomId}`);
       } catch (error) {
         console.warn(`⚠️ [Redlock] Room init lock release failed for ${roomId}:`, error.message);
@@ -701,46 +685,30 @@ async function handleUserCleanup(userId) {
   console.log(`🧹 [Cleanup] Handling user cleanup for ${userId}`);
 
   try {
-    // ✅ RECONNECTION CHECK: Before cleaning up, verify the user hasn't reconnected
-    // during the grace period (e.g., page navigation, iframe transition)
-    const activeSockets = await io.in(`user:${userId}`).fetchSockets();
-    if (activeSockets.length > 0) {
-      console.log(`✅ [Cleanup] ABORT: User ${userId} has ${activeSockets.length} active socket(s) — reconnected during grace period`);
-      return; // User is back online, skip cleanup entirely
-    }
+    // 1. Remove user from all mood tracking
+    await removeUserFromAllMoods(userId);
 
-    // Also check if presence was recently updated (within last 15s)
+    // 2. Clear active room markers (Try both userId and firebaseUid)
+    await clearUserActiveRoom(userId);
+
+    // Attempt to find firebaseUid from presence for thorough cleanup
     const presence = await getUserPresence(userId);
-    if (presence && (Date.now() - presence.lastSeen) < 15000) {
-      console.log(`✅ [Cleanup] ABORT: User ${userId} presence is fresh (${Date.now() - presence.lastSeen}ms ago)`);
-      return;
+    if (presence && presence.firebaseUid) {
+      await clearUserActiveRoom(presence.firebaseUid);
     }
 
-    // ✅ ROOM PROTECTION: Before leaving the room, check if there's an active call
-    // to prevent destroying rooms mid-call
-    const roomId = await matchmaking.getRoomIdByUser(userId);
-    if (roomId) {
-      const activeCall = await findActiveCallForRoom(roomId);
-      if (activeCall) {
-        console.log(`🛡️ [Cleanup] ABORT: User ${userId} has active call in room ${roomId} — protecting room`);
-        return; // Don't destroy room during active call
-      }
-    }
+    // 3. Clear presence record
+    await removeUserPresence(userId);
 
-    console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (no active sockets, no recent presence, no active call)`);
-
-    // ✅ FIX: Use central performUserLeaveChat for authoritative cleanup
-    await performUserLeaveChat(userId, roomId, 'cleanup_timeout', presence?.firebaseUid);
-
-    console.log(`✅ [Cleanup] User ${userId} cleaned up via LeaveSequence`);
+    console.log(`✅ [Cleanup] User ${userId} cleaned up`);
   } catch (error) {
     console.error(`❌ [Cleanup] Error handling user cleanup for ${userId}:`, error);
   }
 }
 
 const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000;
-const ROOM_CLEANUP_GRACE = 600000; // 30 seconds
-const ROOM_WARNING_TIME = 600000; // 60 seconds warning before expiry
+const ROOM_CLEANUP_GRACE = 30000; // 30 seconds
+const ROOM_WARNING_TIME = 60000; // 60 seconds warning before expiry
 
 // ============================================
 // REAL-TIME MOOD USER COUNTERS (REDIS-BACKED)
@@ -787,20 +755,7 @@ async function addUserToMood(userId, mood) {
 async function getUserActiveRoom(userId) {
   try {
     const data = await pubClient.hget('user:active_rooms', userId);
-    if (!data) return null;
-
-    const activeRoom = JSON.parse(data);
-
-    // VERIFY: Does the room actually still exist in Matchmaking/Redis?
-    // This prevents "zombie" room redirects in high-concurrency clusters
-    const roomExists = await matchmaking.getRoom(activeRoom.roomId);
-    if (!roomExists) {
-      console.log(`🧹 [Presence] Stale active room detected for ${userId} (Room ${activeRoom.roomId} is gone). Clearing.`);
-      await pubClient.hdel('user:active_rooms', userId);
-      return null;
-    }
-
-    return activeRoom;
+    return data ? JSON.parse(data) : null;
   } catch (error) {
     console.error(`❌ [Redis] Failed to get active room for ${userId}:`, error.message);
     return null;
@@ -828,8 +783,8 @@ async function setUserActiveRoom(userId, roomId, mood) {
 async function clearUserActiveRoom(userId) {
   try {
     // ALWAYS attempt delete in Redis to be safe
-    const result = await pubClient.hdel('user:active_rooms', userId);
-    console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker. Deleted: ${result}`);
+    await pubClient.hdel('user:active_rooms', userId);
+    console.log(`🔓 [UID: ${userId}] Attempted clear of active room marker`);
     return true;
   } catch (error) {
     console.error(`❌ [Redis] Failed to clear active room for ${userId}:`, error.message);
@@ -1341,11 +1296,10 @@ const io = new Server(server, {
 });
 
 // Initialize Redis-backed matchmaking
-matchmaking.init(pubClient, io, redlock);
+matchmaking.init(pubClient, io);
 
 app.use(cors());
 app.use(express.json());
-
 app.use(express.static(__dirname));
 
 const upload = multer({
@@ -1371,19 +1325,9 @@ async function updateUserPresence(userId, data) {
   try {
     // Merge with existing
     const current = await getUserPresence(userId) || {};
-
-    // FIX: Preserve existing roomId and status if not explicitly provided in 'data'
-    // This prevents heartbeats from other tabs (mood.html/app.js) from wiping out chat state
-    const mergedData = {
-      ...current,
-      ...data,
-      roomId: data.roomId || current.roomId,
-      status: data.status || current.status || 'chat_active',
-      lastSeen: Date.now()
-    };
-
-    await pubClient.hset('user:presence', userId, JSON.stringify(mergedData));
-    return mergedData;
+    const updated = { ...current, ...data, lastSeen: Date.now() };
+    await pubClient.hset('user:presence', userId, JSON.stringify(updated));
+    return updated;
   } catch (error) {
     console.error(`❌ [Redis] Failed to update presence for ${userId}:`, error.message);
     return null;
@@ -1580,7 +1524,56 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
 });
 
 
-// [api/leave-chat route moved to top]
+app.post('/api/leave-chat', authenticateFirebase, async (req, res) => {
+  const requestId = uuidv4().substring(0, 8);
+  console.log(`[ROUTE-DEBUG][${requestId}] START /api/leave-chat. Body:`, JSON.stringify(req.body));
+  console.log(`[ROUTE-DEBUG][${requestId}] Headers:`, JSON.stringify(req.headers));
+  try {
+    const { roomId } = req.body;
+    const firebaseUid = req.firebaseUser?.uid;
+    console.log(`[ROUTE-DEBUG][${requestId}] User UID: ${firebaseUid}, Room: ${roomId}`);
+
+    if (!req.firebaseUser) {
+      console.error(`❌ [API][${requestId}] No firebaseUser in request!`);
+      return res.status(401).json({ error: 'Auth context missing' });
+    }
+
+    console.log(`📡 [API][${requestId}] Leave request received: Room=${roomId}, User UID=${firebaseUid}`);
+
+    if (!roomId) {
+      console.warn(`⚠️ [API][${requestId}] Missing roomId in request body`);
+      return res.status(400).json({ error: 'Room ID is required' });
+    }
+
+    const db = getDB();
+    const user = await db.collection('users').findOne(
+      { firebaseUid },
+      { projection: { _id: 1, username: 1 }, maxTimeMS: 3000 }
+    );
+
+    if (!user) {
+      console.warn(`⚠️ [API][${requestId}] Unknown Firebase UID: ${firebaseUid}`);
+      return res.status(404).json({ error: 'User record not found' });
+    }
+
+    const userId = user._id.toString();
+    console.log(`📡 [API][${requestId}] Authorized: ${user.username} (${userId})`);
+
+    const result = await performUserLeaveChat(userId, roomId, 'manual', firebaseUid);
+
+    console.log(`📡 [API][${requestId}] Result:`, result);
+
+    if (result.success) {
+      return res.json({ success: true, message: 'Successfully left room' });
+    } else {
+      console.error(`❌ [API][${requestId}] performUserLeaveChat reported failure:`, result.error);
+      return res.status(500).json({ success: false, error: result.error });
+    }
+  } catch (error) {
+    console.error(`❌ [API][${requestId}] CRITICAL ROUTE ERROR:`, error.stack);
+    return res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
 
 app.post('/api/check-username', async (req, res) => {
   try {
@@ -2137,37 +2130,6 @@ app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
 });
 
-/**
- * Reliable Leave Endpoint (for navigator.sendBeacon)
- */
-app.post('/api/leave-room', authenticateFirebase, async (req, res) => {
-  const { roomId } = req.body;
-  const userId = req.firebaseUser.userId;
-  const firebaseUid = req.firebaseUser.uid;
-
-  console.log(`📡 [API] Leave request via Beacon/Fetch: user=${userId}, room=${roomId}`);
-
-  if (!roomId) {
-    return res.status(400).json({ error: 'roomId is required' });
-  }
-
-  try {
-    // Trigger authoritative leave sequence
-    const result = await performUserLeaveChat(userId, roomId, 'api_beacon', firebaseUid);
-
-    if (result.success) {
-      console.log(`✅ [API] Leave sequence successful for ${userId}`);
-      return res.json({ success: true });
-    } else {
-      console.error(`❌ [API] Leave sequence failed for ${userId}:`, result.error);
-      return res.status(500).json({ error: 'Leave sequence failed' });
-    }
-  } catch (error) {
-    console.error(`❌ [API] Error in leave-room endpoint:`, error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 
 /**
  * Shared Call Leave Logic (Internal)
@@ -2246,50 +2208,37 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
   console.log(`🏁 [LeaveSequence][${sequenceId}] START: user=${userId}, room=${roomId}, reason=${reason}`);
 
   try {
-    // 0. Resolve Identifiers & Room ID (Deep Lookup)
+    // 0. Resolve Identifiers (Enhanced with DB Fallback)
     let firebaseUid = providedFirebaseUid;
-    let resolvedRoomId = roomId;
-
-    if (!firebaseUid || !resolvedRoomId) {
-      console.log(`🔍 [LeaveSequence][${sequenceId}] Resolving missing data... (Provided UID: ${firebaseUid}, Room: ${resolvedRoomId})`);
+    if (!firebaseUid) {
+      console.log(`🔍 [LeaveSequence][${sequenceId}] firebaseUid missing, checking presence...`);
       const presence = await getUserPresence(userId);
-      if (!firebaseUid) firebaseUid = presence?.firebaseUid;
-      if (!resolvedRoomId) resolvedRoomId = presence?.roomId;
+      firebaseUid = presence?.firebaseUid;
 
-      if (!firebaseUid || !resolvedRoomId) {
-        console.log(`🔍 [LeaveSequence][${sequenceId}] Data still missing from presence, checking DB/MMR...`);
+      if (!firebaseUid) {
+        console.log(`🔍 [LeaveSequence][${sequenceId}] firebaseUid not in presence, checking DB...`);
         try {
           const db = getDB();
-          if (!firebaseUid) {
-            const userDoc = await db.collection('users').findOne({ _id: new ObjectId(userId) }, { projection: { firebaseUid: 1 }, maxTimeMS: 2000 });
-            firebaseUid = userDoc?.firebaseUid;
-          }
-          if (!resolvedRoomId) {
-            resolvedRoomId = await matchmaking.getRoomIdByUser(userId);
-          }
-          if (!resolvedRoomId) {
-            // Final fallback: Check user:active_rooms hash
-            const activeRoom = await getUserActiveRoom(userId);
-            resolvedRoomId = activeRoom?.roomId;
-          }
-        } catch (e) {
-          console.error(`❌ [LeaveSequence][${sequenceId}] Deep lookup failed:`, e.message);
+          const userDoc = await db.collection('users').findOne(
+            { _id: new ObjectId(userId) },
+            { projection: { firebaseUid: 1 }, maxTimeMS: 2000 }
+          );
+          firebaseUid = userDoc?.firebaseUid;
+          if (firebaseUid) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from DB`);
+        } catch (dbError) {
+          console.error(`❌ [LeaveSequence][${sequenceId}] DB Lookup failed:`, dbError.message);
         }
+      } else {
+        console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID ${firebaseUid} from presence`);
       }
-
-      if (firebaseUid) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved UID: ${firebaseUid}`);
-      if (resolvedRoomId) console.log(`🔍 [LeaveSequence][${sequenceId}] Resolved Room: ${resolvedRoomId}`);
     }
 
-    // Update roomId reference
-    const finalRoomId = resolvedRoomId;
-
     // 1. Get Room State
-    console.log(`🏠 [LeaveSequence][${sequenceId}][1/9] Fetching room ${finalRoomId}...`);
-    const room = finalRoomId ? await matchmaking.getRoom(finalRoomId) : null;
+    console.log(`🏠 [LeaveSequence][${sequenceId}][1/9] Fetching room ${roomId}...`);
+    const room = await matchmaking.getRoom(roomId);
 
     if (!room) {
-      console.log(`ℹ️ [LeaveSequence][${sequenceId}][1/9] Room already gone (Room: ${finalRoomId}). Authoritative cleanup.`);
+      console.log(`ℹ️ [LeaveSequence][${sequenceId}][1/9] Room already gone. Cleaning markers for UID: ${firebaseUid} / ID: ${userId}`);
       await clearUserActiveRoom(userId);
       if (firebaseUid) await clearUserActiveRoom(firebaseUid);
       await removeUserPresence(userId);
@@ -2301,7 +2250,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
     // 2. Identify User in Room
     const roomUser = room.users.find(u => u.userId === userId);
     if (!roomUser) {
-      console.log(`ℹ️ [LeaveSequence][${sequenceId}][2/9] User not in room list. Cleaning markers.`);
+      console.log(`ℹ️ [LeaveSequence][${sequenceId}][2/9] User not in room user list. Authoritative cleanup.`);
       await clearUserActiveRoom(userId);
       if (firebaseUid) await clearUserActiveRoom(firebaseUid);
       await removeUserPresence(userId);
@@ -2324,10 +2273,10 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
     const releaseLock = firebaseUid ? await acquireUserLock(firebaseUid) : () => { };
 
     try {
-      // 4. Matchmaking Leave (Crucial: returns destroyed status and updated user list)
-      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave (Authoritative)...`);
+      // 4. Matchmaking Leave
+      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave...`);
       const leaveResult = await matchmaking.leaveRoom(userId);
-      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave result:`, leaveResult.success, `Remaining:`, leaveResult.remainingUsers);
+      console.log(`🎮 [LeaveSequence][${sequenceId}][4/9] MMR Leave result:`, leaveResult);
 
       // 5. Active Room Cleanup
       console.log(`🏠 [LeaveSequence][${sequenceId}][5/9] Clearing markers...`);
@@ -2343,26 +2292,25 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
         await handleCallLeaveInternal(userId, activeCallId);
       }
 
-      // 7. Socket Broadcasting (Enhanced with user list for real-time sidebar)
-      console.log(`📡 [LeaveSequence][${sequenceId}][7/9] Broadcasting leave event to room ${finalRoomId}...`);
-      io.to(finalRoomId).emit('user_left', {
+      // 7. Socket Broadcasting
+      console.log(`📡 [LeaveSequence][${sequenceId}][7/9] Broadcasting leave event...`);
+      io.to(roomId).emit('user_left', {
         userId,
         username,
         pfpUrl: userData?.pfpUrl,
         remainingUsers: leaveResult?.remainingUsers || 0,
-        destroyed: leaveResult?.destroyed || false,
-        users: leaveResult?.users || [], // Definitive list for real-time sidebar synchronization
-        roomId: finalRoomId
+        roomId
       });
 
       // 8. Socket Room Exit
       console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Forcing socket room departure...`);
       const socketIds = await getUserSocketIds(userId);
+      console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Found ${socketIds.length} sockets:`, socketIds);
       socketIds.forEach(sid => {
         const s = io.sockets.sockets.get(sid);
         if (s) {
-          s.leave(finalRoomId);
-          console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Socket ${sid} left room ${finalRoomId}`);
+          s.leave(roomId);
+          console.log(`📱 [LeaveSequence][${sequenceId}][8/9] Socket ${sid} left room ${roomId}`);
         }
       });
 
@@ -2370,7 +2318,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
       console.log(`📢 [LeaveSequence][${sequenceId}][9/9] Syncing other devices...`);
       if (firebaseUid) {
         emitToUserAllDevices(firebaseUid, 'left_room', {
-          roomId: finalRoomId,
+          roomId,
           success: true,
           reason,
           forceRedirect: (reason === 'manual' || reason === 'heartbeat_timeout')
@@ -2596,14 +2544,7 @@ io.on('connection', (socket) => {
       if (matchResult) {
         const room = matchResult;
 
-        // Set active room markers (Redundant for both ID formats for cluster resilience)
         await setUserActiveRoom(firebaseUid, room.id, mood);
-        await setUserActiveRoom(userId, room.id, mood);
-
-        // CRITICAL: Seed presence immediately so we don't wait for first heartbeat
-        // This closes the race condition window where mood.html heartbeat could wipe state
-        await updateUserPresence(userId, { roomId: room.id, status: 'chat_active' });
-
         socket.join(room.id);
 
         if (room) {
@@ -3027,15 +2968,11 @@ io.on('connection', (socket) => {
         expiresAt: room.expiresAt,
         timerStartedAt: room.timerStartedAt,
         serverTime: Date.now(), // CRITICAL: Current server time for clock sync
-        timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
+        timeRemaining: room.getTimeUntilExpiration()
       };
 
       console.log(`📤 Sending room sync to ${user.username}:`);
-      if (room.expiresAt) {
-        console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
-      } else {
-        console.log(`   expiresAt: null`);
-      }
+      console.log(`   expiresAt: ${new Date(room.expiresAt).toISOString()}`);
       console.log(`   serverTime: ${new Date(syncData.serverTime).toISOString()}`);
       console.log(`   timeRemaining: ${(syncData.timeRemaining / 1000).toFixed(1)}s`);
 
@@ -3271,7 +3208,7 @@ io.on('connection', (socket) => {
           socket.emit('room_reconnected', {
             roomId: room.id,
             expiresAt: room.expiresAt,
-            timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
+            timeRemaining: room.getTimeUntilExpiration()
           });
 
           // Notify other users in room
@@ -3381,45 +3318,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // ✅ DUPLICATE ACCOUNT PREVENTION: Check if user is already in a room
-      const existingRoomId = await matchmaking.getRoomIdByUser(user.userId);
-      if (existingRoomId) {
-        const existingRoom = await matchmaking.getRoom(existingRoomId);
-        if (existingRoom && existingRoom.hasUser(user.userId)) {
-          console.log(`⚠️ [Matchmaking] User ${user.username} already in room ${existingRoomId} — redirecting to existing room`);
-
-          // Cancel any pending cleanup since user is actively reconnecting
-          await cancelUserCleanup(user.userId);
-
-          // Join the socket to the room
-          socket.join(existingRoomId);
-          io.in(`user:${user.userId}`).socketsJoin(existingRoomId);
-
-          // Emit match_found with existing room data
-          const matchData = {
-            roomId: existingRoom.id,
-            mood: existingRoom.mood,
-            users: existingRoom.users.map(u => ({
-              userId: u.userId,
-              username: u.username,
-              pfpUrl: u.pfpUrl
-            })),
-            expiresAt: existingRoom.expiresAt,
-            previousMessages: existingRoom.getMessages ? existingRoom.getMessages() : [],
-            activeCall: await findActiveCallForRoom(existingRoomId)
-          };
-          socket.emit('match_found', matchData);
-
-          // Update tracking
-          if (user.firebaseUid) {
-            await setUserActiveRoom(user.firebaseUid, existingRoomId, existingRoom.mood);
-          }
-          addUserToMood(user.userId, existingRoom.mood);
-
-          return; // Don't re-queue
-        }
-      }
-
       // ✅ ADD USER TO MOOD (deduplicated)
       addUserToMood(user.userId, mood);
 
@@ -3431,9 +3329,6 @@ io.on('connection', (socket) => {
 
       // Clear any existing timeout for this user
       clearMatchmakingTimeout(user.userId);
-
-      // Cancel any pending user cleanup (user is actively reconnecting)
-      await cancelUserCleanup(user.userId);
 
       // Try to add to queue or join existing room
       let room = await matchmaking.addToQueue({
@@ -3607,6 +3502,8 @@ io.on('connection', (socket) => {
       }
 
       const joinKey = `${user.userId}:${roomId}`;
+
+      // CRITICAL FIX: Idempotency check
       const existingJoin = roomJoinState.get(joinKey);
       if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
         console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
@@ -3630,7 +3527,7 @@ io.on('connection', (socket) => {
         console.warn(`⚠️ User ${user.username} (${user.userId}) not in room ${roomId} - attempting to re-add`);
 
         // Check if user was recently in this room (grace period reconnection)
-        const activeRoom = user.firebaseUid ? await getUserActiveRoom(user.firebaseUid) : null;
+        const activeRoom = firebaseUid ? await getUserActiveRoom(firebaseUid) : null;
 
         if (activeRoom && activeRoom.roomId === roomId) {
           // User is reconnecting to their active room - re-add them
@@ -5353,40 +5250,24 @@ io.on('connection', (socket) => {
 
 
   socket.on('leave_room', async (data, callback) => {
-    const sequenceId = uuidv4().substring(0, 8);
-    console.log(`👋 [Socket][${sequenceId}] 'leave_room' event received from ${socket.id}`);
+    const userData = await getSocketUser(socket.id);
+    if (!userData) {
+      return callback?.({ success: false, error: 'Not authenticated' });
+    }
+
+    const firebaseUid = userData.firebaseUid;
+    const activeRoom = await getUserActiveRoom(firebaseUid);
+
+    if (!activeRoom) {
+      return callback?.({ success: true, message: 'No active room' });
+    }
 
     try {
-      const userData = await getSocketUser(socket.id);
-      if (!userData) {
-        console.warn(`⚠️ [Socket][${sequenceId}] Unauthorized leave attempt`);
-        return callback?.({ success: false, error: 'Not authenticated' });
-      }
-
-      const firebaseUid = userData.firebaseUid;
-      // Also check user:active_room marker for consistency
-      const activeRoom = await getUserActiveRoom(firebaseUid);
-
-      // DEEP LOOKUP: If roomId is missing, try to find it from MMR mapping as last resort
-      let roomId = data?.roomId || activeRoom?.roomId;
-      if (!roomId) {
-        console.log(`🔍 [Socket][${sequenceId}] roomId missing, checking MMR mapping for ${userData.userId}`);
-        roomId = await matchmaking.getRoomIdByUser(userData.userId);
-      }
-
-      if (!roomId) {
-        console.warn(`⚠️ [Socket][${sequenceId}] Leave request missing room context (Active: ${activeRoom?.roomId})`);
-        return callback?.({ success: true, message: 'No active room found to leave' });
-      }
-
-      console.log(`👋 [Socket][${sequenceId}] User ${userData.username} (UID: ${firebaseUid}) leaving room ${roomId}`);
-      const result = await performUserLeaveChat(userData.userId, roomId, 'manual', firebaseUid);
-
-      console.log(`✅ [Socket][${sequenceId}] Leave result:`, result.success);
+      const result = await performUserLeaveChat(userData.userId, activeRoom.roomId, 'manual', firebaseUid);
       callback?.(result);
     } catch (error) {
-      console.error(`❌ [Socket][${sequenceId}] Error in leave_room handler:`, error.stack);
-      callback?.({ success: false, error: 'Internal server error during leave' });
+      console.error(`❌ [leave_room] Error:`, error);
+      callback?.({ success: false, error: error.message });
     }
   });
 
@@ -5426,8 +5307,7 @@ io.on('connection', (socket) => {
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
       // Use Redis TTL based cleanup instead of local setTimeout
-      // Increased to 20 seconds to handle network jitter, page refreshes, and iframe transitions
-      await scheduleUserCleanup(userId, 20000);
+      await scheduleUserCleanup(userId, 500); // 500ms grace period
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
@@ -5441,7 +5321,6 @@ io.on('connection', (socket) => {
 
 
 const fileChunkRateLimiter = new Map(); // userId -> { count, resetTime }
-const roomJoinState = new Map(); // userId:roomId -> { timestamp }
 const CHUNK_RATE_LIMIT = 100; // Max chunks per 10 seconds
 const RATE_WINDOW = 10000; // 10 seconds
 
@@ -5492,17 +5371,18 @@ async function performPeriodicCleanup() {
 
   try {
     const now = Date.now();
-    const rooms = await matchmaking.getActiveRooms();
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 50;
 
+    // Clean up expired rooms (Authoritative check in case keyspace notification was missed)
+    const rooms = matchmaking.getActiveRooms();
     console.log(`🧹 Checking ${rooms.length} active rooms for expiry`);
 
     for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
       const batch = rooms.slice(i, i + BATCH_SIZE);
       for (const room of batch) {
-        if (room.expiresAt && room.expiresAt <= now) {
+        if (room.expiresAt <= now) {
           console.log(`🕐 Room ${room.id} has expired, cleaning up...`);
-          await handleRoomExpiry(room.id);
+          await performRoomCleanup(room.id);
         }
       }
       if (i + BATCH_SIZE < rooms.length) await new Promise(resolve => setImmediate(resolve));
