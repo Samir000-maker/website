@@ -185,7 +185,7 @@ class Room {
       }
 
       this.users.push(userData);
-      await redis.set(`user:room:${userData.userId}`, this.id);
+      await redis.set(`user:room:${userData.userId}`, this.id, 'EX', 3600);
       await this.save();
       console.log(`✅ User ${userData.userId} added to room ${this.id}`);
       return true;
@@ -233,9 +233,9 @@ async function findRoomWithSpace(mood, excludeUserId = null) {
       if (!room) continue;
 
       // Must match mood, have space, and not be expired
-      if (room.mood === mood && room.hasSpace() && !room.isExpired) {
-        // Skip if the user is already in this room
-        if (excludeUserId && room.hasUser(excludeUserId)) continue;
+     if (room.mood === mood && room.hasSpace() && !room.isExpired) {
+  console.log(`🔍 [Matchmaking] Room ${room.id} users: ${JSON.stringify(room.users.map(u => u.userId))}`);
+  if (excludeUserId && room.users.some(u => u.userId === excludeUserId)) continue;
         console.log(`🔍 [Matchmaking] Found room ${roomId} with space for mood ${mood} (${room.users.length}/${room.maxUsers || config.MAX_USERS_PER_ROOM})`);
         return room;
       }
@@ -257,7 +257,7 @@ export async function addToQueue(userData) {
   const existingRoomId = await redis.get(`user:room:${userId}`);
   if (existingRoomId) {
     const existingRoom = await getRoom(existingRoomId);
-    if (existingRoom && existingRoom.hasUser(userId)) {
+    if (existingRoom && Array.isArray(existingRoom.users) && existingRoom.users.some(u => u.userId === userId)) {
       console.log(`⚠️ [Matchmaking] User ${username} (${userId}) already in room ${existingRoomId}, returning existing room`);
       return existingRoom;
     } else {
@@ -286,18 +286,20 @@ export async function addToQueue(userData) {
     } catch (e) { /* ignore parse errors */ }
   }
 
-  // 3. JOIN EXISTING ROOM: Try to find a room with space for this mood
-  const availableRoom = await findRoomWithSpace(mood, userId);
+const availableRoom = await findRoomWithSpace(mood, userId);
   if (availableRoom) {
     console.log(`🚪 [Matchmaking] Adding ${username} to existing room ${availableRoom.id}`);
-    availableRoom.users.push({
+    const added = await availableRoom.addUser({
       userId: userData.userId,
       username: userData.username,
       pfpUrl: userData.pfpUrl,
       firebaseUid: userData.firebaseUid,
       socketId: userData.socketId
     });
-    await saveRoomToRedis(availableRoom);
+    if (!added) {
+      console.error(`❌ [Matchmaking] Failed to add ${username} to room ${availableRoom.id}`);
+      return null;
+    }
     await redis.set(`user:room:${userId}`, availableRoom.id, 'EX', 3600);
     console.log(`✅ [Matchmaking] ${username} joined room ${availableRoom.id} (${availableRoom.users.length}/${availableRoom.maxUsers || config.MAX_USERS_PER_ROOM})`);
     return availableRoom;
