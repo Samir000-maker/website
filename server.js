@@ -1094,6 +1094,31 @@ async function validateRoomAccess(roomId, userId) {
   }
 
   if (!room.hasUser(userId)) {
+    // ✅ FIX: Auto-readd user if they have an active room mapping
+    // This handles transient disconnects where the user was cleaned up
+    // but reconnected within the grace period
+    const userRoomId = await matchmaking.getRoomIdByUser(userId);
+    if (userRoomId === roomId) {
+      console.log(`🔄 [Room] Auto-readding ${userId} to room ${roomId} (had active mapping)`);
+      // Fetch user data from socket
+      const allSockets = await io.in(`user:${userId}`).fetchSockets();
+      let userData = null;
+      for (const s of allSockets) {
+        const su = await getSocketUser(s.id);
+        if (su) { userData = su; break; }
+      }
+      if (userData) {
+        room.users.push({
+          userId: userData.userId,
+          username: userData.username,
+          pfpUrl: userData.pfpUrl,
+          firebaseUid: userData.firebaseUid
+        });
+        await room.save();
+        console.log(`✅ [Room] Auto-readded ${userData.username} to room ${roomId}`);
+        return { valid: true, room };
+      }
+    }
     return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
   }
 
