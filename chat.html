@@ -5248,6 +5248,17 @@
             console.error('   Current room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
 
+            // ✅ FIX: Do NOT auto-exit the room on NOT_IN_ROOM!
+            // This error often happens during transient disconnects/reconnects.
+            // Instead, attempt to re-join the room silently.
+            if (data.code === 'NOT_IN_ROOM' && roomData?.roomId && socketInstance?.connected) {
+              console.log('🔄 Attempting silent re-join of room', roomData.roomId);
+              socketInstance.emit('join_room', { roomId: roomData.roomId });
+              toast('Reconnecting to room...', 'warning');
+              return; // Don't exit — wait for re-join result
+            }
+
+            // Only exit if room truly doesn't exist (ROOM_NOT_FOUND)
             toast('Room no longer available', 'error');
 
             // Clear loading states
@@ -6038,21 +6049,16 @@
             return;
           }
 
-          console.log('🚪 Page unloading - triggering best-effort leave');
+          console.log('🚩 Page unloading - saving state (room preserved by server grace period)');
 
-          // Manual socket emission as best-effort during unload
-          if (socketInstance?.connected) {
-            console.log('📤 Best-effort socket leave_room emission...');
-            socketInstance.emit('leave_room', { roomId: roomData?.roomId });
-          }
+          // ✅ FIX: Do NOT emit leave_room here!
+          // The server's 20s disconnect grace period will handle cleanup.
+          // If the user is just refreshing/navigating, they'll reconnect within 20s
+          // and the room will be preserved. Only an intentional leave (via the leave button)
+          // should trigger leave_room.
 
-          // Socket emission (legacy/fallback)
-          if (socketInstance?.connected) {
-            socketInstance.emit('leave_room');
-          }
-
-          // Cleanup storage immediately
-          clearChatState(true);
+          // Save state for potential reconnection
+          saveChatState(roomData?.roomId, messagesCache);
 
           // Stop typing indicator
           stopTyping();
