@@ -1341,7 +1341,7 @@ const io = new Server(server, {
 });
 
 // Initialize Redis-backed matchmaking
-matchmaking.init(pubClient, io);
+matchmaking.init(pubClient, io, redlock);
 
 app.use(cors());
 app.use(express.json());
@@ -5492,18 +5492,17 @@ async function performPeriodicCleanup() {
 
   try {
     const now = Date.now();
-    const BATCH_SIZE = 50;
+    const rooms = await matchmaking.getActiveRooms();
+    const BATCH_SIZE = 10;
 
-    // Clean up expired rooms (Authoritative check in case keyspace notification was missed)
-    const rooms = matchmaking.getActiveRooms();
     console.log(`🧹 Checking ${rooms.length} active rooms for expiry`);
 
     for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
       const batch = rooms.slice(i, i + BATCH_SIZE);
       for (const room of batch) {
-        if (room.expiresAt <= now) {
+        if (room.expiresAt && room.expiresAt <= now) {
           console.log(`🕐 Room ${room.id} has expired, cleaning up...`);
-          await performRoomCleanup(room.id);
+          await handleRoomExpiry(room.id);
         }
       }
       if (i + BATCH_SIZE < rooms.length) await new Promise(resolve => setImmediate(resolve));
