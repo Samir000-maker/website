@@ -4377,17 +4377,30 @@
           // This effectively "cancels" the back navigation from the browser's perspective
           history.pushState(TRAP_STATE, '', window.location.href);
 
-          const shouldLeave = await showConfirmationDialog();
+          // We use a small delay to ensure the UI has processed the pushState
+          // before showing the heavy modal
+          setTimeout(async () => {
+            const shouldLeave = await showConfirmationDialog();
 
-          if (shouldLeave) {
-            console.log('✅ User confirmed leaving');
-            backButtonHandled = true;
+            if (shouldLeave) {
+              console.log('✅ User confirmed leaving');
+              backButtonHandled = true;
 
-            // ✅ Explicitly redirect to mood.html (same as manual leaveBtn)
-            await exitRoomSequence('/mood.html');
-          } else {
-            console.log('❌ User staying in chat');
-            // State was already pushed back, so the UI stays on chat.html
+              // ✅ Explicitly redirect with reason 'manual'
+              await exitRoomSequence('/mood.html');
+            } else {
+              console.log('❌ User staying in chat');
+              // State was already pushed back, so the UI stays on chat.html
+            }
+          }, 10);
+        });
+
+        // Add pagehide listener for mobile browsers (iOS Safari reliability)
+        window.addEventListener('pagehide', (event) => {
+          if (!navigatingToCall && !backButtonHandled && !isInBackgroundCall) {
+            // Treat sudden pagehide as a "might be leaving" event
+            // But don't force a full leave sequence here to allow for task switching
+            console.log('📱 Page hidden - backgrounding state preserved');
           }
         });
       }
@@ -6048,45 +6061,18 @@
           const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
 
           if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
-            console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
+            console.log('ℹ️ Unloading but navigating to call or in background');
             return;
           }
 
-          console.log('🚪 Page unloading - triggering reliable leave signals');
+          // CRITICAL: DO NOT send leave_room on beforeunload.
+          // This allows the room to persist during refreshes/temporary disconnects.
+          // The server-side heartbeat timeout (35s) will clean up orphaned rooms.
 
-          // A. Reliable Signal: Navigatior SendBeacon (Async, survives page death)
-          const token = sessionStorage.getItem('vibe_auth_token');
-          if (token && roomData?.roomId) {
-            console.log('📡 Sending leave signal via Beacon API...');
-            const blob = new Blob([JSON.stringify({
-              roomId: roomData.roomId
-            })], { type: 'application/json' });
+          console.log('🚪 Page unloading (refresh/close) - relying on server-side timeout for cleanup');
 
-            // Note: Sending token in header is not possible with sendBeacon, 
-            // but the server can verify the session if needed or we could append to URL
-            // However, our endpoint uses authenticateFirebase which checks headers.
-            // WORKAROUND: Use fetch with keepalive: true (modern alternative to beacon)
-            fetch('/api/leave-room', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ roomId: roomData.roomId }),
-              keepalive: true
-            }).catch(e => console.error('Beacon fetch failed:', e));
-          }
-
-          // B. Best-effort: Socket emission (may or may not arrive)
-          if (socketInstance?.connected) {
-            console.log('📤 Best-effort socket leave_room emission...');
-            socketInstance.emit('leave_room', { roomId: roomData?.roomId });
-          }
-
-          // Cleanup storage immediately
-          clearChatState(true);
-
-          // Stop typing indicator
+          // We can still stop the local heartbeat to be clean
+          stopHeartbeat();
           stopTyping();
         });
 
