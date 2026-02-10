@@ -2404,7 +2404,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
  */
 setInterval(async () => {
   const now = Date.now();
-  const HEARTBEAT_TIMEOUT = 35000; // 35 seconds (allows for some network jitter)
+  const HEARTBEAT_TIMEOUT = 600000; // 35 seconds (allows for some network jitter)
 
   try {
     const allPresence = await pubClient.hgetall('user:presence');
