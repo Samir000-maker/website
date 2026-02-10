@@ -4302,23 +4302,37 @@
           sessionStorage.removeItem('hasBackgroundCall');
         }
 
-        // 3. Trigger server-side leave sequence via API
-        // IMPORTANT: Only use socket emit as fallback if API fails to prevent duplicates
-        if (typeof MoodApp !== 'undefined' && MoodApp.API && roomData?.roomId) {
-          try {
-            console.log('📤 Calling /api/leave-chat...');
-            await MoodApp.API.post('/api/leave-chat', { roomId: roomData.roomId });
-            console.log('✅ API leave-chat succeeded');
-            // API succeeded - do NOT emit socket event (server already processed leave)
-          } catch (e) {
-            console.warn('⚠️ API leave-chat failed, using socket emission as fallback');
-            if (socketInstance && socketInstance.connected) {
-              socketInstance.emit('leave_room');
-            }
-          }
-        } else if (socketInstance && socketInstance.connected) {
-          // No API available, use socket directly
-          socketInstance.emit('leave_room');
+        // 3. Trigger server-side leave sequence via Socket & API (Redundancy)
+        const token = sessionStorage.getItem('vibe_auth_token');
+        if (token && roomData?.roomId) {
+          console.log('📡 Triggering REDUNDANT leave signal via Beacon/Fetch API...');
+          fetch('/api/leave-room', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId: roomData.roomId }),
+            keepalive: true
+          }).catch(e => console.error('Exit sequence beacon failed:', e));
+        }
+
+        if (socketInstance && socketInstance.connected) {
+          console.log('📤 Emitting leave_room via socket...');
+          // Wrap in promise to allow sequence to continue after acknowledgment
+          const leavePromise = new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+              console.warn('⚠️ leave_room acknowledgment timed out');
+              resolve();
+            }, 2000);
+
+            socketInstance.emit('leave_room', { roomId: roomData.roomId }, (response) => {
+              clearTimeout(timeout);
+              console.log('✅ leave_room acknowledgment received:', response);
+              resolve();
+            });
+          });
+          await leavePromise;
         }
 
         // 4. Clear chat state
@@ -4363,17 +4377,30 @@
           // This effectively "cancels" the back navigation from the browser's perspective
           history.pushState(TRAP_STATE, '', window.location.href);
 
-          const shouldLeave = await showConfirmationDialog();
+          // We use a small delay to ensure the UI has processed the pushState
+          // before showing the heavy modal
+          setTimeout(async () => {
+            const shouldLeave = await showConfirmationDialog();
 
-          if (shouldLeave) {
-            console.log('✅ User confirmed leaving');
-            backButtonHandled = true;
+            if (shouldLeave) {
+              console.log('✅ User confirmed leaving');
+              backButtonHandled = true;
 
-            // ✅ Explicitly redirect to mood.html (same as manual leaveBtn)
-            await exitRoomSequence('/mood.html');
-          } else {
-            console.log('❌ User staying in chat');
-            // State was already pushed back, so the UI stays on chat.html
+              // ✅ Explicitly redirect with reason 'manual'
+              await exitRoomSequence('/mood.html');
+            } else {
+              console.log('❌ User staying in chat');
+              // State was already pushed back, so the UI stays on chat.html
+            }
+          }, 10);
+        });
+
+        // Add pagehide listener for mobile browsers (iOS Safari reliability)
+        window.addEventListener('pagehide', (event) => {
+          if (!navigatingToCall && !backButtonHandled && !isInBackgroundCall) {
+            // Treat sudden pagehide as a "might be leaving" event
+            // But don't force a full leave sequence here to allow for task switching
+            console.log('📱 Page hidden - backgrounding state preserved');
           }
         });
       }
@@ -5550,32 +5577,40 @@
         });
 
         socketInstance.on('user_left', (data) => {
-          console.log(`👤 User left: ${data.username} (${data.userId})`);
+          const sequenceId = Math.random().toString(36).substring(2, 6).toUpperCase();
+          console.log(`👤 [${sequenceId}] User left: ${data.username} (${data.userId}). Remaining: ${data.remainingUsers}`);
 
+          // 1. Show message
           const msgEl = document.createElement('div');
           msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
           msgEl.textContent = `${data.username || 'A user'} left the room`;
           messagesList?.appendChild(msgEl);
+          if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
 
-          // Update online count
+          // 2. Authoritative User List Update (mirroring user_joined)
+          if (data.users && Array.isArray(data.users)) {
+            console.log(`👥 [${sequenceId}] Updating sidebar with ${data.users.length} users`);
+            renderUserList(data.users);
+          } else {
+            // Fallback for older server versions/single element remove
+            const userEl = document.getElementById(`user-${data.userId}`);
+            if (userEl) {
+              userEl.style.opacity = '0';
+              setTimeout(() => userEl.remove(), 300);
+            }
+          }
+
+          // 3. Update online count UI
           if (onlineCount && data.remainingUsers !== undefined) {
-            console.log(`👥 Online count updated: ${data.remainingUsers}`);
             onlineCount.textContent = `${data.remainingUsers} Online`;
           }
 
-          // Remove user from sidebar list
-          const userEl = document.getElementById(`user-${data.userId}`);
-          if (userEl) {
-            userEl.style.opacity = '0';
-            userEl.style.transform = 'translateX(-10px)';
-            setTimeout(() => userEl.remove(), 300);
-            console.log(`✅ Removed user element for ${data.userId}`);
-          } else {
-            console.warn(`⚠️ Could not find user element for ${data.userId} to remove`);
-          }
+          // 4. Room Destruction Logic
+          // Trigger exit if server says destroyed OR users drop below 2
+          if (data.destroyed || data.remainingUsers < 2) {
+            console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
 
-          if (data.remainingUsers <= 1) {
-            // CRITICAL: Check if we are in an active call before exiting
+            // Partner left room - check call status
             const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
             let isInActiveCall = false;
             if (activeCallStr) {
@@ -5588,9 +5623,10 @@
             }
 
             if (isInActiveCall) {
-              console.log('🛡️ Partner left room but call is active — PRESERVING UI');
+              console.log(`🛡️ [${sequenceId}] Partner left room but call is active — PRESERVING UI`);
               toast('Partner left chat, but call remains active', 'warning');
             } else {
+              console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
               toast('Room closing...', 'warning');
               exitRoomSequence().catch(console.error);
             }
@@ -6020,53 +6056,36 @@
           }
         });
 
-        // 2. BeforeUnload (Refresh/Close/Address Bar)
+        // 2. Page Unload (Refresh/Close/Address Bar)
         window.addEventListener('beforeunload', (event) => {
           const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
 
           if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
-            console.log('ℹ️ Unloading but navigating to call or in background - skipping auto-leave');
+            console.log('ℹ️ Unloading but navigating to call or in background');
             return;
           }
 
-          console.log('🚪 Page unloading - triggering best-effort leave');
+          // CRITICAL: DO NOT send leave_room on beforeunload.
+          // This allows the room to persist during refreshes/temporary disconnects.
+          // The server-side heartbeat timeout (35s) will clean up orphaned rooms.
 
-          // ✅ Authoritative Exit Signal (Beacon API style)
-          const roomStr = localStorage.getItem('currentRoom');
-          if (roomStr) {
-            try {
-              const roomData = JSON.parse(roomStr);
-              const currentUserStr = localStorage.getItem('currentUser');
-              const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+          console.log('🚪 Page unloading (refresh/close) - relying on server-side timeout for cleanup');
 
-              if (roomData.roomId) {
-                // We use a keepalive fetch to ensure the request is processed after page close
-                // Note: Auth token is retrieved from storage if possible for speed
-                const token = sessionStorage.getItem('vibe_auth_token'); // Assuming app.js might store it here, otherwise we skip headers and rely on server-side socket link if still active
-
-                fetch('/api/leave-chat', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                  },
-                  body: JSON.stringify({ roomId: roomData.roomId }),
-                  keepalive: true
-                }).catch(() => { });
-              }
-            } catch (e) { }
-          }
-
-          // Socket emission (legacy/fallback)
-          if (socketInstance?.connected) {
-            socketInstance.emit('leave_room');
-          }
-
-          // Cleanup storage immediately
-          clearChatState(true);
-
-          // Stop typing indicator
+          // We can still stop the local heartbeat to be clean
+          stopHeartbeat();
           stopTyping();
+        });
+
+        // 3. Visibility Change (Detect minimizing app/switching tabs on mobile)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') {
+            const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+            if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
+              console.log('📱 Tab hidden - user might be leaving chat');
+              // We don't force a leave here, but we could trigger a shorter keepalive
+              // or notify the server. For now, the heartbeat timeout handles this.
+            }
+          }
         });
 
 
