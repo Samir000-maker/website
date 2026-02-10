@@ -58,7 +58,7 @@ const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
 
 // Redis connection URL
 const redisUrl = `redis://:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
-
+const roomJoinState = new Map();
 
 const pubClient = new Redis(redisUrl);
 const subClient = pubClient.duplicate();
@@ -3208,7 +3208,7 @@ io.on('connection', (socket) => {
           socket.emit('room_reconnected', {
             roomId: room.id,
             expiresAt: room.expiresAt,
-            timeRemaining: room.getTimeUntilExpiration()
+            timeRemaining: Math.max(0, room.expiresAt - Date.now())
           });
 
           // Notify other users in room
@@ -3242,7 +3242,7 @@ io.on('connection', (socket) => {
           socket.emit('room_reconnected', {
             roomId: room.id,
             expiresAt: room.expiresAt,
-            timeRemaining: room.getTimeUntilExpiration(),
+            timeRemaining: Math.max(0, room.expiresAt - Date.now()),
             isMultiDevice: true
           });
 
