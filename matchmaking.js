@@ -3,17 +3,49 @@ import config from './config.js';
 
 let redis = null;
 let io = null;
+let redlock = null;
 
 const ROOM_LIFETIME = 600000; // 10 minutes
 const ROOM_WARNING_TIME = 60000; // 1 minute
 
 /**
- * Initialize matchmaking with Redis client and Socket.IO
+ * Initialize matchmaking with Redis client, Socket.IO, and Redlock
  */
-export function init(redisClient, ioInstance) {
+export function init(redisClient, ioInstance, redlockInstance) {
   redis = redisClient;
   io = ioInstance;
-  console.log('📡 [Matchmaking] Initialized with Redis and Socket.IO');
+  redlock = redlockInstance;
+  console.log('📡 [Matchmaking] Initialized with Redis, Socket.IO, and Redlock');
+}
+
+/**
+ * Acquire distributed lock for room operations
+ */
+async function acquireRoomMutex(roomId) {
+  if (!redlock) return () => { };
+  const lockKey = `locks:room:${roomId}`;
+  const lockTTL = 5000; // 5 seconds
+
+  try {
+    const lock = await redlock.acquire([lockKey], lockTTL);
+    console.log(`🔒 [Redlock][MMR] Acquired room lock for ${roomId}`);
+
+    return async () => {
+      try {
+        if (typeof lock.release === 'function') {
+          await lock.release();
+        } else if (typeof lock.unlock === 'function') {
+          await lock.unlock();
+        }
+        console.log(`🔓 [Redlock][MMR] Released room lock for ${roomId}`);
+      } catch (error) {
+        console.warn(`⚠️ [Redlock][MMR] Lock release failed for ${roomId}:`, error.message);
+      }
+    };
+  } catch (error) {
+    console.warn(`⚠️ [Redlock][MMR] Failed to acquire room lock for ${roomId}:`, error.message);
+    return () => { };
+  }
 }
 
 async function saveRoomToRedis(roomData) {
@@ -32,10 +64,12 @@ async function saveRoomToRedis(roomData) {
 
   try {
     await redis.hset(`room:data:${id}`, data);
-    // Set Redis key expiry to match room expiry (plus safety buffer)
+    // Set Redis key expiry to match room expiry exactly
     if (data.expiresAt) {
-      const ttl = Math.floor((data.expiresAt - Date.now()) / 1000) + 300; // +5 mins
-      if (ttl > 0) await redis.expire(`room:data:${id}`, ttl);
+      const ttl = Math.floor((data.expiresAt - Date.now()) / 1000);
+      if (ttl > 0) {
+        await redis.expire(`room:data:${id}`, ttl + 300); // 5 min buffer for data safety
+      }
     }
   } catch (error) {
     console.error(`❌ [Redis] Save failure for room ${id}:`, error.stack);
@@ -130,14 +164,34 @@ class Room {
     return this.users.some(u => u.userId === userId);
   }
 
-  addUser(userData) {
-    if (!this.hasUser(userData.userId) && this.users.length < this.maxUsers) {
+  async addUser(userData) {
+    const releaseLock = await acquireRoomMutex(this.id);
+    try {
+      // Re-fetch to ensure we have the absolute latest user list
+      const latestRoom = await getRoomFromRedis(this.id);
+      if (latestRoom) {
+        this.users = latestRoom.users;
+      }
+
+      const existingUser = this.users.find(u => u.userId === userData.userId);
+      if (existingUser) {
+        console.log(`ℹ️ User ${userData.userId} already in room ${this.id}`);
+        return true;
+      }
+
+      if (this.users.length >= this.maxUsers) {
+        console.error(`❌ Room ${this.id} is full`);
+        return false;
+      }
+
       this.users.push(userData);
-      this.save();
-      console.log(`🏠 [Room:${this.id}] Added user ${userData.username}`);
+      await redis.set(`user:room:${userData.userId}`, this.id);
+      await this.save();
+      console.log(`✅ User ${userData.userId} added to room ${this.id}`);
       return true;
+    } finally {
+      await releaseLock();
     }
-    return false;
   }
 
   hasSpace() {
@@ -318,36 +372,48 @@ export async function leaveRoom(userId) {
     return { roomId: null, remainingUsers: 0 };
   }
 
-  // CRITICAL: Always delete the user-to-room mapping immediately
-  console.log(`🏠 [MMR] Deleting mapping user:room:${userId} (Room: ${roomId})`);
-  await redis.del(`user:room:${userId}`);
+  const releaseLock = await acquireRoomMutex(roomId);
+  try {
+    // CRITICAL: Always delete the user-to-room mapping immediately
+    console.log(`🏠 [MMR] Deleting mapping user:room:${userId} (Room: ${roomId})`);
+    await redis.del(`user:room:${userId}`);
 
-  const room = await getRoom(roomId);
-  if (room) {
-    const initialCount = room.users.length;
-    room.users = room.users.filter(u => u.userId !== userId);
-    const remainingUsers = room.users.length;
+    const roomData = await getRoomFromRedis(roomId);
+    if (roomData) {
+      const initialCount = roomData.users.length;
+      const updatedUsers = roomData.users.filter(u => u.userId !== userId);
+      const remainingUsers = updatedUsers.length;
 
-    console.log(`🏠 [MMR] User filter: ${initialCount} -> ${remainingUsers} users`);
+      console.log(`🏠 [MMR] User filter for ${roomId}: ${initialCount} -> ${remainingUsers} users`);
 
-    // AUTO-DESTROY LOGIC: If less than 2 users remain, destroy the room
-    if (remainingUsers < 2) {
-      console.log(`💥 [MMR] Room ${roomId} has ${remainingUsers} users. Auto-destroying...`);
-      await destroyRoom(roomId);
-      return { roomId, remainingUsers: 0, destroyed: true, users: [] };
+      // AUTO-DESTROY LOGIC: Only destroy if NO users remain
+      // This allows 1-person rooms to survive refreshes/reconnections
+      if (remainingUsers === 0) {
+        console.log(`💥 [MMR] Room ${roomId} is empty. Auto-destroying...`);
+        await destroyRoomInternal(roomId);
+        return { roomId, remainingUsers: 0, destroyed: true, users: [] };
+      }
+
+      // Save updated room state
+      roomData.users = updatedUsers;
+      await saveRoomToRedis(roomData);
+
+      console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
+      return { roomId, remainingUsers, destroyed: false, users: updatedUsers };
     }
 
-    await saveRoomToRedis(room);
-    console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
-    return { roomId, remainingUsers, destroyed: false, users: room.users };
+    console.log(`🏠 [Matchmaking] Legacy marker for ${userId} cleared (room ${roomId} was already gone)`);
+    return { roomId, remainingUsers: 0, destroyed: true, users: [] };
+  } finally {
+    await releaseLock();
   }
-
-  console.log(`🏠 [Matchmaking] Legacy marker for ${userId} cleared (room ${roomId} was already gone)`);
-  return { roomId, remainingUsers: 0, destroyed: true, users: [] };
 }
 
-export async function destroyRoom(roomId) {
-  const room = await getRoom(roomId);
+/**
+ * Internal destroyRoom (no locking inside, used by functions that already have a lock)
+ */
+async function destroyRoomInternal(roomId) {
+  const room = await getRoomFromRedis(roomId);
   if (room) {
     for (const user of room.users) {
       await redis.del(`user:room:${user.userId}`);
@@ -356,6 +422,15 @@ export async function destroyRoom(roomId) {
   await redis.del(`room:data:${roomId}`);
   await redis.del(`room:expiry:${roomId}`);
   console.log(`💥 [Cluster] Room ${roomId} destroyed`);
+}
+
+export async function destroyRoom(roomId) {
+  const releaseLock = await acquireRoomMutex(roomId);
+  try {
+    await destroyRoomInternal(roomId);
+  } finally {
+    await releaseLock();
+  }
 }
 
 export async function cancelMatchmaking(userId, mood) {
