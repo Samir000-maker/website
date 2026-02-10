@@ -729,24 +729,10 @@ async function handleUserCleanup(userId) {
 
     console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (no active sockets, no recent presence, no active call)`);
 
-    // 1. Remove user from all mood tracking
-    await removeUserFromAllMoods(userId);
+    // ✅ FIX: Use central performUserLeaveChat for authoritative cleanup
+    await performUserLeaveChat(userId, roomId, 'cleanup_timeout', presence?.firebaseUid);
 
-    // 2. Clear active room markers (Try both userId and firebaseUid)
-    await clearUserActiveRoom(userId);
-
-    // Attempt to find firebaseUid from presence for thorough cleanup
-    if (presence && presence.firebaseUid) {
-      await clearUserActiveRoom(presence.firebaseUid);
-    }
-
-    // 3. Clear presence record & matchmaking mapping
-    // CRITICAL: Must call leaveRoom to clear user:room:{userId} mapping!
-    // This prevents "zombie" restoration in auth logic upon reconnection
-    await matchmaking.leaveRoom(userId);
-    await removeUserPresence(userId);
-
-    console.log(`✅ [Cleanup] User ${userId} cleaned up`);
+    console.log(`✅ [Cleanup] User ${userId} cleaned up via LeaveSequence`);
   } catch (error) {
     console.error(`❌ [Cleanup] Error handling user cleanup for ${userId}:`, error);
   }
@@ -1094,31 +1080,6 @@ async function validateRoomAccess(roomId, userId) {
   }
 
   if (!room.hasUser(userId)) {
-    // ✅ FIX: Auto-readd user if they have an active room mapping
-    // This handles transient disconnects where the user was cleaned up
-    // but reconnected within the grace period
-    const userRoomId = await matchmaking.getRoomIdByUser(userId);
-    if (userRoomId === roomId) {
-      console.log(`🔄 [Room] Auto-readding ${userId} to room ${roomId} (had active mapping)`);
-      // Fetch user data from socket
-      const allSockets = await io.in(`user:${userId}`).fetchSockets();
-      let userData = null;
-      for (const s of allSockets) {
-        const su = await getSocketUser(s.id);
-        if (su) { userData = su; break; }
-      }
-      if (userData) {
-        room.users.push({
-          userId: userData.userId,
-          username: userData.username,
-          pfpUrl: userData.pfpUrl,
-          firebaseUid: userData.firebaseUid
-        });
-        await room.save();
-        console.log(`✅ [Room] Auto-readded ${userData.username} to room ${roomId}`);
-        return { valid: true, room };
-      }
-    }
     return { valid: false, error: 'You are not in this room', code: 'NOT_IN_ROOM' };
   }
 
@@ -2174,6 +2135,37 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
 
 app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
+});
+
+/**
+ * Reliable Leave Endpoint (for navigator.sendBeacon)
+ */
+app.post('/api/leave-room', authenticateFirebase, async (req, res) => {
+  const { roomId } = req.body;
+  const userId = req.firebaseUser.userId;
+  const firebaseUid = req.firebaseUser.uid;
+
+  console.log(`📡 [API] Leave request via Beacon/Fetch: user=${userId}, room=${roomId}`);
+
+  if (!roomId) {
+    return res.status(400).json({ error: 'roomId is required' });
+  }
+
+  try {
+    // Trigger authoritative leave sequence
+    const result = await performUserLeaveChat(userId, roomId, 'api_beacon', firebaseUid);
+
+    if (result.success) {
+      console.log(`✅ [API] Leave sequence successful for ${userId}`);
+      return res.json({ success: true });
+    } else {
+      console.error(`❌ [API] Leave sequence failed for ${userId}:`, result.error);
+      return res.status(500).json({ error: 'Leave sequence failed' });
+    }
+  } catch (error) {
+    console.error(`❌ [API] Error in leave-room endpoint:`, error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 
@@ -3638,7 +3630,7 @@ io.on('connection', (socket) => {
         console.warn(`⚠️ User ${user.username} (${user.userId}) not in room ${roomId} - attempting to re-add`);
 
         // Check if user was recently in this room (grace period reconnection)
-        const activeRoom = firebaseUid ? await getUserActiveRoom(firebaseUid) : null;
+        const activeRoom = user.firebaseUid ? await getUserActiveRoom(user.firebaseUid) : null;
 
         if (activeRoom && activeRoom.roomId === roomId) {
           // User is reconnecting to their active room - re-add them
