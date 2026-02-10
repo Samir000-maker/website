@@ -1353,21 +1353,26 @@
     // PRESENCE & HEARTBEAT
     // ============================================
     let socketInstance = null;
+    let currentRoomId = null;
     let heartbeatInterval = null;
 
 
     function startHeartbeat() {
       if (heartbeatInterval) stopHeartbeat();
       console.log('💓 [Presence] Starting heartbeat interval');
+      const heartbeatRoomId = currentRoomId;
 
       // Send initial heartbeat immediately
-      if (socketInstance && socketInstance.connected) {
-        socketInstance.emit('heartbeat', { roomId: currentRoomId });
+      if (socketInstance && socketInstance.connected && heartbeatRoomId) {
+        socketInstance.emit('heartbeat', { roomId: heartbeatRoomId });
       }
 
       heartbeatInterval = setInterval(() => {
         if (socketInstance && socketInstance.connected) {
-          socketInstance.emit('heartbeat', { roomId: currentRoomId });
+          const roomId = currentRoomId;
+          if (roomId) {
+            socketInstance.emit('heartbeat', { roomId });
+          }
         }
       }, 10000); // 10s interval
     }
@@ -1625,11 +1630,13 @@
       let activeCallInRoom = null;
       let backButtonHandled = false;
       let timerInterval = null;
-      let socketInstance = null;
       let currentUser = null;
       let roomData = null;
       let serverClockOffset = 0; // Milliseconds to add to client time to get server time
       let serverExpiresAt = null; // Absolute server timestamp for expiry
+      let roomRecoveryInProgress = false;
+      let roomRecoveryAttempts = 0;
+      let lastRoomRecoveryAttemptAt = 0;
       // ============================================
       // EMOJI PICKER STATE
       // ============================================
@@ -4257,15 +4264,6 @@
                 }
               }
 
-              // 3. Leave chat room
-              if (socketInstance && socketInstance.connected) {
-                console.log('📤 Emitting leave_room...');
-                socketInstance.emit('leave_room');
-
-                // Wait for server to process
-                await new Promise(resolve => setTimeout(resolve, 300));
-              }
-
               exitRoomSequence().catch(console.error);
               resolve(true);
 
@@ -4302,21 +4300,7 @@
           sessionStorage.removeItem('hasBackgroundCall');
         }
 
-        // 3. Trigger server-side leave sequence via Socket & API (Redundancy)
-        const token = sessionStorage.getItem('vibe_auth_token');
-        if (token && roomData?.roomId) {
-          console.log('📡 Triggering REDUNDANT leave signal via Beacon/Fetch API...');
-          fetch('/api/leave-room', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ roomId: roomData.roomId }),
-            keepalive: true
-          }).catch(e => console.error('Exit sequence beacon failed:', e));
-        }
-
+        // 3. Trigger server-side leave sequence (socket first, API fallback).
         if (socketInstance && socketInstance.connected) {
           console.log('📤 Emitting leave_room via socket...');
           // Wrap in promise to allow sequence to continue after acknowledgment
@@ -4333,10 +4317,25 @@
             });
           });
           await leavePromise;
+        } else {
+          const token = sessionStorage.getItem('vibe_auth_token');
+          if (token && roomData?.roomId) {
+            console.log('📡 Socket offline - using Beacon/Fetch API leave fallback...');
+            fetch('/api/leave-room', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ roomId: roomData.roomId }),
+              keepalive: true
+            }).catch(e => console.error('Exit sequence beacon failed:', e));
+          }
         }
 
         // 4. Clear chat state
         await clearChatState(true);
+        currentRoomId = null;
 
         // 5. Navigate
         console.log('✅ Exit sequence complete');
@@ -4663,6 +4662,9 @@
           console.log('✅ ROOM_JOINED EVENT RECEIVED');
           console.log('✅ ========================================');
           console.log(`   roomId: ${data.roomId}`);
+          currentRoomId = data.roomId || currentRoomId;
+          roomRecoveryInProgress = false;
+          roomRecoveryAttempts = 0;
 
           // [Keep existing clock sync code...]
           const clientNow = Date.now();
@@ -5049,6 +5051,9 @@
           console.log('⏰ ========================================');
           console.log('⏰ ROOM SYNC DATA RECEIVED');
           console.log('⏰ ========================================');
+          currentRoomId = data.roomId || currentRoomId;
+          roomRecoveryInProgress = false;
+          roomRecoveryAttempts = 0;
 
           const clientNow = Date.now();
 
@@ -5268,16 +5273,11 @@
             return;
           }
 
-          // Handle room-related errors
-          if (data.code === 'ROOM_NOT_FOUND' || data.code === 'NOT_IN_ROOM') {
-            console.error('❌ ROOM ERROR:', data.code);
-            console.error('   Message:', data.message);
-            console.error('   Current room:', roomData?.roomId);
-            console.error('   Was initiating:', wasInitiating);
+          // Handle NOT_IN_ROOM as recoverable first (re-sync + rejoin).
+          if (data.code === 'NOT_IN_ROOM') {
+            console.warn('⚠️ ROOM MEMBERSHIP DESYNC DETECTED');
+            console.warn('   Attempting room recovery before exiting');
 
-            toast('Room no longer available', 'error');
-
-            // Clear loading states
             if (audioCallBtn) {
               audioCallBtn.classList.remove('call-btn-loading', 'calling', 'animate-pulse');
               const timeoutId = audioCallBtn.dataset.timeoutId;
@@ -5295,7 +5295,61 @@
               }
             }
 
-            // Clear all storage
+            const now = Date.now();
+            if (now - lastRoomRecoveryAttemptAt > 15000) {
+              roomRecoveryAttempts = 0;
+            }
+
+            if (!roomRecoveryInProgress && socketInstance?.connected && roomData?.roomId && roomRecoveryAttempts < 3) {
+              roomRecoveryInProgress = true;
+              roomRecoveryAttempts++;
+              lastRoomRecoveryAttemptAt = now;
+
+              toast('Connection hiccup detected. Resyncing room...', 'warning');
+              socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
+              socketInstance.emit('join_room', { roomId: roomData.roomId });
+
+              setTimeout(() => {
+                roomRecoveryInProgress = false;
+              }, 3000);
+
+              console.warn(`🔄 Recovery attempt ${roomRecoveryAttempts}/3 initiated`);
+              console.error('❌ ========================================\n');
+              return;
+            }
+
+            console.error('🗑️ Room recovery exhausted; using unified exit sequence');
+            exitRoomSequence().catch(console.error);
+            console.error('❌ ========================================\n');
+            return;
+          }
+
+          // Handle hard room-not-found as terminal.
+          if (data.code === 'ROOM_NOT_FOUND') {
+            console.error('❌ ROOM ERROR:', data.code);
+            console.error('   Message:', data.message);
+            console.error('   Current room:', roomData?.roomId);
+            console.error('   Was initiating:', wasInitiating);
+
+            toast('Room no longer available', 'error');
+
+            if (audioCallBtn) {
+              audioCallBtn.classList.remove('call-btn-loading', 'calling', 'animate-pulse');
+              const timeoutId = audioCallBtn.dataset.timeoutId;
+              if (timeoutId) {
+                clearTimeout(parseInt(timeoutId));
+                delete audioCallBtn.dataset.timeoutId;
+              }
+            }
+            if (videoCallBtn) {
+              videoCallBtn.classList.remove('call-btn-loading', 'calling', 'animate-pulse');
+              const timeoutId = videoCallBtn.dataset.timeoutId;
+              if (timeoutId) {
+                clearTimeout(parseInt(timeoutId));
+                delete videoCallBtn.dataset.timeoutId;
+              }
+            }
+
             console.error('🗑️ Using unified exit sequence due to room error');
             exitRoomSequence().catch(console.error);
 
@@ -5667,6 +5721,7 @@
         socketInstance.on('left_room', (data) => {
           console.log('👋 Received left_room confirmation from server');
           toast('Left room', 'success');
+          currentRoomId = null;
 
           // CRITICAL: Don't clear storage here - already done in leave button handler
           // Just disconnect socket
@@ -6771,6 +6826,7 @@
 
       try {
         roomData = JSON.parse(roomDataStr);
+        currentRoomId = roomData?.roomId || null;
         console.log('📦 Loaded room data from localStorage:');
         console.log(`   roomId: ${roomData.roomId}`);
 
