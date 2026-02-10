@@ -4302,7 +4302,21 @@
           sessionStorage.removeItem('hasBackgroundCall');
         }
 
-        // 3. Trigger server-side leave sequence via Socket
+        // 3. Trigger server-side leave sequence via Socket & API (Redundancy)
+        const token = sessionStorage.getItem('vibe_auth_token');
+        if (token && roomData?.roomId) {
+          console.log('📡 Triggering REDUNDANT leave signal via Beacon/Fetch API...');
+          fetch('/api/leave-room', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId: roomData.roomId }),
+            keepalive: true
+          }).catch(e => console.error('Exit sequence beacon failed:', e));
+        }
+
         if (socketInstance && socketInstance.connected) {
           console.log('📤 Emitting leave_room via socket...');
           // Wrap in promise to allow sequence to continue after acknowledgment
@@ -5248,17 +5262,6 @@
             console.error('   Current room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
 
-            // ✅ FIX: Do NOT auto-exit the room on NOT_IN_ROOM!
-            // This error often happens during transient disconnects/reconnects.
-            // Instead, attempt to re-join the room silently.
-            if (data.code === 'NOT_IN_ROOM' && roomData?.roomId && socketInstance?.connected) {
-              console.log('🔄 Attempting silent re-join of room', roomData.roomId);
-              socketInstance.emit('join_room', { roomId: roomData.roomId });
-              toast('Reconnecting to room...', 'warning');
-              return; // Don't exit — wait for re-join result
-            }
-
-            // Only exit if room truly doesn't exist (ROOM_NOT_FOUND)
             toast('Room no longer available', 'error');
 
             // Clear loading states
@@ -6040,7 +6043,7 @@
           }
         });
 
-        // 2. BeforeUnload (Refresh/Close/Address Bar)
+        // 2. Page Unload (Refresh/Close/Address Bar)
         window.addEventListener('beforeunload', (event) => {
           const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
 
@@ -6049,19 +6052,54 @@
             return;
           }
 
-          console.log('🚩 Page unloading - saving state (room preserved by server grace period)');
+          console.log('🚪 Page unloading - triggering reliable leave signals');
 
-          // ✅ FIX: Do NOT emit leave_room here!
-          // The server's 20s disconnect grace period will handle cleanup.
-          // If the user is just refreshing/navigating, they'll reconnect within 20s
-          // and the room will be preserved. Only an intentional leave (via the leave button)
-          // should trigger leave_room.
+          // A. Reliable Signal: Navigatior SendBeacon (Async, survives page death)
+          const token = sessionStorage.getItem('vibe_auth_token');
+          if (token && roomData?.roomId) {
+            console.log('📡 Sending leave signal via Beacon API...');
+            const blob = new Blob([JSON.stringify({
+              roomId: roomData.roomId
+            })], { type: 'application/json' });
 
-          // Save state for potential reconnection
-          saveChatState(roomData?.roomId, messagesCache);
+            // Note: Sending token in header is not possible with sendBeacon, 
+            // but the server can verify the session if needed or we could append to URL
+            // However, our endpoint uses authenticateFirebase which checks headers.
+            // WORKAROUND: Use fetch with keepalive: true (modern alternative to beacon)
+            fetch('/api/leave-room', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ roomId: roomData.roomId }),
+              keepalive: true
+            }).catch(e => console.error('Beacon fetch failed:', e));
+          }
+
+          // B. Best-effort: Socket emission (may or may not arrive)
+          if (socketInstance?.connected) {
+            console.log('📤 Best-effort socket leave_room emission...');
+            socketInstance.emit('leave_room', { roomId: roomData?.roomId });
+          }
+
+          // Cleanup storage immediately
+          clearChatState(true);
 
           // Stop typing indicator
           stopTyping();
+        });
+
+        // 3. Visibility Change (Detect minimizing app/switching tabs on mobile)
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') {
+            const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
+            if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
+              console.log('📱 Tab hidden - user might be leaving chat');
+              // We don't force a leave here, but we could trigger a shorter keepalive
+              // or notify the server. For now, the heartbeat timeout handles this.
+            }
+          }
         });
 
 
