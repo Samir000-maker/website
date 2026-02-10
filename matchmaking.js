@@ -5,7 +5,7 @@ let redis = null;
 let io = null;
 
 const ROOM_LIFETIME = 600000; // 10 minutes
-const ROOM_WARNING_TIME = 600000; // 1 minute
+const ROOM_WARNING_TIME = 60000; // 1 minute
 
 /**
  * Initialize matchmaking with Redis client and Socket.IO
@@ -128,6 +128,16 @@ class Room {
 
   hasUser(userId) {
     return this.users.some(u => u.userId === userId);
+  }
+
+  addUser(userData) {
+    if (!this.hasUser(userData.userId) && this.users.length < this.maxUsers) {
+      this.users.push(userData);
+      this.save();
+      console.log(`🏠 [Room:${this.id}] Added user ${userData.username}`);
+      return true;
+    }
+    return false;
   }
 
   hasSpace() {
@@ -320,10 +330,13 @@ export async function leaveRoom(userId) {
 
     console.log(`🏠 [MMR] User filter: ${initialCount} -> ${remainingUsers} users`);
 
-    // ✅ FIX: Do NOT auto-destroy rooms with < 2 users!
-    // Rooms persist until their timer expires. This prevents premature destruction
-    // during transient disconnects, page navigation, and iframe transitions.
-    // The room timer (handleRoomExpiry) is the ONLY way rooms should be destroyed.
+    // AUTO-DESTROY LOGIC: If less than 2 users remain, destroy the room
+    if (remainingUsers < 2) {
+      console.log(`💥 [MMR] Room ${roomId} has ${remainingUsers} users. Auto-destroying...`);
+      await destroyRoom(roomId);
+      return { roomId, remainingUsers: 0, destroyed: true, users: [] };
+    }
+
     await saveRoomToRedis(room);
     console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
     return { roomId, remainingUsers, destroyed: false, users: room.users };
