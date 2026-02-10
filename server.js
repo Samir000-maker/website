@@ -3571,7 +3571,11 @@ io.on('connection', (socket) => {
       // CRITICAL: Start room lifecycle timers when FIRST user actually joins
       if (!room.userJoinedRoom) {
         room.userJoinedRoom = true;
-        room.startLifecycleTimers();
+         room.timerStartedAt = Date.now();
+  room.expiresAt = room.timerStartedAt + ROOM_EXPIRY_TIME;
+  // Save updated room state back to Redis
+  await matchmaking.saveRoom(room); // or however your matchmaking module exposes a save
+  await scheduleRoomCleanup(roomId, ROOM_EXPIRY_TIME);
         console.log(`⏱️ Room ${roomId} lifecycle timers STARTED by ${user.username}`);
         console.log(`   Timer started at: ${new Date(room.timerStartedAt).toISOString()}`);
         console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
