@@ -158,10 +158,50 @@ class Room {
 }
 
 /**
+ * Find an existing room with space for the given mood
+ */
+async function findRoomWithSpace(mood, excludeUserId = null) {
+  try {
+    const keys = await redis.keys('room:data:*');
+    for (const key of keys) {
+      const roomId = key.replace('room:data:', '');
+      const room = await getRoom(roomId);
+      if (!room) continue;
+
+      // Must match mood, have space, and not be expired
+      if (room.mood === mood && room.hasSpace() && !room.isExpired) {
+        // Skip if the user is already in this room
+        if (excludeUserId && room.hasUser(excludeUserId)) continue;
+        console.log(`🔍 [Matchmaking] Found room ${roomId} with space for mood ${mood} (${room.users.length}/${room.maxUsers || config.MAX_USERS_PER_ROOM})`);
+        return room;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error(`❌ [Matchmaking] Error finding room with space:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Add user to matchmaking queue
  */
 export async function addToQueue(userData) {
   const { mood, userId, username } = userData;
+
+  // 0. DUPLICATE PREVENTION: Check if user is already in a room
+  const existingRoomId = await redis.get(`user:room:${userId}`);
+  if (existingRoomId) {
+    const existingRoom = await getRoom(existingRoomId);
+    if (existingRoom && existingRoom.hasUser(userId)) {
+      console.log(`⚠️ [Matchmaking] User ${username} (${userId}) already in room ${existingRoomId}, returning existing room`);
+      return existingRoom;
+    } else {
+      // Stale mapping, clean it up
+      console.log(`🧹 [Matchmaking] Cleaning stale room mapping for ${userId} (room ${existingRoomId})`);
+      await redis.del(`user:room:${userId}`);
+    }
+  }
 
   // 1. Initial capacity check
   const keys = await redis.keys('room:data:*');
@@ -169,14 +209,43 @@ export async function addToQueue(userData) {
     return { error: 'Server at capacity' };
   }
 
-  // 2. Add to Redis List
+  // 2. DEDUPLICATE QUEUE: Remove user from queue if already present
   const queueKey = `matchmaking:queue:${mood}`;
+  const allInQueue = await redis.lrange(queueKey, 0, -1);
+  for (const item of allInQueue) {
+    try {
+      const parsed = JSON.parse(item);
+      if (parsed.userId === userId) {
+        await redis.lrem(queueKey, 1, item);
+        console.log(`🧹 [Matchmaking] Removed duplicate queue entry for ${username}`);
+      }
+    } catch (e) { /* ignore parse errors */ }
+  }
+
+  // 3. JOIN EXISTING ROOM: Try to find a room with space for this mood
+  const availableRoom = await findRoomWithSpace(mood, userId);
+  if (availableRoom) {
+    console.log(`🚪 [Matchmaking] Adding ${username} to existing room ${availableRoom.id}`);
+    availableRoom.users.push({
+      userId: userData.userId,
+      username: userData.username,
+      pfpUrl: userData.pfpUrl,
+      firebaseUid: userData.firebaseUid,
+      socketId: userData.socketId
+    });
+    await saveRoomToRedis(availableRoom);
+    await redis.set(`user:room:${userId}`, availableRoom.id, 'EX', 3600);
+    console.log(`✅ [Matchmaking] ${username} joined room ${availableRoom.id} (${availableRoom.users.length}/${availableRoom.maxUsers || config.MAX_USERS_PER_ROOM})`);
+    return availableRoom;
+  }
+
+  // 4. Add to Redis List (queue)
   await redis.rpush(queueKey, JSON.stringify(userData));
 
   const queueLength = await redis.llen(queueKey);
   console.log(`🎮 [Cluster] User ${username} queued for ${mood} (${queueLength}/${config.MIN_USERS_FOR_ROOM})`);
 
-  // 3. Matchmaking Logic
+  // 5. Matchmaking Logic — create new room if enough users
   if (queueLength >= config.MIN_USERS_FOR_ROOM) {
     const roomUsers = [];
     for (let i = 0; i < config.MIN_USERS_FOR_ROOM; i++) {
