@@ -1,4 +1,4 @@
-mport { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import config from './config.js';
 
 let redis = null;
