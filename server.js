@@ -5423,7 +5423,7 @@ await setRoomJoinState(roomId, user.userId, { joined: true, timestamp: Date.now(
 
       // Use Redis TTL based cleanup instead of local setTimeout
       // Increased to 20 seconds to handle network jitter, page refreshes, and iframe transitions
-      await scheduleUserCleanup(userId, 20000);
+      await scheduleUserCleanup(userId, 600000);
 
     } catch (error) {
       console.error(`❌ Error in disconnect handler for ${userId}:`, error);
