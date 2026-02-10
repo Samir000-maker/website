@@ -185,6 +185,7 @@ class Room {
       }
 
       this.users.push(userData);
+      // ✅ Set user-room mapping BEFORE saving (moved from addToQueue to ensure atomicity)
       await redis.set(`user:room:${userData.userId}`, this.id, 'EX', 3600);
       await this.save();
       console.log(`✅ User ${userData.userId} added to room ${this.id}`);
@@ -286,7 +287,7 @@ export async function addToQueue(userData) {
     } catch (e) { /* ignore parse errors */ }
   }
 
-const availableRoom = await findRoomWithSpace(mood, userId);
+  const availableRoom = await findRoomWithSpace(mood, userId);
   if (availableRoom) {
     console.log(`🚪 [Matchmaking] Adding ${username} to existing room ${availableRoom.id}`);
     const added = await availableRoom.addUser({
@@ -300,9 +301,16 @@ const availableRoom = await findRoomWithSpace(mood, userId);
       console.error(`❌ [Matchmaking] Failed to add ${username} to room ${availableRoom.id}`);
       return null;
     }
-    await redis.set(`user:room:${userId}`, availableRoom.id, 'EX', 3600);
-    console.log(`✅ [Matchmaking] ${username} joined room ${availableRoom.id} (${availableRoom.users.length}/${availableRoom.maxUsers || config.MAX_USERS_PER_ROOM})`);
-    return availableRoom;
+    
+    // ✅ FIX: Re-fetch room from Redis to get fresh, authoritative state
+    const freshRoom = await getRoom(availableRoom.id);
+    if (!freshRoom) {
+      console.error(`❌ [Matchmaking] Room ${availableRoom.id} disappeared after adding user`);
+      return null;
+    }
+    
+    console.log(`✅ [Matchmaking] ${username} joined room ${freshRoom.id} (${freshRoom.users.length}/${freshRoom.maxUsers || config.MAX_USERS_PER_ROOM})`);
+    return freshRoom;
   }
 
   // 4. Add to Redis List (queue)
