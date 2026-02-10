@@ -320,13 +320,10 @@ export async function leaveRoom(userId) {
 
     console.log(`🏠 [MMR] User filter: ${initialCount} -> ${remainingUsers} users`);
 
-    // AUTO-DESTROY LOGIC: If less than 2 users remain, destroy the room
-    if (remainingUsers < 2) {
-      console.log(`💥 [MMR] Room ${roomId} has ${remainingUsers} users. Auto-destroying...`);
-      await destroyRoom(roomId);
-      return { roomId, remainingUsers: 0, destroyed: true, users: [] };
-    }
-
+    // ✅ FIX: Do NOT auto-destroy rooms with < 2 users!
+    // Rooms persist until their timer expires. This prevents premature destruction
+    // during transient disconnects, page navigation, and iframe transitions.
+    // The room timer (handleRoomExpiry) is the ONLY way rooms should be destroyed.
     await saveRoomToRedis(room);
     console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
     return { roomId, remainingUsers, destroyed: false, users: room.users };
