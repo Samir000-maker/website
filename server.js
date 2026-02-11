@@ -1568,6 +1568,8 @@ async function updateUserPresence(userId, data) {
     const hasStatus = Object.prototype.hasOwnProperty.call(data, 'status');
     const hasLocation = Object.prototype.hasOwnProperty.call(data, 'location');
     const hasActiveRoomId = Object.prototype.hasOwnProperty.call(data, 'activeRoomId');
+    const hasChatContextSeen = Object.prototype.hasOwnProperty.call(data, 'chatContextSeen');
+    const providedLocation = hasLocation ? normalizePresenceLocation(data.location) : null;
 
     // FIX: Preserve existing roomId and status if not explicitly provided in 'data'
     // This prevents heartbeats from other tabs (mood.html/app.js) from wiping out chat state
@@ -1580,6 +1582,9 @@ async function updateUserPresence(userId, data) {
       activeRoomId: hasActiveRoomId
         ? data.activeRoomId
         : (hasRoomId ? data.roomId : current.activeRoomId),
+      chatContextSeen: hasChatContextSeen
+        ? !!data.chatContextSeen
+        : (Boolean(current.chatContextSeen) || (providedLocation ? CHAT_CONTEXT_LOCATIONS.has(providedLocation) : false)),
       lastSeen: Date.now()
     };
 
@@ -1647,6 +1652,8 @@ async function applyPresenceContextForUser({
   const normalizedLocation = normalizePresenceLocation(location, path);
   const inChatContext = CHAT_CONTEXT_LOCATIONS.has(normalizedLocation);
   const currentPresence = await getUserPresence(userId);
+  const previousLocation = normalizePresenceLocation(currentPresence?.location);
+  const hasChatContextHistory = Boolean(currentPresence?.chatContextSeen) || CHAT_CONTEXT_LOCATIONS.has(previousLocation);
   const resolvedRoomId = await resolveRoomContextForUser(
     userId,
     firebaseUid,
@@ -1658,7 +1665,8 @@ async function applyPresenceContextForUser({
     location: normalizedLocation,
     roomId: inChatContext ? (resolvedRoomId || roomId || null) : (resolvedRoomId || null),
     activeRoomId: resolvedRoomId || null,
-    status: getPresenceStatusForLocation(normalizedLocation)
+    status: getPresenceStatusForLocation(normalizedLocation),
+    chatContextSeen: hasChatContextHistory || inChatContext
   };
   if (firebaseUid) {
     presencePatch.firebaseUid = firebaseUid;
@@ -1684,7 +1692,7 @@ async function applyPresenceContextForUser({
   }
 
   // Leaving chat context for any non-call page is authoritative and server-driven.
-  if (triggerLeaveOnExit && resolvedRoomId) {
+  if (triggerLeaveOnExit && resolvedRoomId && hasChatContextHistory) {
     logLifecycle('presence_context_left_chat', {
       userId,
       firebaseUid,
@@ -1712,6 +1720,16 @@ async function applyPresenceContextForUser({
       leftRoom: true,
       redirectTo: '/mood.html'
     };
+  }
+
+  if (triggerLeaveOnExit && resolvedRoomId && !hasChatContextHistory) {
+    logLifecycle('presence_context_exit_ignored_pre_chat', {
+      userId,
+      firebaseUid,
+      location: normalizedLocation,
+      roomId: resolvedRoomId,
+      source
+    });
   }
 
   return {
@@ -2874,7 +2892,7 @@ setInterval(async () => {
         const presence = JSON.parse(rawData);
         const normalizedLocation = normalizePresenceLocation(presence.location);
 
-        if (!CHAT_CONTEXT_LOCATIONS.has(normalizedLocation)) {
+        if (!CHAT_CONTEXT_LOCATIONS.has(normalizedLocation) && presence.chatContextSeen) {
           const candidateRoomId = presence.activeRoomId || presence.roomId || null;
           const roomId = candidateRoomId
             ? await resolveRoomContextForUser(userId, presence.firebaseUid, candidateRoomId)
@@ -3250,8 +3268,9 @@ io.on('connection', (socket) => {
         await updateUserPresence(userId, {
           roomId: room.id,
           activeRoomId: room.id,
-          location: 'chat',
-          status: 'chat_active',
+          location: 'mood',
+          status: 'matchmaking',
+          chatContextSeen: false,
           firebaseUid
         });
 
@@ -3894,8 +3913,7 @@ io.on('connection', (socket) => {
         await updateUserPresence(mongoUserId, {
           roomId: activeRoom.roomId,
           activeRoomId: activeRoom.roomId,
-          location: 'chat',
-          status: 'chat_active',
+          status: 'online',
           firebaseUid
         });
       }
