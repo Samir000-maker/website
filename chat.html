@@ -1364,14 +1364,22 @@
 
       // Send initial heartbeat immediately
       if (socketInstance && socketInstance.connected && heartbeatRoomId) {
-        socketInstance.emit('heartbeat', { roomId: heartbeatRoomId });
+        socketInstance.emit('heartbeat', {
+          roomId: heartbeatRoomId,
+          location: 'chat',
+          path: window.location.pathname
+        });
       }
 
       heartbeatInterval = setInterval(() => {
         if (socketInstance && socketInstance.connected) {
           const roomId = currentRoomId;
           if (roomId) {
-            socketInstance.emit('heartbeat', { roomId });
+            socketInstance.emit('heartbeat', {
+              roomId,
+              location: 'chat',
+              path: window.location.pathname
+            });
           }
         }
       }, 10000); // 10s interval
@@ -1637,6 +1645,9 @@
       let roomRecoveryInProgress = false;
       let roomRecoveryAttempts = 0;
       let lastRoomRecoveryAttemptAt = 0;
+      let isConfirmationDialogOpen = false;
+      let confirmationDialogResolve = null;
+      let leaveSequenceInProgress = false;
       // ============================================
       // EMOJI PICKER STATE
       // ============================================
@@ -4166,14 +4177,84 @@
         }
       }
 
+      async function reportChatPresenceContext(reason = 'chat_lifecycle', options = {}) {
+        const roomId = options.roomId || roomData?.roomId || currentRoomId || null;
+        const payload = {
+          location: 'chat',
+          path: window.location.pathname,
+          roomId: roomId || null,
+          source: options.source || 'chat_html',
+          reason
+        };
+
+        try {
+          if (MoodApp?.Presence?.reportContext) {
+            MoodApp.Presence.reportContext(reason, {
+              ...payload,
+              allowRedirect: options.allowRedirect !== false,
+              keepalive: options.keepalive !== false
+            }).catch(() => { });
+          }
+        } catch { }
+
+        if (socketInstance?.connected) {
+          socketInstance.emit('page_context', payload, (response) => {
+            if (!response) return;
+            if (response.redirectTo && response.redirectTo !== window.location.pathname) {
+              cleanupParentCallPage('/mood.html');
+            }
+          });
+        }
+      }
+
+      async function validateChatPresenceState(trigger = 'manual_validation') {
+        if (!socketInstance?.connected || !roomData?.roomId) return;
+
+        socketInstance.emit('validate_presence_state', {
+          location: 'chat',
+          roomId: roomData.roomId,
+          path: window.location.pathname,
+          trigger
+        }, async (response) => {
+          if (!response) return;
+          if (response.valid) {
+            if ((trigger.includes('pageshow') || trigger.includes('visibility')) && socketInstance?.connected) {
+              socketInstance.emit('request_room_sync', { roomId: response.roomId || roomData.roomId });
+            }
+            return;
+          }
+
+          console.warn('⚠️ Presence validation failed. Redirecting to mood.');
+          try {
+            await clearChatState(true);
+          } catch { }
+          cleanupParentCallPage('/mood.html');
+        });
+      }
+
       // ============================================
       // CONFIRMATION DIALOG
       // ============================================
 
       function showConfirmationDialog() {
+        if (isConfirmationDialogOpen) {
+          return Promise.resolve(false);
+        }
+
         return new Promise((resolve) => {
           const overlay = document.getElementById('confirmationOverlay');
           if (!overlay) return resolve(false);
+          isConfirmationDialogOpen = true;
+          confirmationDialogResolve = resolve;
+
+          const closeDialog = (decision) => {
+            isConfirmationDialogOpen = false;
+            const resolver = confirmationDialogResolve;
+            confirmationDialogResolve = null;
+            overlay.style.display = 'none';
+            overlay.innerHTML = '';
+            resolver?.(decision);
+          };
 
           const dialogHTML = `
         <div class="confirmation-overlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 9999;">
@@ -4212,8 +4293,7 @@
               btnStay.style.borderColor = '#30363d';
             });
             btnStay.addEventListener('click', () => {
-              overlay.style.display = 'none';
-              resolve(false);
+              closeDialog(false);
             }, { once: true });
           }
 
@@ -4229,7 +4309,7 @@
             });
             btnLeave.addEventListener('click', async () => {
               console.log('✅ User confirmed leaving via dialog - starting cleanup');
-              overlay.style.display = 'none';
+              closeDialog(true);
 
               // CRITICAL: Clean up background call FIRST
               const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -4265,8 +4345,6 @@
               }
 
               exitRoomSequence().catch(console.error);
-              resolve(true);
-
             }, { once: true });
           }
         });
@@ -4276,71 +4354,79 @@
       // BACK BUTTON HANDLER
       // ============================================
       async function exitRoomSequence(targetUrl = null) {
+        if (leaveSequenceInProgress) {
+          console.log('⚠️ Leave sequence already in progress, ignoring duplicate trigger');
+          return;
+        }
+        leaveSequenceInProgress = true;
         console.log('🚪 ========================================');
         console.log('🚪 STARTING EXIT ROOM SEQUENCE (Server-Authoritative)');
         console.log('🚪 ========================================');
+        try {
+          // 1. Stop all monitoring and heartbeat
+          stopCachedCallMonitoring();
+          stopHeartbeat(); // ✅ Stop heartbeat IMMEDIATELY
+          if (timerInterval) clearInterval(timerInterval);
 
-        // 1. Stop all monitoring and heartbeat
-        stopCachedCallMonitoring();
-        stopHeartbeat(); // ✅ Stop heartbeat IMMEDIATELY
-        if (timerInterval) clearInterval(timerInterval);
+          // 2. Logic to handle active call if user is leaving
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            console.log('📞 Active call detected - ensuring server cleanup...');
+            try {
+              const callData = JSON.parse(activeCallStr);
+              if (socketInstance && socketInstance.connected) {
+                socketInstance.emit('leave_call', { callId: callData.callId });
+              }
+            } catch (e) { }
 
-        // 2. Logic to handle active call if user is leaving
-        const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        if (activeCallStr) {
-          console.log('📞 Active call detected - ensuring server cleanup...');
-          try {
-            const callData = JSON.parse(activeCallStr);
-            if (socketInstance && socketInstance.connected) {
-              socketInstance.emit('leave_call', { callId: callData.callId });
-            }
-          } catch (e) { }
-
-          localStorage.removeItem(ACTIVE_CALL_KEY);
-          sessionStorage.removeItem('hasBackgroundCall');
-        }
-
-        // 3. Trigger server-side leave sequence (socket first, API fallback).
-        if (socketInstance && socketInstance.connected) {
-          console.log('📤 Emitting leave_room via socket...');
-          // Wrap in promise to allow sequence to continue after acknowledgment
-          const leavePromise = new Promise((resolve) => {
-            const timeout = setTimeout(() => {
-              console.warn('⚠️ leave_room acknowledgment timed out');
-              resolve();
-            }, 2000);
-
-            socketInstance.emit('leave_room', { roomId: roomData.roomId }, (response) => {
-              clearTimeout(timeout);
-              console.log('✅ leave_room acknowledgment received:', response);
-              resolve();
-            });
-          });
-          await leavePromise;
-        } else {
-          const token = sessionStorage.getItem('vibe_auth_token');
-          if (token && roomData?.roomId) {
-            console.log('📡 Socket offline - using Beacon/Fetch API leave fallback...');
-            fetch('/api/leave-room', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ roomId: roomData.roomId }),
-              keepalive: true
-            }).catch(e => console.error('Exit sequence beacon failed:', e));
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            sessionStorage.removeItem('hasBackgroundCall');
           }
+
+          // 3. Trigger server-side leave sequence (socket first, API fallback).
+          if (socketInstance && socketInstance.connected) {
+            console.log('📤 Emitting leave_room via socket...');
+            // Wrap in promise to allow sequence to continue after acknowledgment
+            const leavePromise = new Promise((resolve) => {
+              const timeout = setTimeout(() => {
+                console.warn('⚠️ leave_room acknowledgment timed out');
+                resolve();
+              }, 2000);
+
+              socketInstance.emit('leave_room', { roomId: roomData.roomId }, (response) => {
+                clearTimeout(timeout);
+                console.log('✅ leave_room acknowledgment received:', response);
+                resolve();
+              });
+            });
+            await leavePromise;
+          } else {
+            const token = sessionStorage.getItem('vibe_auth_token');
+            if (token && roomData?.roomId) {
+              console.log('📡 Socket offline - using Beacon/Fetch API leave fallback...');
+              fetch('/api/leave-room', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ roomId: roomData.roomId }),
+                keepalive: true
+              }).catch(e => console.error('Exit sequence beacon failed:', e));
+            }
+          }
+
+          // 4. Clear chat state
+          await clearChatState(true);
+          currentRoomId = null;
+
+          // 5. Navigate
+          console.log('✅ Exit sequence complete');
+          cleanupParentCallPage(targetUrl);
+          console.log('🚪 ========================================\n');
+        } finally {
+          leaveSequenceInProgress = false;
         }
-
-        // 4. Clear chat state
-        await clearChatState(true);
-        currentRoomId = null;
-
-        // 5. Navigate
-        console.log('✅ Exit sequence complete');
-        cleanupParentCallPage(targetUrl);
-        console.log('🚪 ========================================\n');
       }
 
       function setupBackButtonHandler() {
@@ -4364,6 +4450,11 @@
           // event.persisted check is optional but good for debugging BFCache
           console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
           setTimeout(ensureTrapState, 0); // specialized timeout ensures it runs after browser restoration
+          reportChatPresenceContext('pageshow', {
+            source: event.persisted ? 'chat_pageshow_bfcache' : 'chat_pageshow',
+            allowRedirect: true
+          }).catch(() => { });
+          validateChatPresenceState(event.persisted ? 'pageshow_bfcache' : 'pageshow').catch(() => { });
         });
 
         // Handle the Back Button (popstate)
@@ -4375,6 +4466,23 @@
           // Immediately push the state back to keep the user here while the modal shows
           // This effectively "cancels" the back navigation from the browser's perspective
           history.pushState(TRAP_STATE, '', window.location.href);
+
+          if (isConfirmationDialogOpen) {
+            console.log('⚠️ Confirmation already open - second back triggers immediate leave');
+            backButtonHandled = true;
+            try {
+              confirmationDialogResolve?.(true);
+            } catch { }
+            const overlay = document.getElementById('confirmationOverlay');
+            if (overlay) {
+              overlay.style.display = 'none';
+              overlay.innerHTML = '';
+            }
+            isConfirmationDialogOpen = false;
+            confirmationDialogResolve = null;
+            await exitRoomSequence('/mood.html');
+            return;
+          }
 
           // We use a small delay to ensure the UI has processed the pushState
           // before showing the heavy modal
@@ -4400,6 +4508,11 @@
             // Treat sudden pagehide as a "might be leaving" event
             // But don't force a full leave sequence here to allow for task switching
             console.log('📱 Page hidden - backgrounding state preserved');
+            reportChatPresenceContext('pagehide', {
+              keepalive: true,
+              allowRedirect: false,
+              source: 'chat_pagehide'
+            }).catch(() => { });
           }
         });
       }
@@ -4523,6 +4636,11 @@
               token: idToken,
               userId: currentUser.userId
             });
+            reportChatPresenceContext('socket_connect', {
+              allowRedirect: false,
+              keepalive: true,
+              source: 'chat_socket_connect'
+            }).catch(() => { });
           }).catch(err => {
             console.error('❌ Failed to get token:', err);
             toast('Authentication failed. Please refresh.', 'error');
@@ -4560,6 +4678,12 @@
           // ✅ START HEARTBEAT after authentication
           startHeartbeat();
 
+          await reportChatPresenceContext('socket_authenticated', {
+            allowRedirect: true,
+            keepalive: true,
+            source: 'chat_authenticated'
+          });
+
           // ✅ Cache token for Beacon API (beforeunload)
           if (MoodApp.Auth) {
             MoodApp.Auth.getToken().then(token => {
@@ -4583,6 +4707,7 @@
 
           startCachedCallMonitoring();
           socketInstance.emit('join_room', { roomId: roomData.roomId });
+          validateChatPresenceState('post_auth_join').catch(() => { });
 
           console.log('✅ ========================================\n');
         });
@@ -4665,6 +4790,13 @@
           currentRoomId = data.roomId || currentRoomId;
           roomRecoveryInProgress = false;
           roomRecoveryAttempts = 0;
+          reportChatPresenceContext('room_joined', {
+            roomId: currentRoomId,
+            allowRedirect: true,
+            keepalive: true,
+            source: 'chat_room_joined'
+          }).catch(() => { });
+          validateChatPresenceState('room_joined').catch(() => { });
 
           // [Keep existing clock sync code...]
           const clientNow = Date.now();
@@ -5054,6 +5186,12 @@
           currentRoomId = data.roomId || currentRoomId;
           roomRecoveryInProgress = false;
           roomRecoveryAttempts = 0;
+          reportChatPresenceContext('room_sync_data', {
+            roomId: currentRoomId,
+            allowRedirect: true,
+            keepalive: true,
+            source: 'chat_room_sync'
+          }).catch(() => { });
 
           const clientNow = Date.now();
 
@@ -5723,6 +5861,12 @@
           toast('Left room', 'success');
           currentRoomId = null;
 
+          if (data?.forceRedirect) {
+            clearChatState(true).catch(() => { });
+            cleanupParentCallPage('/mood.html');
+            return;
+          }
+
           // CRITICAL: Don't clear storage here - already done in leave button handler
           // Just disconnect socket
           if (socketInstance) {
@@ -5730,6 +5874,14 @@
           }
 
           console.log('✅ Socket disconnected after leaving room');
+        });
+
+        socketInstance.on('force_navigation', (data) => {
+          const target = data?.to || '/mood.html';
+          const safeTarget = target === '/discovery.html' ? '/mood.html' : target;
+          console.warn(`🚦 Server-authoritative navigation requested: ${safeTarget} (${data?.reason || 'unspecified'})`);
+          clearChatState(true).catch(() => { });
+          cleanupParentCallPage(safeTarget);
         });
 
         socketInstance.on('incoming_call', (data) => {
@@ -6137,9 +6289,19 @@
             const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
             if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
               console.log('📱 Tab hidden - user might be leaving chat');
-              // We don't force a leave here, but we could trigger a shorter keepalive
-              // or notify the server. For now, the heartbeat timeout handles this.
+              reportChatPresenceContext('visibility_hidden', {
+                allowRedirect: false,
+                keepalive: true,
+                source: 'chat_visibility_hidden'
+              }).catch(() => { });
             }
+          } else {
+            reportChatPresenceContext('visibility_visible', {
+              allowRedirect: true,
+              keepalive: true,
+              source: 'chat_visibility_visible'
+            }).catch(() => { });
+            validateChatPresenceState('visibility_visible').catch(() => { });
           }
         });
 
@@ -6673,8 +6835,19 @@
           if (document.hidden) {
             console.log('📱 Page hidden');
             saveChatState(roomData.roomId, messagesCache);
+            reportChatPresenceContext('visibility_hidden_save', {
+              allowRedirect: false,
+              keepalive: true,
+              source: 'chat_visibility_hidden_save'
+            }).catch(() => { });
           } else {
             console.log('📱 Page visible');
+            reportChatPresenceContext('visibility_visible_save', {
+              allowRedirect: true,
+              keepalive: true,
+              source: 'chat_visibility_visible_save'
+            }).catch(() => { });
+            validateChatPresenceState('visibility_visible_save').catch(() => { });
           }
         });
       }
