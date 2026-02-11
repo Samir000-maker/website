@@ -1371,79 +1371,77 @@ applyVideoOrientation(video, { isSelf });
       }
 
       function setupAudioDetection(userId, stream) {
-        try {
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const source = audioContext.createMediaStreamSource(stream);
-          const analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          let isSpeaking = false, lastSpeakTime = 0;
-          let stopped = false;
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let isSpeaking = false, lastSpeakTime = 0;
+    let stopped = false;
 
-          function detect() {
-            if (stopped || audioContext.state === 'closed') {
-              console.log(`🔇 Audio detection stopped for ${userId}`);
-              return;
-            }
+    function detect() {
+      if (stopped || audioContext.state === 'closed') {
+        console.log(`🔇 Audio detection stopped for ${userId}`);
+        return;
+      }
 
-            const speaking = document.getElementById(`speaking-${userId}`);
-            const tile = document.getElementById(`participant-${userId}`);
+      const speaking = document.getElementById(`speaking-${userId}`);
+      const tile = document.getElementById(`participant-${userId}`);
 
-            if (!speaking || !tile) {
-              stopped = true;
-              if (audioContext.state !== 'closed') {
-                audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
-              }
-              return;
-            }
+      if (!speaking || !tile) {
+        stopped = true;
+        if (audioContext.state !== 'closed') {
+          audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
+        }
+        return;
+      }
 
-            analyser.getByteFrequencyData(dataArray);
-            const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-            const now = Date.now();
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      const now = Date.now();
 
-            if (avg > 30) {
-              if (!isSpeaking) {
-                isSpeaking = true;
-                speaking.classList.remove('hidden');
-                tile.classList.add('active-speaker');
-                if (socketInstance && userId === currentUser.userId) {
-                  socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
-                }
-              }
-              lastSpeakTime = now;
-            } else if (isSpeaking && now - lastSpeakTime > 300) {
-              isSpeaking = false;
-              speaking.classList.add('hidden');
-              tile.classList.remove('active-speaker');
-              if (socketInstance && userId === currentUser.userId) {
-                socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
-              }
-            }
-            requestAnimationFrame(detect);
+      if (avg > 30) {
+        if (!isSpeaking) {
+          isSpeaking = true;
+          speaking.classList.remove('hidden');
+          tile.classList.add('active-speaker');
+          if (socketInstance && userId === currentUser.userId) {
+            socketInstance.emit('speaking_state', { callId: callData.callId, speaking: true });
           }
-          detect();
-
-          // CRITICAL FIX: Store object with context and stop function
-          audioContexts.set(userId, {
-            context: audioContext,
-            stop: () => {
-              stopped = true;
-              if (audioContext.state !== 'closed') {
-                audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
-              }
-            }
-          });
-
-          // ✅ Handle initial suspension (browser auto-play policy)
-          if (audioContext.state === 'suspended') {
-            console.warn(`⚠️ AudioContext for ${userId} is suspended. Waiting for interaction...`);
-          }
-
-        } catch (error) {
-          console.error(`❌ setupAudioDetection error for ${userId}:`, error);
+        }
+        lastSpeakTime = now;
+      } else if (isSpeaking && now - lastSpeakTime > 300) {
+        isSpeaking = false;
+        speaking.classList.add('hidden');
+        tile.classList.remove('active-speaker');
+        if (socketInstance && userId === currentUser.userId) {
+          socketInstance.emit('speaking_state', { callId: callData.callId, speaking: false });
         }
       }
+      requestAnimationFrame(detect);
+    }
+    detect();
+
+    audioContexts.set(userId, {
+      context: audioContext,
+      stop: () => {
+        stopped = true;
+        if (audioContext.state !== 'closed') {
+          audioContext.close().catch(e => console.warn('Failed to close audio context:', e));
+        }
+      }
+    });
+
+    if (audioContext.state === 'suspended') {
+      console.warn(`⚠️ AudioContext for ${userId} is suspended. Waiting for interaction...`);
+    }
+
+  } catch (error) {
+    console.error(`❌ setupAudioDetection error for ${userId}:`, error);
+  }
+}
 
       // ✅ GLOBAL RESUME FOR AUDIO CONTEXTS
       function resumeAllAudioContexts() {
@@ -1809,100 +1807,91 @@ console.log(`✅ Local stream attached with preview orientation (${currentCamera
           }
         };
 
-        // CRITICAL: Add ontrack handler to receive remote media
         pc.ontrack = (event) => {
-          console.log(`🎵 ========================================`);
-          console.log(`🎵 [TRACK] Received ${event.track.kind} track`);
-          console.log(`🎵 ========================================`);
-          console.log(`   From: ${userId}`);
-          console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
-          console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
-          console.log(`   Streams: ${event.streams.length}`);
+  console.log(`🎵 ========================================`);
+  console.log(`🎵 [TRACK] Received ${event.track.kind} track`);
+  console.log(`🎵 ========================================`);
+  console.log(`   From: ${userId}`);
+  console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
+  console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
+  console.log(`   Streams: ${event.streams.length}`);
 
-          if (event.streams && event.streams.length > 0) {
-            const remoteStream = event.streams[0];
-            console.log(`   Remote stream: ${remoteStream.id.substring(0, 8)}... with ${remoteStream.getTracks().length} tracks`);
+  if (event.streams && event.streams.length > 0) {
+    const remoteStream = event.streams[0];
+    console.log(`   Remote stream: ${remoteStream.id.substring(0, 8)}... with ${remoteStream.getTracks().length} tracks`);
 
-            const remoteVideo = document.getElementById(`video-${userId}`);
+    const remoteVideo = document.getElementById(`video-${userId}`);
 
-            if (remoteVideo) {
-              applyVideoOrientation(remoteVideo, { isSelf: false });
+    if (remoteVideo) {
+      applyVideoOrientation(remoteVideo, { isSelf: false });
 
-              const tryPlayRemoteVideo = async () => {
-                try {
-                  await remoteVideo.play();
-                } catch (playError) {
-                  // Autoplay can transiently fail while track is still negotiating.
-                  console.debug(`Remote play pending for ${userId}: ${playError.message}`);
-                }
-              };
+      const tryPlayRemoteVideo = async () => {
+        try {
+          await remoteVideo.play();
+        } catch (playError) {
+          console.debug(`Remote play pending for ${userId}: ${playError.message}`);
+        }
+      };
 
-              // ✅ CRITICAL: Always update srcObject when new tracks arrive
-              const needsUpdate = !remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id;
+      const needsUpdate = !remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id;
 
-              if (needsUpdate) {
-                console.log(`📺 Setting/updating srcObject for ${userId}`);
-                remoteVideo.srcObject = remoteStream;
-                remoteVideo.muted = false;
-                remoteVideo.volume = 1.0;
+      if (needsUpdate) {
+        console.log(`📺 Setting/updating srcObject for ${userId}`);
+        remoteVideo.srcObject = remoteStream;
+        remoteVideo.muted = false;
+        remoteVideo.volume = 1.0;
 
-                // Attach multiple readiness hooks so first frame appears as early as possible.
-                remoteVideo.onloadedmetadata = tryPlayRemoteVideo;
-                remoteVideo.oncanplay = tryPlayRemoteVideo;
-                remoteVideo.onloadeddata = tryPlayRemoteVideo;
+        remoteVideo.onloadedmetadata = tryPlayRemoteVideo;
+        remoteVideo.oncanplay = tryPlayRemoteVideo;
+        remoteVideo.onloadeddata = tryPlayRemoteVideo;
 
-                if (remoteVideo.readyState >= 1) {
-                  tryPlayRemoteVideo();
-                }
-              } else {
-                console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
-                tryPlayRemoteVideo();
-              }
+        if (remoteVideo.readyState >= 1) {
+          tryPlayRemoteVideo();
+        }
+      } else {
+        console.log(`ℹ️ Remote video for ${userId} already has correct srcObject`);
+        tryPlayRemoteVideo();
+      }
 
-              // ✅ Unified Visibility Update
-              if (event.track.kind === 'video') {
-                const intended = remoteMediaStates.get(userId);
-                const shouldShow = intended ? intended.video : true;
-                updateVideoVisibility(userId, shouldShow, true);
-              }
+      if (event.track.kind === 'video') {
+        const intended = remoteMediaStates.get(userId);
+        const shouldShow = intended ? intended.video : true;
+        updateVideoVisibility(userId, shouldShow, true);
+      }
 
-              // Setup audio detection for remote streams
-              if (event.track.kind === 'audio') {
-                console.log(`🎤 Setting up audio detection for remote user ${userId}`);
-                setupAudioDetection(userId, remoteStream);
-              }
+      if (event.track.kind === 'audio') {
+        console.log(`🎤 Setting up audio detection for remote user ${userId}`);
+        setupAudioDetection(userId, remoteStream);
+      }
 
-            } else {
-              console.error(`❌ Video element not found for ${userId}`);
-            }
-          } else {
-            console.warn(`⚠️ No streams in track event for ${userId}`);
-          }
+    } else {
+      console.error(`❌ Video element not found for ${userId}`);
+    }
+  } else {
+    console.warn(`⚠️ No streams in track event for ${userId}`);
+  }
 
-          // Track ended handler
-          event.track.onended = () => {
-            console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
-          };
+  event.track.onended = () => {
+    console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
+  };
 
-          // Track mute/unmute handlers
-          event.track.onmute = () => {
-            console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
-          };
+  event.track.onmute = () => {
+    console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
+  };
 
-          event.track.onunmute = () => {
-            console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
+  event.track.onunmute = () => {
+    console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
 
-            // ✅ Handle video unmute event (dynamic video addition)
-            if (event.track.kind === 'video') {
-              console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
-              const intended = remoteMediaStates.get(userId);
-              const shouldShow = intended ? intended.video : true;
-              updateVideoVisibility(userId, shouldShow, true);
-            }
-          };
+    if (event.track.kind === 'video') {
+      console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
+      const intended = remoteMediaStates.get(userId);
+      const shouldShow = intended ? intended.video : true;
+      updateVideoVisibility(userId, shouldShow, true);
+    }
+  };
 
-          console.log(`🎵 ========================================\n`);
-        };
+  console.log(`🎵 ========================================\n`);
+};
 
         // CRITICAL: ICE candidate handler with rate limiting
         let lastCandidateEmit = 0;
