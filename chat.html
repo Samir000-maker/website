@@ -7161,19 +7161,7 @@
           userCard.className = 'user-card flex items-center gap-3 p-2 rounded-lg bg-[#2a2d33] border border-gray-700 transition-all duration-300 animate-fade-in';
 
           // Profile Picture
-          const pfpContainer = document.createElement('div');
-          pfpContainer.className = 'w-8 h-8 rounded-full overflow-hidden flex-shrink-0 border border-gray-600';
-
-          if (user.pfpUrl) {
-            const img = document.createElement('img');
-            img.src = user.pfpUrl;
-            img.className = 'w-full h-full object-cover';
-            img.alt = user.username;
-            pfpContainer.appendChild(img);
-          } else {
-            pfpContainer.className += ' bg-gray-600 flex items-center justify-center';
-            pfpContainer.innerHTML = `<span class="text-xs text-white font-bold">${(user.username || 'U').charAt(0).toUpperCase()}</span>`;
-          }
+          const pfpContainer = createProfilePictureElement(user.pfpUrl, user.username, 'w-8 h-8');
 
           // Username
           const infoContainer = document.createElement('div');
@@ -7181,7 +7169,7 @@
 
           const nameEl = document.createElement('div');
           nameEl.className = 'text-sm font-medium text-gray-200 truncate';
-          nameEl.textContent = user.username + (isMe ? ' (You)' : '');
+          nameEl.textContent = (user.username || 'User') + (isMe ? ' (You)' : '');
 
           infoContainer.appendChild(nameEl);
 
