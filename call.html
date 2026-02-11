@@ -63,19 +63,15 @@ video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: none;
-  -webkit-transform: none;
-  -moz-transform: none;
+  transform: none !important;
+  -webkit-transform: none !important;
+  -moz-transform: none !important;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  will-change: transform, opacity;
+  will-change: opacity;
 }
 
-video.self-view.is-mirrored {
-  transform: scaleX(-1) !important;
-  -webkit-transform: scaleX(-1) !important;
-  -moz-transform: scaleX(-1) !important;
-}
+video.self-view,
 video.remote-view {
   transform: none !important;
   -webkit-transform: none !important;
@@ -413,13 +409,9 @@ video.remote-view {
       function enforceNaturalVideoRendering(videoEl) {
         if (!videoEl) return;
         videoEl.classList.add('video-enhanced');
-                const shouldMirror = Boolean(isSelf && shouldMirrorSelfPreview());
-        videoEl.classList.toggle('is-mirrored', shouldMirror);
-
-        const transformValue = shouldMirror ? 'scaleX(-1)' : 'none';
-        videoEl.style.setProperty('transform', transformValue, 'important');
-        videoEl.style.setProperty('-webkit-transform', transformValue, 'important');
-        videoEl.style.setProperty('-moz-transform', transformValue, 'important');
+        videoEl.style.setProperty('transform', 'none', 'important');
+        videoEl.style.setProperty('-webkit-transform', 'none', 'important');
+        videoEl.style.setProperty('-moz-transform', 'none', 'important');
         videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
         videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
       }
