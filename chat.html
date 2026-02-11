@@ -2447,32 +2447,39 @@
       // FILE VALIDATION
       // ============================================
       const SUPPORTED_FILE_TYPES = {
-        // Images - 10MB max
-        'image/jpeg': { ext: ['.jpg', '.jpeg'], maxSize: 10 * 1024 * 1024 },
-        'image/png': { ext: ['.png'], maxSize: 10 * 1024 * 1024 },
-        'image/gif': { ext: ['.gif'], maxSize: 10 * 1024 * 1024 },
-        'image/webp': { ext: ['.webp'], maxSize: 10 * 1024 * 1024 },
+        // Images - 100MB max
+        'image/jpeg': { ext: ['.jpg', '.jpeg'], maxSize: 100 * 1024 * 1024 },
+        'image/png': { ext: ['.png'], maxSize: 100 * 1024 * 1024 },
+        'image/gif': { ext: ['.gif'], maxSize: 100 * 1024 * 1024 },
+        'image/webp': { ext: ['.webp'], maxSize: 100 * 1024 * 1024 },
+        'image/bmp': { ext: ['.bmp'], maxSize: 100 * 1024 * 1024 },
+        'image/tiff': { ext: ['.tiff', '.tif'], maxSize: 100 * 1024 * 1024 },
+        'image/svg+xml': { ext: ['.svg'], maxSize: 10 * 1024 * 1024 },
 
-        // Videos - 10MB max (production should use CDN for larger)
-        'video/mp4': { ext: ['.mp4'], maxSize: 10 * 1024 * 1024 },
-        'video/webm': { ext: ['.webm'], maxSize: 10 * 1024 * 1024 },
-        'video/quicktime': { ext: ['.mov'], maxSize: 10 * 1024 * 1024 },
+        // Videos - 100MB max
+        'video/mp4': { ext: ['.mp4'], maxSize: 100 * 1024 * 1024 },
+        'video/webm': { ext: ['.webm'], maxSize: 100 * 1024 * 1024 },
+        'video/quicktime': { ext: ['.mov'], maxSize: 100 * 1024 * 1024 },
+        'video/ogg': { ext: ['.ogv', '.ogg'], maxSize: 100 * 1024 * 1024 },
+        'video/x-msvideo': { ext: ['.avi'], maxSize: 100 * 1024 * 1024 },
+        'video/x-matroska': { ext: ['.mkv'], maxSize: 100 * 1024 * 1024 },
+        'video/mpeg': { ext: ['.mpeg', '.mpg'], maxSize: 100 * 1024 * 1024 },
 
-        // Documents - 10MB max
-        'application/pdf': { ext: ['.pdf'], maxSize: 10 * 1024 * 1024 },
-        'application/msword': { ext: ['.doc'], maxSize: 10 * 1024 * 1024 },
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: ['.docx'], maxSize: 10 * 1024 * 1024 },
-        'application/vnd.ms-excel': { ext: ['.xls'], maxSize: 10 * 1024 * 1024 },
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: ['.xlsx'], maxSize: 10 * 1024 * 1024 },
-        'application/vnd.ms-powerpoint': { ext: ['.ppt'], maxSize: 10 * 1024 * 1024 },
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation': { ext: ['.pptx'], maxSize: 10 * 1024 * 1024 },
-        'text/plain': { ext: ['.txt'], maxSize: 10 * 1024 * 1024 },
-        'application/rtf': { ext: ['.rtf'], maxSize: 10 * 1024 * 1024 },
-        'application/zip': { ext: ['.zip'], maxSize: 10 * 1024 * 1024 },
-        'application/x-zip-compressed': { ext: ['.zip'], maxSize: 10 * 1024 * 1024 }
+        // Documents - 100MB max
+        'application/pdf': { ext: ['.pdf'], maxSize: 100 * 1024 * 1024 },
+        'application/msword': { ext: ['.doc'], maxSize: 100 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: ['.docx'], maxSize: 100 * 1024 * 1024 },
+        'application/vnd.ms-excel': { ext: ['.xls'], maxSize: 100 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: ['.xlsx'], maxSize: 100 * 1024 * 1024 },
+        'application/vnd.ms-powerpoint': { ext: ['.ppt'], maxSize: 100 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': { ext: ['.pptx'], maxSize: 100 * 1024 * 1024 },
+        'text/plain': { ext: ['.txt'], maxSize: 100 * 1024 * 1024 },
+        'application/rtf': { ext: ['.rtf'], maxSize: 100 * 1024 * 1024 },
+        'application/zip': { ext: ['.zip'], maxSize: 100 * 1024 * 1024 },
+        'application/x-zip-compressed': { ext: ['.zip'], maxSize: 100 * 1024 * 1024 }
       };
 
-      const ABSOLUTE_MAX_FILE_SIZE = 10 * 1024 * 1024;
+      const ABSOLUTE_MAX_FILE_SIZE = 100 * 1024 * 1024;
 
       /**
        * Validate file before processing
@@ -2498,9 +2505,17 @@
           };
         }
 
-        // Check file type
+        // Check file type - allow image/*, video/*, PDF, and common document types
         const typeConfig = SUPPORTED_FILE_TYPES[file.type];
         if (!typeConfig) {
+          const mime = (file.type || '').toLowerCase();
+          if (mime.startsWith('image/') || mime.startsWith('video/') ||
+              mime === 'application/pdf' ||
+              mime.startsWith('application/vnd.') || mime.startsWith('application/msword') ||
+              mime === 'text/plain' || mime === 'application/rtf') {
+            console.log(`🔍 Allowing generic type: ${file.type}`);
+            return { valid: true, error: null };
+          }
           console.warn(`⚠️ Unknown MIME type (${file.type || 'none'}) - allowing with fallback handling`);
           console.log('🔍 ========================================\n');
           return { valid: true, error: null };
@@ -6102,6 +6117,21 @@
             console.warn('⚠️ user_joined event received without user list');
             // Fallback: append single user? (Wait, server sends full list)
           }
+        });
+
+        socketInstance.on('room_expired', async (data) => {
+          console.warn('⏰ Room expired - cleaning up attachments and redirecting');
+          const expiredRoomId = data?.roomId || roomData?.roomId;
+          if (expiredRoomId) {
+            try {
+              await deleteRoomFiles(expiredRoomId);
+            } catch (e) {
+              console.error('❌ Failed to delete room files on expiry:', e);
+            }
+          }
+          await clearChatState(true).catch(() => { });
+          cleanupParentCallPage('/mood.html');
+          toast(data?.message || 'Chat room has expired', 'warning');
         });
 
         socketInstance.on('left_room', (data) => {
