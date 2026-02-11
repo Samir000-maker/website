@@ -337,6 +337,8 @@
       let pendingVideoToggleDesired = null;
       let pendingVideoToggleAt = 0;
       let videoTrackAcquirePromise = null;
+      const videoRecoveryAttempts = new Map();
+      const MAX_VIDEO_RECOVERY_ATTEMPTS = 3;
 
       let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
       let makingOffer = new Map();
@@ -1031,6 +1033,11 @@
           pfp.classList.add('hidden');
           if (loading) loading.classList.add('hidden');
 
+          // ✅ Reset recovery attempts on success
+          if (videoRecoveryAttempts.has(userId)) {
+            videoRecoveryAttempts.set(userId, 0);
+          }
+
           // ✅ Clear watchdog if loading successful
           if (loadingWatchdogs.has(userId)) {
             clearTimeout(loadingWatchdogs.get(userId));
@@ -1042,12 +1049,21 @@
           if (loading) loading.classList.remove('hidden');
 
           // ✅ Start Watchdog if NOT already running
-          if (enabled && hasVideoTrack && !loadingWatchdogs.has(userId)) {
+          if (enabled && !loadingWatchdogs.has(userId)) {
             const watchdogId = setTimeout(() => {
               console.error(`❌ [WATCHDOG] Video stuck in LOADING for ${userId}. Triggering recovery...`);
               handleStuckVideo(userId);
             }, 2500);
             loadingWatchdogs.set(userId, watchdogId);
+          }
+
+          // ✅ Fast retry for missing tracks
+          if (enabled && !hasVideoTrack) {
+            setTimeout(() => {
+              if (videoRenderState.get(userId) === 'loading') {
+                handleStuckVideo(userId);
+              }
+            }, 400);
           }
         } else {
           vid.classList.add('hidden');
@@ -1199,6 +1215,17 @@
           console.warn(`   ⚠️ No PeerConnection for ${userId}. Cannot recover.`);
           return;
         }
+
+        const attempts = videoRecoveryAttempts.get(userId) || 0;
+        if (attempts >= MAX_VIDEO_RECOVERY_ATTEMPTS) {
+          console.error(`   ❌ Recovery exhausted for ${userId}. Forcing renegotiation.`);
+          handleIceFailure(userId);
+          videoRecoveryAttempts.set(userId, 0);
+          loadingWatchdogs.delete(userId);
+          return;
+        }
+
+        videoRecoveryAttempts.set(userId, attempts + 1);
 
         // 1. Check if we have remote tracks in the PC
         const remoteTracks = pc.getReceivers()
@@ -1629,6 +1656,11 @@
             if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
 
             console.log(`✅ initLocalMedia() complete - stream ready`);
+
+            if (socketInstance?.connected) {
+              socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+              socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+            }
 
             if (pendingVideoToggleDesired !== null) {
               applyPendingVideoToggle('initLocalMedia');
