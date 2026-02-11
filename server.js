@@ -112,6 +112,7 @@ function normalizePresenceLocation(rawLocation, rawPath = '') {
   const locationValue = (typeof rawLocation === 'string' ? rawLocation : '').trim().toLowerCase();
   const pathValue = (typeof rawPath === 'string' ? rawPath : '').trim().toLowerCase();
 
+  if (locationValue === 'discovery' || pathValue.includes('/discovery.html') || pathValue.includes('/discovery') || pathValue.includes('/discover')) return 'discovery';
   if (locationValue === 'chat' || pathValue.includes('/chat.html') || pathValue === '/chat') return 'chat';
   if (locationValue === 'call' || pathValue.includes('/call.html') || pathValue === '/call') return 'call';
   if (locationValue === 'mood' || pathValue.includes('/mood.html') || pathValue === '/mood') return 'mood';
@@ -121,6 +122,7 @@ function normalizePresenceLocation(rawLocation, rawPath = '') {
 function getPresenceStatusForLocation(location) {
   if (location === 'call') return 'call_active';
   if (location === 'chat') return 'chat_active';
+  if (location === 'discovery') return 'matchmaking';
   return 'online';
 }
 
@@ -853,6 +855,16 @@ async function handleUserCleanup(userId) {
 
     if (!roomId) {
       // No room to leave; just clear stale presence/call state.
+      if (presence?.status === 'matchmaking') {
+        const mood = await pubClient.hget('user:moods', userId);
+        await matchmaking.cancelMatchmaking(userId, mood || undefined);
+        await removeUserFromAllMoods(userId);
+        logLifecycle('matchmaking_cleanup_no_room', {
+          userId,
+          reason: cleanupReason,
+          mood: mood || null
+        });
+      }
       await removeUserPresence(userId);
       await removeUserCall(userId);
       await cancelUserCleanup(userId);
@@ -1800,6 +1812,7 @@ async function applyPresenceContextForUser({
 }) {
   const normalizedLocation = normalizePresenceLocation(location, path);
   const inChatContext = CHAT_CONTEXT_LOCATIONS.has(normalizedLocation);
+  const inDiscoveryContext = normalizedLocation === 'discovery';
   const currentPresence = await getUserPresence(userId);
   const previousLocation = normalizePresenceLocation(currentPresence?.location);
   const hasChatContextHistory = Boolean(currentPresence?.chatContextSeen) || CHAT_CONTEXT_LOCATIONS.has(previousLocation);
@@ -1821,6 +1834,11 @@ async function applyPresenceContextForUser({
     presencePatch.firebaseUid = firebaseUid;
   }
 
+  // Discovery pages are matchmaking context; keep user visible for matchmaking.
+  if (inDiscoveryContext) {
+    presencePatch.status = 'matchmaking';
+  }
+
   await updateUserPresence(userId, presencePatch);
 
   if (inChatContext) {
@@ -1838,6 +1856,28 @@ async function applyPresenceContextForUser({
       roomId: resolvedRoomId || null,
       leftRoom: false
     };
+  }
+
+  // Leaving discovery/matchmaking should immediately remove user from queue/mood tracking.
+  if (
+    triggerLeaveOnExit
+    && !inDiscoveryContext
+    && (currentPresence?.status === 'matchmaking' || previousLocation === 'discovery')
+  ) {
+    try {
+      const mood = await pubClient.hget('user:moods', userId);
+      await matchmaking.cancelMatchmaking(userId, mood || undefined);
+      await removeUserFromAllMoods(userId);
+      logLifecycle('matchmaking_exit_cleanup', {
+        userId,
+        firebaseUid,
+        location: normalizedLocation,
+        mood: mood || null,
+        source
+      });
+    } catch (cleanupError) {
+      console.error(`❌ [Presence] Failed matchmaking exit cleanup for ${userId}:`, cleanupError.message);
+    }
   }
 
   // Leaving chat context for any non-call page is authoritative and server-driven.
@@ -6945,6 +6985,32 @@ async function performPeriodicCleanup() {
       }
     }
     if (orphanedUsers > 0) console.log(`🗑️ Cleaned up ${orphanedUsers} orphaned users from mood tracking`);
+
+    // Audit matchmaking queues for ghost users (no presence or stale heartbeat)
+    let ghostQueuedUsers = 0;
+    for (const moodConfig of config.MOODS) {
+      const mood = moodConfig.id;
+      const queueKey = `matchmaking:queue:${mood}`;
+      const queued = await pubClient.lrange(queueKey, 0, -1);
+      for (const entry of queued) {
+        try {
+          const userData = JSON.parse(entry);
+          if (!userData?.userId) continue;
+          const presence = await getUserPresence(userData.userId);
+          const isStale = !presence || (now - (presence.lastSeen || 0) > 300000);
+          if (isStale) {
+            await pubClient.lrem(queueKey, 1, entry);
+            await removeUserFromAllMoods(userData.userId);
+            ghostQueuedUsers++;
+          }
+        } catch {
+          // malformed entry, drop it
+          await pubClient.lrem(queueKey, 1, entry);
+          ghostQueuedUsers++;
+        }
+      }
+    }
+    if (ghostQueuedUsers > 0) console.log(`🗑️ Cleaned up ${ghostQueuedUsers} ghost users from matchmaking queues`);
 
     const cleanupDuration = Date.now() - startTime;
     const allUsers = await getAllSocketUsers();
