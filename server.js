@@ -40,6 +40,7 @@ import {
   uploadProfilePicture,
   uploadChatAttachment,
   getChatAttachmentStream,
+  deleteChatAttachmentByKey,
   getDefaultProfilePicture
 } from './cloudflare-storage.js';
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
@@ -687,7 +688,22 @@ async function handleRoomExpiry(roomId) {
       await handleCallExpiry(callId);
     }
 
-    // 3. File stores are now in Redis or handled per-user, no local cleanup needed here
+    // 3. Delete all attachments for this room (R2 + MongoDB)
+    try {
+      const db = getDB();
+      const attachments = await db.collection('attachments').find({ roomId }).toArray();
+      for (const att of attachments) {
+        if (att.storageKey) {
+          await deleteChatAttachmentByKey(att.storageKey);
+        }
+      }
+      if (attachments.length > 0) {
+        const delResult = await db.collection('attachments').deleteMany({ roomId });
+        console.log(`🧹 [Cleanup] Deleted ${delResult.deletedCount} attachment(s) for room ${roomId}`);
+      }
+    } catch (attErr) {
+      console.error(`❌ [Cleanup] Failed to delete room attachments for ${roomId}:`, attErr);
+    }
 
     // 4. Remove room from matchmaking
     await matchmaking.destroyRoom(roomId, 'timer_expired');
@@ -771,7 +787,7 @@ const SOCKET_DISCONNECT_GRACE_MS = 120000;
 const CLEANUP_RECHECK_MIN_MS = 10000;
 const SERVER_PING_INTERVAL_MS = 15000;
 const SERVER_PONG_TIMEOUT_MS = 45000;
-const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const CHAT_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024; // 100MB for production
 
 async function handleUserCleanup(userId) {
   const startedAt = Date.now();
@@ -1647,7 +1663,8 @@ const io = new Server(server, {
 matchmaking.init(pubClient, io, redlock);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.use(express.static(__dirname));
 
@@ -1664,10 +1681,25 @@ const upload = multer({
   }
 });
 
+function isAllowedAttachmentMime(mime = '') {
+  const m = String(mime || '').toLowerCase();
+  if (m.startsWith('image/') || m.startsWith('video/')) return true;
+  if (m === 'application/pdf') return true;
+  if (m.startsWith('application/vnd.') || m === 'application/msword') return true;
+  if (m === 'text/plain' || m === 'application/rtf') return true;
+  if (m === 'application/zip' || m === 'application/x-zip-compressed') return true;
+  return false;
+}
+
 const chatAttachmentUpload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: CHAT_ATTACHMENT_MAX_BYTES
+  limits: { fileSize: CHAT_ATTACHMENT_MAX_BYTES },
+  fileFilter: (req, file, cb) => {
+    if (isAllowedAttachmentMime(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed: ${file.mimetype || 'unknown'}`), false);
+    }
   }
 });
 
@@ -2382,7 +2414,14 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
 app.post('/api/chat/attachments',
   authenticateFirebase,
-  chatAttachmentUpload.single('file'),
+  (req, res, next) => {
+    chatAttachmentUpload.single('file')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ error: err.message || 'File upload failed' });
+      }
+      next();
+    });
+  },
   async (req, res) => {
     try {
       const file = req.file;
@@ -3063,6 +3102,20 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
           reason: 'below_min_users',
           triggeredByUserId: userId
         });
+        // Delete all attachments for destroyed room (R2 + MongoDB)
+        try {
+          const db = getDB();
+          const attachments = await db.collection('attachments').find({ roomId: finalRoomId }).toArray();
+          for (const att of attachments) {
+            if (att.storageKey) await deleteChatAttachmentByKey(att.storageKey);
+          }
+          if (attachments.length > 0) {
+            await db.collection('attachments').deleteMany({ roomId: finalRoomId });
+            console.log(`🧹 [Cleanup] Deleted ${attachments.length} attachment(s) for destroyed room ${finalRoomId}`);
+          }
+        } catch (attErr) {
+          console.error(`❌ [Cleanup] Failed to delete room attachments for ${finalRoomId}:`, attErr);
+        }
       }
 
       // 5. Active Room Cleanup
