@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>How are you feeling? - MoodJournal</title>
 
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+    rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
@@ -522,6 +524,7 @@
         opacity: 0;
         transform: translateY(20px);
       }
+
       to {
         opacity: 1;
         transform: translateY(0);
@@ -542,7 +545,9 @@
     }
 
     @keyframes spin {
-      to { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     .hidden {
@@ -577,6 +582,7 @@
     }
   </style>
 </head>
+
 <body>
   <header class="header">
     <div class="header-content">
@@ -589,11 +595,11 @@
         <a href="#"></a><!-- discover -->
         <a href="#"></a>
       </nav>
-<div class="user-actions">
-  <button class="notification-btn"></button>
-  <span class="logout-text" id="logoutBtn">Logout</span>
-</div>
+      <div class="user-actions">
+        <button class="notification-btn"></button>
+        <span class="logout-text" id="logoutBtn">Logout</span>
       </div>
+    </div>
     </div>
   </header>
 
@@ -602,7 +608,7 @@
       <div class="status-badge">
         <span class="status-indicator"></span>
         <!-- 4,281 USERS ONLINE -->
-        <span>Welcome to Vibegra</span> 
+        <span>Welcome to Vibegra</span>
       </div>
       <h1>
         Connect with your<br>
@@ -627,11 +633,7 @@
         <span class="context-icon">✍️</span>
         <span class="context-label">Add Public NOTE (Optional)</span>
       </div>
-      <textarea 
-        id="noteText"
-        class="context-textarea"
-        rows="3"
-        maxlength="500"
+      <textarea id="noteText" class="context-textarea" rows="3" maxlength="500"
         placeholder="Briefly describe why you are feeling Calm... This helps match you with better conversations."></textarea>
       <div class="context-footer">
         <span class="privacy-badge">
@@ -647,12 +649,12 @@
 
     <div class="sessions-section">
       <div class="sessions-header">
-  <h2 class="sessions-title">Public Notes</h2>
-  <span class="view-all-link" style="cursor: default; opacity: 0.6;">
-    <span>Scroll for more</span>
-    <span>↓</span>
-  </span>
-</div>
+        <h2 class="sessions-title">Public Notes</h2>
+        <span class="view-all-link" style="cursor: default; opacity: 0.6;">
+          <span>Scroll for more</span>
+          <span>↓</span>
+        </span>
+      </div>
 
       <div id="notesList" class="sessions-grid">
         <!-- Sessions will be loaded here -->
@@ -688,19 +690,19 @@
   <!-- Initialize Firebase -->
   <script>
 
-// At the start of your page script
-if (window.StateManager) {
-  const state = window.StateManager.getState();
-  
-  // If coming from expired room, clear state
-  if (state.room && window.StateManager.isRoomExpired()) {
-    window.StateManager.clearRoom();
-  }
-  
-  // Set current page
-  window.StateManager.setPage('mood');
-}
-    
+    // At the start of your page script
+    if (window.StateManager) {
+      const state = window.StateManager.getState();
+
+      // If coming from expired room, clear state
+      if (state.room && window.StateManager.isRoomExpired()) {
+        window.StateManager.clearRoom();
+      }
+
+      // Set current page
+      window.StateManager.setPage('mood');
+    }
+
     const firebaseConfig = {
       apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
       authDomain: "projectt3-8c55e.firebaseapp.com",
@@ -726,529 +728,529 @@ if (window.StateManager) {
 
   <!-- Page-specific script -->
   <script>
-  (async function () {
-    const MoodApp = window.MoodApp || {};
-    const _Auth = MoodApp.Auth;
-    const _API = MoodApp.API;
-    const _Toast = MoodApp.Toast;
-    const _Loading = MoodApp.Loading;
-    const _PageTransition = MoodApp.PageTransition;
-    const _Utils = MoodApp.Utils;
-    const _Session = MoodApp.Session;
+    (async function () {
+      const MoodApp = window.MoodApp || {};
+      const _Auth = MoodApp.Auth;
+      const _API = MoodApp.API;
+      const _Toast = MoodApp.Toast;
+      const _Loading = MoodApp.Loading;
+      const _PageTransition = MoodApp.PageTransition;
+      const _Utils = MoodApp.Utils;
+      const _Session = MoodApp.Session;
 
-    // Helper functions
-    const toast = (m, t='success') => { 
-      if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
-      console[t==='error'?'error':'log'](m); 
-    };
-    const showLoading = (m) => { 
-      if (_Loading && typeof _Loading.show === 'function') _Loading.show(m); 
-    };
-    const hideLoading = () => { 
-      if (_Loading && typeof _Loading.hide === 'function') _Loading.hide(); 
-    };
+      // Helper functions
+      const toast = (m, t = 'success') => {
+        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m);
+        console[t === 'error' ? 'error' : 'log'](m);
+      };
+      const showLoading = (m) => {
+        if (_Loading && typeof _Loading.show === 'function') _Loading.show(m);
+      };
+      const hideLoading = () => {
+        if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+      };
 
-    // DOM refs
-    const moodsGrid = document.getElementById('moodsGrid');
-    const noteText = document.getElementById('noteText');
-    const logMoodBtn = document.getElementById('logMoodBtn');
-    const enterChatBtn = document.getElementById('enterChatBtn');
-    const notesList = document.getElementById('notesList');
-    const loadingEl = document.getElementById('loading');
-    const loadMoreBtn = document.getElementById('loadMoreBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
+      // DOM refs
+      const moodsGrid = document.getElementById('moodsGrid');
+      const noteText = document.getElementById('noteText');
+      const logMoodBtn = document.getElementById('logMoodBtn');
+      const enterChatBtn = document.getElementById('enterChatBtn');
+      const notesList = document.getElementById('notesList');
+      const loadingEl = document.getElementById('loading');
+      const loadMoreBtn = document.getElementById('loadMoreBtn');
+      const logoutBtn = document.getElementById('logoutBtn');
 
-    const moods = {
-      happy: '😊', sad: '😭', angry: '😠', lonely: '😔',
-      calm: '😌', excited: '🤩', tired: '😴', stressed: '😣', confused: '😕'
-    };
+      const moods = {
+        happy: '😊', sad: '😭', angry: '😠', lonely: '😔',
+        calm: '😌', excited: '🤩', tired: '😴', stressed: '😣', confused: '😕'
+      };
 
-    let selectedMood = null;
-    let page = 0;
-    let socketInstance = null;
-    let currentUser = null;
-    let socketConnectFailures = 0;
+      let selectedMood = null;
+      let page = 0;
+      let socketInstance = null;
+      let currentUser = null;
+      let socketConnectFailures = 0;
 
-    // ============================================
-    // SOCKET.IO CONNECTION
-    // ============================================
-    
-    
-    function preventBackNavigation() {
-  // Push a dummy state to history
-  history.pushState(null, null, location.href);
-  
-  // Listen for popstate (back button)
-  window.addEventListener('popstate', function(event) {
-    // Push state again to prevent navigation
-    history.pushState(null, null, location.href);
-    
-    // Optional: Show a toast message
-    if (_Toast && typeof _Toast.warning === 'function') {
-      _Toast.warning('Please use logout to exit');
-    }
-  });
-}
-    
-    
-function waitForTabManager() {
-  return new Promise((resolve, reject) => {
-    // Check if already available
-    if (window.tabManager && window.tabManager.tabId) {
-      console.log('✅ [Auth] TabManager already ready:', window.tabManager.tabId);
-      resolve(window.tabManager);
-      return;
-    }
-    
-    console.log('⏳ [Auth] Waiting for TabManager to initialize...');
-    
-    // Poll for TabManager (handles race conditions)
-    let attempts = 0;
-    const maxAttempts = 100; // 10 seconds max wait
-    
-    const interval = setInterval(() => {
-      attempts++;
-      
-      if (window.tabManager && window.tabManager.tabId) {
-        clearInterval(interval);
-        console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
-        resolve(window.tabManager);
-      } else if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        console.error('❌ [Auth] TabManager timeout after 10s');
-        reject(new Error('TabManager initialization timeout'));
+      // ============================================
+      // SOCKET.IO CONNECTION
+      // ============================================
+
+
+      function preventBackNavigation() {
+        // Push a dummy state to history
+        history.pushState(null, null, location.href);
+
+        // Listen for popstate (back button)
+        window.addEventListener('popstate', function (event) {
+          // Push state again to prevent navigation
+          history.pushState(null, null, location.href);
+
+          // Optional: Show a toast message
+          if (_Toast && typeof _Toast.warning === 'function') {
+            _Toast.warning('Please use logout to exit');
+          }
+        });
       }
-    }, 100); // Check every 100ms
-  });
-}
 
-function getStableSocketSessionId() {
-  if (_Session && typeof _Session.getSocketSessionId === 'function') {
-    return _Session.getSocketSessionId();
-  }
-  try {
-    let sessionId = sessionStorage.getItem('vibe_socket_session_id');
-    if (sessionId) return sessionId;
-    sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-    sessionStorage.setItem('vibe_socket_session_id', sessionId);
-    return sessionId;
-  } catch {
-    return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-  }
-}
 
-function triggerSocketRecoveryReload(reason = 'socket_recovery') {
-  try {
-    const key = 'mood_socket_recovery_state';
-    const now = Date.now();
-    const state = JSON.parse(sessionStorage.getItem(key) || '{}');
-    const recentWindowMs = 5 * 60 * 1000;
-    const withinWindow = state.lastReloadAt && (now - state.lastReloadAt) < recentWindowMs;
-    const count = withinWindow ? (state.count || 0) + 1 : 1;
+      function waitForTabManager() {
+        return new Promise((resolve, reject) => {
+          // Check if already available
+          if (window.tabManager && window.tabManager.tabId) {
+            console.log('✅ [Auth] TabManager already ready:', window.tabManager.tabId);
+            resolve(window.tabManager);
+            return;
+          }
 
-    if (count > 2) {
-      console.error(`❌ [Socket] Reload suppressed (loop guard): ${reason}`);
-      return;
-    }
+          console.log('⏳ [Auth] Waiting for TabManager to initialize...');
 
-    sessionStorage.setItem(key, JSON.stringify({ count, lastReloadAt: now, reason }));
-  } catch { }
+          // Poll for TabManager (handles race conditions)
+          let attempts = 0;
+          const maxAttempts = 100; // 10 seconds max wait
 
-  window.location.reload();
-}
+          const interval = setInterval(() => {
+            attempts++;
 
-/**
- * Authenticate socket with tab management
- * Call this INSTEAD of manually emitting 'authenticate'
- * 
- * @param {Socket} socket - Socket.IO instance
- * @param {string} userId - User's database ID
- * @returns {Promise} - Resolves when authenticated
- */
-async function authenticateSocketWithTabManagement(socket, userId) {
-  try {
-    console.log('🔐 [Auth] Starting socket authentication...');
-    
-    // 1. Wait for TabManager to be ready
-    const tabManager = await waitForTabManager();
-    const tabId = tabManager.tabId;
-    const sessionId = getStableSocketSessionId();
-    
-    console.log('✅ [Auth] TabId retrieved:', tabId);
-    
-    // 2. Get Firebase token
-    const firebaseUser = firebase.auth().currentUser;
-    if (!firebaseUser) {
-      throw new Error('Not authenticated with Firebase');
-    }
-    
-    const token = await firebaseUser.getIdToken();
-    console.log('✅ [Auth] Firebase token retrieved');
-    
-    // 3. Send authentication event
-    console.log('📤 [Auth] Sending authenticate event:', {
-      userId,
-      tabId,
-      socketId: socket.id
-    });
-    
-    socket.emit('authenticate', {
-      token: token,
-      userId: userId,
-      tabId: tabId,  // ← CRITICAL: Include tabId
-      sessionId
-    });
-    
-    // 4. Wait for authentication response
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Authentication timeout (10s)'));
-      }, 10000);
-      
-      // Success handler
-      socket.once('authenticated', (data) => {
-        clearTimeout(timeout);
-        console.log('✅ [Auth] Socket authenticated successfully:', data);
-        resolve(data);
-      });
-      
-      // Error handler
-      socket.once('auth_error', (error) => {
-        clearTimeout(timeout);
-        console.error('❌ [Auth] Authentication failed:', error);
-        
-        // Handle specific error codes
-        if (error.code === 'DUPLICATE_TAB') {
-          console.warn('⚠️ [Auth] Another tab is active');
-          // The TabManager will handle showing the overlay
+            if (window.tabManager && window.tabManager.tabId) {
+              clearInterval(interval);
+              console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
+              resolve(window.tabManager);
+            } else if (attempts >= maxAttempts) {
+              clearInterval(interval);
+              console.error('❌ [Auth] TabManager timeout after 10s');
+              reject(new Error('TabManager initialization timeout'));
+            }
+          }, 100); // Check every 100ms
+        });
+      }
+
+      function getStableSocketSessionId() {
+        if (_Session && typeof _Session.getSocketSessionId === 'function') {
+          return _Session.getSocketSessionId();
         }
-        
-        reject(new Error(error.message || 'Authentication failed'));
-      });
-    });
-    
-  } catch (error) {
-    console.error('❌ [Auth] Socket authentication error:', error);
-    throw error;
-  }
-}
-
-/**
- * Setup session replacement handler
- * Call this ONCE after socket connection
- * 
- * @param {Socket} socket - Socket.IO instance
- */
-function setupSessionReplacementHandler(socket) {
-  socket.on('session_replaced', (data) => {
-    console.log('⚠️ [Session] This tab has been replaced by another:', data);
-    
-    // The TabManager will automatically show the "Use Here" overlay
-    // No need for additional UI here
-    
-    // Optionally: Clean up page-specific state
-    // e.g., stop timers, clear intervals, etc.
-  });
-  
-  console.log('✅ [Session] Replacement handler registered');
-}
-
-console.log('✅ Socket authentication helpers loaded');
-    
-    
-    
-    async function initializeSocket() {
-  try {
-    // Get current Firebase user
-    const firebaseUser = firebase.auth().currentUser;
-    if (!firebaseUser) {
-      console.error('No Firebase user found');
-      return null;
-    }
-
-    // Get fresh ID token
-    const idToken = await firebaseUser.getIdToken();
-
-    // Get user profile from API
-    if (!_API || typeof _API.get !== 'function') {
-      console.error('API helper not available');
-      return null;
-    }
-
-    const userData = await _API.get('/api/users/me');
-    currentUser = {
-      userId: userData._id,
-      username: userData.username,
-      pfpUrl: userData.pfpUrl,
-      email: userData.email
-    };
-
-    console.log('✅ Current user loaded:', currentUser);
-
-    // Connect Socket.IO to backend server
-    const socketUrl = window.location.origin;
-    const sessionId = getStableSocketSessionId();
-    const tabId = window.tabManager?.tabId || null;
-    const socket = io(socketUrl, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 1000,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 10000,
-      randomizationFactor: 0.5,
-      closeOnBeforeunload: false,
-      timeout: 15000,
-      auth: {
-        token: idToken,
-        sessionId,
-        tabId
+        try {
+          let sessionId = sessionStorage.getItem('vibe_socket_session_id');
+          if (sessionId) return sessionId;
+          sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+          sessionStorage.setItem('vibe_socket_session_id', sessionId);
+          return sessionId;
+        } catch {
+          return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+        }
       }
-    });
 
-    // ✅ CRITICAL: Setup mood count listeners BEFORE authentication
-    // This ensures we catch 'mood_counts_initial' event
-    socket.on('mood_counts_initial', (counts) => {
-      console.log('📊 Received initial mood counts:', counts);
-      Object.entries(counts).forEach(([mood, count]) => {
-        updateMoodCount(mood, count);
-      });
-    });
+      function triggerSocketRecoveryReload(reason = 'socket_recovery') {
+        try {
+          const key = 'mood_socket_recovery_state';
+          const now = Date.now();
+          const state = JSON.parse(sessionStorage.getItem(key) || '{}');
+          const recentWindowMs = 5 * 60 * 1000;
+          const withinWindow = state.lastReloadAt && (now - state.lastReloadAt) < recentWindowMs;
+          const count = withinWindow ? (state.count || 0) + 1 : 1;
 
-    socket.on('mood_count_update', ({ mood, count }) => {
-      console.log(`📊 Mood count update: ${mood} = ${count}`);
-      updateMoodCount(mood, count);
-    });
+          if (count > 2) {
+            console.error(`❌ [Socket] Reload suppressed (loop guard): ${reason}`);
+            return;
+          }
 
-    socket.on('connect', async () => {
-      console.log('🔌 Socket connected:', socket.id);
-      socketConnectFailures = 0;
-      
-      try {
-        await authenticateSocketWithTabManagement(socket, currentUser.userId);
-        setupSessionReplacementHandler(socket);
-        console.log('✅ Socket authenticated and ready');
-      } catch (error) {
-        console.error('❌ Authentication failed:', error);
-        MoodApp.Toast.error('Connection failed. Please refresh the page.');
+          sessionStorage.setItem(key, JSON.stringify({ count, lastReloadAt: now, reason }));
+        } catch { }
+
+        window.location.reload();
       }
-    });
 
-    socket.on('authenticated', (data) => {
-      console.log('✅ Socket authenticated:', data);
-      // Note: mood_counts_initial will be sent by server after this event
-    });
+      /**
+       * Authenticate socket with tab management
+       * Call this INSTEAD of manually emitting 'authenticate'
+       * 
+       * @param {Socket} socket - Socket.IO instance
+       * @param {string} userId - User's database ID
+       * @returns {Promise} - Resolves when authenticated
+       */
+      async function authenticateSocketWithTabManagement(socket, userId) {
+        try {
+          console.log('🔐 [Auth] Starting socket authentication...');
 
-    socket.on('auth_error', (data) => {
-      console.error('❌ Socket auth error:', data);
-      toast('Authentication failed. Please refresh the page.', 'error');
-    });
+          // 1. Wait for TabManager to be ready
+          const tabManager = await waitForTabManager();
+          const tabId = tabManager.tabId;
+          const sessionId = getStableSocketSessionId();
 
-    socket.on('connect_error', (error) => {
-      console.error('🔌 Socket connection error:', error);
-      socketConnectFailures += 1;
-      if (socketConnectFailures >= 6) {
-        triggerSocketRecoveryReload('mood_connect_error_threshold');
+          console.log('✅ [Auth] TabId retrieved:', tabId);
+
+          // 2. Get Firebase token
+          const firebaseUser = firebase.auth().currentUser;
+          if (!firebaseUser) {
+            throw new Error('Not authenticated with Firebase');
+          }
+
+          const token = await firebaseUser.getIdToken();
+          console.log('✅ [Auth] Firebase token retrieved');
+
+          // 3. Send authentication event
+          console.log('📤 [Auth] Sending authenticate event:', {
+            userId,
+            tabId,
+            socketId: socket.id
+          });
+
+          socket.emit('authenticate', {
+            token: token,
+            userId: userId,
+            tabId: tabId,  // ← CRITICAL: Include tabId
+            sessionId
+          });
+
+          // 4. Wait for authentication response
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Authentication timeout (10s)'));
+            }, 10000);
+
+            // Success handler
+            socket.once('authenticated', (data) => {
+              clearTimeout(timeout);
+              console.log('✅ [Auth] Socket authenticated successfully:', data);
+              resolve(data);
+            });
+
+            // Error handler
+            socket.once('auth_error', (error) => {
+              clearTimeout(timeout);
+              console.error('❌ [Auth] Authentication failed:', error);
+
+              // Handle specific error codes
+              if (error.code === 'DUPLICATE_TAB') {
+                console.warn('⚠️ [Auth] Another tab is active');
+                // The TabManager will handle showing the overlay
+              }
+
+              reject(new Error(error.message || 'Authentication failed'));
+            });
+          });
+
+        } catch (error) {
+          console.error('❌ [Auth] Socket authentication error:', error);
+          throw error;
+        }
       }
-    });
 
-    socket.on('disconnect', (reason) => {
-      console.log('🔌 Socket disconnected:', reason);
-      if (reason === 'io server disconnect') {
-        socket.connect();
+      /**
+       * Setup session replacement handler
+       * Call this ONCE after socket connection
+       * 
+       * @param {Socket} socket - Socket.IO instance
+       */
+      function setupSessionReplacementHandler(socket) {
+        socket.on('session_replaced', (data) => {
+          console.log('⚠️ [Session] This tab has been replaced by another:', data);
+
+          // The TabManager will automatically show the "Use Here" overlay
+          // No need for additional UI here
+
+          // Optionally: Clean up page-specific state
+          // e.g., stop timers, clear intervals, etc.
+        });
+
+        console.log('✅ [Session] Replacement handler registered');
       }
-    });
 
-    socket.on('server_ping', (payload = {}) => {
-      if (!socket.connected) return;
-      socket.emit('client_pong', {
-        roomId: null,
-        location: 'mood',
-        path: window.location.pathname,
-        serverPingTs: payload.ts || null
-      });
-    });
+      console.log('✅ Socket authentication helpers loaded');
 
-    if (socket.io) {
-      socket.io.on('reconnect_attempt', (attempt) => {
-        console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
-      });
-      socket.io.on('reconnect_failed', () => {
-        triggerSocketRecoveryReload('mood_reconnect_failed');
-      });
-    }
 
-    return socket;
-  } catch (error) {
-    console.error('Socket initialization error:', error);
-    return null;
-  }
-}
 
-    // ============================================
-    // MOOD SELECTION
-    // ============================================
-    function renderMoods() {
-  if (!moodsGrid) return;
-  moodsGrid.innerHTML = '';
-  Object.entries(moods).forEach(([id, emoji]) => {
-    const card = document.createElement('div');
-    card.className = 'mood-card';
-    card.setAttribute('data-mood', id);
-    card.innerHTML = `
+      async function initializeSocket() {
+        try {
+          // Get current Firebase user
+          const firebaseUser = firebase.auth().currentUser;
+          if (!firebaseUser) {
+            console.error('No Firebase user found');
+            return null;
+          }
+
+          // Get fresh ID token
+          const idToken = await firebaseUser.getIdToken();
+
+          // Get user profile from API
+          if (!_API || typeof _API.get !== 'function') {
+            console.error('API helper not available');
+            return null;
+          }
+
+          const userData = await _API.get('/api/users/me');
+          currentUser = {
+            userId: userData._id,
+            username: userData.username,
+            pfpUrl: userData.pfpUrl,
+            email: userData.email
+          };
+
+          console.log('✅ Current user loaded:', currentUser);
+
+          // Connect Socket.IO to backend server
+          const socketUrl = window.location.origin;
+          const sessionId = getStableSocketSessionId();
+          const tabId = window.tabManager?.tabId || null;
+          const socket = io(socketUrl, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 1000,
+            reconnectionDelay: 500,
+            reconnectionDelayMax: 10000,
+            randomizationFactor: 0.5,
+            closeOnBeforeunload: false,
+            timeout: 15000,
+            auth: {
+              token: idToken,
+              sessionId,
+              tabId
+            }
+          });
+
+          // ✅ CRITICAL: Setup mood count listeners BEFORE authentication
+          // This ensures we catch 'mood_counts_initial' event
+          socket.on('mood_counts_initial', (counts) => {
+            console.log('📊 Received initial mood counts:', counts);
+            Object.entries(counts).forEach(([mood, count]) => {
+              updateMoodCount(mood, count);
+            });
+          });
+
+          socket.on('mood_count_update', ({ mood, count }) => {
+            console.log(`📊 Mood count update: ${mood} = ${count}`);
+            updateMoodCount(mood, count);
+          });
+
+          socket.on('connect', async () => {
+            console.log('🔌 Socket connected:', socket.id);
+            socketConnectFailures = 0;
+
+            try {
+              await authenticateSocketWithTabManagement(socket, currentUser.userId);
+              setupSessionReplacementHandler(socket);
+              console.log('✅ Socket authenticated and ready');
+            } catch (error) {
+              console.error('❌ Authentication failed:', error);
+              MoodApp.Toast.error('Connection failed. Please refresh the page.');
+            }
+          });
+
+          socket.on('authenticated', (data) => {
+            console.log('✅ Socket authenticated:', data);
+            // Note: mood_counts_initial will be sent by server after this event
+          });
+
+          socket.on('auth_error', (data) => {
+            console.error('❌ Socket auth error:', data);
+            toast('Authentication failed. Please refresh the page.', 'error');
+          });
+
+          socket.on('connect_error', (error) => {
+            console.error('🔌 Socket connection error:', error);
+            socketConnectFailures += 1;
+            if (socketConnectFailures >= 6) {
+              triggerSocketRecoveryReload('mood_connect_error_threshold');
+            }
+          });
+
+          socket.on('disconnect', (reason) => {
+            console.log('🔌 Socket disconnected:', reason);
+            if (reason === 'io server disconnect') {
+              socket.connect();
+            }
+          });
+
+          socket.on('server_ping', (payload = {}) => {
+            if (!socket.connected) return;
+            socket.emit('client_pong', {
+              roomId: null,
+              location: 'mood',
+              path: window.location.pathname,
+              serverPingTs: payload.ts || null
+            });
+          });
+
+          if (socket.io) {
+            socket.io.on('reconnect_attempt', (attempt) => {
+              console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
+            });
+            socket.io.on('reconnect_failed', () => {
+              triggerSocketRecoveryReload('mood_reconnect_failed');
+            });
+          }
+
+          return socket;
+        } catch (error) {
+          console.error('Socket initialization error:', error);
+          return null;
+        }
+      }
+
+      // ============================================
+      // MOOD SELECTION
+      // ============================================
+      function renderMoods() {
+        if (!moodsGrid) return;
+        moodsGrid.innerHTML = '';
+        Object.entries(moods).forEach(([id, emoji]) => {
+          const card = document.createElement('div');
+          card.className = 'mood-card';
+          card.setAttribute('data-mood', id);
+          card.innerHTML = `
       <div class="mood-emoji">${emoji}</div>
       <div class="mood-label">${id}</div>
       <div class="mood-user-count" id="mood-count-${id}" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
         <span>—</span>
       </div>
     `;
-    card.addEventListener('click', () => selectMood(id, card));
-    moodsGrid.appendChild(card);
-  });
-}
-
-    function selectMood(mood, el) {
-      selectedMood = mood;
-      document.querySelectorAll('.mood-card').forEach(b => {
-        b.classList.remove('selected');
-      });
-      if (el) {
-        el.classList.add('selected');
-      }
-      if (enterChatBtn) enterChatBtn.disabled = false;
-      if (logMoodBtn) logMoodBtn.disabled = false;
-    }
-
-    // ============================================
-    // ENTER CHAT (MATCHMAKING)
-    // ============================================
-    async function handleEnterChat() {
-      if (!selectedMood) {
-        toast('Please select a mood first', 'warning');
-        return;
-      }
-
-      if (!socketInstance || !socketInstance.connected) {
-        toast('Connecting to server...', 'warning');
-        socketInstance = await initializeSocket();
-        
-        // Wait for connection
-        await new Promise((resolve) => {
-          if (socketInstance && socketInstance.connected) {
-            resolve();
-          } else if (socketInstance) {
-            socketInstance.once('connect', resolve);
-            setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
-          } else {
-            resolve();
-          }
+          card.addEventListener('click', () => selectMood(id, card));
+          moodsGrid.appendChild(card);
         });
+      }
+
+      function selectMood(mood, el) {
+        selectedMood = mood;
+        document.querySelectorAll('.mood-card').forEach(b => {
+          b.classList.remove('selected');
+        });
+        if (el) {
+          el.classList.add('selected');
+        }
+        if (enterChatBtn) enterChatBtn.disabled = false;
+        if (logMoodBtn) logMoodBtn.disabled = false;
+      }
+
+      // ============================================
+      // ENTER CHAT (MATCHMAKING)
+      // ============================================
+      async function handleEnterChat() {
+        if (!selectedMood) {
+          toast('Please select a mood first', 'warning');
+          return;
+        }
 
         if (!socketInstance || !socketInstance.connected) {
-          toast('Failed to connect to server. Please try again.', 'error');
-          return;
+          toast('Connecting to server...', 'warning');
+          socketInstance = await initializeSocket();
+
+          // Wait for connection
+          await new Promise((resolve) => {
+            if (socketInstance && socketInstance.connected) {
+              resolve();
+            } else if (socketInstance) {
+              socketInstance.once('connect', resolve);
+              setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
+            } else {
+              resolve();
+            }
+          });
+
+          if (!socketInstance || !socketInstance.connected) {
+            toast('Failed to connect to server. Please try again.', 'error');
+            return;
+          }
+        }
+
+        // Store selected mood
+        try {
+          localStorage.setItem('selectedMood', selectedMood);
+        } catch (e) {
+          console.warn('LocalStorage not available:', e);
+        }
+
+        console.log('🎮 Joining matchmaking with mood:', selectedMood);
+
+        // Navigate to discovery page
+        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+          _PageTransition.navigateTo('/discovery.html');
+        } else {
+          window.location.href = '/discovery.html';
         }
       }
 
-      // Store selected mood
-      try {
-        localStorage.setItem('selectedMood', selectedMood);
-      } catch (e) {
-        console.warn('LocalStorage not available:', e);
+      // ============================================
+      // LOG MOOD (NOTES)
+      // ============================================
+      async function handleLogMood() {
+        const text = (noteText && noteText.value) ? noteText.value.trim() : '';
+        if (!text) {
+          toast('Please add a note', 'warning');
+          return;
+        }
+        if (!selectedMood) {
+          toast('Please select a mood', 'warning');
+          return;
+        }
+
+        showLoading('Saving your mood...');
+        try {
+          if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
+
+          console.log(`💾 Logging mood: ${selectedMood} - "${text.substring(0, 50)}..."`);
+
+          await _API.post('/api/notes', { text, mood: selectedMood });
+
+          hideLoading();
+          toast('Mood logged!', 'success');
+
+          if (noteText) noteText.value = '';
+
+          // CRITICAL: Reset pagination and reload from start
+          console.log(`🔄 Refreshing notes list after new entry`);
+          currentNotePage = 0;
+          hasMoreNotes = true;
+          loadNotes(0, false); // Fresh load, not append
+
+        } catch (err) {
+          hideLoading();
+          console.error('❌ Failed to log mood:', err);
+          toast(err.message || 'Failed to log mood', 'error');
+        }
       }
 
-      console.log('🎮 Joining matchmaking with mood:', selectedMood);
+      // ============================================
+      // NOTES DISPLAY
+      // ============================================
+      function renderNote(note) {
+        console.log(`📝 Rendering note:`, {
+          id: note._id,
+          username: note.username,
+          hasPfp: !!note.pfpUrl,
+          mood: note.mood
+        });
 
-      // Navigate to discovery page
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/discovery.html');
-      } else {
-        window.location.href = '/discovery.html';
-      }
-    }
+        const card = document.createElement('div');
+        card.className = 'session-card';
 
-    // ============================================
-    // LOG MOOD (NOTES)
-    // ============================================
-async function handleLogMood() {
-  const text = (noteText && noteText.value) ? noteText.value.trim() : '';
-  if (!text) {
-    toast('Please add a note', 'warning');
-    return;
-  }
-  if (!selectedMood) {
-    toast('Please select a mood', 'warning');
-    return;
-  }
+        // CRITICAL FIX: Prioritize profile picture, fallback to username initial
+        const initial = (note?.username || 'Anonymous').charAt(0).toUpperCase();
+        const hasPfp = note?.pfpUrl && note.pfpUrl !== null;
 
-  showLoading('Saving your mood...');
-  try {
-    if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
-    
-    console.log(`💾 Logging mood: ${selectedMood} - "${text.substring(0, 50)}..."`);
-    
-    await _API.post('/api/notes', { text, mood: selectedMood });
-    
-    hideLoading();
-    toast('Mood logged!', 'success');
-    
-    if (noteText) noteText.value = '';
-    
-    // CRITICAL: Reset pagination and reload from start
-    console.log(`🔄 Refreshing notes list after new entry`);
-    currentNotePage = 0;
-    hasMoreNotes = true;
-    loadNotes(0, false); // Fresh load, not append
-    
-  } catch (err) {
-    hideLoading();
-    console.error('❌ Failed to log mood:', err);
-    toast(err.message || 'Failed to log mood', 'error');
-  }
-}
+        // CRITICAL FIX: Use actual username from database
+        const username = note?.username || 'Anonymous';
 
-    // ============================================
-    // NOTES DISPLAY
-    // ============================================
-function renderNote(note) {
-  console.log(`📝 Rendering note:`, {
-    id: note._id,
-    username: note.username,
-    hasPfp: !!note.pfpUrl,
-    mood: note.mood
-  });
+        const createdAt = note?.createdAt ?
+          (_Utils && typeof _Utils.formatDate === 'function' ?
+            _Utils.formatDate(note.createdAt) :
+            new Date(note.createdAt).toLocaleString()) : '';
 
-  const card = document.createElement('div');
-  card.className = 'session-card';
-  
-  // CRITICAL FIX: Prioritize profile picture, fallback to mood emoji
-  const moodEmoji = note?.mood ? (moods[note.mood] || '😊') : '😊';
-  const hasPfp = note?.pfpUrl && note.pfpUrl !== null;
-  
-  // CRITICAL FIX: Use actual username from database
-  const username = note?.username || 'Anonymous';
-  
-  const createdAt = note?.createdAt ? 
-    (_Utils && typeof _Utils.formatDate === 'function' ? 
-      _Utils.formatDate(note.createdAt) : 
-      new Date(note.createdAt).toLocaleString()) : '';
-      
-  const moodLabel = note?.mood ? 
-    note.mood.charAt(0).toUpperCase() + note.mood.slice(1) : 
-    'Unknown';
-    
-  const textHtml = note?.text ? 
-    (_Utils && typeof _Utils.escapeHtml === 'function' ? 
-      _Utils.escapeHtml(note.text) : 
-      (()=>{const d=document.createElement('div');d.textContent=note.text;return d.innerHTML;})()) : '';
-  
-  // CRITICAL FIX: Conditional rendering - profile picture OR mood emoji
-  const avatarHtml = hasPfp 
-    ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">` 
-    : `<div class="session-emoji">${moodEmoji}</div>`;
-  
-  console.log(`✅ Using ${hasPfp ? 'profile picture' : 'mood emoji fallback'} for ${username}`);
-  
-  card.innerHTML = `
+        const moodLabel = note?.mood ?
+          note.mood.charAt(0).toUpperCase() + note.mood.slice(1) :
+          'Unknown';
+
+        const textHtml = note?.text ?
+          (_Utils && typeof _Utils.escapeHtml === 'function' ?
+            _Utils.escapeHtml(note.text) :
+            (() => { const d = document.createElement('div'); d.textContent = note.text; return d.innerHTML; })()) : '';
+
+        // CRITICAL FIX: Conditional rendering - profile picture OR username initial
+        const avatarHtml = hasPfp
+          ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
+          : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`;
+
+        console.log(`✅ Using ${hasPfp ? 'profile picture' : 'initial fallback'} for ${username}`);
+
+        card.innerHTML = `
     <div class="session-header">
       ${avatarHtml}
       <div class="session-info">
@@ -1258,224 +1260,225 @@ function renderNote(note) {
     </div>
     <div class="session-text">${textHtml}</div>
   `;
-  
-  return card;
-}
 
-let isLoadingNotes = false;
-let hasMoreNotes = true;
-let currentNotePage = 0;
-
-async function loadNotes(pageNum = 0, append = false) {
-  if (isLoadingNotes) {
-    console.log(`⏳ Already loading notes, skipping duplicate request`);
-    return;
-  }
-  
-  if (!hasMoreNotes && append) {
-    console.log(`✋ No more notes to load`);
-    return;
-  }
-
-  isLoadingNotes = true;
-  console.log(`📥 Loading notes: page=${pageNum}, append=${append}`);
-  
-  if (loadingEl) loadingEl.classList.remove('hidden');
-  
-  try {
-    if (!_API || typeof _API.get !== 'function') {
-      throw new Error('API.get missing');
-    }
-    
-    const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
-    
-    console.log(`✅ Received ${data.notes?.length || 0} notes from server`);
-    console.log(`   Total in database: ${data.total}`);
-    console.log(`   Has more: ${data.hasMore}`);
-    
-    // Clear or append based on mode
-    if (!append && notesList) {
-      notesList.innerHTML = '';
-      console.log(`🗑️ Cleared notes list (fresh load)`);
-    }
-    
-    const notesArray = Array.isArray(data.notes) ? data.notes : [];
-    
-    if (notesArray.length === 0) {
-      console.log(`ℹ️ No notes returned for page ${pageNum}`);
-      if (!append && notesList) {
-        notesList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">No mood entries yet. Log your first mood above!</div>';
+        return card;
       }
-    } else {
-      notesArray.forEach((n, idx) => { 
-        console.log(`  [${idx}] ${n.username}: ${n.mood}`);
-        if (notesList) notesList.appendChild(renderNote(n)); 
-      });
-      console.log(`✅ Rendered ${notesArray.length} note cards`);
-    }
-    
-    currentNotePage = pageNum;
-    hasMoreNotes = data.hasMore;
-    
-    console.log(`📊 Pagination state: page=${currentNotePage}, hasMore=${hasMoreNotes}`);
-    
-  } catch (err) {
-    console.error('❌ Failed to load notes:', err);
-    toast(err.message || 'Failed to load notes', 'error');
-  } finally {
-    if (loadingEl) loadingEl.classList.add('hidden');
-    isLoadingNotes = false;
-    console.log(`🔓 Released loading lock`);
-  }
-}
 
-// CRITICAL: Implement scroll-based lazy loading
-function initInfiniteScroll() {
-  const scrollContainer = window;
-  let scrollTimeout;
+      let isLoadingNotes = false;
+      let hasMoreNotes = true;
+      let currentNotePage = 0;
 
-  scrollContainer.addEventListener('scroll', () => {
-    // Debounce scroll events
-    clearTimeout(scrollTimeout);
-    scrollTimeout = setTimeout(() => {
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      const windowHeight = window.innerHeight;
-      const documentHeight = document.documentElement.scrollHeight;
-      
-      // Trigger when 200px from bottom
-      const threshold = 200;
-      const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
-      
-      if (distanceFromBottom < threshold && hasMoreNotes && !isLoadingNotes) {
-        console.log(`📜 Scroll threshold reached (${distanceFromBottom.toFixed(0)}px from bottom)`);
-        console.log(`   Loading next page: ${currentNotePage + 1}`);
-        loadNotes(currentNotePage + 1, true); // Append mode
-      }
-    }, 100); // 100ms debounce
-  });
-
-  console.log(`✅ Infinite scroll initialized (threshold: 200px from bottom)`);
-}
-
-    // ============================================
-    // LOGOUT
-    // ============================================
-    function handleLogout() {
-      try {
-        // Disconnect socket
-        if (socketInstance) {
-          socketInstance.disconnect();
-          socketInstance = null;
+      async function loadNotes(pageNum = 0, append = false) {
+        if (isLoadingNotes) {
+          console.log(`⏳ Already loading notes, skipping duplicate request`);
+          return;
         }
 
-        // Clear auth
-        if (_Auth && typeof _Auth.clearAuth === 'function') {
-          _Auth.clearAuth();
+        if (!hasMoreNotes && append) {
+          console.log(`✋ No more notes to load`);
+          return;
+        }
+
+        isLoadingNotes = true;
+        console.log(`📥 Loading notes: page=${pageNum}, append=${append}`);
+
+        if (loadingEl) loadingEl.classList.remove('hidden');
+
+        try {
+          if (!_API || typeof _API.get !== 'function') {
+            throw new Error('API.get missing');
+          }
+
+          const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
+
+          console.log(`✅ Received ${data.notes?.length || 0} notes from server`);
+          console.log(`   Total in database: ${data.total}`);
+          console.log(`   Has more: ${data.hasMore}`);
+
+          // Clear or append based on mode
+          if (!append && notesList) {
+            notesList.innerHTML = '';
+            console.log(`🗑️ Cleared notes list (fresh load)`);
+          }
+
+          const notesArray = Array.isArray(data.notes) ? data.notes : [];
+
+          if (notesArray.length === 0) {
+            console.log(`ℹ️ No notes returned for page ${pageNum}`);
+            if (!append && notesList) {
+              notesList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">No mood entries yet. Log your first mood above!</div>';
+            }
+          } else {
+            notesArray.forEach((n, idx) => {
+              console.log(`  [${idx}] ${n.username}: ${n.mood}`);
+              if (notesList) notesList.appendChild(renderNote(n));
+            });
+            console.log(`✅ Rendered ${notesArray.length} note cards`);
+          }
+
+          currentNotePage = pageNum;
+          hasMoreNotes = data.hasMore;
+
+          console.log(`📊 Pagination state: page=${currentNotePage}, hasMore=${hasMoreNotes}`);
+
+        } catch (err) {
+          console.error('❌ Failed to load notes:', err);
+          toast(err.message || 'Failed to load notes', 'error');
+        } finally {
+          if (loadingEl) loadingEl.classList.add('hidden');
+          isLoadingNotes = false;
+          console.log(`🔓 Released loading lock`);
+        }
+      }
+
+      // CRITICAL: Implement scroll-based lazy loading
+      function initInfiniteScroll() {
+        const scrollContainer = window;
+        let scrollTimeout;
+
+        scrollContainer.addEventListener('scroll', () => {
+          // Debounce scroll events
+          clearTimeout(scrollTimeout);
+          scrollTimeout = setTimeout(() => {
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            const windowHeight = window.innerHeight;
+            const documentHeight = document.documentElement.scrollHeight;
+
+            // Trigger when 200px from bottom
+            const threshold = 200;
+            const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
+
+            if (distanceFromBottom < threshold && hasMoreNotes && !isLoadingNotes) {
+              console.log(`📜 Scroll threshold reached (${distanceFromBottom.toFixed(0)}px from bottom)`);
+              console.log(`   Loading next page: ${currentNotePage + 1}`);
+              loadNotes(currentNotePage + 1, true); // Append mode
+            }
+          }, 100); // 100ms debounce
+        });
+
+        console.log(`✅ Infinite scroll initialized (threshold: 200px from bottom)`);
+      }
+
+      // ============================================
+      // LOGOUT
+      // ============================================
+      function handleLogout() {
+        try {
+          // Disconnect socket
+          if (socketInstance) {
+            socketInstance.disconnect();
+            socketInstance = null;
+          }
+
+          // Clear auth
+          if (_Auth && typeof _Auth.clearAuth === 'function') {
+            _Auth.clearAuth();
+          } else {
+            localStorage.removeItem('user');
+          }
+
+          // Sign out from Firebase
+          firebase.auth().signOut();
+        } catch (e) {
+          console.error('Logout error', e);
+        }
+
+        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+          _PageTransition.navigateTo('/login.html');
         } else {
-          localStorage.removeItem('user');
+          window.location.href = '/login.html';
+        }
+      }
+
+      // ============================================
+      // EVENT LISTENERS
+      // ============================================
+      function attachListeners() {
+        if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
+        if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
+
+        // REMOVED: Manual "View History" button - now auto-loads on scroll
+        // if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
+
+        if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+        if (noteText) {
+          noteText.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              if (!logMoodBtn.disabled) handleLogMood();
+            }
+          });
         }
 
-        // Sign out from Firebase
-        firebase.auth().signOut();
-      } catch (e) {
-        console.error('Logout error', e);
+        // CRITICAL: Initialize infinite scroll
+        initInfiniteScroll();
+        console.log(`✅ Event listeners attached`);
       }
-      
-      if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-        _PageTransition.navigateTo('/login.html');
-      } else {
-        window.location.href = '/login.html';
+
+
+      function formatUserCount(count) {
+        if (count >= 1000000) {
+          return `${(count / 1000000).toFixed(1)}M users`;
+        } else if (count >= 1000) {
+          return `${(count / 1000).toFixed(1)}K users`;
+        } else {
+          return `${count} user${count !== 1 ? 's' : ''}`;
+        }
       }
-    }
 
-    // ============================================
-    // EVENT LISTENERS
-    // ============================================
-function attachListeners() {
-  if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
-  if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
-  
-  // REMOVED: Manual "View History" button - now auto-loads on scroll
-  // if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
-  
-  if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-  if (noteText) {
-    noteText.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        if (!logMoodBtn.disabled) handleLogMood();
+      function updateMoodCount(mood, count) {
+        const countEl = document.getElementById(`mood-count-${mood}`);
+        if (countEl) {
+          countEl.innerHTML = `<span>${formatUserCount(count)}</span>`;
+        }
       }
-    });
-  }
-  
-  // CRITICAL: Initialize infinite scroll
-  initInfiniteScroll();
-  console.log(`✅ Event listeners attached`);
-}
+
+      function setupMoodCountListeners() {
+        console.log('📊 Setting up mood count listeners...');
+
+        // ✅ CRITICAL: These must be set up BEFORE socket.on('connect')
+        // Otherwise the 'mood_counts_initial' event will be missed
+
+        // We can't attach to socketInstance yet (it doesn't exist)
+        // So we'll attach these in initializeSocket() BEFORE authentication
+      }
+
+      // ============================================
+      // INITIALIZATION
+      // ============================================
+      async function initPage() {
+        // Require authentication
+        try {
+          if (_Auth && typeof _Auth.requireAuth === 'function') {
+            await _Auth.requireAuth();
+          }
+        } catch (err) {
+          console.error('Error running requireAuth():', err);
+          return;
+        }
+
+        // Prevent back navigation
+        preventBackNavigation();
+
+        // Render UI first (so DOM elements exist)
+        renderMoods();
+
+        // ✅ CRITICAL: Setup mood count listeners BEFORE socket connects
+        setupMoodCountListeners();
+
+        // Initialize Socket.IO (will trigger authenticated event → mood_counts_initial)
+        console.log('🔌 Initializing socket connection...');
+        socketInstance = await initializeSocket();
+
+        // Attach other listeners and load notes
+        attachListeners();
+        loadNotes(0);
+      }
 
 
-function formatUserCount(count) {
-  if (count >= 1000000) {
-    return `${(count / 1000000).toFixed(1)}M users`;
-  } else if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K users`;
-  } else {
-    return `${count} user${count !== 1 ? 's' : ''}`;
-  }
-}
-
-function updateMoodCount(mood, count) {
-  const countEl = document.getElementById(`mood-count-${mood}`);
-  if (countEl) {
-    countEl.innerHTML = `<span>${formatUserCount(count)}</span>`;
-  }
-}
-
-function setupMoodCountListeners() {
-  console.log('📊 Setting up mood count listeners...');
-  
-  // ✅ CRITICAL: These must be set up BEFORE socket.on('connect')
-  // Otherwise the 'mood_counts_initial' event will be missed
-  
-  // We can't attach to socketInstance yet (it doesn't exist)
-  // So we'll attach these in initializeSocket() BEFORE authentication
-}
-
-    // ============================================
-    // INITIALIZATION
-    // ============================================
-async function initPage() {
-  // Require authentication
-  try {
-    if (_Auth && typeof _Auth.requireAuth === 'function') {
-      await _Auth.requireAuth();
-    }
-  } catch (err) {
-    console.error('Error running requireAuth():', err);
-    return;
-  }
-
-  // Prevent back navigation
-  preventBackNavigation();
-
-  // Render UI first (so DOM elements exist)
-  renderMoods();
-  
-  // ✅ CRITICAL: Setup mood count listeners BEFORE socket connects
-  setupMoodCountListeners();
-
-  // Initialize Socket.IO (will trigger authenticated event → mood_counts_initial)
-  console.log('🔌 Initializing socket connection...');
-  socketInstance = await initializeSocket();
-
-  // Attach other listeners and load notes
-  attachListeners();
-  loadNotes(0);
-}
-
-
-    // Start the page
-    initPage();
-  })();
+      // Start the page
+      initPage();
+    })();
   </script>
 </body>
+
 </html>
