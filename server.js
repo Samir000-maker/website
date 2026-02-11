@@ -767,6 +767,14 @@ const CLEANUP_RECHECK_MIN_MS = 10000;
 
 async function handleUserCleanup(userId) {
   const startedAt = Date.now();
+  const cleanupLockKey = `user:cleanup:lock:${userId}`;
+  const cleanupLockId = `${instanceId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const lockAcquired = await pubClient.set(cleanupLockKey, cleanupLockId, 'EX', 30, 'NX');
+  if (!lockAcquired) {
+    logLifecycle('user_cleanup_skipped_lock_held', { userId });
+    return;
+  }
+
   const cleanupMeta = await getScheduledUserCleanupMeta(userId);
   const cleanupReason = cleanupMeta?.reason || 'cleanup_timeout';
   console.log(`🧹 [Cleanup] Handling user cleanup for ${userId} (reason: ${cleanupReason})`);
@@ -856,6 +864,15 @@ async function handleUserCleanup(userId) {
   } catch (error) {
     console.error(`❌ [Cleanup] Error handling user cleanup for ${userId}:`, error);
     await pubClient.hdel('user:cleanup:meta', userId).catch(() => { });
+  } finally {
+    try {
+      const currentLock = await pubClient.get(cleanupLockKey);
+      if (currentLock === cleanupLockId) {
+        await pubClient.del(cleanupLockKey);
+      }
+    } catch (lockError) {
+      console.warn(`⚠️ [Cleanup] Failed to release cleanup lock for ${userId}:`, lockError.message);
+    }
   }
 }
 
@@ -1693,6 +1710,22 @@ async function applyPresenceContextForUser({
 
   // Leaving chat context for any non-call page is authoritative and server-driven.
   if (triggerLeaveOnExit && resolvedRoomId && hasChatContextHistory) {
+    if (currentPresence?.status === 'matchmaking') {
+      logLifecycle('presence_context_exit_ignored_matchmaking', {
+        userId,
+        firebaseUid,
+        location: normalizedLocation,
+        roomId: resolvedRoomId,
+        source
+      });
+      return {
+        success: true,
+        location: normalizedLocation,
+        roomId: resolvedRoomId || null,
+        leftRoom: false
+      };
+    }
+
     logLifecycle('presence_context_left_chat', {
       userId,
       firebaseUid,
@@ -3221,6 +3254,14 @@ io.on('connection', (socket) => {
 
           if (restoration.success) {
             console.log(`✅ [UID: ${firebaseUid}] Room restored successfully`);
+            await updateUserPresence(userId, {
+              roomId: restoration.room.roomId,
+              activeRoomId: restoration.room.roomId,
+              location: 'chat',
+              status: 'chat_active',
+              chatContextSeen: true,
+              firebaseUid
+            });
             socket.emit('match_found', restoration.room);
 
             return callback?.({
@@ -3246,6 +3287,16 @@ io.on('connection', (socket) => {
 
       console.log(`✅ [UID: ${firebaseUid}] Mood selection allowed - proceeding with matchmaking`);
 
+      // User is still in mood/discovery flow; do not allow lifecycle "other" reports to eject room pre-chat.
+      await updateUserPresence(userId, {
+        roomId: null,
+        activeRoomId: null,
+        location: 'mood',
+        status: 'matchmaking',
+        chatContextSeen: false,
+        firebaseUid
+      });
+
       addUserToMood(userId, mood);
 
       const matchResult = await matchmaking.addToQueue({
@@ -3262,6 +3313,18 @@ io.on('connection', (socket) => {
         // Set active room markers (Redundant for both ID formats for cluster resilience)
         await setUserActiveRoom(firebaseUid, room.id, mood);
         await setUserActiveRoom(userId, room.id, mood);
+
+        // Reset all matched users to pre-chat lifecycle state.
+        for (const matchedUser of room.users || []) {
+          await updateUserPresence(matchedUser.userId, {
+            roomId: room.id,
+            activeRoomId: room.id,
+            location: 'mood',
+            status: 'matchmaking',
+            chatContextSeen: false,
+            firebaseUid: matchedUser.firebaseUid
+          });
+        }
 
         // CRITICAL: Seed presence immediately so we don't wait for first heartbeat
         // This closes the race condition window where mood.html heartbeat could wipe state
@@ -4118,6 +4181,14 @@ io.on('connection', (socket) => {
           if (user.firebaseUid) {
             await setUserActiveRoom(user.firebaseUid, existingRoomId, existingRoom.mood);
           }
+          await updateUserPresence(user.userId, {
+            roomId: existingRoomId,
+            activeRoomId: existingRoomId,
+            location: 'chat',
+            status: 'chat_active',
+            chatContextSeen: true,
+            firebaseUid: user.firebaseUid
+          });
           addUserToMood(user.userId, existingRoom.mood);
 
           return; // Don't re-queue
@@ -4129,9 +4200,11 @@ io.on('connection', (socket) => {
 
       // ✅ FIX: Refresh presence before joining queue to prevent race/stale state
       await updateUserPresence(user.userId, {
+        roomId: null,
         location: 'mood',
         activeRoomId: null,
         status: 'matchmaking',
+        chatContextSeen: false,
         lastSeen: Date.now()
       });
 
@@ -4213,6 +4286,15 @@ io.on('connection', (socket) => {
             } else {
               await setUserActiveRoom(roomUser.userId, room.id, room.mood);
             }
+
+            await updateUserPresence(roomUser.userId, {
+              roomId: room.id,
+              activeRoomId: room.id,
+              location: 'mood',
+              status: 'matchmaking',
+              chatContextSeen: false,
+              firebaseUid: roomUser.firebaseUid
+            });
 
             // ✅ Keep user in mood count when moved to room
             addUserToMood(roomUser.userId, room.mood);
