@@ -2681,8 +2681,9 @@
             console.warn('⚠️ Local stream not ready - queueing video toggle');
             pendingVideoToggleDesired = pendingVideoToggleDesired === null ? true : !pendingVideoToggleDesired;
             pendingVideoToggleAt = Date.now();
+            isVideoEnabled = pendingVideoToggleDesired;
             updateVideoButton();
-            scheduleVideoVisibilityUpdate(currentUser.userId, true, false);
+            scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, false);
             return;
           }
 
