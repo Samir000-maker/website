@@ -603,6 +603,209 @@ const PageTransition = {
 };
 
 /* =========================================================
+   SERVER-AUTHORITATIVE PRESENCE CONTEXT
+   ========================================================= */
+
+const Presence = {
+  getCurrentUser() {
+    if (typeof firebase === 'undefined' || !firebase.auth) return null;
+    try {
+      return firebase.auth().currentUser;
+    } catch {
+      return null;
+    }
+  },
+
+  _initialized: false,
+  _tokenCache: null,
+  _heartbeatInterval: null,
+
+  normalizePath(pathname = window.location.pathname || '') {
+    try {
+      return pathname.toLowerCase();
+    } catch {
+      return '';
+    }
+  },
+
+  classifyLocation(pathname = window.location.pathname || '') {
+    const p = this.normalizePath(pathname);
+    if (p.includes('/chat.html') || p === '/chat') return 'chat';
+    if (p.includes('/call.html') || p === '/call') return 'call';
+    if (p.includes('/mood.html') || p === '/mood') return 'mood';
+    return 'other';
+  },
+
+  isChatContext(location = this.classifyLocation()) {
+    return location === 'chat' || location === 'call';
+  },
+
+  getContextRoomId(location = this.classifyLocation()) {
+    try {
+      const activeCallRaw = localStorage.getItem('activeCall');
+      if (activeCallRaw) {
+        const activeCall = JSON.parse(activeCallRaw);
+        if (activeCall?.roomId) return activeCall.roomId;
+      }
+    } catch { }
+
+    try {
+      const currentRoomRaw = localStorage.getItem('currentRoom');
+      if (currentRoomRaw) {
+        const currentRoom = JSON.parse(currentRoomRaw);
+        if (currentRoom?.roomId) return currentRoom.roomId;
+      }
+    } catch { }
+
+    if (this.isChatContext(location)) {
+      return null;
+    }
+
+    return null;
+  },
+
+  async getAuthToken() {
+    const user = this.getCurrentUser();
+    if (!user) return null;
+    try {
+      this._tokenCache = await user.getIdToken();
+      return this._tokenCache;
+    } catch {
+      return null;
+    }
+  },
+
+  async reportContext(reason = 'lifecycle', options = {}) {
+    const location = options.location || this.classifyLocation(options.path);
+    const path = options.path || window.location.pathname;
+    const roomId = Object.prototype.hasOwnProperty.call(options, 'roomId')
+      ? options.roomId
+      : this.getContextRoomId(location);
+
+    const user = this.getCurrentUser();
+    if (!user) return null;
+
+    const token = await this.getAuthToken();
+    if (!token) return null;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/presence/context`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          location,
+          path,
+          roomId: roomId || null,
+          source: options.source || 'client_lifecycle',
+          reason
+        }),
+        keepalive: options.keepalive !== false
+      });
+
+      if (!response.ok) return null;
+      const payload = await response.json().catch(() => null);
+
+      if (payload?.redirectTo && options.allowRedirect !== false) {
+        const safeRedirect = payload.redirectTo === '/discovery.html'
+          ? '/mood.html'
+          : payload.redirectTo;
+
+        if (safeRedirect && window.location.pathname !== safeRedirect) {
+          window.location.href = safeRedirect;
+        }
+      }
+
+      return payload;
+    } catch {
+      return null;
+    }
+  },
+
+  startContextHeartbeat() {
+    this.stopContextHeartbeat();
+    if (!this.isChatContext()) return;
+
+    this._heartbeatInterval = setInterval(() => {
+      this.reportContext('context_heartbeat', {
+        allowRedirect: false,
+        keepalive: true
+      }).catch(() => { });
+    }, 10000);
+  },
+
+  stopContextHeartbeat() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+    }
+  },
+
+  initLifecycle() {
+    if (this._initialized) return;
+    this._initialized = true;
+
+    if (typeof firebase === 'undefined' || !firebase.auth) {
+      return;
+    }
+
+    firebase.auth().onAuthStateChanged(async (user) => {
+      this._tokenCache = null;
+      if (!user) {
+        this.stopContextHeartbeat();
+        return;
+      }
+
+      await this.reportContext('auth_state_change', {
+        allowRedirect: true,
+        keepalive: true
+      });
+      this.startContextHeartbeat();
+    });
+
+    window.addEventListener('pageshow', async (event) => {
+      await this.reportContext('pageshow', {
+        allowRedirect: true,
+        keepalive: true,
+        source: event.persisted ? 'pageshow_bfcache' : 'pageshow'
+      });
+      this.startContextHeartbeat();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.reportContext('visibility_hidden', {
+          allowRedirect: false,
+          keepalive: true
+        }).catch(() => { });
+        return;
+      }
+
+      this.reportContext('visibility_visible', {
+        allowRedirect: true,
+        keepalive: true
+      }).catch(() => { });
+      this.startContextHeartbeat();
+    });
+
+    window.addEventListener('pagehide', () => {
+      this.reportContext('pagehide', {
+        allowRedirect: false,
+        keepalive: true
+      }).catch(() => { });
+    });
+
+    // Initial best-effort sync.
+    this.reportContext('dom_ready', {
+      allowRedirect: true,
+      keepalive: true
+    }).catch(() => { });
+  }
+};
+
+/* =========================================================
    VALIDATOR
    ========================================================= */
 
@@ -744,6 +947,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     document.body.classList.remove('page-transition-enter');
   }, 300);
+
+  // Initialize server-authoritative lifecycle presence reporting.
+  Presence.initLifecycle();
 });
 
 
@@ -752,6 +958,7 @@ window.MoodApp = {
   Storage,
   Auth,
   API,
+  Presence,
   Toast,
   Loading,
   PageTransition,
@@ -771,6 +978,7 @@ window.MoodApp = {
   Storage,
   Auth,
   API,
+  Presence,
   Toast,
   Loading,
   PageTransition,

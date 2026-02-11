@@ -100,6 +100,24 @@ function logLifecycle(event, data = {}) {
   console.log(`📘 [Lifecycle] ${JSON.stringify(payload)}`);
 }
 
+const CHAT_CONTEXT_LOCATIONS = new Set(['chat', 'call']);
+
+function normalizePresenceLocation(rawLocation, rawPath = '') {
+  const locationValue = (typeof rawLocation === 'string' ? rawLocation : '').trim().toLowerCase();
+  const pathValue = (typeof rawPath === 'string' ? rawPath : '').trim().toLowerCase();
+
+  if (locationValue === 'chat' || pathValue.includes('/chat.html') || pathValue === '/chat') return 'chat';
+  if (locationValue === 'call' || pathValue.includes('/call.html') || pathValue === '/call') return 'call';
+  if (locationValue === 'mood' || pathValue.includes('/mood.html') || pathValue === '/mood') return 'mood';
+  return 'other';
+}
+
+function getPresenceStatusForLocation(location) {
+  if (location === 'call') return 'call_active';
+  if (location === 'chat') return 'chat_active';
+  return 'online';
+}
+
 // ============================================
 // REDIS-BACKED SOCKET USER TRACKING
 // ============================================
@@ -777,7 +795,7 @@ async function handleUserCleanup(userId) {
     const staleMs = presence?.lastSeen ? (now - presence.lastSeen) : Number.POSITIVE_INFINITY;
     const minimumStaleMsForLeave = cleanupReason === 'socket_disconnect'
       ? SOCKET_DISCONNECT_GRACE_MS
-      : MIN_AUTOMATED_LEAVE_STALENESS_MS;
+      : (cleanupReason === 'location_change' ? 0 : MIN_AUTOMATED_LEAVE_STALENESS_MS);
 
     // Heartbeat drop alone must not eject users. Require sustained staleness.
     if (presence && staleMs < minimumStaleMsForLeave) {
@@ -814,30 +832,13 @@ async function handleUserCleanup(userId) {
       return;
     }
 
-    // Protect active calls from incidental cleanup.
-    if (roomId) {
-      const activeCall = await findActiveCallForRoom(roomId);
-      if (activeCall) {
-        const rescheduleMs = CLEANUP_RECHECK_MIN_MS * 3;
-        await scheduleUserCleanup(userId, rescheduleMs, {
-          reason: cleanupReason,
-          context: { deferredFrom: 'active_call', roomId }
-        });
-        console.log(`🛡️ [Cleanup] DEFER: User ${userId} has active call in room ${roomId}`);
-        logLifecycle('user_cleanup_deferred_active_call', {
-          userId,
-          roomId,
-          reason: cleanupReason,
-          rescheduleMs
-        });
-        return;
-      }
-    }
-
     console.log(`🧹 [Cleanup] Proceeding with cleanup for ${userId} (verified disconnect)`);
-    const leaveReason = cleanupReason === 'heartbeat_timeout'
-      ? 'verified_disconnect'
-      : 'cleanup_timeout';
+    let leaveReason = 'cleanup_timeout';
+    if (cleanupReason === 'heartbeat_timeout') {
+      leaveReason = 'verified_disconnect';
+    } else if (cleanupReason === 'location_change') {
+      leaveReason = 'location_change';
+    }
 
     // Authoritative leave after verification checks.
     const leaveResult = await performUserLeaveChat(userId, roomId, leaveReason, presence?.firebaseUid);
@@ -1247,6 +1248,8 @@ async function validateRoomAccess(roomId, userId, options = {}) {
             if (firebaseUid) await setUserActiveRoom(firebaseUid, roomId, room.mood);
             await updateUserPresence(userId, {
               roomId,
+              activeRoomId: roomId,
+              location: 'chat',
               status: 'chat_active',
               firebaseUid
             });
@@ -1563,6 +1566,8 @@ async function updateUserPresence(userId, data) {
     const current = await getUserPresence(userId) || {};
     const hasRoomId = Object.prototype.hasOwnProperty.call(data, 'roomId');
     const hasStatus = Object.prototype.hasOwnProperty.call(data, 'status');
+    const hasLocation = Object.prototype.hasOwnProperty.call(data, 'location');
+    const hasActiveRoomId = Object.prototype.hasOwnProperty.call(data, 'activeRoomId');
 
     // FIX: Preserve existing roomId and status if not explicitly provided in 'data'
     // This prevents heartbeats from other tabs (mood.html/app.js) from wiping out chat state
@@ -1571,6 +1576,10 @@ async function updateUserPresence(userId, data) {
       ...data,
       roomId: hasRoomId ? data.roomId : current.roomId,
       status: hasStatus ? data.status : (current.status || 'chat_active'),
+      location: hasLocation ? data.location : (current.location || 'other'),
+      activeRoomId: hasActiveRoomId
+        ? data.activeRoomId
+        : (hasRoomId ? data.roomId : current.activeRoomId),
       lastSeen: Date.now()
     };
 
@@ -1598,6 +1607,119 @@ async function removeUserPresence(userId) {
   } catch (error) {
     console.error(`❌ [Redis] Failed to remove presence for ${userId}:`, error.message);
   }
+}
+
+async function resolveRoomContextForUser(
+  userId,
+  firebaseUid = null,
+  preferredRoomId = null,
+  options = {}
+) {
+  const usePreferredFallback = options.usePreferredFallback === true;
+
+  const mappedRoomId = await matchmaking.getRoomIdByUser(userId);
+  if (mappedRoomId) return mappedRoomId;
+
+  const activeRoomByUser = await getUserActiveRoom(userId);
+  if (activeRoomByUser?.roomId) return activeRoomByUser.roomId;
+
+  if (firebaseUid) {
+    const activeRoomByUid = await getUserActiveRoom(firebaseUid);
+    if (activeRoomByUid?.roomId) return activeRoomByUid.roomId;
+  }
+
+  const presence = await getUserPresence(userId);
+  if (presence?.roomId) return presence.roomId;
+  if (presence?.activeRoomId) return presence.activeRoomId;
+
+  return usePreferredFallback ? (preferredRoomId || null) : null;
+}
+
+async function applyPresenceContextForUser({
+  userId,
+  firebaseUid = null,
+  location,
+  roomId = null,
+  path = '',
+  source = 'unknown',
+  triggerLeaveOnExit = true
+}) {
+  const normalizedLocation = normalizePresenceLocation(location, path);
+  const inChatContext = CHAT_CONTEXT_LOCATIONS.has(normalizedLocation);
+  const currentPresence = await getUserPresence(userId);
+  const resolvedRoomId = await resolveRoomContextForUser(
+    userId,
+    firebaseUid,
+    roomId || currentPresence?.roomId || currentPresence?.activeRoomId,
+    { usePreferredFallback: inChatContext }
+  );
+
+  const presencePatch = {
+    location: normalizedLocation,
+    roomId: inChatContext ? (resolvedRoomId || roomId || null) : (resolvedRoomId || null),
+    activeRoomId: resolvedRoomId || null,
+    status: getPresenceStatusForLocation(normalizedLocation)
+  };
+  if (firebaseUid) {
+    presencePatch.firebaseUid = firebaseUid;
+  }
+
+  await updateUserPresence(userId, presencePatch);
+
+  if (inChatContext) {
+    await cancelUserCleanup(userId);
+    logLifecycle('presence_context_updated', {
+      userId,
+      firebaseUid,
+      location: normalizedLocation,
+      roomId: resolvedRoomId || null,
+      source
+    });
+    return {
+      success: true,
+      location: normalizedLocation,
+      roomId: resolvedRoomId || null,
+      leftRoom: false
+    };
+  }
+
+  // Leaving chat context for any non-call page is authoritative and server-driven.
+  if (triggerLeaveOnExit && resolvedRoomId) {
+    logLifecycle('presence_context_left_chat', {
+      userId,
+      firebaseUid,
+      location: normalizedLocation,
+      roomId: resolvedRoomId,
+      source
+    });
+
+    const leaveResult = await performUserLeaveChat(userId, resolvedRoomId, 'location_change', firebaseUid);
+
+    const redirectPayload = {
+      to: '/mood.html',
+      reason: 'left_chat_context',
+      source
+    };
+    if (firebaseUid) {
+      emitToUserAllDevices(firebaseUid, 'force_navigation', redirectPayload);
+    }
+    io.to(`user:${userId}`).emit('force_navigation', redirectPayload);
+
+    return {
+      success: !!leaveResult?.success,
+      location: normalizedLocation,
+      roomId: resolvedRoomId,
+      leftRoom: true,
+      redirectTo: '/mood.html'
+    };
+  }
+
+  return {
+    success: true,
+    location: normalizedLocation,
+    roomId: resolvedRoomId || null,
+    leftRoom: false
+  };
 }
 const callGracePeriod = new Map(); // callId -> timeout
 
@@ -2329,26 +2451,70 @@ app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
 });
 
+async function resolveMongoUserIdFromFirebaseUid(firebaseUid) {
+  if (!firebaseUid) return null;
+  try {
+    const db = getDB();
+    const userDoc = await db.collection('users').findOne(
+      { firebaseUid },
+      { projection: { _id: 1 }, maxTimeMS: 3000 }
+    );
+    return userDoc?._id?.toString() || null;
+  } catch (error) {
+    console.error(`❌ Failed resolving Mongo user by Firebase UID ${firebaseUid}:`, error.message);
+    return null;
+  }
+}
+
+async function resolveAuthenticatedRequestUser(firebaseUser) {
+  const firebaseUid = firebaseUser?.uid || null;
+  let userId = firebaseUser?.userId || null;
+
+  if (!userId && firebaseUid) {
+    userId = await resolveMongoUserIdFromFirebaseUid(firebaseUid);
+  }
+
+  return { userId, firebaseUid };
+}
+
+app.post('/api/presence/context', authenticateFirebase, async (req, res) => {
+  const { location, path: clientPath, roomId, source } = req.body || {};
+  const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unable to resolve authenticated user' });
+  }
+
+  try {
+    const result = await applyPresenceContextForUser({
+      userId,
+      firebaseUid,
+      location,
+      roomId: roomId || null,
+      path: clientPath || '',
+      source: source || 'api_presence_context',
+      triggerLeaveOnExit: true
+    });
+
+    return res.json({
+      success: true,
+      location: result.location,
+      roomId: result.roomId || null,
+      leftRoom: !!result.leftRoom,
+      redirectTo: result.redirectTo || null
+    });
+  } catch (error) {
+    console.error(`❌ [API] Presence context update failed for ${userId}:`, error);
+    return res.status(500).json({ error: 'Failed to update presence context' });
+  }
+});
+
 /**
  * Reliable Leave Endpoint (for navigator.sendBeacon)
  */
 app.post('/api/leave-room', authenticateFirebase, async (req, res) => {
   const { roomId } = req.body;
-  const firebaseUid = req.firebaseUser?.uid;
-  let userId = req.firebaseUser?.userId || null;
-
-  if (!userId && firebaseUid) {
-    try {
-      const db = getDB();
-      const userDoc = await db.collection('users').findOne(
-        { firebaseUid },
-        { projection: { _id: 1 }, maxTimeMS: 3000 }
-      );
-      userId = userDoc?._id?.toString() || null;
-    } catch (lookupError) {
-      console.error(`❌ [API] Failed to resolve userId from Firebase UID ${firebaseUid}:`, lookupError.message);
-    }
-  }
+  const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
 
   console.log(`📡 [API] Leave request via Beacon/Fetch: user=${userId}, room=${roomId}`);
 
@@ -2479,7 +2645,13 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
     }
     isInflightOwner = true;
 
-    if (reason !== 'manual' && reason !== 'api_beacon') {
+    const bypassActiveSocketGuard = (
+      reason === 'manual' ||
+      reason === 'api_beacon' ||
+      reason === 'location_change'
+    );
+
+    if (!bypassActiveSocketGuard) {
       const activeSockets = await io.in(`user:${userId}`).fetchSockets();
       if (activeSockets.length > 0) {
         console.log(`✅ [LeaveSequence][${sequenceId}] Skipping automated leave; user has ${activeSockets.length} active socket(s)`);
@@ -2624,11 +2796,18 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
       // 9. Final Notifications
       console.log(`📢 [LeaveSequence][${sequenceId}][9/9] Syncing other devices...`);
       if (firebaseUid) {
+        const shouldForceRedirect = (
+          reason === 'manual' ||
+          reason === 'api_beacon' ||
+          reason === 'location_change' ||
+          reason === 'verified_disconnect' ||
+          reason === 'cleanup_timeout'
+        );
         emitToUserAllDevices(firebaseUid, 'left_room', {
           roomId: finalRoomId,
           success: true,
           reason,
-          forceRedirect: (reason === 'manual' || reason === 'api_beacon')
+          forceRedirect: shouldForceRedirect
         });
       }
 
@@ -2693,9 +2872,33 @@ setInterval(async () => {
     for (const [userId, rawData] of Object.entries(allPresence)) {
       try {
         const presence = JSON.parse(rawData);
+        const normalizedLocation = normalizePresenceLocation(presence.location);
 
-        // Skip cleanup if user is in an active call (navigation exception)
-        if (presence.status === 'call_active') continue;
+        if (!CHAT_CONTEXT_LOCATIONS.has(normalizedLocation)) {
+          const candidateRoomId = presence.activeRoomId || presence.roomId || null;
+          const roomId = candidateRoomId
+            ? await resolveRoomContextForUser(userId, presence.firebaseUid, candidateRoomId)
+            : null;
+
+          if (roomId) {
+            const scheduled = await scheduleUserCleanup(userId, 5000, {
+              reason: 'location_change',
+              onlyIfAbsent: true,
+              context: {
+                roomId,
+                presenceLocation: normalizedLocation
+              }
+            });
+
+            if (scheduled) {
+              logLifecycle('presence_non_chat_location_cleanup_scheduled', {
+                userId,
+                roomId,
+                location: normalizedLocation
+              });
+            }
+          }
+        }
 
         const staleMs = now - (presence.lastSeen || 0);
         if (staleMs > HEARTBEAT_TIMEOUT_MS) {
@@ -2747,14 +2950,21 @@ io.on('connection', (socket) => {
   // ============================================
   // PRESENCE & HEARTBEAT EVENTS
   // ============================================
-  socket.on('heartbeat', async ({ roomId }) => {
+  socket.on('heartbeat', async (payload = {}) => {
+    const { roomId, location, path } = payload || {};
     const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     // Heartbeat updates presence only; it does not trigger leave directly.
+    const normalizedLocation = normalizePresenceLocation(location, path);
     const heartbeatPresencePatch = {};
     if (roomId) {
       heartbeatPresencePatch.roomId = roomId;
+      heartbeatPresencePatch.activeRoomId = roomId;
+    }
+    if (location || path) {
+      heartbeatPresencePatch.location = normalizedLocation;
+      heartbeatPresencePatch.status = getPresenceStatusForLocation(normalizedLocation);
     }
     await updateUserPresence(userData.userId, heartbeatPresencePatch);
 
@@ -2762,26 +2972,138 @@ io.on('connection', (socket) => {
     await cancelUserCleanup(userData.userId);
   });
 
-  socket.on('enter_call_mode', async ({ roomId }) => {
+  socket.on('enter_call_mode', async ({ roomId } = {}) => {
     const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     console.log(`📱 [Presence] User ${userData.username} entered call mode (Room: ${roomId})`);
     await updateUserPresence(userData.userId, {
+      location: 'call',
       status: 'call_active',
-      roomId: roomId
+      roomId: roomId,
+      activeRoomId: roomId
     });
   });
 
-  socket.on('exit_call_mode', async ({ roomId }) => {
+  socket.on('exit_call_mode', async ({ roomId } = {}) => {
     const userData = await getSocketUser(socket.id);
     if (!userData) return;
 
     console.log(`💬 [Presence] User ${userData.username} returned to chat mode (Room: ${roomId})`);
     await updateUserPresence(userData.userId, {
+      location: 'chat',
       status: 'chat_active',
-      roomId: roomId
+      roomId: roomId,
+      activeRoomId: roomId
     });
+  });
+
+  socket.on('page_context', async (payload = {}, callback) => {
+    try {
+      const userData = await getSocketUser(socket.id);
+      if (!userData) {
+        return callback?.({ success: false, error: 'Not authenticated' });
+      }
+
+      const result = await applyPresenceContextForUser({
+        userId: userData.userId,
+        firebaseUid: userData.firebaseUid,
+        location: payload.location,
+        roomId: payload.roomId || null,
+        path: payload.path || '',
+        source: payload.source || 'socket_page_context',
+        triggerLeaveOnExit: true
+      });
+
+      callback?.({
+        success: true,
+        location: result.location,
+        roomId: result.roomId || null,
+        leftRoom: !!result.leftRoom,
+        redirectTo: result.redirectTo || null
+      });
+    } catch (error) {
+      console.error(`❌ page_context handler failed:`, error);
+      callback?.({ success: false, error: 'Failed to process page context' });
+    }
+  });
+
+  socket.on('validate_presence_state', async (payload = {}, callback) => {
+    try {
+      const userData = await getSocketUser(socket.id);
+      if (!userData) {
+        return callback?.({ valid: false, reason: 'NOT_AUTHENTICATED', redirectTo: '/login.html' });
+      }
+
+      const requestedLocation = normalizePresenceLocation(payload.location, payload.path);
+      const roomId = await resolveRoomContextForUser(
+        userData.userId,
+        userData.firebaseUid,
+        payload.roomId || null,
+        { usePreferredFallback: CHAT_CONTEXT_LOCATIONS.has(requestedLocation) }
+      );
+
+      if (!CHAT_CONTEXT_LOCATIONS.has(requestedLocation)) {
+        const contextResult = await applyPresenceContextForUser({
+          userId: userData.userId,
+          firebaseUid: userData.firebaseUid,
+          location: requestedLocation,
+          roomId,
+          path: payload.path || '',
+          source: 'socket_validate_presence',
+          triggerLeaveOnExit: true
+        });
+
+        return callback?.({
+          valid: false,
+          reason: 'LEFT_CHAT_CONTEXT',
+          redirectTo: contextResult.redirectTo || '/mood.html'
+        });
+      }
+
+      if (!roomId) {
+        return callback?.({
+          valid: false,
+          reason: 'NO_ACTIVE_ROOM',
+          redirectTo: '/mood.html'
+        });
+      }
+
+      const validation = await validateRoomAccess(roomId, userData.userId, {
+        allowRecovery: true,
+        socket,
+        userData
+      });
+
+      if (!validation.valid) {
+        return callback?.({
+          valid: false,
+          reason: validation.code || 'NOT_IN_ROOM',
+          redirectTo: '/mood.html'
+        });
+      }
+
+      await applyPresenceContextForUser({
+        userId: userData.userId,
+        firebaseUid: userData.firebaseUid,
+        location: requestedLocation,
+        roomId,
+        path: payload.path || '',
+        source: 'socket_validate_presence',
+        triggerLeaveOnExit: false
+      });
+
+      return callback?.({
+        valid: true,
+        roomId,
+        expiresAt: validation.room.expiresAt || null,
+        serverTime: Date.now(),
+        location: requestedLocation
+      });
+    } catch (error) {
+      console.error(`❌ validate_presence_state failed:`, error);
+      return callback?.({ valid: false, reason: 'VALIDATION_ERROR', redirectTo: '/mood.html' });
+    }
   });
 
 
@@ -2810,6 +3132,8 @@ io.on('connection', (socket) => {
 
     await updateUserPresence(userId, {
       roomId,
+      activeRoomId: roomId,
+      location: 'chat',
       status: 'chat_active',
       firebaseUid: userData.firebaseUid
     });
@@ -2923,7 +3247,13 @@ io.on('connection', (socket) => {
 
         // CRITICAL: Seed presence immediately so we don't wait for first heartbeat
         // This closes the race condition window where mood.html heartbeat could wipe state
-        await updateUserPresence(userId, { roomId: room.id, status: 'chat_active' });
+        await updateUserPresence(userId, {
+          roomId: room.id,
+          activeRoomId: room.id,
+          location: 'chat',
+          status: 'chat_active',
+          firebaseUid
+        });
 
         socket.join(room.id);
 
@@ -3320,7 +3650,7 @@ io.on('connection', (socket) => {
   });
 
 
-  socket.on('request_room_sync', async ({ roomId }) => {
+  socket.on('request_room_sync', async ({ roomId } = {}) => {
     try {
       const user = await getSocketUser(socket.id);
 
@@ -3332,6 +3662,8 @@ io.on('connection', (socket) => {
       await cancelUserCleanup(user.userId);
       await updateUserPresence(user.userId, {
         roomId,
+        activeRoomId: roomId,
+        location: 'chat',
         status: 'chat_active',
         firebaseUid: user.firebaseUid
       });
@@ -3543,6 +3875,8 @@ io.on('connection', (socket) => {
 
       // ✅ FIX: Mark presence immediately so matchmaking sees the user as online
       await updateUserPresence(mongoUserId, {
+        location: 'other',
+        activeRoomId: null,
         status: 'online',
         firebaseUid: firebaseUid,
         lastSeen: Date.now()
@@ -3559,6 +3893,8 @@ io.on('connection', (socket) => {
         console.log(`ℹ️ [Auth] User has active room: ${activeRoom.roomId}`);
         await updateUserPresence(mongoUserId, {
           roomId: activeRoom.roomId,
+          activeRoomId: activeRoom.roomId,
+          location: 'chat',
           status: 'chat_active',
           firebaseUid
         });
@@ -3675,6 +4011,13 @@ io.on('connection', (socket) => {
         const call = await getCall(activeCallId);
         if (call && call.status === 'active' && call.participants.includes(mongoUserId)) {
           console.log(`📞 [Auth] User found in active call ${activeCallId}`);
+          await updateUserPresence(mongoUserId, {
+            location: 'call',
+            status: 'call_active',
+            roomId: call.roomId || null,
+            activeRoomId: call.roomId || null,
+            firebaseUid
+          });
 
           socket.emit('call_reconnect_available', {
             callId: activeCallId, // The ID from Redis 
@@ -3768,6 +4111,8 @@ io.on('connection', (socket) => {
 
       // ✅ FIX: Refresh presence before joining queue to prevent race/stale state
       await updateUserPresence(user.userId, {
+        location: 'mood',
+        activeRoomId: null,
         status: 'matchmaking',
         lastSeen: Date.now()
       });
@@ -4041,6 +4386,8 @@ io.on('connection', (socket) => {
       // Refresh presence and active room markers on every room join/rejoin.
       await updateUserPresence(user.userId, {
         roomId,
+        activeRoomId: roomId,
+        location: 'chat',
         status: 'chat_active',
         firebaseUid: user.firebaseUid
       });
@@ -4281,6 +4628,8 @@ io.on('connection', (socket) => {
       // Message activity also refreshes authoritative presence for resilience.
       await updateUserPresence(user.userId, {
         roomId,
+        activeRoomId: roomId,
+        location: 'chat',
         status: 'chat_active',
         firebaseUid: user.firebaseUid
       });
