@@ -358,6 +358,11 @@
       cursor: not-allowed;
     }
 
+    .call-btn-loading .material-symbols-outlined,
+    .join-btn-loading .material-symbols-outlined {
+      animation: spin 1s linear infinite;
+    }
+
     .animate-pulse {
       animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
@@ -371,6 +376,16 @@
 
       50% {
         opacity: .5;
+      }
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
       }
     }
 
@@ -2510,9 +2525,9 @@
         if (!typeConfig) {
           const mime = (file.type || '').toLowerCase();
           if (mime.startsWith('image/') || mime.startsWith('video/') ||
-              mime === 'application/pdf' ||
-              mime.startsWith('application/vnd.') || mime.startsWith('application/msword') ||
-              mime === 'text/plain' || mime === 'application/rtf') {
+            mime === 'application/pdf' ||
+            mime.startsWith('application/vnd.') || mime.startsWith('application/msword') ||
+            mime === 'text/plain' || mime === 'application/rtf') {
             console.log(`🔍 Allowing generic type: ${file.type}`);
             return { valid: true, error: null };
           }
@@ -5267,6 +5282,10 @@
 
             // ✅ CRITICAL: Update button state immediately
             updateCallButtonState(true, data.activeCall);
+          } else {
+            console.log('📞 No active call in room (server authoritative)');
+            activeCallInRoom = null;
+            updateCallButtonState(false);
           }
 
           console.log('⏰ Starting timer updates with server-synced time...');
@@ -6641,7 +6660,7 @@
             isInitiatingCall = true;
 
             // Add loading state
-            audioCallBtn.classList.add('call-btn-loading');
+            audioCallBtn.classList.add('call-btn-loading', 'animate-pulse');
             audioCallBtn.disabled = true;
             if (videoCallBtn) {
               videoCallBtn.classList.add('calling');
@@ -6656,12 +6675,12 @@
             console.log('📤 Audio call initiation sent to server');
             toast('Calling...', 'success');
 
-            // Timeout after 30 seconds with recovery
+            // Timeout after 2 seconds with recovery
             const timeoutId = setTimeout(() => {
               if (isInitiatingCall) {
-                console.log('⏰ Call initiation timeout (30s)');
+                console.log('⏰ Call initiation timeout (2s)');
                 isInitiatingCall = false;
-                audioCallBtn.classList.remove('call-btn-loading');
+                audioCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
                 if (videoCallBtn) {
                   videoCallBtn.classList.remove('calling');
                 }
@@ -6673,7 +6692,7 @@
 
                 toast('Call timeout - no response', 'warning');
               }
-            }, 30000);
+            }, 2000);
 
             // Store timeout for cleanup
             audioCallBtn.dataset.timeoutId = timeoutId;
@@ -6730,7 +6749,7 @@
             isInitiatingCall = true;
 
             // Add loading state
-            videoCallBtn.classList.add('call-btn-loading');
+            videoCallBtn.classList.add('call-btn-loading', 'animate-pulse');
             videoCallBtn.disabled = true;
             if (audioCallBtn) {
               audioCallBtn.classList.add('calling');
@@ -6745,12 +6764,12 @@
             console.log('📤 Video call initiation sent to server');
             toast('Calling...', 'success');
 
-            // Timeout after 30 seconds with recovery
+            // Timeout after 2 seconds with recovery
             const timeoutId = setTimeout(() => {
               if (isInitiatingCall) {
-                console.log('⏰ Call initiation timeout (30s)');
+                console.log('⏰ Call initiation timeout (2s)');
                 isInitiatingCall = false;
-                videoCallBtn.classList.remove('call-btn-loading');
+                videoCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
                 if (audioCallBtn) {
                   audioCallBtn.classList.remove('calling');
                 }
@@ -6762,7 +6781,7 @@
 
                 toast('Call timeout - no response', 'warning');
               }
-            }, 30000);
+            }, 2000);
 
             // Store timeout for cleanup
             videoCallBtn.dataset.timeoutId = timeoutId;
