@@ -3287,6 +3287,12 @@
                   video: p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video'),
                   audio: p.audioEnabled !== undefined ? p.audioEnabled : true
                 });
+              } else {
+                // ✅ Sync self state with server truth on join
+                isVideoEnabled = p.videoEnabled !== undefined ? p.videoEnabled : (callData.callType === 'video');
+                isAudioEnabled = p.audioEnabled !== undefined ? p.audioEnabled : true;
+                updateVideoButton();
+                updateMicButton();
               }
             });
 
@@ -3385,6 +3391,13 @@
               await setupLocalVideo();
             } else {
               console.warn(`⚠️ Self tile not rendered!`);
+            }
+
+            // ✅ Force local UI sync after join to avoid mismatched toggles
+            scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
+            if (socketInstance?.connected) {
+              socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
             }
 
             const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
