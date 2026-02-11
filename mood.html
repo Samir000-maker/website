@@ -1223,11 +1223,12 @@
         card.className = 'session-card';
 
         // CRITICAL FIX: Prioritize profile picture, fallback to username initial
-        const initial = (note?.username || 'Anonymous').charAt(0).toUpperCase();
-        const hasPfp = note?.pfpUrl && note.pfpUrl !== null;
-
-        // CRITICAL FIX: Use actual username from database
-        const username = note?.username || 'Anonymous';
+        const rawUsername = typeof note?.username === 'string' ? note.username : '';
+        const username = rawUsername.trim() || 'Anonymous';
+        const initial = username.charAt(0).toUpperCase();
+        const hasPfp = typeof note?.pfpUrl === 'string'
+          ? note.pfpUrl.trim().length > 0 && note.pfpUrl !== 'null'
+          : false;
 
         const createdAt = note?.createdAt ?
           (_Utils && typeof _Utils.formatDate === 'function' ?
