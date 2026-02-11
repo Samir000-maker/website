@@ -2,42 +2,42 @@
 export const config = {
   // Server configuration
   PORT: process.env.PORT || 3000,
-  
+
   // Cloudflare R2 configuration
   CLOUDFLARE_ENDPOINT: "https://d90a9dc9787962f745733993f3f1766d.r2.cloudflarestorage.com",
   BUCKET_NAME: "my-app-posts",
   ACCESS_KEY: "5d5420127538adcf5c50d41735752ffd",
   SECRET_KEY: "6cbc2488a34434653f26399d1644260b50731e7316c97ac4ba7364d66373ff1b",
-  
+
   R2_PUBLIC_URL: "https://pub-b86353e4f63d45f8bf7e94b3143a1d8b.r2.dev",
   // MongoDB configuration
   // MONGO_URI: 'mongodb+srv://samir_:fitara@cluster0.cmatn6k.mongodb.net/appdb?retryWrites=true&w=majority',
   MONGO_URI: 'mongodb://admin:pyrJyWPWt9PQQDOSzoqYuruP@205.198.72.227:27017/admin?authSource=admin&directConnection=true',
   DB_NAME: 'db',
-  
+
   // App-level variables
   ROOM_DURATION_MINUTES: 10,
   MAX_USERS_PER_ROOM: 4, // Changed from 4 to 2 for easier testing
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
-  
+
   // Matchmaking configuration
   MATCHMAKING_TIMEOUT: 10000, // 5 seconds - global configurable search timeout
   MIN_USERS_FOR_ROOM: 2, // Minimum users required to create a room
-  
+
   // File upload limits
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB (profile pictures)
-  MAX_CHAT_ATTACHMENT_BYTES: 100 * 1024 * 1024, // 100MB for chat attachments
-  // NOTE: If using nginx reverse proxy, add: client_max_body_size 100M;
+  MAX_CHAT_ATTACHMENT_BYTES: 10 * 1024 * 1024, // 10MB for chat attachments
+  // NOTE: If using nginx reverse proxy, add: client_max_body_size 10M;
   // For Cloudflare: attachment uploads may need larger Limits in dashboard
   MAX_NOTE_LENGTH: 500,
-  
+
   // Rate limiting
   MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 10,
-  
+
   // Firebase (you'll need to add your Firebase service account key)
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || 'projectt3-8c55e',
-  
+
   // Available moods
   MOODS: [
     { id: 'happy', name: 'Happy', emoji: '😊' },
