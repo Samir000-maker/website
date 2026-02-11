@@ -417,6 +417,30 @@ const Storage = {
 };
 
 /* =========================================================
+  SESSION IDENTITY (STABLE ACROSS RECONNECTS)
+  ========================================================= */
+
+const Session = {
+  SOCKET_SESSION_KEY: 'vibe_socket_session_id',
+
+  getSocketSessionId() {
+    try {
+      let sessionId = sessionStorage.getItem(this.SOCKET_SESSION_KEY);
+      if (sessionId && typeof sessionId === 'string' && sessionId.length >= 12) {
+        return sessionId;
+      }
+
+      sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+      sessionStorage.setItem(this.SOCKET_SESSION_KEY, sessionId);
+      return sessionId;
+    } catch {
+      // Fallback when sessionStorage is unavailable.
+      return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+    }
+  }
+};
+
+/* =========================================================
    AUTH (SAFE)
    ========================================================= */
 
@@ -953,7 +977,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// At the end of app.js, before the export
 window.MoodApp = {
   Storage,
   Auth,
@@ -965,24 +988,7 @@ window.MoodApp = {
   Validator,
   Utils,
   socket,
-  // Add these:
-  StateManager: null,  // Will be set by state-manager.js
-  NavigationGuard: null  // Will be set by navigation-guard.js
-};
-
-/* =========================================================
-   EXPORT
-   ========================================================= */
-
-window.MoodApp = {
-  Storage,
-  Auth,
-  API,
-  Presence,
-  Toast,
-  Loading,
-  PageTransition,
-  Validator,
-  Utils,
-  socket
+  Session,
+  StateManager: window.MoodApp?.StateManager || null,
+  NavigationGuard: window.MoodApp?.NavigationGuard || null
 };
