@@ -57,33 +57,34 @@
       position: absolute;
       inset: 0;
     }
-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  will-change: opacity;
-}
 
-video.self-view {
-  transform: scaleX(-1) !important;
-  -webkit-transform: scaleX(-1) !important;
-  -moz-transform: scaleX(-1) !important;
-}
+    video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      will-change: opacity;
+    }
 
-video.remote-view {
-transform: scaleX(-1) !important;
-  -webkit-transform: scaleX(-1) !important;
-  -moz-transform: scaleX(-1) !important;
-}
+    video.self-view {
+      transform: scaleX(-1) !important;
+      -webkit-transform: scaleX(-1) !important;
+      -moz-transform: scaleX(-1) !important;
+    }
 
-.video-enhanced {
-  filter: brightness(1.03) contrast(1.04) saturate(1.08);
-  -webkit-filter: brightness(1.03) contrast(1.04) saturate(1.08);
-}
+    video.remote-view {
+      transform: scaleX(-1) !important;
+      -webkit-transform: scaleX(-1) !important;
+      -moz-transform: scaleX(-1) !important;
+    }
+
+    .video-enhanced {
+      filter: brightness(1.03) contrast(1.04) saturate(1.08);
+      -webkit-filter: brightness(1.03) contrast(1.04) saturate(1.08);
+    }
 
     .pfp-overlay {
       position: absolute;
@@ -333,6 +334,9 @@ transform: scaleX(-1) !important;
       let videoStateChangeTimeout = null;
       let isTogglingVideo = false;
       let isJoiningCall = false;
+      let pendingVideoToggleDesired = null;
+      let pendingVideoToggleAt = 0;
+      let videoTrackAcquirePromise = null;
 
       let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
       let makingOffer = new Map();
@@ -409,17 +413,17 @@ transform: scaleX(-1) !important;
       let callHeartbeatInterval = null;
 
       function enforceNaturalVideoRendering(videoEl) {
-  if (!videoEl) return;
-  
-  videoEl.classList.add('video-enhanced');
-  videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
-  videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
-  
-  // Mirror ALL videos - both self-view and remote-view
-  videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
-  videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
-  videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
-}
+        if (!videoEl) return;
+
+        videoEl.classList.add('video-enhanced');
+        videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
+        videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
+
+        // Mirror ALL videos - both self-view and remote-view
+        videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
+        videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
+        videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
+      }
 
       async function reportCallPresenceContext(reason = 'call_lifecycle', options = {}) {
         const roomId = options.roomId || callData?.roomId || null;
@@ -1013,7 +1017,7 @@ transform: scaleX(-1) !important;
         // Remote tracks can briefly report enabled=false while media is flowing.
         const trackRenderable = hasVideoTrack && isTrackLive && (isSelfView ? isTrackEnabled : true);
         const showVideo = enabled && trackReady && trackRenderable;
-        const showLoading = enabled && !showVideo && hasVideoTrack;
+        const showLoading = enabled && !showVideo;
         const nextState = showVideo ? 'video' : (showLoading ? 'loading' : 'pfp');
         const previousState = videoRenderState.get(userId);
 
@@ -1055,6 +1059,132 @@ transform: scaleX(-1) !important;
             clearTimeout(loadingWatchdogs.get(userId));
             loadingWatchdogs.delete(userId);
           }
+        }
+      }
+
+      function scheduleVideoVisibilityUpdate(userId, enabled, trackReady = true, attempts = 20) {
+        const tryUpdate = () => {
+          const vid = document.getElementById(`video-${userId}`);
+          const pfp = document.getElementById(`pfp-${userId}`);
+          if (vid && pfp) {
+            updateVideoVisibility(userId, enabled, trackReady);
+            return;
+          }
+
+          if (attempts > 0) {
+            requestAnimationFrame(() => scheduleVideoVisibilityUpdate(userId, enabled, trackReady, attempts - 1));
+          } else {
+            console.warn(`⚠️ Video elements not ready after retries for ${userId}`);
+          }
+        };
+
+        tryUpdate();
+      }
+
+      async function waitForLocalStream(maxWait = 5000) {
+        if (localStream) return localStream;
+        return new Promise((resolve, reject) => {
+          const start = Date.now();
+          const timer = setInterval(() => {
+            if (localStream) {
+              clearInterval(timer);
+              resolve(localStream);
+              return;
+            }
+
+            if (Date.now() - start > maxWait) {
+              clearInterval(timer);
+              reject(new Error('Local stream not ready'));
+            }
+          }, 50);
+        });
+      }
+
+      async function acquireLocalVideoTrack() {
+        if (localStream && localStream.getVideoTracks().length > 0) {
+          return localStream.getVideoTracks()[0];
+        }
+
+        if (videoTrackAcquirePromise) {
+          return videoTrackAcquirePromise;
+        }
+
+        videoTrackAcquirePromise = (async () => {
+          console.log(`📹 Prewarming camera access for instant video enable...`);
+
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              facingMode: 'user'
+            }
+          });
+
+          const track = videoStream.getVideoTracks()[0];
+          if (!track) {
+            throw new Error('No video track received from camera');
+          }
+
+          if (!localStream) {
+            localStream = new MediaStream();
+          }
+
+          localStream.addTrack(track);
+          console.log(`✅ Video track added to localStream: ${track.id.substring(0, 8)}`);
+
+          const localVid = document.getElementById(`video-${currentUser.userId}`);
+          if (localVid) {
+            localVid.srcObject = localStream;
+            await localVid.play().catch(e => console.warn('Local play error:', e));
+          }
+
+          peerConnections.forEach((pc, userId) => {
+            try {
+              const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+              if (sender) {
+                sender.replaceTrack(track).catch(err => console.warn(`   ⚠️ Failed to replace track for ${userId}:`, err.message));
+              } else {
+                pc.addTrack(track, localStream);
+                console.log(`   ➕ Track added to PC for ${userId}`);
+              }
+            } catch (pcErr) {
+              console.warn(`   ⚠️ Failed to attach track to PC ${userId}:`, pcErr.message);
+            }
+          });
+
+          return track;
+        })().finally(() => {
+          videoTrackAcquirePromise = null;
+        });
+
+        return videoTrackAcquirePromise;
+      }
+
+      async function applyPendingVideoToggle(context = 'pending') {
+        if (pendingVideoToggleDesired === null) return;
+
+        const desired = pendingVideoToggleDesired;
+        console.log(`📹 Applying pending video toggle (${context}): ${desired ? 'ON' : 'OFF'}`);
+
+        try {
+          await waitForLocalStream(6000);
+
+          let track = localStream.getVideoTracks()[0];
+          if (!track && desired) {
+            track = await acquireLocalVideoTrack();
+          }
+
+          if (track) {
+            track.enabled = desired;
+          }
+
+          isVideoEnabled = desired;
+          updateVideoButton();
+          scheduleVideoVisibilityUpdate(currentUser.userId, desired, true);
+        } catch (err) {
+          console.warn(`⚠️ Pending video toggle failed:`, err.message);
+        } finally {
+          pendingVideoToggleDesired = null;
         }
       }
 
@@ -1120,37 +1250,37 @@ transform: scaleX(-1) !important;
         const videoContainer = document.createElement('div');
         videoContainer.className = 'video-container';
 
-const video = document.createElement('video');
-video.id = `video-${user.userId}`;
-video.className = `hidden ${isSelf ? 'self-view' : 'remote-view'} video-enhanced`;
-video.autoplay = true;
-video.playsInline = true;
-video.setAttribute('playsinline', '');
-video.setAttribute('webkit-playsinline', '');
+        const video = document.createElement('video');
+        video.id = `video-${user.userId}`;
+        video.className = `hidden ${isSelf ? 'self-view' : 'remote-view'} video-enhanced`;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
 
-if (isSelf) {
-  video.muted = true;
-  video.volume = 0;
-  console.log(`📹 Self video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
-  console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
-} else {
-  video.muted = false;
-  video.volume = 1.0;
-  console.log(`📹 Remote video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
-  console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
-}
+        if (isSelf) {
+          video.muted = true;
+          video.volume = 0;
+          console.log(`📹 Self video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
+          console.log(`🔇 Self video muted to prevent echo (userId: ${user.userId})`);
+        } else {
+          video.muted = false;
+          video.volume = 1.0;
+          console.log(`📹 Remote video: NON-MIRRORED (true orientation) (userId: ${user.userId})`);
+          console.log(`🔊 Remote video audio enabled (userId: ${user.userId})`);
+        }
 
-enforceNaturalVideoRendering(video);
+        enforceNaturalVideoRendering(video);
 
-videoContainer.appendChild(video);
+        videoContainer.appendChild(video);
 
-requestAnimationFrame(() => {
-  const vid = document.getElementById(`video-${user.userId}`);
-  if (vid) {
-    // Apply rendering based on whether it's self or remote
-    enforceNaturalVideoRendering(vid);
-  }
-});
+        requestAnimationFrame(() => {
+          const vid = document.getElementById(`video-${user.userId}`);
+          if (vid) {
+            // Apply rendering based on whether it's self or remote
+            enforceNaturalVideoRendering(vid);
+          }
+        });
 
         // ✅ Small Loading Indicator for Video Tiles
         const loadingIndicator = document.createElement('div');
@@ -1485,6 +1615,11 @@ requestAnimationFrame(() => {
             if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
 
             console.log(`✅ initLocalMedia() complete - stream ready`);
+
+            if (pendingVideoToggleDesired !== null) {
+              applyPendingVideoToggle('initLocalMedia');
+            }
+
             return localStream;
 
           } catch (e) {
@@ -1546,12 +1681,12 @@ requestAnimationFrame(() => {
             return;
           }
 
-localVid.srcObject = localStream;
-localVid.muted = true;
-localVid.volume = 0;
-enforceNaturalVideoRendering(localVid);
+          localVid.srcObject = localStream;
+          localVid.muted = true;
+          localVid.volume = 0;
+          enforceNaturalVideoRendering(localVid);
 
-console.log(`✅ Local stream attached with FORCED non-mirror`);
+          console.log(`✅ Local stream attached with FORCED non-mirror`);
 
           // ✅ FIX: Gate UI updates on actual media readiness
           if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
@@ -2543,7 +2678,11 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
 
         try {
           if (!localStream) {
-            console.error('❌ No localStream available');
+            console.warn('⚠️ Local stream not ready - queueing video toggle');
+            pendingVideoToggleDesired = pendingVideoToggleDesired === null ? true : !pendingVideoToggleDesired;
+            pendingVideoToggleAt = Date.now();
+            updateVideoButton();
+            scheduleVideoVisibilityUpdate(currentUser.userId, true, false);
             return;
           }
 
@@ -2553,59 +2692,23 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
           if (!track) {
             console.log(`📹 No video track exists - requesting camera access...`);
             try {
-              const videoStream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  width: { ideal: 640 },
-                  height: { ideal: 480 },
-                  facingMode: 'user'
-                }
-              });
-
-              track = videoStream.getVideoTracks()[0];
-              if (!track) throw new Error('No video track received from camera');
-
-              localStream.addTrack(track);
-              console.log(`✅ Video track added to localStream: ${track.id.substring(0, 8)}`);
-
-              // Inform siblings (other PeerConnections)
-              peerConnections.forEach((pc, userId) => {
-                try {
-                  pc.addTrack(track, localStream);
-                  console.log(`   ➕ Track added to PC for ${userId}`);
-                } catch (pcErr) {
-                  console.warn(`   ⚠️ Failed to add track to PC ${userId}:`, pcErr.message);
-                }
-              });
-
-              // Update local view
-              const localVid = document.getElementById(`video-${currentUser.userId}`);
-              if (localVid) {
-                localVid.srcObject = localStream;
-                await localVid.play().catch(e => console.warn('Local play error:', e));
-              }
-
-              toast('Camera enabled', 'success');
-
-              // ✅ CRITICAL ONE-CLICK FIX: 
-              // New tracks are ON by default. We should just set isVideoEnabled to true.
-              isVideoEnabled = true;
-              track.enabled = true;
+              track = await acquireLocalVideoTrack();
             } catch (camErr) {
               console.error('❌ Camera access failed:', camErr);
               toast('Failed to access camera', 'error');
               return;
             }
-          } else {
-            // ✅ Normal toggle for existing track
-            isVideoEnabled = !track.enabled;
-            track.enabled = isVideoEnabled;
           }
+
+          // ✅ Normal toggle for existing track
+          isVideoEnabled = !track.enabled;
+          track.enabled = isVideoEnabled;
 
           console.log(`📹 Video state changed: ${isVideoEnabled ? 'ON' : 'OFF'}`);
 
           // Update UI
           updateVideoButton();
-          updateVideoVisibility(currentUser.userId, isVideoEnabled, true);
+          scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
 
           // Notify server
           socketInstance.emit('video_state_changed', {
@@ -3371,7 +3474,8 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
             console.log(`   New state: ${data.enabled ? 'ON' : 'OFF'}`);
 
             // ✅ Persist intended state immediately (eliminates delay)
-            remoteMediaStates.set(data.userId, { video: data.enabled });
+            const existingState = remoteMediaStates.get(data.userId) || {};
+            remoteMediaStates.set(data.userId, { ...existingState, video: data.enabled });
 
             if (data.userId === currentUser.userId) {
               console.log(`📹 Own state reflected, ignoring UI update`);
@@ -3381,7 +3485,7 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
 
             // ✅ Apply state transition immediately
             // updateVideoVisibility now handles showing a loading spinner if enabled=true but no track yet
-            updateVideoVisibility(data.userId, data.enabled, true);
+            scheduleVideoVisibilityUpdate(data.userId, data.enabled, true);
 
             console.log(`✅ Remote video state handled`);
             console.log(`📹 ========================================\n`);
@@ -3414,16 +3518,16 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
           setupCallCleanup();
 
           console.log('✅ Call page event handlers initialized');
-          
+
           setInterval(() => {
-  document.querySelectorAll('video').forEach(vid => {
-    const computed = window.getComputedStyle(vid).transform || '';
-    // Only fix transforms for remote videos, preserve mirror for self-view
-    if (vid.classList.contains('remote-view') && (computed.includes('matrix(-1') || computed.includes('scaleX(-1)'))) {
-      enforceNaturalVideoRendering(vid);
-    }
-  });
-}, 3000);
+            document.querySelectorAll('video').forEach(vid => {
+              const computed = window.getComputedStyle(vid).transform || '';
+              // Only fix transforms for remote videos, preserve mirror for self-view
+              if (vid.classList.contains('remote-view') && (computed.includes('matrix(-1') || computed.includes('scaleX(-1)'))) {
+                enforceNaturalVideoRendering(vid);
+              }
+            });
+          }, 3000);
 
         } catch (e) {
           console.error('❌ Init error:', e);
