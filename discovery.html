@@ -535,6 +535,7 @@
   const _Auth = MoodApp.Auth;
   const _API = MoodApp.API;
   const _Toast = MoodApp.Toast;
+  const _Session = MoodApp.Session;
 
   const toast = (m, t='success') => { 
     if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m); 
@@ -554,8 +555,11 @@
       
       const token = await firebaseUser.getIdToken();
       const tabId = window.tabManager ? window.tabManager.tabId : `tab_${Date.now()}_fallback`;
+      const sessionId = (_Session && typeof _Session.getSocketSessionId === 'function')
+        ? _Session.getSocketSessionId()
+        : `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
       
-      socket.emit('authenticate', { token, userId, tabId });
+      socket.emit('authenticate', { token, userId, tabId, sessionId });
       
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Auth timeout')), 15000);
@@ -716,9 +720,22 @@
       socketInstance = io(window.location.origin, {
         transports: ['websocket', 'polling'],
         reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        timeout: 15000
+        reconnectionAttempts: 1000,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 10000,
+        randomizationFactor: 0.5,
+        timeout: 15000,
+        closeOnBeforeunload: false
+      });
+
+      socketInstance.on('server_ping', (payload = {}) => {
+        if (!socketInstance?.connected) return;
+        socketInstance.emit('client_pong', {
+          roomId: null,
+          location: 'mood',
+          path: window.location.pathname,
+          serverPingTs: payload.ts || null
+        });
       });
 
       return new Promise((resolve, reject) => {
