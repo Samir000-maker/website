@@ -12,6 +12,88 @@ const s3 = new AWS.S3({
   s3ForcePathStyle: true,
 });
 
+const ATTACHMENT_EXTENSION_BY_MIME = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'text/plain': 'txt',
+  'application/rtf': 'rtf',
+  'application/zip': 'zip',
+  'application/x-zip-compressed': 'zip'
+};
+
+function sanitizeFileName(input = 'file') {
+  const sanitized = String(input)
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  return sanitized || 'file';
+}
+
+function extractExtension(originalName = '') {
+  const parts = String(originalName).split('.');
+  if (parts.length < 2) return null;
+  const ext = parts.pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ext || null;
+}
+
+function resolveAttachmentExtension(mimeType = '', originalName = '') {
+  const normalizedMime = String(mimeType || '').toLowerCase().trim();
+  if (ATTACHMENT_EXTENSION_BY_MIME[normalizedMime]) {
+    return ATTACHMENT_EXTENSION_BY_MIME[normalizedMime];
+  }
+
+  const fromName = extractExtension(originalName);
+  if (fromName) return fromName;
+
+  return 'bin';
+}
+
+function parseRange(rangeHeader, totalLength) {
+  if (!rangeHeader || typeof rangeHeader !== 'string' || !rangeHeader.startsWith('bytes=')) {
+    return null;
+  }
+
+  const rawRange = rangeHeader.replace('bytes=', '').split(',')[0].trim();
+  const [startStr, endStr] = rawRange.split('-');
+
+  let start = Number.parseInt(startStr, 10);
+  let end = endStr ? Number.parseInt(endStr, 10) : totalLength - 1;
+
+  if (Number.isNaN(start)) {
+    // Suffix range: "bytes=-500"
+    const suffixLength = Number.parseInt(endStr, 10);
+    if (Number.isNaN(suffixLength) || suffixLength <= 0) {
+      const err = new Error('Invalid range');
+      err.code = 'INVALID_RANGE';
+      throw err;
+    }
+    start = Math.max(totalLength - suffixLength, 0);
+    end = totalLength - 1;
+  }
+
+  if (Number.isNaN(end) || end < start || start < 0 || end >= totalLength) {
+    const err = new Error('Invalid range');
+    err.code = 'INVALID_RANGE';
+    throw err;
+  }
+
+  return { start, end };
+}
+
 /**
  * Upload profile picture to Cloudflare R2
  * RETURNS: string (public URL)
@@ -38,6 +120,103 @@ export async function uploadProfilePicture(fileBuffer, mimeType, userId) {
     console.error('❌ R2 upload failed:', err);
     throw new Error('Profile picture upload failed');
   }
+}
+
+/**
+ * Upload chat attachment to Cloudflare R2
+ * RETURNS: { fileId, key, publicUrl, mimeType, size }
+ */
+export async function uploadChatAttachment(fileBuffer, mimeType, originalName, roomId, userId, preferredFileId = null) {
+  try {
+    if (!fileBuffer || !Buffer.isBuffer(fileBuffer) || fileBuffer.byteLength === 0) {
+      throw new Error('Attachment buffer is empty');
+    }
+    if (!roomId || !userId) {
+      throw new Error('roomId and userId are required');
+    }
+
+    const fileId = preferredFileId || `file_${roomId}_${Date.now()}_${uuidv4().replace(/-/g, '').slice(0, 8)}`;
+    const extension = resolveAttachmentExtension(mimeType, originalName);
+    const safeBaseName = sanitizeFileName(originalName || `attachment.${extension}`);
+    const safeFileName = safeBaseName.includes('.')
+      ? safeBaseName
+      : `${safeBaseName}.${extension}`;
+
+    const key = `attachments/${roomId}/${userId}/${fileId}_${safeFileName}`;
+    const normalizedMime = (mimeType && String(mimeType).trim()) || 'application/octet-stream';
+
+    await s3.upload({
+      Bucket: config.BUCKET_NAME,
+      Key: key,
+      Body: fileBuffer,
+      ContentType: normalizedMime,
+      CacheControl: 'public, max-age=31536000, immutable'
+    }).promise();
+
+    const publicBase = config.R2_PUBLIC_URL.replace(/\/+$/, '');
+    const publicUrl = `${publicBase}/${key}`;
+
+    return {
+      fileId,
+      key,
+      publicUrl,
+      mimeType: normalizedMime,
+      size: fileBuffer.byteLength
+    };
+  } catch (err) {
+    console.error('❌ Chat attachment upload failed:', err);
+    throw new Error('Chat attachment upload failed');
+  }
+}
+
+/**
+ * Stream attachment from R2 with optional byte-range support.
+ */
+export async function getChatAttachmentStream(storageKey, rangeHeader = null) {
+  if (!storageKey) {
+    const err = new Error('storageKey is required');
+    err.code = 'MISSING_KEY';
+    throw err;
+  }
+
+  const head = await s3.headObject({
+    Bucket: config.BUCKET_NAME,
+    Key: storageKey
+  }).promise();
+
+  const totalLength = Number(head.ContentLength || 0);
+  const contentType = head.ContentType || 'application/octet-stream';
+  const parsedRange = parseRange(rangeHeader, totalLength);
+
+  const getObjectParams = {
+    Bucket: config.BUCKET_NAME,
+    Key: storageKey
+  };
+
+  let statusCode = 200;
+  let contentLength = totalLength;
+  let contentRange = null;
+
+  if (parsedRange) {
+    const { start, end } = parsedRange;
+    getObjectParams.Range = `bytes=${start}-${end}`;
+    statusCode = 206;
+    contentLength = (end - start) + 1;
+    contentRange = `bytes ${start}-${end}/${totalLength}`;
+  }
+
+  const stream = s3.getObject(getObjectParams).createReadStream();
+
+  return {
+    stream,
+    statusCode,
+    contentType,
+    contentLength,
+    totalLength,
+    contentRange,
+    etag: head.ETag || null,
+    lastModified: head.LastModified || null
+  };
 }
 
 /**
