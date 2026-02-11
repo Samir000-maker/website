@@ -1227,6 +1227,15 @@
 
         videoRecoveryAttempts.set(userId, attempts + 1);
 
+        const scheduleImmediateRetry = (delayMs = 300) => {
+          setTimeout(() => {
+            if (videoRenderState.get(userId) === 'loading') {
+              console.warn(`🛠️ Immediate retry ${videoRecoveryAttempts.get(userId) || 0}/${MAX_VIDEO_RECOVERY_ATTEMPTS} for ${userId}`);
+              handleStuckVideo(userId);
+            }
+          }, delayMs);
+        };
+
         // 1. Check if we have remote tracks in the PC
         const remoteTracks = pc.getReceivers()
           .map(receiver => receiver.track)
@@ -1257,9 +1266,15 @@
           if (vid.readyState >= 1) {
             await forcePlay();
           }
+
+          // If still loading, retry immediately
+          scheduleImmediateRetry(200);
         } else {
           console.warn(`   ⚠️ No remote video tracks found in PC. Requesting ICE restart...`);
           handleIceFailure(userId);
+
+          // Retry quickly after ICE restart trigger
+          scheduleImmediateRetry(400);
         }
 
         // Reset watchdog to prevent loop if recovery fails
