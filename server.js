@@ -787,7 +787,7 @@ const SOCKET_DISCONNECT_GRACE_MS = 120000;
 const CLEANUP_RECHECK_MIN_MS = 10000;
 const SERVER_PING_INTERVAL_MS = 15000;
 const SERVER_PONG_TIMEOUT_MS = 45000;
-const CHAT_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024; // 100MB for production
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10MB for production
 
 async function handleUserCleanup(userId) {
   const startedAt = Date.now();
