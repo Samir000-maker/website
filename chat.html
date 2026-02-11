@@ -2477,9 +2477,8 @@
       // ============================================
       // CHUNKED FILE TRANSMISSION CONFIGURATION
       // ============================================
-      // Use a multiple of 3 (262140) to ensure base64 chunks don't have internal padding
-      const CHUNK_SIZE = 262140; // ~256KB chunks (safe for Socket.IO)
-      const CHUNK_TIMEOUT = 30000; // 30s timeout per chunk
+      const CHUNK_SIZE = 524288; // 512KB chunks (fewer packets, faster global transfers)
+      const CHUNK_TIMEOUT = 20000; // 20s stall watchdog
       const MAX_RETRIES = 3; // Retry failed chunks up to 3 times
 
       /**
@@ -2695,86 +2694,105 @@
       }
 
       /**
-       * Send file using chunked transmission protocol
-       * Returns Promise that resolves when all chunks are acknowledged
+       * Send file using a pipelined chunk protocol with lazy chunk reads.
+       * This starts transmitting immediately instead of pre-building all chunks in memory.
        */
-      async function sendFileInChunks(fileId, fileName, fileType, fileSize, chunks, roomId) {
+      async function sendFileInChunks(fileId, fileName, fileType, fileSize, fileBlob, roomId) {
         console.log('📤 ========================================');
         console.log('📤 PIPELINED BINARY TRANSMISSION START');
         console.log('📤 ========================================');
         console.log(`   FileID: ${fileId}`);
         console.log(`   Size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`);
-        console.log(`   Chunks: ${chunks.length}`);
 
-        const WINDOW_SIZE = 10; // Allow 10 chunks to be in flight simultaneously
-        let currentChunkIndex = 0;
+        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+        const WINDOW_SIZE = 24;
+        let nextChunkIndex = 0;
         let acknowledgedCount = 0;
-        let chunksInFlight = 0;
+        let failed = false;
+        let lastProgressAt = Date.now();
+        const inFlight = new Set();
+        const acknowledgedChunks = new Set();
 
         return new Promise((resolve, reject) => {
-          let isFailed = false;
+          const fail = (error) => {
+            if (failed) return;
+            failed = true;
+            socketInstance.off('file_chunk_ack', ackHandler);
+            clearInterval(stallWatcher);
+            reject(error);
+          };
 
-          const ackHandler = (data) => {
-            if (data.fileId !== fileId) return;
-
+          const ackHandler = (ack) => {
+            if (!ack || ack.fileId !== fileId || failed) return;
+            if (acknowledgedChunks.has(ack.chunkIndex)) return;
+            acknowledgedChunks.add(ack.chunkIndex);
+            inFlight.delete(ack.chunkIndex);
             acknowledgedCount++;
-            chunksInFlight--;
+            lastProgressAt = Date.now();
 
-            // Update progress UI
-            const progress = Math.round((acknowledgedCount / chunks.length) * 100);
+            const progress = Math.round((acknowledgedCount / totalChunks) * 100);
             const progressText = document.getElementById('uploadProgressText');
-            if (progressText) {
-              progressText.textContent = `Uploading: ${progress}%`;
+            if (progressText) progressText.textContent = `Uploading: ${progress}%`;
+
+            if (acknowledgedCount >= totalChunks) {
+              socketInstance.off('file_chunk_ack', ackHandler);
+              clearInterval(stallWatcher);
+              console.log('✅ Pipelined transmission complete');
+              resolve();
+              return;
             }
 
-            if (acknowledgedCount === chunks.length) {
-              console.log('✅ Pipelined transmission complete');
-              socketInstance.off('file_chunk_ack', ackHandler);
-              resolve();
-            } else if (!isFailed) {
-              sendMoreChunks();
+            void fillPipeline();
+          };
+
+          const sendChunk = async (index) => {
+            if (failed) return;
+            inFlight.add(index);
+            const start = index * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, fileSize);
+            const chunkBlob = fileBlob.slice(start, end);
+            const arrayBuffer = await chunkBlob.arrayBuffer();
+            if (failed) {
+              inFlight.delete(index);
+              return;
+            }
+            if (index === 0 || index === totalChunks - 1 || index % 8 === 0) {
+              console.log(`📤 Sending chunk ${index + 1}/${totalChunks}`);
+            }
+
+            socketInstance.emit('file_chunk', {
+              fileId,
+              fileName,
+              fileType,
+              fileSize,
+              roomId,
+              chunkIndex: index,
+              totalChunks,
+              chunkData: arrayBuffer,
+              chunkSize: chunkBlob.size
+            });
+          };
+
+          const fillPipeline = async () => {
+            while (!failed && inFlight.size < WINDOW_SIZE && nextChunkIndex < totalChunks) {
+              const index = nextChunkIndex++;
+              sendChunk(index).catch((err) => {
+                console.error('❌ Failed to read/send chunk:', err);
+                fail(new Error('Chunk transmission failed'));
+              });
             }
           };
+
+          const stallWatcher = setInterval(() => {
+            if (failed || acknowledgedCount >= totalChunks) return;
+            if (Date.now() - lastProgressAt > CHUNK_TIMEOUT) {
+              console.error('❌ Transmission stalled (timeout)');
+              fail(new Error('Transmission stalled'));
+            }
+          }, 1000);
 
           socketInstance.on('file_chunk_ack', ackHandler);
-
-          const sendMoreChunks = () => {
-            while (chunksInFlight < WINDOW_SIZE && currentChunkIndex < chunks.length && !isFailed) {
-              const chunk = chunks[currentChunkIndex];
-              const index = currentChunkIndex;
-
-              console.log(`📤 Sending binary chunk ${index}/${chunks.length - 1} (${(chunk.size / 1024).toFixed(2)} KB)`);
-
-              socketInstance.emit('file_chunk', {
-                fileId,
-                fileName,
-                fileType,
-                fileSize,
-                roomId,
-                chunkIndex: index,
-                totalChunks: chunks.length,
-                chunkData: chunk.data, // Binary ArrayBuffer
-                chunkSize: chunk.size
-              });
-
-              chunksInFlight++;
-              currentChunkIndex++;
-
-              // Small fail-safe: reject after timeout if no progress is made
-              const currentCapturedProgress = acknowledgedCount;
-              setTimeout(() => {
-                if (acknowledgedCount === currentCapturedProgress && acknowledgedCount < chunks.length && !isFailed) {
-                  isFailed = true;
-                  console.error('❌ Transmission stalled (timeout)');
-                  socketInstance.off('file_chunk_ack', ackHandler);
-                  reject(new Error('Transmission stalled'));
-                }
-              }, 60000); // 60s stall timeout
-            }
-          };
-
-          // Initial fill of the pipeline
-          sendMoreChunks();
+          void fillPipeline();
         });
       }
 
@@ -2786,10 +2804,11 @@
         async handleChunk(data) {
           const { fileId, fileName, fileType, fileSize, roomId, chunkIndex, totalChunks, chunkData, chunkSize } = data;
 
-          console.log(`📥 Received chunk ${chunkIndex}/${totalChunks - 1} for ${fileName} (${(chunkSize / 1024).toFixed(2)} KB)`);
+          if (chunkIndex === 0 || chunkIndex === totalChunks - 1 || chunkIndex % 8 === 0) {
+            console.log(`📥 Received chunk ${chunkIndex + 1}/${totalChunks} for ${fileName}`);
+          }
 
           if (!this.activeTransfers.has(fileId)) {
-            console.log(`🆕 Starting new file transfer: ${fileId}`);
             this.activeTransfers.set(fileId, {
               chunks: new Array(totalChunks),
               metadata: { fileName, fileType, fileSize, roomId, totalChunks },
@@ -2798,45 +2817,29 @@
           }
 
           const transfer = this.activeTransfers.get(fileId);
-
-          // CRITICAL: Skip duplicate chunks to prevent premature reconstruction
           if (transfer.chunks[chunkIndex] !== undefined) {
-            console.warn(`⚠️ Duplicate chunk ${chunkIndex} received for ${fileName}, skipping`);
-            socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
             return;
           }
 
-          // Handle incoming binary data (could be ArrayBuffer or Buffer converted to Uint8Array by Socket.IO)
           transfer.chunks[chunkIndex] = new Uint8Array(chunkData);
           transfer.receivedCount++;
 
-          // Acknowledge immediately to help sender pump the pipeline
-          socketInstance.emit('file_chunk_ack', { fileId, chunkIndex });
-
           const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
-
-          // Update global progress text if this is a live upload/download
           const progressText = document.getElementById('uploadProgressText');
           if (progressText && fileName === (pendingAttachment?.name || progressText.dataset.fileName)) {
             progressText.textContent = `Receiving: ${progress}%`;
           }
 
           if (transfer.receivedCount === totalChunks) {
-            console.log('✅ All binary chunks received, reconstructing file...');
             await this.reconstructFile(fileId, transfer);
           }
         }
 
         async reconstructFile(fileId, transfer) {
           const { chunks, metadata } = transfer;
-          const { fileName, fileType, fileSize, roomId } = metadata;
-
-          console.log('🔧 ========================================');
-          console.log('🔧 RECONSTRUCTING BINARY FILE');
-          console.log('🔧 ========================================');
+          const { fileName, fileType, roomId } = metadata;
 
           try {
-            // Binary reconstruction is extremely fast
             const totalBytes = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
             const combinedArray = new Uint8Array(totalBytes);
             let offset = 0;
@@ -2847,11 +2850,7 @@
               offset += chunks[i].length;
             }
 
-            console.log(`✅ Binary data joined: ${totalBytes} bytes`);
-
             const blob = new Blob([combinedArray], { type: fileType });
-            console.log(`✅ Blob created: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
-
             const db = await initFileDB();
 
             await new Promise((resolve, reject) => {
@@ -2870,34 +2869,20 @@
               };
 
               const request = store.put(fileRecord);
-
-              request.onsuccess = () => {
-                console.log(`✅ File stored to IndexedDB: ${fileId}`);
-                resolve();
-              };
-
-              request.onerror = () => {
-                console.error('❌ Failed to store file:', request.error);
-                reject(request.error);
-              };
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
             });
 
             this.activeTransfers.delete(fileId);
 
-            console.log('✅ File reconstruction complete');
-            console.log('🔧 ========================================\n');
-
             const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
             if (imgElements.length > 0) {
-              console.log(`🖼️ Updating ${imgElements.length} image element(s)`);
               imgElements.forEach(img => loadImageAttachment(fileId, img));
             }
 
             toast(`Received: ${fileName}`, 'success');
-
           } catch (error) {
             console.error('❌ File reconstruction failed:', error);
-            console.log('🔧 ========================================\n');
             this.activeTransfers.delete(fileId);
             toast(`Failed to receive: ${fileName}`, 'error');
             throw error;
@@ -2906,7 +2891,6 @@
 
         cleanup(fileId) {
           if (this.activeTransfers.has(fileId)) {
-            console.log(`🧹 Cleaning up incomplete transfer: ${fileId}`);
             this.activeTransfers.delete(fileId);
           }
         }
@@ -6736,13 +6720,9 @@
                 // Create File object from blob
                 const file = new File([fileData.blob], fileData.name, { type: fileData.type });
 
-                // Chunk the file
                 const progressText = document.getElementById('uploadProgressText');
-                if (progressText) progressText.textContent = 'Chunking...';
-
-                const chunks = await chunkFile(file);
-
-                console.log(`✅ File chunked into ${chunks.length} pieces`);
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                if (progressText) progressText.textContent = 'Uploading: 0%';
 
                 // Add attachment metadata (no data - will be sent separately)
                 serverMessageData.attachment = {
@@ -6751,7 +6731,7 @@
                   type: pendingAttachment.type,
                   size: pendingAttachment.size,
                   chunked: true, // Signal that chunks will follow
-                  totalChunks: chunks.length
+                  totalChunks
                 };
 
                 // CRITICAL: Store attachment data before hideAttachmentPreview() clears pendingAttachment
@@ -6767,15 +6747,13 @@
                 console.log('📤 Emitting message metadata to server...');
                 socketInstance.emit('chat_message', serverMessageData);
 
-                // Then send file chunks
-                if (progressText) progressText.textContent = 'Uploading: 0%';
-
+                // Then stream chunks immediately (lazy chunk reads).
                 await sendFileInChunks(
                   attachmentFileId,
                   attachmentName,
                   attachmentType,
                   attachmentSize,
-                  chunks,
+                  file,
                   roomData.roomId
                 );
 

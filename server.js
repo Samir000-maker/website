@@ -3471,92 +3471,134 @@ io.on('connection', (socket) => {
       const user = await getSocketUser(socket.id);
       if (!user) return;
 
-      const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkSize, chunkData } = data;
-
-      // 1. Basic Validation
-      let actualChunkSize = 0;
-      if (typeof chunkData === 'string') {
-        const base64Clean = chunkData.replace(/^data:image\/\w+;base64,/, '');
-        if (!/^[a-zA-Z0-9+/]*={0,2}$/.test(base64Clean)) {
-          socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid encoding' });
-          return;
-        }
-        actualChunkSize = Math.floor(chunkData.length * 0.75);
-      } else {
-        actualChunkSize = chunkData.length || chunkData.byteLength;
-      }
-
-      // 2. Distributed Transfer Initializtion
-      let transfer = await getActiveFileTransfer(fileId);
-      if (!transfer) {
-        transfer = { roomId, userId: user.userId, bytesTransferred: 0, startTime: Date.now() };
-        await setActiveFileTransfer(fileId, transfer);
-
-        await saveFileRecord(fileId, {
-          roomId, totalChunks, receivedCount: 0,
-          name: fileName, senderId: user.userId, senderUsername: user.username
-        });
-        console.log(`📦 [Cluster] Started transfer: ${fileName} (${fileId})`);
-      }
-
-      // 3. Update transfer stats
-      transfer.bytesTransferred += actualChunkSize;
-      if (transfer.bytesTransferred > config.MAX_FILE_SIZE) {
-        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Size limit exceeded' });
-        await deleteActiveFileTransfer(fileId);
-        await deleteFileRecord(fileId);
+      const { fileId, fileName, roomId, chunkIndex, totalChunks, chunkData } = data;
+      if (!fileId || !roomId || !Number.isInteger(chunkIndex) || !Number.isInteger(totalChunks) || !chunkData) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Invalid chunk payload' });
         return;
       }
-      await setActiveFileTransfer(fileId, transfer);
-
-      // 4. Store chunk in Redis
-      const fileRecord = await getFileRecord(fileId);
-      if (fileRecord) {
-        const chunkBuffer = Buffer.isBuffer(chunkData) ? chunkData : Buffer.from(chunkData, 'base64');
-        const alreadyReceived = await pubClient.exists(`file:chunk:${fileId}:${chunkIndex}`);
-        if (!alreadyReceived) {
-          await setFileChunk(fileId, chunkIndex, chunkBuffer);
-          fileRecord.receivedCount++;
-          await saveFileRecord(fileId, fileRecord);
-        }
+      if (totalChunks <= 0 || chunkIndex < 0 || chunkIndex >= totalChunks) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk index out of range' });
+        return;
       }
 
-      // 5. Relay to other users in room
+      if (!checkChunkRateLimit(user.userId)) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Chunk rate limit exceeded' });
+        return;
+      }
+
+      // Fast binary normalization.
+      const chunkBuffer = Buffer.isBuffer(chunkData)
+        ? chunkData
+        : (typeof chunkData === 'string' ? Buffer.from(chunkData, 'base64') : Buffer.from(chunkData));
+      const actualChunkSize = chunkBuffer.byteLength;
+      if (actualChunkSize <= 0) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Empty chunk' });
+        return;
+      }
+
+      let transfer = roomFileStore.get(fileId);
+      if (!transfer) {
+        transfer = {
+          fileId,
+          fileName,
+          roomId,
+          senderId: user.userId,
+          senderUsername: user.username,
+          totalChunks,
+          receivedCount: 0,
+          bytesTransferred: 0,
+          chunks: new Array(totalChunks),
+          lastUpdatedAt: Date.now(),
+          assembledData: null
+        };
+        roomFileStore.set(fileId, transfer);
+        await saveFileRecord(fileId, {
+          roomId,
+          totalChunks,
+          receivedCount: 0,
+          name: fileName,
+          senderId: user.userId,
+          senderUsername: user.username
+        });
+        console.log(`📦 [Cluster] Started fast transfer: ${fileName} (${fileId})`);
+      }
+
+      transfer.lastUpdatedAt = Date.now();
+      if (transfer.totalChunks !== totalChunks) {
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Inconsistent chunk metadata' });
+        return;
+      }
+
+      if (transfer.assembledData) {
+        socket.emit('file_chunk_ack', { fileId, chunkIndex });
+        return;
+      }
+
+      // Deduplicate chunk index.
+      if (!transfer.chunks[chunkIndex]) {
+        transfer.chunks[chunkIndex] = chunkBuffer;
+        transfer.receivedCount += 1;
+        transfer.bytesTransferred += actualChunkSize;
+      }
+
+      if (transfer.bytesTransferred > config.MAX_FILE_SIZE) {
+        roomFileStore.delete(fileId);
+        await deleteFileRecord(fileId);
+        socket.emit('file_transmission_failed', { fileId, fileName, reason: 'Size limit exceeded' });
+        return;
+      }
+
+      // Relay immediately for minimum latency.
       socket.to(roomId).emit('file_chunk', {
-        fileId, fileName, senderId: user.userId, senderUsername: user.username,
-        chunkIndex, totalChunks, chunkSize: actualChunkSize, chunkData
+        fileId,
+        fileName,
+        senderId: user.userId,
+        senderUsername: user.username,
+        chunkIndex,
+        totalChunks,
+        chunkSize: actualChunkSize,
+        chunkData
       });
 
-      // 6. Assembly check
-      if (fileRecord && fileRecord.receivedCount === totalChunks) {
-        const allChunks = [];
-        for (let i = 0; i < totalChunks; i++) {
-          const chunk = await getFileChunk(fileId, i);
-          if (chunk) allChunks.push(chunk);
-        }
-
-        if (allChunks.length === totalChunks) {
-          const fullBuffer = Buffer.concat(allChunks);
-          fileRecord.assembledData = fullBuffer.toString('base64');
-          console.log(`✅ [Cluster] Assembled ${fileName} (${fileId})`);
-
-          // Patch room history (Matchmaking is currently local, but room records can be patched)
-          const room = await matchmaking.getRoom(roomId);
-          if (room && room.messages) {
-            const msg = room.messages.find(m => m.attachment && m.attachment.fileId === fileId);
-            if (msg) {
-              msg.attachment.data = fileRecord.assembledData;
-              msg.attachment.chunked = false;
-            }
-          }
-          await saveFileRecord(fileId, fileRecord);
-        }
-      }
-
-      // 7. Progress & ACK
-      const progress = fileRecord ? Math.round((fileRecord.receivedCount / totalChunks) * 100) : 0;
+      const progress = Math.round((transfer.receivedCount / totalChunks) * 100);
       socket.emit('file_upload_progress', { fileId, fileName, progress, totalChunks });
       socket.emit('file_chunk_ack', { fileId, chunkIndex });
+
+      if (transfer.receivedCount === totalChunks && !transfer.assembledData) {
+        const complete = transfer.chunks.every(Boolean);
+        if (!complete) return;
+
+        const fullBuffer = Buffer.concat(transfer.chunks);
+        transfer.assembledData = fullBuffer.toString('base64');
+        transfer.chunks = [];
+
+        await saveFileRecord(fileId, {
+          roomId: transfer.roomId,
+          totalChunks: transfer.totalChunks,
+          receivedCount: transfer.totalChunks,
+          name: transfer.fileName,
+          senderId: transfer.senderId,
+          senderUsername: transfer.senderUsername,
+          assembledData: transfer.assembledData
+        });
+
+        const room = await matchmaking.getRoom(roomId);
+        if (room && room.messages) {
+          const msg = room.messages.find(m => m.attachment && m.attachment.fileId === fileId);
+          if (msg) {
+            msg.attachment.data = transfer.assembledData;
+            msg.attachment.chunked = false;
+          }
+        }
+
+        // Keep cache briefly for quick peer fetches, then release memory.
+        setTimeout(() => {
+          const cached = roomFileStore.get(fileId);
+          if (cached && cached.assembledData && Date.now() - cached.lastUpdatedAt > 15 * 60 * 1000) {
+            roomFileStore.delete(fileId);
+          }
+        }, 16 * 60 * 1000);
+      }
 
     } catch (error) {
       console.error('❌ [Cluster] file_chunk error:', error);
@@ -3575,6 +3617,16 @@ io.on('connection', (socket) => {
     try {
       const user = await getSocketUser(socket.id);
       if (!user) return;
+
+      const hotCache = roomFileStore.get(fileId);
+      if (hotCache?.assembledData) {
+        socket.emit('attachment_data_received', {
+          fileId,
+          data: hotCache.assembledData,
+          metadata: { name: hotCache.fileName }
+        });
+        return;
+      }
 
       const fileRecord = await getFileRecord(fileId);
       if (fileRecord && fileRecord.assembledData) {
@@ -6350,6 +6402,22 @@ setInterval(() => {
     console.log(`🗑️ Cleaned up ${cleaned} expired rate limit entries`);
   }
 }, 30000);
+
+// Clean up stale in-memory attachment transfer cache.
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [fileId, transfer] of roomFileStore.entries()) {
+    if (!transfer?.lastUpdatedAt) continue;
+    if (now - transfer.lastUpdatedAt > 20 * 60 * 1000) {
+      roomFileStore.delete(fileId);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`🗑️ Cleaned up ${cleaned} stale attachment cache entries`);
+  }
+}, 60000);
 
 
 
