@@ -1355,6 +1355,9 @@
     let socketInstance = null;
     let currentRoomId = null;
     let heartbeatInterval = null;
+    let socketReconnectFailures = 0;
+    let lastVisibilityHiddenAt = 0;
+    let controlledReloadInProgress = false;
 
 
     function startHeartbeat() {
@@ -1393,6 +1396,58 @@
       }
     }
 
+    function getStableSocketSessionId() {
+      if (window.MoodApp?.Session && typeof window.MoodApp.Session.getSocketSessionId === 'function') {
+        return window.MoodApp.Session.getSocketSessionId();
+      }
+      try {
+        let sessionId = sessionStorage.getItem('vibe_socket_session_id');
+        if (sessionId) return sessionId;
+        sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+        sessionStorage.setItem('vibe_socket_session_id', sessionId);
+        return sessionId;
+      } catch {
+        return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+      }
+    }
+
+    function triggerSocketRecoveryReload(reason = 'chat_socket_recovery') {
+      if (controlledReloadInProgress) return;
+      controlledReloadInProgress = true;
+
+      try {
+        const key = 'chat_socket_recovery_state';
+        const now = Date.now();
+        const state = JSON.parse(sessionStorage.getItem(key) || '{}');
+        const withinWindow = state.lastReloadAt && (now - state.lastReloadAt) < (5 * 60 * 1000);
+        const count = withinWindow ? (state.count || 0) + 1 : 1;
+
+        if (count > 2) {
+          controlledReloadInProgress = false;
+          console.error(`❌ [Socket] Reload suppressed by loop guard (${reason})`);
+          return;
+        }
+
+        sessionStorage.setItem(key, JSON.stringify({ count, lastReloadAt: now, reason }));
+      } catch { }
+
+      window.location.reload();
+    }
+
+    function reconnectSocketIfNeeded(trigger = 'resume') {
+      if (!socketInstance) return;
+      if (!socketInstance.connected) {
+        console.log(`🔄 [Socket] Reconnect requested (${trigger})`);
+        socketInstance.connect();
+      } else if (currentRoomId) {
+        socketInstance.emit('heartbeat', {
+          roomId: currentRoomId,
+          location: 'chat',
+          path: window.location.pathname
+        });
+      }
+    }
+
   </script>
 
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
@@ -1405,6 +1460,7 @@
       const _API = MoodApp.API;
       const _Toast = MoodApp.Toast;
       const _Utils = MoodApp.Utils;
+      const _Session = MoodApp.Session;
 
       const toast = (m, t = 'success') => {
         if (_Toast) {
@@ -2404,6 +2460,16 @@
 
         // Documents - 10MB max
         'application/pdf': { ext: ['.pdf'], maxSize: 10 * 1024 * 1024 },
+        'application/msword': { ext: ['.doc'], maxSize: 10 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: ['.docx'], maxSize: 10 * 1024 * 1024 },
+        'application/vnd.ms-excel': { ext: ['.xls'], maxSize: 10 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: ['.xlsx'], maxSize: 10 * 1024 * 1024 },
+        'application/vnd.ms-powerpoint': { ext: ['.ppt'], maxSize: 10 * 1024 * 1024 },
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': { ext: ['.pptx'], maxSize: 10 * 1024 * 1024 },
+        'text/plain': { ext: ['.txt'], maxSize: 10 * 1024 * 1024 },
+        'application/rtf': { ext: ['.rtf'], maxSize: 10 * 1024 * 1024 },
+        'application/zip': { ext: ['.zip'], maxSize: 10 * 1024 * 1024 },
+        'application/x-zip-compressed': { ext: ['.zip'], maxSize: 10 * 1024 * 1024 }
       };
 
       const ABSOLUTE_MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -2435,12 +2501,9 @@
         // Check file type
         const typeConfig = SUPPORTED_FILE_TYPES[file.type];
         if (!typeConfig) {
-          console.error(`❌ Unsupported file type: ${file.type}`);
+          console.warn(`⚠️ Unknown MIME type (${file.type || 'none'}) - allowing with fallback handling`);
           console.log('🔍 ========================================\n');
-          return {
-            valid: false,
-            error: `Unsupported file type. Supported: images (JPG, PNG, GIF, WebP), videos (MP4, WebM, MOV), and PDFs.`
-          };
+          return { valid: true, error: null };
         }
 
         // Check file extension matches MIME type
@@ -2489,7 +2552,7 @@
 
 
 
-      async function openImageViewer(fileId, fileName) {
+      async function openImageViewer(fileId, fileName, fallbackUrl = null) {
         console.log('🖼️ ========================================');
         console.log('🖼️ OPENING IMAGE VIEWER');
         console.log('🖼️ ========================================');
@@ -2513,24 +2576,32 @@
           const fileData = await getFileFromIndexedDB(fileId);
 
           if (!fileData || !fileData.blob) {
-            console.error('❌ File not found in IndexedDB');
-            toast('Image not found', 'error');
-            return;
+            if (!fallbackUrl) {
+              console.error('❌ File not found in IndexedDB');
+              toast('Image not found', 'error');
+              return;
+            }
+
+            image.src = fallbackUrl;
+            image.alt = fileName || 'Image attachment';
+            delete image.dataset.blobUrl;
+            if (filenameEl) filenameEl.textContent = fileName || 'Image';
+            if (sizeEl) sizeEl.textContent = 'Loaded from secure storage';
+          } else {
+            console.log(`✅ File retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+
+            // Create blob URL for display
+            const blobUrl = URL.createObjectURL(fileData.blob);
+
+            // Set image source
+            image.src = blobUrl;
+            image.alt = fileData.name;
+            image.dataset.blobUrl = blobUrl;
+
+            // Update info
+            if (filenameEl) filenameEl.textContent = fileData.name;
+            if (sizeEl) sizeEl.textContent = `${formatFileSize(fileData.size)} • Click image to zoom`;
           }
-
-          console.log(`✅ File retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
-
-          // Create blob URL for display
-          const blobUrl = URL.createObjectURL(fileData.blob);
-
-          // Set image source
-          image.src = blobUrl;
-          image.alt = fileData.name;
-          image.dataset.blobUrl = blobUrl;
-
-          // Update info
-          if (filenameEl) filenameEl.textContent = fileData.name;
-          if (sizeEl) sizeEl.textContent = `${formatFileSize(fileData.size)} • Click image to zoom`;
 
           // Reset zoom state
           isImageZoomed = false;
@@ -2992,6 +3063,41 @@
         if (mimeType.startsWith('video/')) return 'video';
         if (mimeType === 'application/pdf') return 'pdf';
         return 'document';
+      }
+
+      async function uploadAttachmentToServer(file, roomId) {
+        if (!file) throw new Error('No file provided');
+        if (!roomId) throw new Error('roomId is required');
+
+        const firebaseUser = firebase.auth().currentUser;
+        if (!firebaseUser) throw new Error('Not authenticated');
+
+        const token = await firebaseUser.getIdToken();
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('roomId', roomId);
+
+        const response = await fetch(`${window.location.origin}/api/chat/attachments`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`
+          },
+          body: formData
+        });
+
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok || !payload?.attachment) {
+          const errorMessage = payload?.error || payload?.message || `Upload failed (${response.status})`;
+          throw new Error(errorMessage);
+        }
+
+        return payload.attachment;
       }
 
       /**
@@ -3912,12 +4018,71 @@
 
             // Load actual image from IndexedDB
             const imgElement = attachmentDiv.querySelector('img');
-            loadImageAttachment(data.attachment.fileId, imgElement);
+            loadImageAttachment(
+              data.attachment.fileId,
+              imgElement,
+              data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl || null,
+              data.attachment.name
+            );
 
           } else if (fileCategory === 'video') {
-            // Show video preview with play button
-            console.log(`   Creating video file element (download on click)`);
-            attachmentDiv.innerHTML = `
+            const persistentUrl = data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl || null;
+            if (persistentUrl) {
+              console.log(`   Creating streaming video preview element`);
+
+              const wrapper = document.createElement('div');
+              wrapper.className = 'message-attachment-file video';
+              wrapper.dataset.fileId = data.attachment.fileId;
+              wrapper.style.display = 'flex';
+              wrapper.style.flexDirection = 'column';
+              wrapper.style.gap = '8px';
+              wrapper.style.cursor = 'default';
+
+              const videoEl = document.createElement('video');
+              videoEl.src = persistentUrl;
+              videoEl.controls = true;
+              videoEl.preload = 'metadata';
+              videoEl.playsInline = true;
+              videoEl.setAttribute('playsinline', '');
+              videoEl.style.width = '100%';
+              videoEl.style.maxHeight = '260px';
+              videoEl.style.borderRadius = '8px';
+              videoEl.style.background = '#000';
+
+              const info = document.createElement('div');
+              info.className = 'message-attachment-info';
+              info.innerHTML = `
+                <div class="message-attachment-name">${escapeHtml(data.attachment.name)}</div>
+                <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
+                <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 2px;">Streaming enabled (progressive loading)</div>
+              `;
+
+              const openBtn = document.createElement('button');
+              openBtn.type = 'button';
+              openBtn.className = 'text-xs text-[#a855f7] font-semibold text-left';
+              openBtn.textContent = 'Open in full player';
+              openBtn.addEventListener('click', () => {
+                downloadAttachment(
+                  data.attachment.fileId,
+                  data.attachment.name,
+                  persistentUrl,
+                  data.attachment.type
+                );
+              }, { passive: true });
+
+              videoEl.onerror = () => {
+                videoEl.remove();
+                openBtn.click();
+              };
+
+              wrapper.appendChild(videoEl);
+              wrapper.appendChild(info);
+              wrapper.appendChild(openBtn);
+              attachmentDiv.appendChild(wrapper);
+            } else {
+              // Legacy fallback when URL is unavailable
+              console.log(`   Creating video file fallback element`);
+              attachmentDiv.innerHTML = `
       <div class="message-attachment-file video" 
            data-file-id="${data.attachment.fileId}"
            style="cursor: pointer;">
@@ -3927,17 +4092,15 @@
           <div class="message-attachment-size">${formatFileSize(data.attachment.size)}</div>
           <div style="font-size: 0.7rem; opacity: 0.6; margin-top: 2px;">Click to open in video player</div>
         </div>
-        <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">download</span>
       </div>
     `;
 
-            // Add click handler for download
-            const fileElement = attachmentDiv.querySelector('.message-attachment-file');
-            if (fileElement) {
-              fileElement.addEventListener('click', () => {
-                console.log(`🎬 Opening video: ${data.attachment.name}`);
-                downloadAttachment(data.attachment.fileId, data.attachment.name);
-              }, { passive: true });
+              const fileElement = attachmentDiv.querySelector('.message-attachment-file');
+              if (fileElement) {
+                fileElement.addEventListener('click', () => {
+                  downloadAttachment(data.attachment.fileId, data.attachment.name, null, data.attachment.type);
+                }, { passive: true });
+              }
             }
 
           } else if (fileCategory === 'pdf') {
@@ -3962,7 +4125,12 @@
             if (fileElement) {
               fileElement.addEventListener('click', () => {
                 console.log(`📄 Opening PDF: ${data.attachment.name}`);
-                downloadAttachment(data.attachment.fileId, data.attachment.name);
+                downloadAttachment(
+                  data.attachment.fileId,
+                  data.attachment.name,
+                  data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl || null,
+                  data.attachment.type
+                );
               }, { passive: true });
             }
 
@@ -3989,7 +4157,12 @@
             if (fileElement) {
               fileElement.addEventListener('click', () => {
                 console.log(`📁 Downloading document: ${data.attachment.name}`);
-                downloadAttachment(data.attachment.fileId, data.attachment.name);
+                downloadAttachment(
+                  data.attachment.fileId,
+                  data.attachment.name,
+                  data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl || null,
+                  data.attachment.type
+                );
               }, { passive: true });
             }
           }
@@ -4032,13 +4205,34 @@
        * Load image attachment from IndexedDB and display
        * Now includes retry mechanism and peer request fallback
        */
-      async function loadImageAttachment(fileId, imgElement) {
+      async function loadImageAttachment(fileId, imgElement, remoteUrl = null, remoteName = null) {
         if (!imgElement) {
           console.error('❌ Image element not provided for fileId:', fileId);
           return;
         }
 
         console.log(`🖼️ Loading image attachment: ${fileId}`);
+
+        if (remoteUrl) {
+          imgElement.src = remoteUrl;
+          imgElement.alt = remoteName || 'Image attachment';
+          imgElement.style.cursor = 'pointer';
+          imgElement.referrerPolicy = 'no-referrer';
+          imgElement.loading = 'lazy';
+
+          const openRemote = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            await openImageViewer(fileId, remoteName || 'Image', remoteUrl);
+          };
+
+          if (imgElement._clickHandler) {
+            imgElement.removeEventListener('click', imgElement._clickHandler);
+          }
+          imgElement._clickHandler = openRemote;
+          imgElement.addEventListener('click', openRemote, { passive: false });
+          return;
+        }
 
         try {
           let fileData = await getFileFromIndexedDB(fileId);
@@ -4087,7 +4281,7 @@
             e.preventDefault();
             e.stopPropagation();
             console.log(`🔍 Opening image in viewer: ${fileData.name}`);
-            await openImageViewer(fileId, fileData.name);
+            await openImageViewer(fileId, fileData.name, remoteUrl);
           };
 
           // Store handler reference to prevent duplicates
@@ -4110,12 +4304,38 @@
       /**
        * Download attachment file
        */
-      async function downloadAttachment(fileId, fileName) {
+      async function downloadAttachment(fileId, fileName, attachmentUrl = null, mimeType = '') {
         console.log('📥 ========================================');
         console.log('📥 DOWNLOAD ATTACHMENT REQUESTED');
         console.log('📥 ========================================');
         console.log(`   FileID: ${fileId}`);
         console.log(`   Filename: ${fileName}`);
+
+        if (attachmentUrl) {
+          try {
+            const isInlineFriendly = mimeType.startsWith('video/')
+              || mimeType.startsWith('image/')
+              || mimeType === 'application/pdf';
+
+            const anchor = document.createElement('a');
+            anchor.href = attachmentUrl;
+            anchor.target = '_blank';
+            anchor.rel = 'noopener noreferrer';
+            if (!isInlineFriendly) {
+              anchor.download = fileName || 'attachment';
+            }
+            anchor.style.display = 'none';
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+
+            console.log(`✅ Opened attachment via persistent URL`);
+            console.log('📥 ========================================\n');
+            return;
+          } catch (error) {
+            console.error('❌ Failed opening persistent URL, falling back to IndexedDB:', error);
+          }
+        }
 
         try {
           const fileData = await getFileFromIndexedDB(fileId);
@@ -4434,6 +4654,7 @@
           // event.persisted check is optional but good for debugging BFCache
           console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
           setTimeout(ensureTrapState, 0); // specialized timeout ensures it runs after browser restoration
+          reconnectSocketIfNeeded(event.persisted ? 'pageshow_bfcache' : 'pageshow');
           reportChatPresenceContext('pageshow', {
             source: event.persisted ? 'chat_pageshow_bfcache' : 'chat_pageshow',
             allowRedirect: true
@@ -4610,15 +4831,20 @@
           console.log('🔌 ========================================');
           console.log(`   Socket ID: ${socketInstance.id}`);
           console.log(`   User: ${currentUser?.username || 'unknown'}`);
+          socketReconnectFailures = 0;
 
           // CRITICAL: Reset auth state on new connection
           setAuthenticationState(false);
 
           firebase.auth().currentUser?.getIdToken().then(idToken => {
             console.log('📤 Sending authentication to server...');
+            const sessionId = getStableSocketSessionId();
+            const tabId = window.tabManager?.tabId || null;
             socketInstance.emit('authenticate', {
               token: idToken,
-              userId: currentUser.userId
+              userId: currentUser.userId,
+              sessionId,
+              tabId
             });
             reportChatPresenceContext('socket_connect', {
               allowRedirect: false,
@@ -4637,6 +4863,10 @@
           console.error('❌ Socket connection error:', error.message);
           setAuthenticationState(false);
           toast('Connection error. Retrying...', 'warning');
+          socketReconnectFailures += 1;
+          if (socketReconnectFailures >= 6) {
+            triggerSocketRecoveryReload('chat_connect_error_threshold');
+          }
         });
 
         socketInstance.on('disconnect', (reason) => {
@@ -4648,6 +4878,34 @@
             socketInstance.connect();
           }
         });
+
+        socketInstance.on('session_replaced', () => {
+          console.warn('⚠️ Session replaced by newer socket. Reconnecting silently...');
+          setAuthenticationState(false);
+          socketInstance.connect();
+        });
+
+        socketInstance.on('server_ping', (payload = {}) => {
+          if (!socketInstance?.connected) return;
+          socketInstance.emit('client_pong', {
+            roomId: roomData?.roomId || currentRoomId || null,
+            location: 'chat',
+            path: window.location.pathname,
+            serverPingTs: payload.ts || null
+          });
+        });
+
+        if (socketInstance.io) {
+          socketInstance.io.on('reconnect_attempt', (attempt) => {
+            console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
+          });
+          socketInstance.io.on('reconnect_error', (error) => {
+            console.error(`❌ [Socket] Reconnect error: ${error?.message || error}`);
+          });
+          socketInstance.io.on('reconnect_failed', () => {
+            triggerSocketRecoveryReload('chat_reconnect_failed');
+          });
+        }
 
         socketInstance.on('authenticated', async () => {
           console.log('✅ ========================================');
@@ -4870,6 +5128,9 @@
 
             for (const msg of mergedMessages) {
               if (msg.attachment && msg.attachment.fileId) {
+                if (msg.attachment.url || msg.attachment.publicUrl || msg.attachment.apiUrl) {
+                  continue;
+                }
                 // Check if file exists in local IndexedDB
                 try {
                   const localFile = await getFileFromIndexedDB(msg.attachment.fileId);
@@ -5692,7 +5953,10 @@
             console.log('📎 Message contains attachment');
             console.log(`   Chunked: ${data.attachment.chunked || false}`);
 
-            if (data.attachment.chunked) {
+            if (data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl) {
+              console.log('🌐 Persistent attachment URL detected');
+              delete data.attachment.data;
+            } else if (data.attachment.chunked) {
               // CHUNKED: File will arrive via file_chunk events
               console.log('📦 Chunked attachment - file will be received separately');
               console.log(`   FileID: ${data.attachment.fileId}`);
@@ -6117,8 +6381,7 @@
             // Create file input dynamically (ensures fresh state)
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
-            fileInput.accept = Object.keys(SUPPORTED_FILE_TYPES).join(',') + ',' +
-              Object.values(SUPPORTED_FILE_TYPES).flatMap(t => t.ext).join(',');
+            fileInput.accept = '*/*';
             fileInput.style.display = 'none';
 
             fileInput.addEventListener('change', async (e) => {
@@ -6270,6 +6533,7 @@
         // 3. Visibility Change (Detect minimizing app/switching tabs on mobile)
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'hidden') {
+            lastVisibilityHiddenAt = Date.now();
             const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
             if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
               console.log('📱 Tab hidden - user might be leaving chat');
@@ -6280,6 +6544,8 @@
               }).catch(() => { });
             }
           } else {
+            const hiddenDuration = lastVisibilityHiddenAt ? (Date.now() - lastVisibilityHiddenAt) : 0;
+            reconnectSocketIfNeeded(hiddenDuration > 60000 ? 'visibility_resume_long_idle' : 'visibility_resume');
             reportChatPresenceContext('visibility_visible', {
               allowRedirect: true,
               keepalive: true,
@@ -6287,6 +6553,14 @@
             }).catch(() => { });
             validateChatPresenceState('visibility_visible').catch(() => { });
           }
+        });
+
+        window.addEventListener('online', () => {
+          reconnectSocketIfNeeded('network_online');
+        });
+
+        window.addEventListener('offline', () => {
+          console.warn('📴 Network offline detected');
         });
 
 
@@ -6680,12 +6954,12 @@
             }
 
             // ============================================
-            // HANDLE ATTACHMENT - CHUNKED TRANSMISSION
+            // HANDLE ATTACHMENT - UPLOAD FIRST, THEN BROADCAST METADATA
             // ============================================
             if (pendingAttachment) {
               try {
                 console.log('📎 ========================================');
-                console.log('📎 PREPARING CHUNKED ATTACHMENT TRANSMISSION');
+                console.log('📎 PREPARING ATTACHMENT UPLOAD');
                 console.log('📎 ========================================');
                 console.log(`   FileID: ${pendingAttachment.fileId}`);
                 console.log(`   File: ${pendingAttachment.name}`);
@@ -6717,52 +6991,37 @@
 
                 console.log(`✅ File retrieved from IndexedDB`);
 
-                // Create File object from blob
+                // Upload payload
                 const file = new File([fileData.blob], fileData.name, { type: fileData.type });
-
                 const progressText = document.getElementById('uploadProgressText');
-                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-                if (progressText) progressText.textContent = 'Uploading: 0%';
+                if (progressText) progressText.textContent = 'Uploading to secure storage...';
 
-                // Add attachment metadata (no data - will be sent separately)
-                serverMessageData.attachment = {
-                  fileId: pendingAttachment.fileId,
-                  name: pendingAttachment.name,
-                  type: pendingAttachment.type,
-                  size: pendingAttachment.size,
-                  chunked: true, // Signal that chunks will follow
-                  totalChunks
-                };
+                const uploadedAttachment = await uploadAttachmentToServer(file, roomData.roomId);
+                if (!uploadedAttachment?.fileId || !uploadedAttachment?.url) {
+                  throw new Error('Server returned invalid attachment metadata');
+                }
 
-                // CRITICAL: Store attachment data before hideAttachmentPreview() clears pendingAttachment
-                const attachmentFileId = pendingAttachment.fileId;
-                const attachmentName = pendingAttachment.name;
-                const attachmentType = pendingAttachment.type;
-                const attachmentSize = pendingAttachment.size;
+                // Keep local cache aligned with server fileId for fast fallback previews.
+                if (uploadedAttachment.fileId !== pendingAttachment.fileId) {
+                  await storeFileToIndexedDB(file, roomData.roomId, null, uploadedAttachment.fileId).catch(() => { });
+                  await deleteFileFromIndexedDB(pendingAttachment.fileId).catch(() => { });
+                }
 
-                // IMMEDIATE: Hide attachment preview as soon as user clicks send
+                serverMessageData.attachment = uploadedAttachment;
+                if (progressText) progressText.textContent = 'Broadcasting message...';
+
+                // IMMEDIATE: Hide preview for responsive UX
                 hideAttachmentPreview();
 
-                // Send message metadata first (creates message in UI)
                 console.log('📤 Emitting message metadata to server...');
                 socketInstance.emit('chat_message', serverMessageData);
 
-                // Then stream chunks immediately (lazy chunk reads).
-                await sendFileInChunks(
-                  attachmentFileId,
-                  attachmentName,
-                  attachmentType,
-                  attachmentSize,
-                  file,
-                  roomData.roomId
-                );
-
-                console.log('✅ File transmission complete');
+                console.log('✅ Attachment uploaded and message broadcasted');
 
                 // Remove progress UI
                 progressDiv.remove();
 
-                toast(`File uploaded: ${attachmentName}`, 'success');
+                toast(`File uploaded: ${uploadedAttachment.name || file.name}`, 'success');
 
                 console.log('📎 ========================================\\n');
 
@@ -6812,6 +7071,7 @@
         document.addEventListener('visibilitychange', () => {
           if (document.hidden) {
             console.log('📱 Page hidden');
+            lastVisibilityHiddenAt = Date.now();
             saveChatState(roomData.roomId, messagesCache);
             reportChatPresenceContext('visibility_hidden_save', {
               allowRedirect: false,
@@ -6820,6 +7080,8 @@
             }).catch(() => { });
           } else {
             console.log('📱 Page visible');
+            const hiddenDuration = lastVisibilityHiddenAt ? (Date.now() - lastVisibilityHiddenAt) : 0;
+            reconnectSocketIfNeeded(hiddenDuration > 60000 ? 'visibility_resume_save_long_idle' : 'visibility_resume_save');
             reportChatPresenceContext('visibility_visible_save', {
               allowRedirect: true,
               keepalive: true,
@@ -7114,14 +7376,19 @@
       try {
         const idToken = await firebaseUser.getIdToken();
         const socketUrl = window.location.origin;
+        const sessionId = getStableSocketSessionId();
+        const tabId = window.tabManager?.tabId || null;
 
         socketInstance = io(socketUrl, {
           transports: ['websocket', 'polling'],
           reconnection: true,
           reconnectionDelay: 500,
-          reconnectionAttempts: 10,
-          auth: { token: idToken },
-          timeout: 10000
+          reconnectionDelayMax: 10000,
+          randomizationFactor: 0.5,
+          reconnectionAttempts: 1000,
+          auth: { token: idToken, sessionId, tabId },
+          timeout: 15000,
+          closeOnBeforeunload: false
         });
 
         setupSocketHandlers();

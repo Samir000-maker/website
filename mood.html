@@ -734,6 +734,7 @@ if (window.StateManager) {
     const _Loading = MoodApp.Loading;
     const _PageTransition = MoodApp.PageTransition;
     const _Utils = MoodApp.Utils;
+    const _Session = MoodApp.Session;
 
     // Helper functions
     const toast = (m, t='success') => { 
@@ -766,6 +767,7 @@ if (window.StateManager) {
     let page = 0;
     let socketInstance = null;
     let currentUser = null;
+    let socketConnectFailures = 0;
 
     // ============================================
     // SOCKET.IO CONNECTION
@@ -820,6 +822,41 @@ function waitForTabManager() {
   });
 }
 
+function getStableSocketSessionId() {
+  if (_Session && typeof _Session.getSocketSessionId === 'function') {
+    return _Session.getSocketSessionId();
+  }
+  try {
+    let sessionId = sessionStorage.getItem('vibe_socket_session_id');
+    if (sessionId) return sessionId;
+    sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+    sessionStorage.setItem('vibe_socket_session_id', sessionId);
+    return sessionId;
+  } catch {
+    return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
+
+function triggerSocketRecoveryReload(reason = 'socket_recovery') {
+  try {
+    const key = 'mood_socket_recovery_state';
+    const now = Date.now();
+    const state = JSON.parse(sessionStorage.getItem(key) || '{}');
+    const recentWindowMs = 5 * 60 * 1000;
+    const withinWindow = state.lastReloadAt && (now - state.lastReloadAt) < recentWindowMs;
+    const count = withinWindow ? (state.count || 0) + 1 : 1;
+
+    if (count > 2) {
+      console.error(`❌ [Socket] Reload suppressed (loop guard): ${reason}`);
+      return;
+    }
+
+    sessionStorage.setItem(key, JSON.stringify({ count, lastReloadAt: now, reason }));
+  } catch { }
+
+  window.location.reload();
+}
+
 /**
  * Authenticate socket with tab management
  * Call this INSTEAD of manually emitting 'authenticate'
@@ -835,6 +872,7 @@ async function authenticateSocketWithTabManagement(socket, userId) {
     // 1. Wait for TabManager to be ready
     const tabManager = await waitForTabManager();
     const tabId = tabManager.tabId;
+    const sessionId = getStableSocketSessionId();
     
     console.log('✅ [Auth] TabId retrieved:', tabId);
     
@@ -857,7 +895,8 @@ async function authenticateSocketWithTabManagement(socket, userId) {
     socket.emit('authenticate', {
       token: token,
       userId: userId,
-      tabId: tabId  // ← CRITICAL: Include tabId
+      tabId: tabId,  // ← CRITICAL: Include tabId
+      sessionId
     });
     
     // 4. Wait for authentication response
@@ -947,14 +986,22 @@ console.log('✅ Socket authentication helpers loaded');
     console.log('✅ Current user loaded:', currentUser);
 
     // Connect Socket.IO to backend server
-    const socketUrl = 'https://website-hdem.onrender.com';
+    const socketUrl = window.location.origin;
+    const sessionId = getStableSocketSessionId();
+    const tabId = window.tabManager?.tabId || null;
     const socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 1000,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.5,
+      closeOnBeforeunload: false,
+      timeout: 15000,
       auth: {
-        token: idToken
+        token: idToken,
+        sessionId,
+        tabId
       }
     });
 
@@ -974,6 +1021,7 @@ console.log('✅ Socket authentication helpers loaded');
 
     socket.on('connect', async () => {
       console.log('🔌 Socket connected:', socket.id);
+      socketConnectFailures = 0;
       
       try {
         await authenticateSocketWithTabManagement(socket, currentUser.userId);
@@ -997,11 +1045,37 @@ console.log('✅ Socket authentication helpers loaded');
 
     socket.on('connect_error', (error) => {
       console.error('🔌 Socket connection error:', error);
+      socketConnectFailures += 1;
+      if (socketConnectFailures >= 6) {
+        triggerSocketRecoveryReload('mood_connect_error_threshold');
+      }
     });
 
     socket.on('disconnect', (reason) => {
       console.log('🔌 Socket disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        socket.connect();
+      }
     });
+
+    socket.on('server_ping', (payload = {}) => {
+      if (!socket.connected) return;
+      socket.emit('client_pong', {
+        roomId: null,
+        location: 'mood',
+        path: window.location.pathname,
+        serverPingTs: payload.ts || null
+      });
+    });
+
+    if (socket.io) {
+      socket.io.on('reconnect_attempt', (attempt) => {
+        console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
+      });
+      socket.io.on('reconnect_failed', () => {
+        triggerSocketRecoveryReload('mood_reconnect_failed');
+      });
+    }
 
     return socket;
   } catch (error) {

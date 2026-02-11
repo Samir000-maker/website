@@ -49,6 +49,10 @@ async function createIndexes() {
     await db.collection('notes').createIndex({ userId: 1, createdAt: -1 });
     await db.collection('notes').createIndex({ mood: 1, createdAt: -1 });
 
+    await db.collection('attachments').createIndex({ fileId: 1 }, { unique: true });
+    await db.collection('attachments').createIndex({ roomId: 1, createdAt: -1 });
+    await db.collection('attachments').createIndex({ userId: 1, createdAt: -1 });
+
     console.log('✅ Database indexes created');
   } catch (err) {
     console.error('❌ Error creating indexes:', err);
