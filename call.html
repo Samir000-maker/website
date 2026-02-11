@@ -411,20 +411,30 @@ transform: scaleX(-1) !important;
       function enforceNaturalVideoRendering(videoEl) {
   if (!videoEl) return;
   
+  const videoId = videoEl.id;
+  const hasSelfView = videoEl.classList.contains('self-view');
+  const hasRemoteView = videoEl.classList.contains('remote-view');
+  
+  console.log(`🎨 enforceNaturalVideoRendering for ${videoId}: self-view=${hasSelfView}, remote-view=${hasRemoteView}`);
+  
   videoEl.classList.add('video-enhanced');
   videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
   videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
   
-  if (videoEl.classList.contains('self-view')) {
-    // Self-view: MUST be mirrored for natural preview
+  if (hasRemoteView) {
+    // Remote view: MIRROR to fix inverted display
     videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
     videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
     videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
-  } else if (videoEl.classList.contains('remote-view')) {
-    // Remote view: MUST NOT be mirrored
+    console.log(`   ✅ Applied MIRROR transform to remote-view`);
+  } else if (hasSelfView) {
+    // Self-view: NO MIRROR (keep natural)
     videoEl.style.setProperty('transform', 'none', 'important');
     videoEl.style.setProperty('-webkit-transform', 'none', 'important');
     videoEl.style.setProperty('-moz-transform', 'none', 'important');
+    console.log(`   ✅ Applied NORMAL transform to self-view`);
+  } else {
+    console.warn(`   ⚠️ Video element has neither self-view nor remote-view class!`);
   }
 }
 
