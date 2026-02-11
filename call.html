@@ -68,24 +68,17 @@ video {
   will-change: opacity;
 }
 
-video.self-view {
-  transform: scaleX(-1) !important;
-  -webkit-transform: scaleX(-1) !important;
-  -moz-transform: scaleX(-1) !important;
-}
+  video.self-view.mirrored {
+    transform: scaleX(-1) !important;
+    -webkit-transform: scaleX(-1) !important;
+    -moz-transform: scaleX(-1) !important;
+  }
 
-video.remote-view {
-  transform: none !important;
-  -webkit-transform: none !important;
-  -moz-transform: none !important;
-}
-
-video.self-view,
-video.remote-view {
-  transform: none !important;
-  -webkit-transform: none !important;
-  -moz-transform: none !important;
-}
+  video.remote-view {
+    transform: none !important;
+    -webkit-transform: none !important;
+    -moz-transform: none !important;
+  }
 
 .video-enhanced {
   filter: brightness(1.03) contrast(1.04) saturate(1.08);
@@ -1406,6 +1399,23 @@ requestAnimationFrame(() => {
         }, { once: true, passive: true });
       });
 
+      function shouldMirrorLocalPreview(track) {
+        if (!track) return false;
+        const settings = track.getSettings ? track.getSettings() : {};
+        const facing = settings.facingMode || '';
+        if (typeof facing === 'string') {
+          return facing.toLowerCase() !== 'environment';
+        }
+        return true;
+      }
+
+      function updateLocalPreviewMirror(videoEl) {
+        if (!videoEl) return;
+        const track = localStream?.getVideoTracks?.()[0] || null;
+        const shouldMirror = shouldMirrorLocalPreview(track);
+        videoEl.classList.toggle('mirrored', !!shouldMirror);
+      }
+
       async function initLocalMedia() {
         const loadingText = document.getElementById('loadingStatusText');
         const loadingSubtext = document.getElementById('loadingSubtext');
@@ -1559,14 +1569,13 @@ requestAnimationFrame(() => {
             return;
           }
 
-localVid.srcObject = localStream;
-localVid.muted = true;
-localVid.volume = 0;
-enforceNaturalVideoRendering(localVid);
+          localVid.srcObject = localStream;
+          localVid.muted = true;
+          localVid.volume = 0;
+          enforceNaturalVideoRendering(localVid);
+          updateLocalPreviewMirror(localVid);
 
-console.log(`✅ Local stream attached with mirrored self-preview`);
-
-console.log(`✅ Local stream attached with FORCED non-mirror`);
+          console.log(`✅ Local stream attached with self-preview mirror policy`);
 
           // ✅ FIX: Gate UI updates on actual media readiness
           if (isVideoEnabled && localStream.getVideoTracks().length > 0) {
@@ -1588,8 +1597,9 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
             });
 
             try {
-              await localVid.play();
-              console.log(`▶️ Local video playback started`);
+            await localVid.play();
+            updateLocalPreviewMirror(localVid);
+            console.log(`▶️ Local video playback started`);
               updateVideoVisibility(currentUser.userId, true, true);
               updateVideoButton(); // ✅ FIX: Update icon AFTER video confirmed playing
               console.log(`✅ Video icon synchronized: ON`);
@@ -2597,6 +2607,7 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
               if (localVid) {
                 localVid.srcObject = localStream;
                 await localVid.play().catch(e => console.warn('Local play error:', e));
+                updateLocalPreviewMirror(localVid);
               }
 
               toast('Camera enabled', 'success');
