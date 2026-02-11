@@ -63,12 +63,21 @@ video {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: none !important;
-  -webkit-transform: none !important;
-  -moz-transform: none !important;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   will-change: opacity;
+}
+
+video.self-view {
+  transform: scaleX(-1) !important;
+  -webkit-transform: scaleX(-1) !important;
+  -moz-transform: scaleX(-1) !important;
+}
+
+video.remote-view {
+  transform: none !important;
+  -webkit-transform: none !important;
+  -moz-transform: none !important;
 }
 
 video.self-view,
@@ -406,15 +415,24 @@ video.remote-view {
       const videoRenderState = new Map(); // userId -> 'video' | 'loading' | 'pfp'
       let callHeartbeatInterval = null;
 
-      function enforceNaturalVideoRendering(videoEl) {
-        if (!videoEl) return;
-        videoEl.classList.add('video-enhanced');
-        videoEl.style.setProperty('transform', 'none', 'important');
-        videoEl.style.setProperty('-webkit-transform', 'none', 'important');
-        videoEl.style.setProperty('-moz-transform', 'none', 'important');
-        videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
-        videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
-      }
+function enforceNaturalVideoRendering(videoEl) {
+  if (!videoEl) return;
+  
+  // Only enforce non-mirrored rendering for remote videos
+  if (videoEl.classList.contains('remote-view')) {
+    videoEl.classList.add('video-enhanced');
+    videoEl.style.setProperty('transform', 'none', 'important');
+    videoEl.style.setProperty('-webkit-transform', 'none', 'important');
+    videoEl.style.setProperty('-moz-transform', 'none', 'important');
+    videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
+    videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
+  } else if (videoEl.classList.contains('self-view')) {
+    // Self-view: apply mirror effect via CSS class (already handled by CSS)
+    videoEl.classList.add('video-enhanced');
+    videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
+    videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
+  }
+}
 
       async function reportCallPresenceContext(reason = 'call_lifecycle', options = {}) {
         const roomId = options.roomId || callData?.roomId || null;
@@ -1137,11 +1155,12 @@ if (isSelf) {
 
 enforceNaturalVideoRendering(video);
 
-        videoContainer.appendChild(video);
-        
-        requestAnimationFrame(() => {
+videoContainer.appendChild(video);
+
+requestAnimationFrame(() => {
   const vid = document.getElementById(`video-${user.userId}`);
   if (vid) {
+    // Apply rendering based on whether it's self or remote
     enforceNaturalVideoRendering(vid);
   }
 });
@@ -1544,6 +1563,8 @@ localVid.srcObject = localStream;
 localVid.muted = true;
 localVid.volume = 0;
 enforceNaturalVideoRendering(localVid);
+
+console.log(`✅ Local stream attached with mirrored self-preview`);
 
 console.log(`✅ Local stream attached with FORCED non-mirror`);
 
@@ -3409,14 +3430,15 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
 
           console.log('✅ Call page event handlers initialized');
           
-          setInterval(() => {
-            document.querySelectorAll('video').forEach(vid => {
-              const computed = window.getComputedStyle(vid).transform || '';
-              if (computed.includes('matrix(-1') || computed.includes('scaleX(-1)')) {
-                enforceNaturalVideoRendering(vid);
-              }
-            });
-          }, 3000);
+setInterval(() => {
+  document.querySelectorAll('video').forEach(vid => {
+    const computed = window.getComputedStyle(vid).transform || '';
+    // Only fix transforms for remote videos, preserve mirror for self-view
+    if (vid.classList.contains('remote-view') && (computed.includes('matrix(-1') || computed.includes('scaleX(-1)'))) {
+      enforceNaturalVideoRendering(vid);
+    }
+  });
+}, 3000);
 
         } catch (e) {
           console.error('❌ Init error:', e);
