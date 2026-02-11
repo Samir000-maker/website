@@ -1042,7 +1042,7 @@
           if (loading) loading.classList.remove('hidden');
 
           // ✅ Start Watchdog if NOT already running
-          if (enabled && !loadingWatchdogs.has(userId)) {
+          if (enabled && hasVideoTrack && !loadingWatchdogs.has(userId)) {
             const watchdogId = setTimeout(() => {
               console.error(`❌ [WATCHDOG] Video stuck in LOADING for ${userId}. Triggering recovery...`);
               handleStuckVideo(userId);
@@ -1206,15 +1206,29 @@
           .filter(track => track && track.kind === 'video');
         if (remoteTracks.length > 0) {
           console.log(`   ✅ Remote tracks found in PC. Re-attaching srcObject.`);
-          if (!vid.srcObject) {
-            vid.srcObject = new MediaStream(remoteTracks);
-          }
-          try {
-            await vid.play();
-            updateVideoVisibility(userId, true, true);
-            toast('Video restored', 'success');
-          } catch (e) {
-            console.error(`   ❌ Failed to force play video:`, e);
+
+          // Always rebuild the stream to force a fresh render pipeline
+          const refreshedStream = new MediaStream(remoteTracks);
+          vid.srcObject = refreshedStream;
+          vid.muted = false;
+          vid.volume = 1.0;
+
+          const forcePlay = async () => {
+            try {
+              await vid.play();
+              scheduleVideoVisibilityUpdate(userId, true, true);
+              toast('Video restored', 'success');
+            } catch (e) {
+              console.error(`   ❌ Failed to force play video:`, e);
+            }
+          };
+
+          vid.onloadedmetadata = forcePlay;
+          vid.oncanplay = forcePlay;
+          vid.onloadeddata = forcePlay;
+
+          if (vid.readyState >= 1) {
+            await forcePlay();
           }
         } else {
           console.warn(`   ⚠️ No remote video tracks found in PC. Requesting ICE restart...`);
