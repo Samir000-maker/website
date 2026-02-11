@@ -1226,8 +1226,11 @@
         const rawUsername = typeof note?.username === 'string' ? note.username : '';
         const username = rawUsername.trim() || 'Anonymous';
         const initial = username.charAt(0).toUpperCase();
+        const defaultAvatarRegex = /ui-avatars\.com\/api\/.+name=User/i;
         const hasPfp = typeof note?.pfpUrl === 'string'
-          ? note.pfpUrl.trim().length > 0 && note.pfpUrl !== 'null'
+          ? note.pfpUrl.trim().length > 0
+          && note.pfpUrl !== 'null'
+          && !defaultAvatarRegex.test(note.pfpUrl)
           : false;
 
         const createdAt = note?.createdAt ?
