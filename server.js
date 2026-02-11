@@ -36,7 +36,12 @@ import { v4 as uuidv4 } from 'uuid';
 import config from './config.js';
 import { connectDB, getDB } from './database.js';
 import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyToken } from './firebase-auth.js';
-import { uploadProfilePicture, getDefaultProfilePicture } from './cloudflare-storage.js';
+import {
+  uploadProfilePicture,
+  uploadChatAttachment,
+  getChatAttachmentStream,
+  getDefaultProfilePicture
+} from './cloudflare-storage.js';
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
 import * as matchmaking from './matchmaking.js';
 
@@ -759,11 +764,14 @@ async function scheduleCallCleanup(callId, delayMs) {
 /**
  * Handle user cleanup event (called when Redis key expires)
  */
-const HEARTBEAT_TIMEOUT_MS = 35000; // 35 seconds
-const HEARTBEAT_GRACE_MS = 60000; // additional verification window
+const HEARTBEAT_TIMEOUT_MS = 45000; // 45 seconds
+const HEARTBEAT_GRACE_MS = 90000; // additional verification window
 const MIN_AUTOMATED_LEAVE_STALENESS_MS = HEARTBEAT_TIMEOUT_MS + HEARTBEAT_GRACE_MS;
-const SOCKET_DISCONNECT_GRACE_MS = 45000;
+const SOCKET_DISCONNECT_GRACE_MS = 120000;
 const CLEANUP_RECHECK_MIN_MS = 10000;
+const SERVER_PING_INTERVAL_MS = 15000;
+const SERVER_PONG_TIMEOUT_MS = 45000;
+const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 async function handleUserCleanup(userId) {
   const startedAt = Date.now();
@@ -985,6 +993,85 @@ async function registerSocketForUser(userId, socketId, userData) {
 async function unregisterSocketForUser(socketId) {
   await deleteSocketUser(socketId);
   console.log(`📱 Socket ${socketId} unregistered from Redis`);
+}
+
+function normalizeSocketSessionId(rawSessionId, userId, socketId) {
+  const candidate = typeof rawSessionId === 'string' ? rawSessionId.trim() : '';
+  if (/^[a-zA-Z0-9._:-]{8,128}$/.test(candidate)) {
+    return candidate;
+  }
+  return `sess_${userId}_${socketId}`;
+}
+
+async function bindSocketToSession(sessionId, socketId) {
+  if (!sessionId || !socketId) return;
+
+  const previousSocketId = await pubClient.get(`session:active:${sessionId}`);
+  if (previousSocketId && previousSocketId !== socketId) {
+    io.to(previousSocketId).emit('session_replaced', {
+      sessionId,
+      reason: 'new_socket_authenticated'
+    });
+    io.in(previousSocketId).disconnectSockets(true);
+  }
+
+  await pubClient.set(`session:active:${sessionId}`, socketId, 'EX', 7200);
+  await pubClient.hset('socket:sessions', socketId, sessionId);
+}
+
+async function refreshSocketSessionTTL(sessionId, socketId) {
+  if (!sessionId || !socketId) return;
+  const mappedSocket = await pubClient.get(`session:active:${sessionId}`);
+  if (mappedSocket === socketId) {
+    await pubClient.expire(`session:active:${sessionId}`, 7200);
+  }
+}
+
+async function unbindSocketSession(socketId) {
+  if (!socketId) return;
+
+  const sessionId = await pubClient.hget('socket:sessions', socketId);
+  if (!sessionId) return;
+
+  const mappedSocket = await pubClient.get(`session:active:${sessionId}`);
+  if (mappedSocket === socketId) {
+    await pubClient.del(`session:active:${sessionId}`);
+  }
+
+  await pubClient.hdel('socket:sessions', socketId);
+}
+
+function sanitizeAttachmentName(fileName = 'attachment') {
+  const clean = String(fileName)
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .trim();
+  return clean || 'attachment';
+}
+
+function categorizeAttachmentType(mimeType = '') {
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.startsWith('image/')) return 'image';
+  if (normalized.startsWith('video/')) return 'video';
+  if (normalized === 'application/pdf') return 'pdf';
+  if (
+    normalized.startsWith('text/') ||
+    normalized.startsWith('application/') ||
+    normalized.startsWith('audio/')
+  ) {
+    return 'document';
+  }
+  return 'unknown';
+}
+
+function isAttachmentUrlAllowed(url = '') {
+  if (typeof url !== 'string') return false;
+  if (url.startsWith('/api/attachments/')) return true;
+  if (!/^https?:\/\//i.test(url)) return false;
+
+  const normalizedUrl = url.replace(/\/+$/, '');
+  const allowedPublicBase = String(config.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+  return allowedPublicBase ? normalizedUrl.startsWith(allowedPublicBase) : false;
 }
 
 // DEPRECATED: Use io.to(`user:${userId}`) or socket.to(`user:${userId}`)
@@ -1545,8 +1632,14 @@ const io = new Server(server, {
     credentials: true
   },
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  pingTimeout: 30000,
+  pingInterval: 10000,
+  connectTimeout: 15000,
+  maxHttpBufferSize: CHAT_ATTACHMENT_MAX_BYTES + (1024 * 1024),
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true
+  },
   adapter: createAdapter(pubClient, subClient)
 });
 
@@ -1568,6 +1661,13 @@ const upload = multer({
       return cb(new Error('Only image files are allowed'), false);
     }
     cb(null, true);
+  }
+});
+
+const chatAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: CHAT_ATTACHMENT_MAX_BYTES
   }
 });
 
@@ -2280,53 +2380,211 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
 
 
+app.post('/api/chat/attachments',
+  authenticateFirebase,
+  chatAttachmentUpload.single('file'),
+  async (req, res) => {
+    try {
+      const file = req.file;
+      const roomId = String(req.body?.roomId || '').trim();
+
+      if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      if (!roomId) {
+        return res.status(400).json({ error: 'roomId is required' });
+      }
+
+      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+        return res.status(413).json({
+          error: 'Attachment too large',
+          maxBytes: CHAT_ATTACHMENT_MAX_BYTES
+        });
+      }
+
+      const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
+      if (!userId) {
+        return res.status(401).json({ error: 'Unable to resolve authenticated user' });
+      }
+
+      const room = await matchmaking.getRoom(roomId);
+      if (!room || room.isExpired) {
+        return res.status(410).json({ error: 'Room is no longer available' });
+      }
+      if (!room.hasUser(userId)) {
+        return res.status(403).json({ error: 'You are not allowed to upload in this room' });
+      }
+
+      const safeName = sanitizeAttachmentName(file.originalname || 'attachment');
+      const uploadResult = await uploadChatAttachment(
+        file.buffer,
+        file.mimetype,
+        safeName,
+        roomId,
+        userId
+      );
+
+      const category = categorizeAttachmentType(uploadResult.mimeType);
+      const preview = {
+        kind: category,
+        inline: category === 'image' || category === 'video' || category === 'pdf'
+      };
+
+      const attachmentRecord = {
+        fileId: uploadResult.fileId,
+        roomId,
+        userId,
+        firebaseUid: firebaseUid || null,
+        storageProvider: 'cloudflare_r2',
+        storageKey: uploadResult.key,
+        publicUrl: uploadResult.publicUrl,
+        originalName: safeName,
+        mimeType: uploadResult.mimeType,
+        size: uploadResult.size,
+        category,
+        preview,
+        createdAt: new Date(),
+        lastAccessedAt: new Date()
+      };
+
+      const db = getDB();
+      await db.collection('attachments').updateOne(
+        { fileId: uploadResult.fileId },
+        { $set: attachmentRecord },
+        { upsert: true, maxTimeMS: 5000 }
+      );
+
+      await updateUserPresence(userId, {
+        roomId,
+        activeRoomId: roomId,
+        location: 'chat',
+        status: 'chat_active',
+        firebaseUid: firebaseUid || null
+      });
+
+      return res.json({
+        success: true,
+        attachment: {
+          fileId: uploadResult.fileId,
+          name: safeName,
+          type: uploadResult.mimeType,
+          size: uploadResult.size,
+          category,
+          preview,
+          storage: 'r2',
+          url: uploadResult.publicUrl,
+          apiUrl: `/api/attachments/${uploadResult.fileId}`,
+          publicUrl: uploadResult.publicUrl,
+          serverStored: true,
+          chunked: false
+        }
+      });
+    } catch (error) {
+      if (error.code === 50) {
+        console.error('❌ Database timeout in attachment upload:', error.message);
+        return res.status(503).json({
+          error: 'Database temporarily slow. Please try again.',
+          retryable: true
+        });
+      }
+      console.error('❌ Chat attachment upload failed:', error);
+      return res.status(500).json({ error: 'Failed to upload attachment' });
+    }
+  }
+);
+
 app.get('/api/attachments/:fileId', authenticateFirebase, async (req, res) => {
   try {
     const { fileId } = req.params;
-    const firebaseUser = req.firebaseUser;
-
-    console.log(`📂 Attachment request: ${fileId} from ${firebaseUser.email}`);
-
-    // Extract roomId from fileId format: file_<roomId>_<timestamp>_<random>
-    const fileIdParts = fileId.split('_');
-    if (fileIdParts.length < 4 || fileIdParts[0] !== 'file') {
-      return res.status(400).json({ error: 'Invalid fileId format' });
+    const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unable to resolve authenticated user' });
     }
 
-    const roomId = fileIdParts[1];
+    const db = getDB();
+    const attachment = await db.collection('attachments').findOne(
+      { fileId },
+      { maxTimeMS: 3000 }
+    );
 
-    // Verify user is/was in this room
-    const room = matchmaking.getRoom(roomId);
-    if (!room) {
-      console.log(`⚠️ Room ${roomId} expired, but allowing attachment fetch`);
-    } else {
-      const db = getDB();
+    if (!attachment) {
+      return res.status(404).json({ error: 'File not found' });
+    }
 
-      // ✅ FIX: Add maxTimeMS timeout
-      const user = await db.collection('users').findOne(
-        { email: firebaseUser.email },
-        {
-          projection: { _id: 1 },
-          maxTimeMS: 3000
-        }
+    const room = attachment.roomId ? await matchmaking.getRoom(attachment.roomId) : null;
+    const activeRoomByUserId = await getUserActiveRoom(userId);
+    const activeRoomByUid = firebaseUid ? await getUserActiveRoom(firebaseUid) : null;
+
+    const hasRoomMembership = !!(room && room.hasUser(userId));
+    const hasActiveRoomMarker = !!(
+      attachment.roomId &&
+      (
+        activeRoomByUserId?.roomId === attachment.roomId ||
+        activeRoomByUid?.roomId === attachment.roomId
+      )
+    );
+    const isOwner = attachment.userId === userId;
+
+    if (!hasRoomMembership && !hasActiveRoomMarker && !isOwner) {
+      return res.status(403).json({ error: 'Access denied to this attachment' });
+    }
+
+    if (!attachment.storageKey && attachment.publicUrl) {
+      return res.redirect(302, attachment.publicUrl);
+    }
+
+    let streamResult;
+    try {
+      streamResult = await getChatAttachmentStream(
+        attachment.storageKey,
+        req.headers.range || null
       );
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+    } catch (streamError) {
+      if (streamError.code === 'INVALID_RANGE') {
+        res.setHeader('Content-Range', `bytes */${attachment.size || '*'}`);
+        return res.status(416).end();
       }
-
-      if (!room.hasUser(user._id.toString())) {
-        return res.status(403).json({ error: 'Access denied to this room\'s files' });
-      }
+      throw streamError;
     }
 
-    // In production, fetch from persistent storage (S3, Cloudflare R2, etc.)
-    // For now, return error as files are only in client IndexedDB
-    console.error(`❌ File ${fileId} not found in server storage`);
-    res.status(404).json({
-      error: 'File not found',
-      message: 'Server-side file storage not implemented. Files exist only in sender\'s browser.'
+    const requestedDownload = String(req.query.download || '') === '1';
+    const safeFileName = sanitizeAttachmentName(attachment.originalName || 'attachment');
+
+    res.status(streamResult.statusCode);
+    res.setHeader('Content-Type', attachment.mimeType || streamResult.contentType || 'application/octet-stream');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Length', String(streamResult.contentLength));
+    res.setHeader(
+      'Content-Disposition',
+      `${requestedDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(safeFileName)}"`
+    );
+
+    if (streamResult.contentRange) {
+      res.setHeader('Content-Range', streamResult.contentRange);
+    }
+    if (streamResult.etag) {
+      res.setHeader('ETag', streamResult.etag);
+    }
+    if (streamResult.lastModified) {
+      res.setHeader('Last-Modified', new Date(streamResult.lastModified).toUTCString());
+    }
+
+    streamResult.stream.on('error', (streamErr) => {
+      console.error(`❌ Attachment stream error for ${fileId}:`, streamErr.message);
+      if (!res.headersSent) {
+        res.status(500).end();
+      } else {
+        res.end();
+      }
     });
+
+    streamResult.stream.pipe(res);
+
+    db.collection('attachments').updateOne(
+      { fileId },
+      { $set: { lastAccessedAt: new Date() } },
+      { maxTimeMS: 3000 }
+    ).catch(() => { });
 
   } catch (error) {
     // ✅ FIX: Handle timeout errors
@@ -2998,13 +3256,94 @@ setInterval(async () => {
 io.on('connection', (socket) => {
   console.log('🔌 Client connected:', socket.id);
 
+  let serverPingInterval = null;
+
+  const stopServerPingLoop = () => {
+    if (serverPingInterval) {
+      clearInterval(serverPingInterval);
+      serverPingInterval = null;
+    }
+  };
+
+  const startServerPingLoop = () => {
+    stopServerPingLoop();
+    socket.data.lastClientPongAt = Date.now();
+
+    serverPingInterval = setInterval(() => {
+      void (async () => {
+        if (!socket.data?.isAuthenticated) return;
+
+        const lastPongAt = Number(socket.data.lastClientPongAt || 0);
+        const elapsed = Date.now() - lastPongAt;
+
+        if (elapsed > SERVER_PONG_TIMEOUT_MS) {
+          console.warn(`⚠️ [Heartbeat] Socket ${socket.id} missed pong for ${elapsed}ms`);
+
+          const userData = await getSocketUser(socket.id);
+          if (userData?.userId) {
+            await scheduleUserCleanup(userData.userId, HEARTBEAT_GRACE_MS, {
+              reason: 'heartbeat_timeout',
+              onlyIfAbsent: true,
+              context: {
+                socketId: socket.id,
+                elapsedMs: elapsed,
+                roomId: userData.roomId || null
+              }
+            });
+          }
+
+          socket.emit('server_ping_timeout', {
+            timeoutMs: SERVER_PONG_TIMEOUT_MS,
+            elapsedMs: elapsed
+          });
+          socket.disconnect(true);
+          return;
+        }
+
+        socket.emit('server_ping', {
+          ts: Date.now(),
+          intervalMs: SERVER_PING_INTERVAL_MS,
+          timeoutMs: SERVER_PONG_TIMEOUT_MS
+        });
+      })().catch((error) => {
+        console.error(`❌ [Heartbeat] Server ping loop failure for ${socket.id}:`, error.message);
+      });
+    }, SERVER_PING_INTERVAL_MS);
+  };
+
   // ============================================
   // PRESENCE & HEARTBEAT EVENTS
   // ============================================
+  socket.on('client_pong', async (payload = {}) => {
+    socket.data.lastClientPongAt = Date.now();
+
+    const userData = await getSocketUser(socket.id);
+    if (!userData) return;
+
+    const { roomId, location, path } = payload || {};
+    const normalizedLocation = normalizePresenceLocation(location, path);
+    const patch = {};
+
+    if (roomId) {
+      patch.roomId = roomId;
+      patch.activeRoomId = roomId;
+    }
+    if (location || path) {
+      patch.location = normalizedLocation;
+      patch.status = getPresenceStatusForLocation(normalizedLocation);
+    }
+
+    await updateUserPresence(userData.userId, patch);
+    await cancelUserCleanup(userData.userId);
+    await refreshSocketSessionTTL(socket.data.sessionId, socket.id);
+  });
+
   socket.on('heartbeat', async (payload = {}) => {
     const { roomId, location, path } = payload || {};
     const userData = await getSocketUser(socket.id);
     if (!userData) return;
+
+    socket.data.lastClientPongAt = Date.now();
 
     // Heartbeat updates presence only; it does not trigger leave directly.
     const normalizedLocation = normalizePresenceLocation(location, path);
@@ -3021,6 +3360,7 @@ io.on('connection', (socket) => {
 
     // If user is actively heartbeating again, cancel any pending disconnect cleanup.
     await cancelUserCleanup(userData.userId);
+    await refreshSocketSessionTTL(socket.data.sessionId, socket.id);
   });
 
   socket.on('enter_call_mode', async ({ roomId } = {}) => {
@@ -3841,7 +4181,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('authenticate', async ({ token, userId }) => {
+  socket.on('authenticate', async ({ token, userId, tabId = null, sessionId = null }) => {
     const authStart = Date.now();
     try {
       // ============================================
@@ -3969,14 +4309,21 @@ io.on('connection', (socket) => {
       // ============================================
       const firebaseUid = decodedToken.uid;
       const mongoUserId = user._id.toString();
+      const resolvedSessionId = normalizeSocketSessionId(sessionId || tabId, mongoUserId, socket.id);
+      socket.data.sessionId = resolvedSessionId;
+      socket.data.isAuthenticated = true;
+      socket.data.lastClientPongAt = Date.now();
 
       // Register this socket in Redis for cluster-wide tracking
       await registerSocketForUser(mongoUserId, socket.id, {
         firebaseUid,
         username: user.username,
         email: user.email,
-        profilePicture: user.profilePicture
+        profilePicture: user.profilePicture,
+        tabId: tabId || null,
+        sessionId: resolvedSessionId
       });
+      await bindSocketToSession(resolvedSessionId, socket.id);
 
       // ✅ FIX: Join user-specific rooms for cluster-wide targeted emissions
       socket.join(`user:${mongoUserId}`);
@@ -3998,12 +4345,15 @@ io.on('connection', (socket) => {
         username: user.username,
         pfpUrl: user.pfpUrl,
         email: user.email,
-        authenticatedAt: Date.now()
+        authenticatedAt: Date.now(),
+        tabId: tabId || null,
+        sessionId: resolvedSessionId
       };
 
       // Store in Redis global tracking for cross-instance lookups
       await setSocketUser(socket.id, userSocketData);
       // socketUsers.set removed - redundant with Redis-backed state
+      startServerPingLoop();
 
       console.log(`✅ [Auth] Socket authenticated for ${user.username} (${mongoUserId})`);
 
@@ -4046,6 +4396,7 @@ io.on('connection', (socket) => {
         },
         socketId: socket.id,
         timestamp: Date.now(),
+        sessionId: resolvedSessionId,
         // MULTI-DEVICE: Include active room info
         hasActiveRoom: !!activeRoom,
         activeRoom: activeRoom ? {
@@ -4802,14 +5153,23 @@ io.on('connection', (socket) => {
 
       if (attachment) {
         console.log('📎 Processing attachment...');
-        console.log(`   File: ${attachment.name}`);
-        console.log(`   Type: ${attachment.type}`);
-        console.log(`   Size: ${(attachment.size / 1024).toFixed(2)} KB`);
+        console.log(`   File: ${attachment.name || '[unnamed]'}`);
+        console.log(`   Type: ${attachment.type || 'application/octet-stream'}`);
+        console.log(`   Size: ${((Number(attachment.size) || 0) / 1024).toFixed(2)} KB`);
         console.log(`   Chunked: ${!!attachment.chunked}`);
 
-        // Validate attachment size before broadcasting
-        const maxAttachmentSize = 10 * 1024 * 1024; // 10MB
-        if (attachment.size > maxAttachmentSize) {
+        const maxAttachmentSize = CHAT_ATTACHMENT_MAX_BYTES;
+        const attachmentSize = Number(attachment.size || 0);
+
+        if (!Number.isFinite(attachmentSize) || attachmentSize <= 0) {
+          socket.emit('error', {
+            message: 'Invalid attachment size',
+            code: 'INVALID_ATTACHMENT'
+          });
+          return;
+        }
+
+        if (attachmentSize > maxAttachmentSize) {
           console.error(`❌ Attachment too large: ${(attachment.size / 1024 / 1024).toFixed(2)}MB`);
           socket.emit('error', {
             message: 'Attachment too large. Maximum size is 10MB.',
@@ -4818,7 +5178,36 @@ io.on('connection', (socket) => {
           return;
         }
 
-        if (attachment.chunked) {
+        const normalizedAttachmentName = sanitizeAttachmentName(attachment.name || 'attachment');
+        const normalizedAttachmentType = String(attachment.type || 'application/octet-stream');
+
+        // Preferred production flow: message carries persistent metadata URL.
+        if (attachment.url) {
+          if (!attachment.fileId || !isAttachmentUrlAllowed(attachment.url)) {
+            socket.emit('error', {
+              message: 'Invalid persistent attachment metadata',
+              code: 'INVALID_ATTACHMENT'
+            });
+            return;
+          }
+
+          messageData.attachment = {
+            fileId: attachment.fileId,
+            name: normalizedAttachmentName,
+            type: normalizedAttachmentType,
+            size: attachmentSize,
+            url: attachment.url,
+            publicUrl: attachment.publicUrl || null,
+            apiUrl: attachment.apiUrl || null,
+            storage: attachment.storage || 'r2',
+            category: attachment.category || categorizeAttachmentType(normalizedAttachmentType),
+            preview: attachment.preview || null,
+            serverStored: true,
+            chunked: false
+          };
+
+          console.log('✅ Persistent attachment metadata validated');
+        } else if (attachment.chunked) {
           console.log(`📦 Chunked attachment detected - data will arrive separately`);
           console.log(`   Total chunks expected: ${attachment.totalChunks}`);
 
@@ -4833,9 +5222,9 @@ io.on('connection', (socket) => {
 
           messageData.attachment = {
             fileId: attachment.fileId,
-            name: attachment.name,
-            type: attachment.type,
-            size: attachment.size,
+            name: normalizedAttachmentName,
+            type: normalizedAttachmentType,
+            size: attachmentSize,
             chunked: true,
             totalChunks: attachment.totalChunks
           };
@@ -4866,9 +5255,9 @@ io.on('connection', (socket) => {
 
           messageData.attachment = {
             fileId: attachment.fileId,
-            name: attachment.name,
-            type: attachment.type,
-            size: attachment.size,
+            name: normalizedAttachmentName,
+            type: normalizedAttachmentType,
+            size: attachmentSize,
             data: attachment.data
           };
 
@@ -4902,6 +5291,27 @@ io.on('connection', (socket) => {
         if (messageData.attachment.totalChunks) {
           storedMessage.attachment.totalChunks = messageData.attachment.totalChunks;
         }
+        if (messageData.attachment.url) {
+          storedMessage.attachment.url = messageData.attachment.url;
+        }
+        if (messageData.attachment.publicUrl) {
+          storedMessage.attachment.publicUrl = messageData.attachment.publicUrl;
+        }
+        if (messageData.attachment.apiUrl) {
+          storedMessage.attachment.apiUrl = messageData.attachment.apiUrl;
+        }
+        if (messageData.attachment.storage) {
+          storedMessage.attachment.storage = messageData.attachment.storage;
+        }
+        if (messageData.attachment.category) {
+          storedMessage.attachment.category = messageData.attachment.category;
+        }
+        if (messageData.attachment.preview) {
+          storedMessage.attachment.preview = messageData.attachment.preview;
+        }
+        if (messageData.attachment.serverStored) {
+          storedMessage.attachment.serverStored = true;
+        }
       }
 
       // Store to room history
@@ -4919,11 +5329,16 @@ io.on('connection', (socket) => {
         console.log(`   📎 Broadcasting attachment metadata`);
         console.log(`      Chunked: ${messageData.attachment.chunked}`);
         console.log(`      File: ${messageData.attachment.name}`);
+        if (messageData.attachment.url) {
+          console.log(`      URL: ${messageData.attachment.url}`);
+        }
 
         if (messageData.attachment.data) {
           console.log(`      Legacy data size: ${(messageData.attachment.data.length / 1024).toFixed(2)} KB`);
         } else {
-          console.log(`      Chunked - data will arrive separately`);
+          console.log(messageData.attachment.chunked
+            ? '      Chunked - data will arrive separately'
+            : '      Persistent URL attachment');
         }
       }
 
@@ -6305,6 +6720,9 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', async (reason) => {
     console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason})`);
+    stopServerPingLoop();
+    socket.data.isAuthenticated = false;
+    await unbindSocketSession(socket.id);
 
     const userData = await getSocketUser(socket.id);
     if (!userData) {
@@ -6325,10 +6743,9 @@ io.on('connection', (socket) => {
     // Unregister this socket from multi-device tracking
     if (firebaseUid) {
       await unregisterSocketForUser(socket.id);
+    } else {
+      await deleteSocketUser(socket.id);
     }
-
-    // Clean up socket user data mapping in Redis
-    await deleteSocketUser(socket.id);
 
     try {
       // Check if user has other active devices across the cluster
