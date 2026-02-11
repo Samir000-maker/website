@@ -2964,13 +2964,14 @@ console.log(`✅ Local stream attached with preview orientation (${currentCamera
             }
           });
 
-          socketInstance.on('server_ping', (payload = {}) => {
-            if (!socketInstance?.connected) return;
+          socketInstance.on('server_ping', (payload) => {
+            if (!socketInstance || !socketInstance.connected) return;
+            const p = payload || {};
             socketInstance.emit('client_pong', {
               roomId: callData?.roomId || null,
               location: 'call',
               path: window.location.pathname,
-              serverPingTs: payload.ts || null
+              serverPingTs: p.ts || null
             });
           });
 
