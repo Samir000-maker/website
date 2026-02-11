@@ -392,6 +392,89 @@ video.remote-view {
       let isControlsLocked = true; // ✅ Initial lockout
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
       let loadingWatchdogs = new Map(); // ✅ userId -> timeoutId
+      let callHeartbeatInterval = null;
+
+      async function reportCallPresenceContext(reason = 'call_lifecycle', options = {}) {
+        const roomId = options.roomId || callData?.roomId || null;
+        const payload = {
+          location: 'call',
+          path: window.location.pathname,
+          roomId: roomId || null,
+          source: options.source || 'call_html',
+          reason
+        };
+
+        try {
+          if (MoodApp?.Presence?.reportContext) {
+            MoodApp.Presence.reportContext(reason, {
+              ...payload,
+              keepalive: options.keepalive !== false,
+              allowRedirect: options.allowRedirect !== false
+            }).catch(() => { });
+          }
+        } catch { }
+
+        if (socketInstance?.connected) {
+          socketInstance.emit('page_context', payload, (response) => {
+            if (response?.redirectTo && response.redirectTo !== window.location.pathname) {
+              window.location.href = '/mood.html';
+            }
+          });
+        }
+      }
+
+      function startCallHeartbeat() {
+        if (callHeartbeatInterval) clearInterval(callHeartbeatInterval);
+        if (!socketInstance?.connected) return;
+
+        const roomId = callData?.roomId || null;
+        if (!roomId) return;
+
+        socketInstance.emit('heartbeat', {
+          roomId,
+          location: 'call',
+          path: window.location.pathname
+        });
+
+        callHeartbeatInterval = setInterval(() => {
+          if (!socketInstance?.connected) return;
+          socketInstance.emit('heartbeat', {
+            roomId,
+            location: 'call',
+            path: window.location.pathname
+          });
+        }, 10000);
+      }
+
+      function stopCallHeartbeat() {
+        if (callHeartbeatInterval) {
+          clearInterval(callHeartbeatInterval);
+          callHeartbeatInterval = null;
+        }
+      }
+
+      function validateCallPresenceState(trigger = 'call_validation') {
+        if (!socketInstance?.connected || !callData?.roomId) return;
+        socketInstance.emit('validate_presence_state', {
+          location: 'call',
+          roomId: callData.roomId,
+          path: window.location.pathname,
+          trigger
+        }, (response) => {
+          if (!response) return;
+          if (response.valid) {
+            if ((trigger.includes('pageshow') || trigger.includes('visibility')) && socketInstance?.connected) {
+              socketInstance.emit('request_room_sync', { roomId: response.roomId || callData.roomId });
+            }
+            return;
+          }
+
+          console.warn(`⚠️ Call presence validation failed (${response.reason || 'unknown'}). Redirecting to mood.`);
+          localStorage.removeItem('activeCall');
+          sessionStorage.removeItem('hasBackgroundCall');
+          window.location.href = '/mood.html';
+        });
+      }
 
       // ============================================
       // 🔄 BACKGROUND RECOVERY LOGIC
@@ -463,12 +546,27 @@ video.remote-view {
         if (!document.hidden) {
           console.log('👀 Page became VISIBLE - initiating recovery');
           resumeAllMedia();
+          reportCallPresenceContext('call_visibility_visible', {
+            keepalive: true,
+            allowRedirect: true
+          }).catch(() => { });
+          validateCallPresenceState('call_visibility_visible');
+        } else {
+          reportCallPresenceContext('call_visibility_hidden', {
+            keepalive: true,
+            allowRedirect: false
+          }).catch(() => { });
         }
       });
 
       window.addEventListener('focus', () => {
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
+        reportCallPresenceContext('call_focus', {
+          keepalive: true,
+          allowRedirect: true
+        }).catch(() => { });
+        validateCallPresenceState('call_focus');
       });
 
       function setupCallBackButtonHandler() {
@@ -827,73 +925,24 @@ video.remote-view {
       }
 
       function setupCallCleanup() {
-        window.addEventListener('beforeunload', (e) => {
-          console.log('🚪 ========================================');
-          console.log('🚪 CALL PAGE BEFOREUNLOAD');
-          console.log('🚪 ========================================');
+        window.addEventListener('pagehide', () => {
+          console.log('🚪 Call pagehide detected - reporting lifecycle state');
+          reportCallPresenceContext('call_pagehide', {
+            keepalive: true,
+            allowRedirect: false,
+            source: 'call_pagehide'
+          }).catch(() => { });
+        });
 
-          // Check if chat is showing (means we're not actually leaving)
-          const chatOverlay = document.getElementById('chatOverlayContainer');
-          const isShowingChat = chatOverlay && !chatOverlay.classList.contains('hidden');
-
-          if (isShowingChat) {
-            console.log('🔒 Chat overlay active - NOT cleaning up');
-            console.log('   This should not happen - preventing navigation');
-            console.log('🚪 ========================================\n');
-            return;
-          }
-
-          console.log('🗑️ Performing full cleanup');
-
-          // Stop timer
-          if (durationInterval) {
-            clearInterval(durationInterval);
-            console.log('   ✓ Timer stopped');
-          }
-
-          // Close audio contexts
-          audioContexts.forEach((ac, userId) => {
-            try {
-              if (ac.stop) ac.stop();
-              if (ac.context && ac.context.state !== 'closed') {
-                ac.context.close().catch(e => console.warn('Failed to close audio context:', e));
-              }
-            } catch (e) {
-              console.warn(`Failed to cleanup audio context for ${userId}:`, e);
-            }
-          });
-          audioContexts.clear();
-          console.log('   ✓ Audio contexts closed');
-
-          // Stop local stream
-          if (localStream) {
-            localStream.getTracks().forEach(t => {
-              try {
-                t.stop();
-              } catch (e) {
-                console.warn('Failed to stop track:', e);
-              }
-            });
-            console.log('   ✓ Local stream stopped');
-          }
-
-          // Close peer connections
-          peerConnections.forEach((pc, userId) => {
-            try {
-              pc.close();
-            } catch (e) {
-              console.warn(`Failed to close PC for ${userId}:`, e);
-            }
-          });
-          peerConnections.clear();
-          console.log('   ✓ Peer connections closed');
-
-          // localStorage.removeItem('activeCall'); // ✅ Preserve for restoration
-
-          console.log('✅ Temporary cleanup complete (keeping server state active)');
-
-          console.log('✅ Full cleanup complete');
-          console.log('🚪 ========================================\n');
+        window.addEventListener('pageshow', (event) => {
+          console.log(`📱 Call pageshow (persisted=${event.persisted})`);
+          reportCallPresenceContext('call_pageshow', {
+            keepalive: true,
+            allowRedirect: true,
+            source: event.persisted ? 'call_pageshow_bfcache' : 'call_pageshow'
+          }).catch(() => { });
+          startCallHeartbeat();
+          validateCallPresenceState(event.persisted ? 'call_pageshow_bfcache' : 'call_pageshow');
         });
       }
 
@@ -2623,6 +2672,7 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
       function leaveCall() {
         if (isInitializing) return;
         isInitializing = true;
+        stopCallHeartbeat();
         audioContexts.forEach(ac => {
           try {
             if (ac.stop) ac.stop();
@@ -2637,7 +2687,16 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
         if (localStream) localStream.getTracks().forEach(t => t.stop());
         peerConnections.forEach(pc => pc.close());
         peerConnections.clear();
-        if (socketInstance && socketInstance.connected) socketInstance.emit('leave_call', { callId: callData.callId });
+        if (socketInstance && socketInstance.connected) {
+          socketInstance.emit('leave_call', { callId: callData.callId });
+          socketInstance.emit('exit_call_mode', { roomId: callData?.roomId || null });
+          socketInstance.emit('page_context', {
+            location: 'chat',
+            path: '/chat.html',
+            roomId: callData?.roomId || null,
+            source: 'leave_call_navigation'
+          });
+        }
         if (durationInterval) clearInterval(durationInterval);
         localStorage.removeItem('activeCall');
 
@@ -2776,6 +2835,16 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
             const loadingText = document.getElementById('loadingStatusText');
             if (loadingText) loadingText.textContent = "Connecting to Secure Server";
             socketInstance.emit('authenticate', { token, userId: currentUser.userId });
+            reportCallPresenceContext('socket_connect', {
+              keepalive: true,
+              allowRedirect: true,
+              source: 'call_socket_connect'
+            }).catch(() => { });
+          });
+
+          socketInstance.on('disconnect', (reason) => {
+            console.warn(`🔌 Call socket disconnected: ${reason}`);
+            stopCallHeartbeat();
           });
 
           // Inside initCall() function, replace the 'authenticated' handler:
@@ -2834,6 +2903,14 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
             if (callData && callData.roomId) {
               socketInstance.emit('enter_call_mode', { roomId: callData.roomId });
               console.log(`📱 [Presence] Signaled call mode for room ${callData.roomId}`);
+              socketInstance.emit('page_context', {
+                location: 'call',
+                path: window.location.pathname,
+                roomId: callData.roomId,
+                source: 'call_authenticated'
+              });
+              startCallHeartbeat();
+              validateCallPresenceState('call_authenticated');
             }
 
 
@@ -2894,6 +2971,23 @@ console.log(`✅ Local stream attached with FORCED non-mirror`);
                 isJoiningCall = false;
               }
             }
+          });
+
+          socketInstance.on('force_navigation', (data) => {
+            const target = data?.to || '/mood.html';
+            const safeTarget = target === '/discovery.html' ? '/mood.html' : target;
+            console.warn(`🚦 Force navigation from server: ${safeTarget}`);
+            localStorage.removeItem('activeCall');
+            sessionStorage.removeItem('hasBackgroundCall');
+            window.location.href = safeTarget;
+          });
+
+          socketInstance.on('left_room', (data) => {
+            if (!data?.forceRedirect) return;
+            console.warn(`🚦 left_room with forced redirect (${data.reason || 'unspecified'})`);
+            localStorage.removeItem('activeCall');
+            sessionStorage.removeItem('hasBackgroundCall');
+            window.location.href = '/mood.html';
           });
 
 
