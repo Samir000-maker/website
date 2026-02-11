@@ -1197,6 +1197,10 @@
           isVideoEnabled = desired;
           updateVideoButton();
           scheduleVideoVisibilityUpdate(currentUser.userId, desired, true);
+
+          if (socketInstance?.connected) {
+            socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+          }
         } catch (err) {
           console.warn(`⚠️ Pending video toggle failed:`, err.message);
         } finally {
@@ -1679,6 +1683,14 @@
 
             if (pendingVideoToggleDesired !== null) {
               applyPendingVideoToggle('initLocalMedia');
+            } else if (callData.callType === 'video') {
+              // ✅ Ensure video state is broadcast and UI is synced for video calls
+              isVideoEnabled = localStream.getVideoTracks().length > 0;
+              updateVideoButton();
+              scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
+              if (socketInstance?.connected) {
+                socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              }
             }
 
             return localStream;
@@ -1823,6 +1835,16 @@
           icon.textContent = 'videocam_off';
         }
         console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
+
+        // ✅ Force sync retry to keep icon consistent after rapid state changes
+        setTimeout(() => {
+          if (btn && icon) {
+            const expected = isVideoEnabled ? 'videocam' : 'videocam_off';
+            if (icon.textContent !== expected) {
+              icon.textContent = expected;
+            }
+          }
+        }, 200);
       }
 
 
