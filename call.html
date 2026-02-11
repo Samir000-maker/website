@@ -924,23 +924,23 @@ video.remote-view {
         console.log('🔙 ========================================\n');
       }
 
-      function returnToCallView() {
-        console.log('🔙 Returning to call view');
+      // function returnToCallView() {
+      //   console.log('🔙 Returning to call view');
 
-        const chatContainer = document.getElementById('chatContainer');
-        const miniIndicator = document.getElementById('miniCallIndicator');
+      //   const chatContainer = document.getElementById('chatContainer');
+      //   const miniIndicator = document.getElementById('miniCallIndicator');
 
-        if (chatContainer) chatContainer.classList.add('hidden');
-        if (miniIndicator) miniIndicator.classList.add('hidden');
+      //   if (chatContainer) chatContainer.classList.add('hidden');
+      //   if (miniIndicator) miniIndicator.classList.add('hidden');
 
-        document.body.style.overflow = '';
+      //   document.body.style.overflow = '';
 
-        // Clear session flags
-        sessionStorage.removeItem('returningFromCall');
-        sessionStorage.removeItem('backgroundCallMode');
+      //   // Clear session flags
+      //   sessionStorage.removeItem('returningFromCall');
+      //   sessionStorage.removeItem('backgroundCallMode');
 
-        console.log('✅ Returned to call view');
-      }
+      //   console.log('✅ Returned to call view');
+      // }
 
       function updateMiniCallIndicator() {
         const miniAvatar = document.getElementById('miniCallAvatar');
@@ -2979,7 +2979,6 @@ console.log(`✅ Local stream attached with preview orientation (${currentCamera
             socketInstance.io.on('reconnect_failed', () => {
               triggerCallSocketRecoveryReload('call_reconnect_failed');
             });
-          });
 
           // Inside initCall() function, replace the 'authenticated' handler:
 
