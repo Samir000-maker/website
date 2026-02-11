@@ -17,9 +17,16 @@ const ATTACHMENT_EXTENSION_BY_MIME = {
   'image/png': 'png',
   'image/gif': 'gif',
   'image/webp': 'webp',
+  'image/bmp': 'bmp',
+  'image/tiff': 'tiff',
+  'image/svg+xml': 'svg',
   'video/mp4': 'mp4',
   'video/webm': 'webm',
   'video/quicktime': 'mov',
+  'video/ogg': 'ogv',
+  'video/x-msvideo': 'avi',
+  'video/x-matroska': 'mkv',
+  'video/mpeg': 'mpeg',
   'application/pdf': 'pdf',
   'application/msword': 'doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
@@ -217,6 +224,21 @@ export async function getChatAttachmentStream(storageKey, rangeHeader = null) {
     etag: head.ETag || null,
     lastModified: head.LastModified || null
   };
+}
+
+/**
+ * Delete chat attachment from R2 by storage key
+ */
+export async function deleteChatAttachmentByKey(storageKey) {
+  if (!storageKey || typeof storageKey !== 'string') return;
+  try {
+    await s3.deleteObject({
+      Bucket: config.BUCKET_NAME,
+      Key: storageKey,
+    }).promise();
+  } catch (err) {
+    console.error('❌ R2 delete attachment failed:', storageKey, err);
+  }
 }
 
 /**

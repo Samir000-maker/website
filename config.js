@@ -26,7 +26,10 @@ export const config = {
   MIN_USERS_FOR_ROOM: 2, // Minimum users required to create a room
   
   // File upload limits
-  MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
+  MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB (profile pictures)
+  MAX_CHAT_ATTACHMENT_BYTES: 100 * 1024 * 1024, // 100MB for chat attachments
+  // NOTE: If using nginx reverse proxy, add: client_max_body_size 100M;
+  // For Cloudflare: attachment uploads may need larger Limits in dashboard
   MAX_NOTE_LENGTH: 500,
   
   // Rate limiting
