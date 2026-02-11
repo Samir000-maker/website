@@ -411,19 +411,20 @@ video.remote-view {
       function enforceNaturalVideoRendering(videoEl) {
   if (!videoEl) return;
   
-  // Only enforce non-mirrored rendering for remote videos
-  if (videoEl.classList.contains('remote-view')) {
-    videoEl.classList.add('video-enhanced');
+  videoEl.classList.add('video-enhanced');
+  videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
+  videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
+  
+  if (videoEl.classList.contains('self-view')) {
+    // Self-view: MUST be mirrored for natural preview
+    videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
+    videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
+    videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
+  } else if (videoEl.classList.contains('remote-view')) {
+    // Remote view: MUST NOT be mirrored
     videoEl.style.setProperty('transform', 'none', 'important');
     videoEl.style.setProperty('-webkit-transform', 'none', 'important');
     videoEl.style.setProperty('-moz-transform', 'none', 'important');
-    videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
-    videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
-  } else if (videoEl.classList.contains('self-view')) {
-    // Self-view: apply mirror effect via CSS class (already handled by CSS)
-    videoEl.classList.add('video-enhanced');
-    videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
-    videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
   }
 }
 
