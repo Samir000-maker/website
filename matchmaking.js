@@ -259,9 +259,9 @@ async function findRoomWithSpace(mood, excludeUserId = null) {
       if (!room) continue;
 
       // Must match mood, have space, and not be expired
-     if (room.mood === mood && room.hasSpace() && !room.isExpired) {
-  console.log(`🔍 [Matchmaking] Room ${room.id} users: ${JSON.stringify(room.users.map(u => u.userId))}`);
-  if (excludeUserId && room.users.some(u => u.userId === excludeUserId)) continue;
+      if (room.mood === mood && room.hasSpace() && !room.isExpired) {
+        console.log(`🔍 [Matchmaking] Room ${room.id} users: ${JSON.stringify(room.users.map(u => u.userId))}`);
+        if (excludeUserId && room.users.some(u => u.userId === excludeUserId)) continue;
         console.log(`🔍 [Matchmaking] Found room ${roomId} with space for mood ${mood} (${room.users.length}/${room.maxUsers || config.MAX_USERS_PER_ROOM})`);
         return room;
       }
@@ -312,7 +312,7 @@ export async function addToQueue(userData) {
     } catch (e) { /* ignore parse errors */ }
   }
 
-const availableRoom = await findRoomWithSpace(mood, userId);
+  const availableRoom = await findRoomWithSpace(mood, userId);
   if (availableRoom) {
     console.log(`🚪 [Matchmaking] Adding ${username} to existing room ${availableRoom.id}`);
     const added = await availableRoom.addUser({
@@ -463,17 +463,27 @@ export async function destroyRoom(roomId, reason = 'manual') {
 }
 
 export async function cancelMatchmaking(userId, mood) {
-  const queueKey = `matchmaking:queue:${mood}`;
-  const allInQueue = await redis.lrange(queueKey, 0, -1);
-  for (const item of allInQueue) {
-    const userData = JSON.parse(item);
-    if (userData.userId === userId) {
-      await redis.lrem(queueKey, 1, item);
-      console.log(`🎮 [Cluster] Matchmaking cancelled for ${userId}`);
-      return true;
+  const moods = mood ? [mood] : config.MOODS.map(m => m.id);
+  let removed = false;
+
+  for (const moodId of moods) {
+    const queueKey = `matchmaking:queue:${moodId}`;
+    const allInQueue = await redis.lrange(queueKey, 0, -1);
+    for (const item of allInQueue) {
+      try {
+        const userData = JSON.parse(item);
+        if (userData.userId === userId) {
+          await redis.lrem(queueKey, 1, item);
+          removed = true;
+        }
+      } catch { }
     }
   }
-  return false;
+
+  if (removed) {
+    console.log(`🎮 [Cluster] Matchmaking cancelled for ${userId}`);
+  }
+  return removed;
 }
 
 export async function getQueueStatus(mood) {
