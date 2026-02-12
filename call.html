@@ -249,17 +249,21 @@
     </div>
   </div>
 
-  <!-- UI-only Reconnection Banner (shown during reconnect attempts) -->
-  <div id="callReconnectBanner" class="fixed top-0 left-0 right-0 z-[60] hidden">
-    <div
-      class="mx-auto mt-3 w-[min(680px,calc(100%-24px))] rounded-xl border border-amber-500/30 bg-amber-500/15 backdrop-blur-md px-4 py-3 shadow-lg">
-      <div class="flex items-center gap-3">
-        <div class="w-4 h-4 border-2 border-amber-500/40 border-t-amber-500 rounded-full animate-spin"></div>
-        <div class="min-w-0 flex-1">
-          <div class="text-sm font-semibold text-amber-200" id="callReconnectTitle">Reconnecting…</div>
-          <div class="text-xs text-amber-100/80" id="callReconnectSubtext">Trying to restore your connection.</div>
-        </div>
+  <!-- UI-only Reconnection Overlay (shown during reconnect attempts) -->
+  <div id="callReconnectOverlay"
+    class="fixed inset-0 z-[55] hidden bg-background-light/90 dark:bg-background-dark/90 flex flex-col items-center justify-center transition-opacity duration-500">
+    <div class="relative mb-8">
+      <div class="w-20 h-20 border-4 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
+      <div class="absolute inset-0 flex items-center justify-center">
+        <span class="material-symbols-outlined text-amber-400 text-3xl animate-pulse">wifi_off</span>
       </div>
+    </div>
+    <h2 class="text-xl font-bold mb-2 tracking-tight" id="reconnectStatusText">Reconnecting</h2>
+    <p class="text-slate-500 dark:text-slate-400 text-sm animate-pulse" id="reconnectSubtext">Restoring your secure connection...</p>
+
+    <div class="mt-12 flex items-center gap-4 px-6 py-3 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
+      <div class="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+      <span class="text-xs text-slate-500 dark:text-slate-400">Attempting to resume in-call signaling</span>
     </div>
   </div>
 
@@ -3370,21 +3374,29 @@
             auth: { token, sessionId, tabId }
           });
 
-          const reconnectBanner = document.getElementById('callReconnectBanner');
-          const reconnectTitle = document.getElementById('callReconnectTitle');
-          const reconnectSubtext = document.getElementById('callReconnectSubtext');
+          const reconnectOverlay = document.getElementById('callReconnectOverlay');
+          const reconnectTitle = document.getElementById('reconnectStatusText');
+          const reconnectSubtext = document.getElementById('reconnectSubtext');
 
           const showReconnectUI = (title, subtext) => {
             try {
               if (reconnectTitle && typeof title === 'string') reconnectTitle.textContent = title;
               if (reconnectSubtext && typeof subtext === 'string') reconnectSubtext.textContent = subtext;
-              if (reconnectBanner) reconnectBanner.classList.remove('hidden');
+              if (reconnectOverlay) {
+                reconnectOverlay.classList.remove('hidden');
+                reconnectOverlay.style.opacity = '1';
+              }
             } catch { }
           };
 
           const hideReconnectUI = () => {
             try {
-              if (reconnectBanner) reconnectBanner.classList.add('hidden');
+              if (reconnectOverlay) {
+                reconnectOverlay.style.opacity = '0';
+                setTimeout(() => {
+                  try { reconnectOverlay.classList.add('hidden'); } catch { }
+                }, 350);
+              }
             } catch { }
           };
 
