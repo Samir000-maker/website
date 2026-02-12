@@ -220,12 +220,12 @@
     </div>
     <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
       <div
-        class="flex items-center gap-1.5 sm:gap-2 bg-slate-200 dark:bg-surface-dark px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-700">
+        class="flex items-center gap-1.5 sm:gap-2 bg-slate-200 dark:bg-surface-dark px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-700 min-w-0">
         <span class="relative flex h-2 w-2">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
         </span>
-        <span class="text-[10px] sm:text-sm font-bold font-mono" id="callDuration">00:00:00</span>
+        <span class="text-[9px] sm:text-sm font-bold font-mono whitespace-nowrap" id="callDuration">00:00:00</span>
       </div>
     </div>
   </header>
@@ -413,6 +413,217 @@
       let loadingWatchdogs = new Map(); // ✅ userId -> timeoutId
       const videoRenderState = new Map(); // userId -> 'video' | 'loading' | 'pfp'
       let callHeartbeatInterval = null;
+
+      const mediaHealthMonitors = new Map(); // userId -> intervalId
+      const mediaHealthState = new Map(); // userId -> last stats snapshot
+
+      const SIGNALING_QUEUE_KEY = 'vibe_call_signaling_queue_v1';
+      const JOIN_RETRY_KEY_PREFIX = 'vibe_call_join_retry_v1:';
+      let signalingQueue = [];
+
+      function loadSignalingQueue() {
+        try {
+          const raw = sessionStorage.getItem(SIGNALING_QUEUE_KEY);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed)) {
+            signalingQueue = parsed;
+          }
+        } catch {
+          signalingQueue = [];
+        }
+      }
+
+      function persistSignalingQueue() {
+        try {
+          sessionStorage.setItem(SIGNALING_QUEUE_KEY, JSON.stringify(signalingQueue.slice(-500)));
+        } catch { }
+      }
+
+      function enqueueSignalingEmit(eventName, payload) {
+        signalingQueue.push({
+          eventName,
+          payload,
+          queuedAt: Date.now()
+        });
+        persistSignalingQueue();
+      }
+
+      function flushSignalingQueue() {
+        if (!socketInstance?.connected) return;
+        if (!signalingQueue.length) return;
+
+        const now = Date.now();
+        const ttlMs = 2 * 60 * 1000;
+        const queue = signalingQueue;
+        signalingQueue = [];
+        persistSignalingQueue();
+
+        let flushed = 0;
+        for (const item of queue) {
+          if (!item || !item.eventName) continue;
+          if (item.queuedAt && (now - item.queuedAt) > ttlMs) {
+            continue;
+          }
+          try {
+            socketInstance.emit(item.eventName, item.payload);
+            flushed++;
+          } catch {
+            enqueueSignalingEmit(item.eventName, item.payload);
+          }
+        }
+
+        if (flushed > 0) {
+          console.log(`📤 Flushed ${flushed} queued signaling message(s)`);
+        }
+      }
+
+      function safeSocketEmit(eventName, payload, options = {}) {
+        const { queueWhenDisconnected = true } = options;
+        if (socketInstance?.connected) {
+          try {
+            socketInstance.emit(eventName, payload);
+            return true;
+          } catch {
+            if (queueWhenDisconnected) enqueueSignalingEmit(eventName, payload);
+            return false;
+          }
+        }
+        if (queueWhenDisconnected) enqueueSignalingEmit(eventName, payload);
+        return false;
+      }
+
+      function stopMediaHealthMonitor(userId) {
+        const id = mediaHealthMonitors.get(userId);
+        if (id) {
+          clearInterval(id);
+          mediaHealthMonitors.delete(userId);
+        }
+        mediaHealthState.delete(userId);
+      }
+
+      async function recoverRemoteMedia(userId, reason = 'unknown') {
+        console.warn(`🩺 [MEDIA] Recovery triggered for ${userId} (reason=${reason})`);
+
+        const pc = peerConnections.get(userId);
+        if (!pc || pc.connectionState === 'closed') {
+          console.warn(`🩺 [MEDIA] No active PC for ${userId}.`);
+          return;
+        }
+
+        // Step 1: Re-attach stream + play
+        try {
+          const videoEl = document.getElementById(`video-${userId}`);
+          if (videoEl) {
+            const inboundVideoTracks = pc.getReceivers().map(r => r.track).filter(t => t && t.kind === 'video' && t.readyState === 'live');
+            if (inboundVideoTracks.length > 0) {
+              const rebuilt = new MediaStream(inboundVideoTracks);
+              if (videoEl.srcObject !== rebuilt) {
+                videoEl.srcObject = rebuilt;
+              }
+              await videoEl.play().catch(() => { });
+            }
+          }
+        } catch { }
+
+        // Step 2: Force renegotiation (safe in existing perfect-negotiation flow)
+        try {
+          await createOffer(userId);
+        } catch (e) {
+          console.warn(`🩺 [MEDIA] Renegotiation failed for ${userId}:`, e?.message || e);
+        }
+
+        // Step 3: ICE recovery / TURN escalation via existing handler
+        try {
+          handleIceFailure(userId);
+        } catch { }
+      }
+
+      function startMediaHealthMonitor(userId, pc) {
+        stopMediaHealthMonitor(userId);
+
+        const intervalId = setInterval(async () => {
+          const currentPc = peerConnections.get(userId);
+          if (!currentPc || currentPc !== pc || currentPc.connectionState === 'closed') {
+            stopMediaHealthMonitor(userId);
+            return;
+          }
+
+          // Only monitor when we believe we should be connected.
+          if (currentPc.iceConnectionState !== 'connected' && currentPc.iceConnectionState !== 'completed') {
+            return;
+          }
+
+          const now = Date.now();
+          try {
+            const stats = await currentPc.getStats();
+
+            let inboundVideo = null;
+            let inboundAudio = null;
+
+            stats.forEach(report => {
+              if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                inboundVideo = report;
+              }
+              if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+                inboundAudio = report;
+              }
+            });
+
+            const prev = mediaHealthState.get(userId) || null;
+            const next = {
+              at: now,
+              videoBytes: inboundVideo?.bytesReceived ?? null,
+              videoFramesDecoded: inboundVideo?.framesDecoded ?? null,
+              audioBytes: inboundAudio?.bytesReceived ?? null,
+              audioEnergy: inboundAudio?.totalAudioEnergy ?? inboundAudio?.audioLevel ?? null,
+              frozenSince: prev?.frozenSince ?? null,
+              silentSince: prev?.silentSince ?? null
+            };
+
+            // Frozen video detection (bytes/frames not advancing)
+            if (next.videoBytes !== null && prev?.videoBytes !== null) {
+              const videoAdvancing = (next.videoBytes > prev.videoBytes) || (next.videoFramesDecoded !== null && prev.videoFramesDecoded !== null && next.videoFramesDecoded > prev.videoFramesDecoded);
+              if (!videoAdvancing) {
+                next.frozenSince = next.frozenSince || now;
+              } else {
+                next.frozenSince = null;
+              }
+            }
+
+            // Silent audio detection (bytes/energy not advancing)
+            if (next.audioBytes !== null && prev?.audioBytes !== null) {
+              const audioAdvancing = next.audioBytes > prev.audioBytes;
+              if (!audioAdvancing) {
+                next.silentSince = next.silentSince || now;
+              } else {
+                next.silentSince = null;
+              }
+            }
+
+            mediaHealthState.set(userId, next);
+
+            const frozenMs = next.frozenSince ? (now - next.frozenSince) : 0;
+            const silentMs = next.silentSince ? (now - next.silentSince) : 0;
+
+            if (frozenMs > 6000) {
+              await recoverRemoteMedia(userId, 'frozen_video');
+              next.frozenSince = now; // rate-limit
+              mediaHealthState.set(userId, next);
+            }
+
+            if (silentMs > 8000) {
+              await recoverRemoteMedia(userId, 'silent_audio');
+              next.silentSince = now; // rate-limit
+              mediaHealthState.set(userId, next);
+            }
+
+          } catch {
+            // getStats can fail transiently; ignore.
+          }
+        }, 2000);
+
+        mediaHealthMonitors.set(userId, intervalId);
+      }
 
       function enforceNaturalVideoRendering(videoEl) {
         if (!videoEl) return;
@@ -827,6 +1038,25 @@
         console.log('📞 ========================================\n');
       }
 
+      function getStableSocketSessionId() {
+        try {
+          if (window.MoodApp?.Session && typeof window.MoodApp.Session.getSocketSessionId === 'function') {
+            return window.MoodApp.Session.getSocketSessionId();
+          }
+        } catch { }
+
+        try {
+          const key = 'vibe_socket_session_id';
+          const existing = sessionStorage.getItem(key);
+          if (existing) return existing;
+          const created = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+          sessionStorage.setItem(key, created);
+          return created;
+        } catch {
+          return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+        }
+      }
+
       function returnToCallView() {
         console.log('🔙 ========================================');
         console.log('🔙 RETURNING TO CALL VIEW (MAXIMIZING)');
@@ -859,24 +1089,6 @@
         console.log(`   PeerConnections still active: ${peerConnections.size}`);
         console.log(`   LocalStream still active: ${localStream?.getTracks().length || 0} tracks`);
         console.log('🔙 ========================================\n');
-      }
-
-      function returnToCallView() {
-        console.log('🔙 Returning to call view');
-
-        const chatContainer = document.getElementById('chatContainer');
-        const miniIndicator = document.getElementById('miniCallIndicator');
-
-        if (chatContainer) chatContainer.classList.add('hidden');
-        if (miniIndicator) miniIndicator.classList.add('hidden');
-
-        document.body.style.overflow = '';
-
-        // Clear session flags
-        sessionStorage.removeItem('returningFromCall');
-        sessionStorage.removeItem('backgroundCallMode');
-
-        console.log('✅ Returned to call view');
       }
 
       function updateMiniCallIndicator() {
@@ -1198,17 +1410,13 @@
           updateVideoButton();
           scheduleVideoVisibilityUpdate(currentUser.userId, desired, true);
 
-          if (socketInstance?.connected) {
-            socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
-          }
+          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
         } catch (err) {
           console.warn(`⚠️ Pending video toggle failed:`, err.message);
         } finally {
           pendingVideoToggleDesired = null;
         }
       }
-
-      // ✅ AGGRESSIVE VIDEO RECOVERY HANDLER
       async function handleStuckVideo(userId) {
         console.warn(`🛠️ Attempting aggressive recovery for ${userId}...`);
 
@@ -1677,8 +1885,8 @@
             console.log(`✅ initLocalMedia() complete - stream ready`);
 
             if (socketInstance?.connected) {
-              socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
-              socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
             }
 
             if (pendingVideoToggleDesired !== null) {
@@ -1689,7 +1897,7 @@
               updateVideoButton();
               scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
               if (socketInstance?.connected) {
-                socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+                safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
               }
             }
 
@@ -1893,6 +2101,8 @@
           iceServers: ICE_SERVERS
         });
 
+        startMediaHealthMonitor(userId, pc);
+
         connectionStats.set(userId, {
           startTime: Date.now(),
           iceState: 'new',
@@ -2076,7 +2286,7 @@
             }
 
             // Send all candidates immediately (no delay needed - no relay to worry about)
-            socketInstance.emit('ice_candidate', {
+            safeSocketEmit('ice_candidate', {
               callId: callData.callId,
               targetUserId: userId,
               candidate: e.candidate
@@ -2088,7 +2298,7 @@
             console.log(`🧊 [ICE] End of candidates for ${userId}`);
             console.log(`📊 [ICE] Total candidates sent: ${connectionStats.get(userId)?.candidatesSent || 0}`);
 
-            socketInstance.emit('ice_candidate', {
+            safeSocketEmit('ice_candidate', {
               callId: callData.callId,
               targetUserId: userId,
               candidate: null
@@ -2256,10 +2466,14 @@
 
           console.log(`🔌 [PC] Connection state for ${userId}: ${state}`);
 
+          if (state === 'closed' || state === 'failed') {
+            stopMediaHealthMonitor(userId);
+          }
+
           if (state === 'connected') {
             console.log(`✅ [PC] Peer connection established with ${userId}`);
 
-            socketInstance.emit('connection_state_update', {
+            safeSocketEmit('connection_state_update', {
               callId: callData.callId,
               state: 'connected',
               userId: userId
@@ -2292,7 +2506,7 @@
               }
             });
 
-            socketInstance.emit('connection_state_update', {
+            safeSocketEmit('connection_state_update', {
               callId: callData.callId,
               state: 'failed',
               userId: userId
@@ -2410,7 +2624,7 @@
           console.log(`   Offer SDP length: ${offer.sdp?.length || 0} bytes`);
           console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
 
-          socketInstance.emit('webrtc_offer', {
+          safeSocketEmit('webrtc_offer', {
             callId: callData.callId,
             targetUserId: userId,
             offer
@@ -2535,7 +2749,7 @@
             console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
 
             console.log(`📤 Sending answer to ${fromUserId} via socket`);
-            socketInstance.emit('webrtc_answer', {
+            safeSocketEmit('webrtc_answer', {
               callId: callData.callId,
               targetUserId: fromUserId,
               answer
@@ -2734,7 +2948,7 @@
               if (mic) mic.classList.remove('hidden');
             }
 
-            socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+            safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
           }
         }
       }
@@ -2795,7 +3009,7 @@
           scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
 
           // Notify server
-          socketInstance.emit('video_state_changed', {
+          safeSocketEmit('video_state_changed', {
             callId: callData.callId,
             enabled: isVideoEnabled
           });
@@ -2935,24 +3149,62 @@
 
 
       // Add this helper function before initCall()
+      function getJoinRetryKey(callId) {
+        return `${JOIN_RETRY_KEY_PREFIX}${callId || 'unknown'}`;
+      }
+
+      function loadJoinRetryCount(callId) {
+        try {
+          const raw = sessionStorage.getItem(getJoinRetryKey(callId));
+          const n = raw ? parseInt(raw, 10) : 0;
+          return Number.isFinite(n) ? n : 0;
+        } catch {
+          return 0;
+        }
+      }
+
+      function saveJoinRetryCount(callId, count) {
+        try {
+          sessionStorage.setItem(getJoinRetryKey(callId), String(count));
+        } catch { }
+      }
+
+      function clearJoinRetryCount(callId) {
+        try {
+          sessionStorage.removeItem(getJoinRetryKey(callId));
+        } catch { }
+      }
+
+      function computeBackoffDelayMs(attempt) {
+        const cappedAttempt = Math.min(Math.max(1, attempt), 8);
+        const base = 250;
+        const maxDelay = 15000;
+        const exp = Math.min(maxDelay, base * Math.pow(2, cappedAttempt - 1));
+        return Math.floor(Math.random() * exp);
+      }
+
       let joinCallRetryCount = 0;
       const MAX_JOIN_RETRIES = 3;
 
       async function attemptJoinCall(callId, retryDelay = 1000) {
         return new Promise((resolve, reject) => {
-          console.log(`🔄 Attempting to join call (attempt ${joinCallRetryCount + 1}/${MAX_JOIN_RETRIES})`);
+          joinCallRetryCount = loadJoinRetryCount(callId);
+          const attemptNumber = joinCallRetryCount + 1;
+          console.log(`🔄 Attempting to join call (attempt ${attemptNumber}/${MAX_JOIN_RETRIES})`);
 
-          socketInstance.emit('join_call', { callId });
+          safeSocketEmit('join_call', { callId }, { queueWhenDisconnected: false });
 
           // Set timeout for response
           const timeout = setTimeout(() => {
-            joinCallRetryCount++;
+            joinCallRetryCount = attemptNumber;
+            saveJoinRetryCount(callId, joinCallRetryCount);
 
             if (joinCallRetryCount < MAX_JOIN_RETRIES) {
-              console.warn(`⚠️ Join call timeout, retrying in ${retryDelay}ms...`);
+              const backoff = computeBackoffDelayMs(joinCallRetryCount + 1);
+              console.warn(`⚠️ Join call timeout, retrying in ${backoff}ms...`);
               setTimeout(() => {
-                attemptJoinCall(callId, retryDelay * 1.5).then(resolve).catch(reject);
-              }, retryDelay);
+                attemptJoinCall(callId, backoff).then(resolve).catch(reject);
+              }, backoff);
             } else {
               reject(new Error('Failed to join call after maximum retries'));
             }
@@ -2961,8 +3213,9 @@
           // Listen for successful join (one-time)
           const handleJoined = (data) => {
             clearTimeout(timeout);
-            joinCallRetryCount = 0; // Reset on success
-            console.log(`✅ Join call succeeded on attempt ${joinCallRetryCount + 1}`);
+            clearJoinRetryCount(callId);
+            joinCallRetryCount = 0;
+            console.log(`✅ Join call succeeded on attempt ${attemptNumber}`);
             socketInstance.off('call_joined', handleJoined);
             socketInstance.off('error', handleError);
             resolve(data);
@@ -3024,19 +3277,28 @@
           if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
 
           const token = await firebaseUser.getIdToken();
+          const sessionId = getStableSocketSessionId();
+          const tabId = window.tabManager?.tabId || null;
           socketInstance = io(window.location.origin, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
-            auth: { token }
+            auth: { token, sessionId, tabId }
           });
 
           socketInstance.on('connect', () => {
             console.log(`🔌 Connected: ${socketInstance.id}`);
             const loadingText = document.getElementById('loadingStatusText');
             if (loadingText) loadingText.textContent = "Connecting to Secure Server";
-            socketInstance.emit('authenticate', { token, userId: currentUser.userId });
+            socketInstance.emit('authenticate', {
+              token,
+              userId: currentUser.userId,
+              sessionId,
+              tabId
+            });
+            loadSignalingQueue();
+            flushSignalingQueue();
             reportCallPresenceContext('socket_connect', {
               keepalive: true,
               allowRedirect: true,
@@ -3047,6 +3309,18 @@
           socketInstance.on('disconnect', (reason) => {
             console.warn(`🔌 Call socket disconnected: ${reason}`);
             stopCallHeartbeat();
+          });
+
+          socketInstance.on('session_replaced', (data) => {
+            console.warn('⚠️ Session replaced by newer socket:', data);
+            try { stopCallHeartbeat(); } catch { }
+            try { localStorage.removeItem('activeCall'); } catch { }
+            try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
+            try { socketInstance.disconnect(); } catch { }
+            toast('This session was opened in another tab/device. Redirecting...', 'warning');
+            setTimeout(() => {
+              window.location.href = '/mood.html';
+            }, 1200);
           });
 
           // Inside initCall() function, replace the 'authenticated' handler:
@@ -3396,8 +3670,8 @@
             // ✅ Force local UI sync after join to avoid mismatched toggles
             scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
             if (socketInstance?.connected) {
-              socketInstance.emit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
-              socketInstance.emit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
             }
 
             const remoteParticipants = sortedParticipants.filter(p => p.userId !== currentUser.userId);
