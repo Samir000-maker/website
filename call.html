@@ -3400,13 +3400,162 @@
             } catch { }
           };
 
+          let reconnectWatchdogTimer = null;
+          let reconnectHardResetTimer = null;
+          let reconnectAttempts = 0;
+          let needsRejoinAfterReconnect = false;
+          let lastDisconnectAt = 0;
+
+          async function refreshSocketAuthToken(forceRefresh = false) {
+            try {
+              const u = firebase.auth().currentUser;
+              if (!u) return null;
+              const newToken = await u.getIdToken(!!forceRefresh);
+              if (socketInstance) {
+                socketInstance.auth = { ...(socketInstance.auth || {}), token: newToken, sessionId, tabId };
+              }
+              return newToken;
+            } catch {
+              return null;
+            }
+          }
+
+          async function softKickReconnect(source = 'unknown') {
+            try {
+              if (!socketInstance) return;
+              if (socketInstance.connected) return;
+
+              reconnectAttempts++;
+              showReconnectUI('Reconnecting…', `Restoring connection… (${source})`);
+
+              // Refresh token periodically in case the server rejects auth after backgrounding
+              const forceRefresh = (reconnectAttempts % 3 === 0);
+              await refreshSocketAuthToken(forceRefresh);
+
+              try { socketInstance.connect(); } catch { }
+            } catch { }
+          }
+
+          function clearReconnectWatchdogs() {
+            try { if (reconnectWatchdogTimer) clearInterval(reconnectWatchdogTimer); } catch { }
+            try { if (reconnectHardResetTimer) clearTimeout(reconnectHardResetTimer); } catch { }
+            reconnectWatchdogTimer = null;
+            reconnectHardResetTimer = null;
+          }
+
+          async function hardResetSocketAndReconnect(source = 'unknown') {
+            try {
+              if (!callData?.callId) return;
+              console.warn(`🧯 Hard resetting call socket due to stuck reconnect (${source})`);
+              showReconnectUI('Reconnecting…', 'Rebuilding secure connection…');
+
+              clearReconnectWatchdogs();
+
+              try { socketInstance.off(); } catch { }
+              try { socketInstance.disconnect(); } catch { }
+
+              const newToken = (await refreshSocketAuthToken(true)) || token;
+
+              // Recreate socket with fresh auth
+              socketInstance = io(window.location.origin, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 10,
+                reconnectionDelay: 500,
+                auth: { token: newToken, sessionId, tabId }
+              });
+
+              // Rebind minimal critical handlers for reconnection path
+              socketInstance.on('connect', () => {
+                console.log(`🔌 Connected (reset): ${socketInstance.id}`);
+                showReconnectUI('Reconnecting…', 'Syncing call…');
+                socketInstance.emit('authenticate', {
+                  token: socketInstance.auth?.token || newToken,
+                  userId: currentUser.userId,
+                  sessionId,
+                  tabId
+                });
+              });
+
+              socketInstance.on('disconnect', (reason) => {
+                console.warn(`🔌 Call socket disconnected (reset): ${reason}`);
+                stopCallHeartbeat();
+                if (reason !== 'io client disconnect') {
+                  needsRejoinAfterReconnect = true;
+                  lastDisconnectAt = Date.now();
+                  showReconnectUI('Reconnecting…', 'Your connection dropped. Restoring…');
+                }
+              });
+
+              socketInstance.on('authenticated', async () => {
+                console.log('✅ Authenticated (reset)');
+                try {
+                  if (callData && callData.roomId) {
+                    socketInstance.emit('enter_call_mode', { roomId: callData.roomId });
+                    socketInstance.emit('page_context', {
+                      location: 'call',
+                      path: window.location.pathname,
+                      roomId: callData.roomId,
+                      source: 'call_authenticated_reset'
+                    });
+                    startCallHeartbeat();
+                  }
+                } catch { }
+
+                // Always re-join after hard reset
+                needsRejoinAfterReconnect = true;
+                try {
+                  showReconnectUI('Reconnecting…', 'Rejoining call…');
+                  await attemptJoinCall(callData.callId);
+                } catch { }
+              });
+
+              socketInstance.on('call_joined', () => {
+                needsRejoinAfterReconnect = false;
+                hideReconnectUI();
+              });
+
+              socketInstance.on('connect_error', () => {
+                showReconnectUI('Reconnecting…', 'Unable to reach server. Retrying…');
+              });
+
+              // Kick immediate connect
+              try { socketInstance.connect(); } catch { }
+            } catch (e) {
+              console.error('❌ Hard reset socket failed:', e);
+            }
+          }
+
+          function startReconnectWatchdogs(source = 'unknown') {
+            clearReconnectWatchdogs();
+
+            // Soft kick loop (fast)
+            reconnectWatchdogTimer = setInterval(() => {
+              if (!socketInstance) return;
+              if (socketInstance.connected) return;
+              softKickReconnect(source).catch(() => { });
+            }, 1200);
+
+            // Hard reset if we remain disconnected for too long
+            reconnectHardResetTimer = setTimeout(() => {
+              if (!socketInstance) return;
+              if (socketInstance.connected) return;
+              hardResetSocketAndReconnect('watchdog_timeout').catch(() => { });
+            }, 9000);
+          }
+
           socketInstance.on('connect', () => {
             console.log(`🔌 Connected: ${socketInstance.id}`);
-            hideReconnectUI();
+            // Don't hide overlay immediately during a reconnect; wait for call re-sync.
+            if (needsRejoinAfterReconnect) {
+              showReconnectUI('Reconnecting…', 'Syncing call…');
+            } else {
+              hideReconnectUI();
+            }
             const loadingText = document.getElementById('loadingStatusText');
             if (loadingText) loadingText.textContent = "Connecting to Secure Server";
             socketInstance.emit('authenticate', {
-              token,
+              token: socketInstance.auth?.token || token,
               userId: currentUser.userId,
               sessionId,
               tabId
@@ -3424,7 +3573,11 @@
             console.warn(`🔌 Call socket disconnected: ${reason}`);
             stopCallHeartbeat();
             if (reason !== 'io client disconnect') {
+              needsRejoinAfterReconnect = true;
+              lastDisconnectAt = Date.now();
+              reconnectAttempts = 0;
               showReconnectUI('Reconnecting…', 'Your connection dropped. Restoring…');
+              startReconnectWatchdogs('disconnect');
             }
           });
 
@@ -3445,13 +3598,15 @@
               });
 
               mgr.on('reconnect', () => {
-                hideReconnectUI();
+                // We might be connected at transport-level but still need to re-join/sync.
+                if (!needsRejoinAfterReconnect) hideReconnectUI();
               });
             }
           } catch { }
 
           socketInstance.on('connect_error', () => {
             showReconnectUI('Reconnecting…', 'Unable to reach server. Retrying…');
+            startReconnectWatchdogs('connect_error');
           });
 
           socketInstance.on('reconnect_attempt', (attempt) => {
@@ -3464,6 +3619,8 @@
 
           socketInstance.on('reconnect_failed', () => {
             showReconnectUI('Connection unstable', 'We could not reconnect yet. Keep this tab open.');
+            // If Socket.IO gives up, we take over and do a controlled rebuild.
+            hardResetSocketAndReconnect('reconnect_failed').catch(() => { });
           });
 
           socketInstance.on('session_replaced', (data) => {
@@ -3566,6 +3723,32 @@
               return;
             }
 
+            // If we previously joined but got disconnected (background, network switch, etc.),
+            // we must re-join to resync participants + signaling.
+            if (needsRejoinAfterReconnect) {
+              isJoiningCall = true;
+              try {
+                console.log(`📞 Re-joining call ${callData.callId} after reconnect...`);
+                showReconnectUI('Reconnecting…', 'Rejoining call…');
+                const loadingText = document.getElementById('loadingStatusText');
+                const loadingSubtext = document.getElementById('loadingSubtext');
+                if (loadingText) loadingText.textContent = "Joining Secure Channel";
+                if (loadingSubtext) loadingSubtext.textContent = "Finalizing your encryption keys...";
+                const joinData = await attemptJoinCall(callData.callId);
+                console.log('✅ Joined call successfully');
+
+                needsRejoinAfterReconnect = false;
+                clearReconnectWatchdogs();
+                hideReconnectUI();
+              } catch (error) {
+                console.error('❌ Failed to re-join call:', error);
+                startReconnectWatchdogs('rejoin_failed');
+              } finally {
+                isJoiningCall = false;
+              }
+              return;
+            }
+
             if (!hasJoinedCall) {
               isJoiningCall = true;
               hasJoinedCall = true;
@@ -3603,6 +3786,30 @@
               }
             }
           });
+
+          // Aggressive foreground recovery: browsers often pause sockets/timers while backgrounded.
+          const onVisibilityOrNetworkChange = () => {
+            try {
+              if (document.visibilityState === 'visible') {
+                const disconnectedForMs = lastDisconnectAt ? (Date.now() - lastDisconnectAt) : 0;
+                if (!socketInstance?.connected) {
+                  needsRejoinAfterReconnect = true;
+                  showReconnectUI('Reconnecting…', 'Restoring your call…');
+                  startReconnectWatchdogs('foreground');
+                  softKickReconnect('foreground').catch(() => { });
+
+                  // If we were backgrounded for long enough, jump straight to hard reset.
+                  if (disconnectedForMs > 12000) {
+                    hardResetSocketAndReconnect('foreground_long_gap').catch(() => { });
+                  }
+                }
+              }
+            } catch { }
+          };
+
+          try { document.addEventListener('visibilitychange', onVisibilityOrNetworkChange); } catch { }
+          try { window.addEventListener('focus', onVisibilityOrNetworkChange); } catch { }
+          try { window.addEventListener('online', onVisibilityOrNetworkChange); } catch { }
 
           socketInstance.on('force_navigation', (data) => {
             const target = data?.to || '/mood.html';
@@ -3699,6 +3906,12 @@
             console.log(`✅ CALL_JOINED EVENT RECEIVED`);
             console.log(`✅ ========================================`);
             console.log(`📊 Participants: ${data.participants.length}`);
+
+            if (needsRejoinAfterReconnect) {
+              needsRejoinAfterReconnect = false;
+              clearReconnectWatchdogs();
+              hideReconnectUI();
+            }
 
             // CRITICAL: Update connection state
             console.log(`📞 Call state transition: ${callConnectionState} → connecting`);
