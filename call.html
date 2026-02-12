@@ -3416,6 +3416,32 @@
             }
           });
 
+          // Some Socket.IO reconnect events are emitted on the Manager (socketInstance.io) rather than the socket.
+          try {
+            const mgr = socketInstance.io;
+            if (mgr && typeof mgr.on === 'function') {
+              mgr.on('reconnect_attempt', (attempt) => {
+                showReconnectUI('Reconnecting…', `Attempt ${attempt}/5`);
+              });
+
+              mgr.on('reconnect_error', () => {
+                showReconnectUI('Reconnecting…', 'Still trying to restore your connection…');
+              });
+
+              mgr.on('reconnect_failed', () => {
+                showReconnectUI('Connection unstable', 'We could not reconnect yet. Keep this tab open.');
+              });
+
+              mgr.on('reconnect', () => {
+                hideReconnectUI();
+              });
+            }
+          } catch { }
+
+          socketInstance.on('connect_error', () => {
+            showReconnectUI('Reconnecting…', 'Unable to reach server. Retrying…');
+          });
+
           socketInstance.on('reconnect_attempt', (attempt) => {
             showReconnectUI('Reconnecting…', `Attempt ${attempt}/5`);
           });
