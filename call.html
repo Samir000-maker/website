@@ -493,6 +493,45 @@
         return false;
       }
 
+      function showCallLoadingOverlay(statusText, subText) {
+        const overlay = document.getElementById('callLoadingOverlay');
+        if (!overlay) return;
+
+        const loadingText = document.getElementById('loadingStatusText');
+        const loadingSubtext = document.getElementById('loadingSubtext');
+
+        if (typeof statusText === 'string' && loadingText) loadingText.textContent = statusText;
+        if (typeof subText === 'string' && loadingSubtext) loadingSubtext.textContent = subText;
+
+        overlay.classList.remove('hidden');
+        overlay.style.opacity = '1';
+      }
+
+      function hideCallLoadingOverlay() {
+        const overlay = document.getElementById('callLoadingOverlay');
+        if (!overlay) return;
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+          overlay.classList.add('hidden');
+          try {
+            document.querySelector('header').style.visibility = 'visible';
+            document.querySelector('main').style.visibility = 'visible';
+            document.querySelector('footer').style.visibility = 'visible';
+          } catch { }
+        }, 500);
+      }
+
+      function hasAnyConnectedPeer() {
+        try {
+          for (const pc of peerConnections.values()) {
+            if (!pc) continue;
+            if (pc.connectionState === 'connected') return true;
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') return true;
+          }
+        } catch { }
+        return false;
+      }
+
       function stopMediaHealthMonitor(userId) {
         const id = mediaHealthMonitors.get(userId);
         if (id) {
@@ -2480,9 +2519,16 @@
 
           } else if (state === 'failed') {
             console.error(`❌ [ICE] Connection failed for ${userId}`);
+            if (!isInitializing) {
+              showCallLoadingOverlay('Reconnecting…', 'Recovering media path…');
+            }
             handleIceFailure(userId);
           } else if (state === 'disconnected') {
             console.warn(`⚠️ [ICE] Disconnected from ${userId}`);
+
+            if (!isInitializing) {
+              showCallLoadingOverlay('Reconnecting…', 'Waiting for network…');
+            }
 
             // ✅ Proactive Retry: if still disconnected after 3 seconds, fire recovery
             if (stats) {
@@ -2539,6 +2585,10 @@
 
           if (state === 'connected') {
             console.log(`✅ [PC] Peer connection established with ${userId}`);
+
+            if (!isInitializing) {
+              hideCallLoadingOverlay();
+            }
 
             safeSocketEmit('connection_state_update', {
               callId: callData.callId,
@@ -3387,7 +3437,23 @@
           socketInstance.on('disconnect', (reason) => {
             console.warn(`🔌 Call socket disconnected: ${reason}`);
             stopCallHeartbeat();
+            if (!isInitializing) {
+              showCallLoadingOverlay('Reconnecting…', 'Restoring your secure connection…');
+            }
           });
+
+          if (socketInstance.io) {
+            socketInstance.io.on('reconnect_attempt', (attempt) => {
+              if (!isInitializing) {
+                showCallLoadingOverlay('Reconnecting…', `Attempt ${attempt}…`);
+              }
+            });
+            socketInstance.io.on('reconnect_failed', () => {
+              if (!isInitializing) {
+                showCallLoadingOverlay('Connection unstable', 'Trying again…');
+              }
+            });
+          }
 
           socketInstance.on('session_replaced', (data) => {
             console.warn('⚠️ Session replaced by newer socket:', data);
@@ -3450,8 +3516,8 @@
             toast(`Room expiring soon!`, 'warning');
           });
 
-          socketInstance.on('authenticated', async () => {
-            console.log('✅ Authenticated');
+          socketInstance.on('authenticated', async (data) => {
+            console.log(`✅ Authenticated`);
 
             // ✅ Signal CALL MODE to server
             if (callData && callData.roomId) {
@@ -3465,8 +3531,16 @@
               });
               startCallHeartbeat();
               validateCallPresenceState('call_authenticated');
-            }
 
+              // If we were showing reconnect overlay, only hide once WebRTC is back.
+              if (!isInitializing) {
+                if (hasAnyConnectedPeer()) {
+                  hideCallLoadingOverlay();
+                } else {
+                  showCallLoadingOverlay('Reconnecting…', 'Re-establishing media…');
+                }
+              }
+            }
 
             // CRITICAL: Request room data from server to get clock sync
             const roomStr = localStorage.getItem('currentRoom');
