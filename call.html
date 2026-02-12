@@ -342,6 +342,7 @@
 
       let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
       let makingOffer = new Map();
+      let pendingNegotiation = new Map(); // userId -> boolean
 
       let ICE_SERVERS = null;
       let useTurnFallback = false; // Global flag for TURN fallback
@@ -2158,10 +2159,28 @@
             // ✅ CRITICAL FIX: Removed the check that blocked negotiation while connected.
             // Renegotiation is REQUIRED to add/remove tracks even when already connected.
 
+            // Only negotiate from stable state; otherwise mark pending and flush on signalingstatechange.
+            if (pc.signalingState !== 'stable' || negotiationMutex.has(userId) || makingOffer.get(userId)) {
+              pendingNegotiation.set(userId, true);
+              return;
+            }
+
             await createOffer(userId);
           } catch (err) {
             console.error(`❌ Negotiation error for ${userId}:`, err);
           }
+        };
+
+        pc.onsignalingstatechange = () => {
+          try {
+            const state = pc.signalingState;
+            if (state === 'stable' && pendingNegotiation.get(userId)) {
+              pendingNegotiation.set(userId, false);
+              if (!makingOffer.get(userId) && !negotiationMutex.has(userId)) {
+                createOffer(userId).catch(() => { });
+              }
+            }
+          } catch { }
         };
 
         // CRITICAL: Add ontrack handler to receive remote media
@@ -2225,6 +2244,35 @@
               if (event.track.kind === 'audio') {
                 console.log(`🎤 Setting up audio detection for remote user ${userId}`);
                 setupAudioDetection(userId, remoteStream);
+
+                try {
+                  const audioId = `audio-${userId}`;
+                  let remoteAudio = document.getElementById(audioId);
+                  if (!remoteAudio) {
+                    remoteAudio = document.createElement('audio');
+                    remoteAudio.id = audioId;
+                    remoteAudio.autoplay = true;
+                    remoteAudio.playsInline = true;
+                    remoteAudio.muted = false;
+                    remoteAudio.style.display = 'none';
+                    document.body.appendChild(remoteAudio);
+                  }
+
+                  if (!remoteAudio.srcObject || remoteAudio.srcObject.id !== remoteStream.id) {
+                    remoteAudio.srcObject = remoteStream;
+                  }
+                  remoteAudio.volume = 1.0;
+
+                  const tryPlay = async () => {
+                    try {
+                      await remoteAudio.play();
+                    } catch { }
+                  };
+
+                  tryPlay();
+                  setTimeout(tryPlay, 250);
+                  setTimeout(tryPlay, 1000);
+                } catch { }
               }
 
             } else {
@@ -2234,11 +2282,6 @@
             console.warn(`⚠️ No streams in track event for ${userId}`);
           }
 
-          // Track ended handler
-          event.track.onended = () => {
-            console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
-          };
-
           // Track mute/unmute handlers
           event.track.onmute = () => {
             console.log(`🔇 Track muted for ${userId}: ${event.track.kind}`);
@@ -2247,12 +2290,34 @@
           event.track.onunmute = () => {
             console.log(`🔊 Track unmuted for ${userId}: ${event.track.kind}`);
 
-            // ✅ Handle video unmute event (dynamic video addition)
             if (event.track.kind === 'video') {
               console.log(`📹 Video track unmuted for ${userId}, updating visibility`);
               const intended = remoteMediaStates.get(userId);
               const shouldShow = intended ? intended.video : true;
               updateVideoVisibility(userId, shouldShow, true);
+            }
+
+            if (event.track.kind === 'audio') {
+              try {
+                const audioEl = document.getElementById(`audio-${userId}`);
+                if (audioEl) {
+                  audioEl.play().catch(() => { });
+                }
+              } catch { }
+            }
+          };
+
+          // Track ended handler
+          event.track.onended = () => {
+            console.log(`🔇 Track ended for ${userId}: ${event.track.kind}`);
+            if (event.track.kind === 'audio') {
+              try {
+                const audioEl = document.getElementById(`audio-${userId}`);
+                if (audioEl) {
+                  audioEl.srcObject = null;
+                  audioEl.remove();
+                }
+              } catch { }
             }
           };
 
@@ -2591,19 +2656,29 @@
           return;
         }
 
+        // Avoid negotiation while we are processing an inbound offer/answer for this peer.
+        if (negotiationMutex.has(userId)) {
+          console.warn(`⚠️ Negotiation mutex active for ${userId}; deferring offer.`);
+          pendingNegotiation.set(userId, true);
+          return;
+        }
+
         try {
           makingOffer.set(userId, true);
 
           console.log(`📤 Creating offer for ${userId}`);
 
-          let pc = peerConnections.get(userId);
+          const pc = peerConnections.get(userId);
+          if (!pc) {
+            console.error(`❌ No PC found for ${userId} when creating offer`);
+            return;
+          }
 
-          // ✅ PERFECT NEGOTIATION: Reuse PC if exists and not closed
-          if (!pc || pc.connectionState === 'closed') {
-            console.log(`🔧 Creating NEW PeerConnection for ${userId} (initial/retry)`);
-            pc = createPC(userId);
-          } else {
-            console.log(`🔄 Reusing EXISTING PeerConnection for ${userId} (renegotiation)`);
+          // Perfect Negotiation: never create an offer unless stable.
+          if (pc.signalingState !== 'stable') {
+            console.warn(`⚠️ Skipping offer for ${userId} (signalingState=${pc.signalingState}). Will retry when stable.`);
+            pendingNegotiation.set(userId, true);
+            return;
           }
 
           // Validate local stream
