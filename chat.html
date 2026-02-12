@@ -1513,6 +1513,12 @@
       }
     }
 
+    function getScopedSocketSessionId(scope) {
+      const base = getStableSocketSessionId();
+      const safeScope = String(scope || 'default').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      return `${base}:${safeScope || 'default'}`;
+    }
+
     function triggerSocketRecoveryReload(reason = 'chat_socket_recovery') {
       if (controlledReloadInProgress) return;
       controlledReloadInProgress = true;
@@ -4956,7 +4962,7 @@
 
           firebase.auth().currentUser?.getIdToken().then(idToken => {
             console.log('📤 Sending authentication to server...');
-            const sessionId = getStableSocketSessionId();
+            const sessionId = getScopedSocketSessionId('chat');
             const tabId = window.tabManager?.tabId || null;
             socketInstance.emit('authenticate', {
               token: idToken,
@@ -5691,7 +5697,7 @@
 
               firebase.auth().currentUser?.getIdToken(true).then(idToken => {
                 console.log('📤 Re-sending authentication with fresh token...');
-                const sessionId = getStableSocketSessionId();
+                const sessionId = getScopedSocketSessionId('chat');
                 const tabId = window.tabManager?.tabId || null;
                 socketInstance.emit('authenticate', {
                   token: idToken,
