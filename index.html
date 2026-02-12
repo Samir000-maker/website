@@ -1,51 +1,328 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="dark" lang="en">
 <head>
-    <!-- Favicon -->
-<link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MoodLog - Track Your Emotions</title>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-    <link href="global.css" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Vibegra Home Screen</title>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#6320e9",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#161121",
+                        "accent-teal": "#2DD4BF",
+                        "accent-amber": "#F59E0B",
+                    },
+                    fontFamily: {
+                        "display": ["Plus Jakarta Sans", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem", 
+                        "lg": "1rem", 
+                        "xl": "1.5rem", 
+                        "full": "9999px"
+                    },
+                    backgroundImage: {
+                        'mesh-gradient': 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(260,82%,65%,0.15) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,0.3) 0, transparent 50%)',
+                        'glass-gradient': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02))',
+                        'glass-border': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05))'
+                    }
+                },
+            },
+        }
+    </script>
     <style>
-        body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .premium-bg {
+            background-color: #161121;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 30%, rgba(245, 158, 11, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(99, 32, 233, 0.15) 0%, transparent 50%);
+        }
+        
+        @keyframes breathe {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.02);
+                opacity: 0.95;
+            }
+        }
+        
+        .glass-card {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            perspective: 1000px;
+            animation: breathe 4s ease-in-out infinite;
+        }
+        .glass-card:hover {
+            border-color: rgba(99, 32, 233, 0.5);
+            background: linear-gradient(135deg, rgba(99, 32, 233, 0.1), rgba(255, 255, 255, 0.01));
+            transform: translateY(-8px);
+            box-shadow: 0 16px 48px 0 rgba(99, 32, 233, 0.3),
+                        0 0 40px rgba(99, 32, 233, 0.2);
+            animation: none;
+        }
+        
+        .emoji-wrapper {
+            transform-style: preserve-3d;
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        
+        .glass-card:hover .emoji-wrapper {
+            transform: perspective(1000px) rotateY(5deg);
+        }
+        .glow-button {
+            box-shadow: 0 0 20px rgba(99, 32, 233, 0.3);
+            transition: all 0.3s ease;
+        }
+        .glow-button:hover {
+            box-shadow: 0 0 30px rgba(99, 32, 233, 0.6);
+            transform: scale(1.02);
+        }
+        .nav-link {
+            position: relative;
+        }
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 2px;
+            bottom: -4px;
+            left: 50%;
+            background-color: #6320e9;
+            transition: all 0.3s ease;
+            transform: translateX(-50%);
+        }
+        .nav-link:hover::after {
+            width: 100%;
+        }
+        .emoji-3d {
+            filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            font-size: 3.5rem;
+            line-height: 1;
+            display: inline-block;
+            animation: float 3s ease-in-out infinite;
+            transform-style: preserve-3d;
+        }
+        
+        @keyframes float {
+            0%, 100% {
+                transform: translateY(0px) rotate(0deg);
+            }
+            50% {
+                transform: translateY(-10px) rotate(2deg);
+            }
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% {
+                filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+            }
+            50% {
+                filter: drop-shadow(0 8px 24px rgba(99,32,233,0.6));
+            }
+        }
+        
+        .emoji-3d:nth-child(1) {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .emoji-3d:nth-child(2) {
+            animation: float 3.5s ease-in-out infinite;
+            animation-delay: 0.2s;
+        }
+        
+        .emoji-3d:nth-child(3) {
+            animation: float 2.8s ease-in-out infinite;
+            animation-delay: 0.4s;
+        }
+        
+        .emoji-3d:nth-child(4) {
+            animation: float 3.2s ease-in-out infinite;
+            animation-delay: 0.6s;
+        }
+        
+        .group:hover .emoji-3d {
+            animation: none;
+            transform: scale(1.25) translateY(-8px) rotateZ(8deg) rotateY(10deg);
+            filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) 
+                    drop-shadow(0 0 20px rgba(99,32,233,0.5));
+        }
+        
+        .glass-card:hover .emoji-3d {
+            animation-play-state: paused;
+        }
+        
+        /* Special animation for selected card */
+        .ring-2 .emoji-3d {
+            animation: float 2.5s ease-in-out infinite, pulse-glow 2s ease-in-out infinite;
         }
     </style>
 </head>
-<body>
-    <div class="text-center animate-fade-in-up" style="color: white; max-width: 600px; padding: 2rem;">
-        <h1 style="font-size: 3rem; font-weight: 800; margin-bottom: 1rem;">MoodLog</h1>
-        <p style="font-size: 1.25rem; margin-bottom: 2rem; opacity: 0.9;">
-            Track your emotions, connect with others, and discover inner peace
-        </p>
-        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-            <a href="/signup.html" class="btn btn-primary" style="background: white; color: #667eea;">
-                Get Started
-            </a>
-            <a href="/login.html" class="btn btn-secondary" style="border-color: white; color: white;">
-                Login
-            </a>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-800 dark:text-white premium-bg min-h-screen flex flex-col overflow-x-hidden selection:bg-primary selection:text-white">
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 top-0 left-0 transition-all duration-300 backdrop-blur-md bg-background-dark/30 border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3 group cursor-pointer">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-purple-800 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-all">
+                    <span class="material-icons-outlined text-white text-xl">bubble_chart</span>
+                </div>
+                <span class="text-xl font-bold tracking-tight">Vibegra</span>
+            </div>
+            <div class="hidden md:flex items-center gap-10">
+            </div>
+            <div class="flex items-center gap-4">
+                <button class="hidden md:flex text-sm font-medium text-white/70 hover:text-white transition-colors">Sign In</button>
+                <button class="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10 backdrop-blur-sm">
+                    Get Started
+                </button>
+            </div>
         </div>
-    </div>
-    <script src="app.js"></script>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col justify-center relative pt-20">
+        <!-- Ambient Blur Effects -->
+        <div class="absolute top-1/4 left-10 w-64 h-64 bg-accent-teal/10 rounded-full blur-[100px] pointer-events-none"></div>
+        <div class="absolute bottom-1/4 right-10 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
+        
+        <div class="max-w-7xl mx-auto w-full px-6 py-12 lg:py-20 z-10 flex flex-col items-center text-center">
+            <!-- Hero Section -->
+            <div class="max-w-3xl mx-auto mb-16 space-y-6 animate-fade-in-up">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm mb-4">
+                    <span class="w-2 h-2 rounded-full bg-accent-teal shadow-[0_0_10px_rgba(45,212,191,0.5)]"></span>
+                    <span class="text-xs font-medium text-white/70 uppercase tracking-wider">Safe Space Verified</span>
+                </div>
+                <h1 class="text-5xl md:text-7xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
+                    Connect on a <br/><span class="text-white">Deeper Level.</span>
+                </h1>
+                <p class="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-light leading-relaxed">
+                    A premium sanctuary to share your vibe and find people who resonate with you right now. No noise, just connection.
+                </p>
+            </div>
+
+            <!-- Mood Cards -->
+            <div class="w-full max-w-6xl mx-auto mb-16">
+                <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-6">
+                    <!-- Stressed Card -->
+                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
+                        <div class="absolute inset-0 bg-gradient-to-br from-red-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
+                            <span class="emoji-3d">😫</span>
+                        </div>
+                        <div class="relative z-10">
+                            <h3 class="text-lg font-semibold text-white mb-1">Stressed</h3>
+                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Overwhelmed</p>
+                        </div>
+                    </button>
+
+                    <!-- Lonely Card -->
+                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
+                        <div class="absolute inset-0 bg-gradient-to-br from-blue-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
+                            <span class="emoji-3d">🥺</span>
+                        </div>
+                        <div class="relative z-10">
+                            <h3 class="text-lg font-semibold text-white mb-1">Lonely</h3>
+                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Seeking connection</p>
+                        </div>
+                    </button>
+
+                    <!-- Tired Card (Selected) -->
+                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden ring-2 ring-primary/50 shadow-[0_0_30px_rgba(99,32,233,0.15)] transform -translate-y-2 h-full">
+                        <div class="absolute inset-0 bg-gradient-to-br from-primary/20 to-transparent opacity-100 transition-opacity duration-300"></div>
+                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
+                            <span class="emoji-3d">😴</span>
+                        </div>
+                        <div class="relative z-10">
+                            <h3 class="text-lg font-semibold text-white mb-1">Tired</h3>
+                            <p class="text-xs text-white/60 font-light group-hover:text-white/80 transition-colors">Low energy</p>
+                        </div>
+                        <div class="absolute top-4 right-4 w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(99,32,233,1)]"></div>
+                    </button>
+
+                    <!-- Sad Card -->
+                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
+                        <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
+                            <span class="emoji-3d">😢</span>
+                        </div>
+                        <div class="relative z-10">
+                            <h3 class="text-lg font-semibold text-white mb-1">Sad</h3>
+                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Feeling down</p>
+                        </div>
+                    </button>
+
+                    <!-- More Card -->
+                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full border-dashed border-white/20 hover:border-white/40">
+                        <div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div class="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 border border-white/10 group-hover:border-purple-400/30">
+                            <span class="material-icons-outlined text-3xl text-white/50 group-hover:text-white/80">more_horiz</span>
+                        </div>
+                        <div class="relative z-10">
+                            <h3 class="text-lg font-semibold text-white mb-1">More...</h3>
+                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">View all moods</p>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- CTA Section -->
+            <div class="flex flex-col items-center gap-6">
+                <button class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3">
+                    Connect Now
+                    <span class="material-icons-outlined text-xl">arrow_forward</span>
+                </button>
+                <div class="flex items-center gap-6 text-sm text-slate-500">
+                    <div class="flex items-center gap-1.5">
+                        <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
+                        <span>End-to-end Encrypted</span>
+                    </div>
+                    <div class="w-1 h-1 rounded-full bg-white/20"></div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="material-icons-outlined text-base text-primary">face</span>
+                        <span>Verified Profiles Only</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decorative Background Elements -->
+        <div class="absolute top-0 w-full h-full overflow-hidden pointer-events-none z-0">
+            <div class="absolute top-[15%] right-[10%] w-32 h-32 opacity-20" data-alt="Abstract purple glow orb" style="background-image: radial-gradient(circle, rgba(99,32,233,0.4) 0%, transparent 70%);"></div>
+            <div class="absolute bottom-[20%] left-[5%] w-48 h-48 opacity-10" data-alt="Abstract teal glow orb" style="background-image: radial-gradient(circle, rgba(45,212,191,0.4) 0%, transparent 70%);"></div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/5 bg-background-dark/50 backdrop-blur-sm relative z-10">
+        <div class="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="text-slate-500 text-sm">
+                © 2023 Vibegra. All rights reserved.
+            </div>
+            <div class="flex gap-6">
+                <a class="text-slate-500 hover:text-white text-sm transition-colors" href="#">Privacy Policy</a>
+                <a class="text-slate-500 hover:text-white text-sm transition-colors" href="#">Terms of Service</a>
+            </div>
+        </div>
+    </footer>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
