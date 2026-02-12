@@ -1882,6 +1882,26 @@ async function applyPresenceContextForUser({
 
   // Leaving chat context for any non-call page is authoritative and server-driven.
   if (triggerLeaveOnExit && resolvedRoomId && hasChatContextHistory) {
+    try {
+      const activeSockets = await io.in(`user:${userId}`).fetchSockets();
+      if (activeSockets.length > 0) {
+        logLifecycle('presence_context_exit_deferred_active_sockets', {
+          userId,
+          firebaseUid,
+          location: normalizedLocation,
+          roomId: resolvedRoomId,
+          source,
+          activeSockets: activeSockets.length
+        });
+        return {
+          success: true,
+          location: normalizedLocation,
+          roomId: resolvedRoomId || null,
+          leftRoom: false
+        };
+      }
+    } catch { }
+
     if (currentPresence?.status === 'matchmaking') {
       logLifecycle('presence_context_exit_ignored_matchmaking', {
         userId,
@@ -3035,8 +3055,7 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
 
     const bypassActiveSocketGuard = (
       reason === 'manual' ||
-      reason === 'api_beacon' ||
-      reason === 'location_change'
+      reason === 'api_beacon'
     );
 
     if (!bypassActiveSocketGuard) {
