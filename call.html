@@ -2668,22 +2668,23 @@
 
           console.log(`📤 Creating offer for ${userId}`);
 
-          const pc = peerConnections.get(userId);
-          if (!pc) {
-            console.error(`❌ No PC found for ${userId} when creating offer`);
+          // Validate local stream early; we need it to create a PC.
+          if (!localStream || localStream.getTracks().length === 0) {
+            console.warn(`⚠️ Local media not ready yet; deferring offer for ${userId}`);
+            pendingNegotiation.set(userId, true);
             return;
+          }
+
+          let pc = peerConnections.get(userId);
+          if (!pc || pc.connectionState === 'closed') {
+            console.warn(`⚠️ No active PC for ${userId} when creating offer; creating one now.`);
+            pc = createPC(userId);
           }
 
           // Perfect Negotiation: never create an offer unless stable.
           if (pc.signalingState !== 'stable') {
             console.warn(`⚠️ Skipping offer for ${userId} (signalingState=${pc.signalingState}). Will retry when stable.`);
             pendingNegotiation.set(userId, true);
-            return;
-          }
-
-          // Validate local stream
-          if (!localStream || localStream.getTracks().length === 0) {
-            console.error(`❌ No local stream available when creating offer for ${userId}`);
             return;
           }
 
