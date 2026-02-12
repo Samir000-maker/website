@@ -418,9 +418,32 @@ export async function leaveRoom(userId) {
       // Authoritative lifecycle: room is not viable with fewer than 2 active users.
       const minimumViableUsers = Math.max(2, config.MIN_USERS_FOR_ROOM || 2);
       if (remainingUsers < minimumViableUsers) {
-        console.log(`💥 [MMR] Room ${roomId} below viable user threshold (${remainingUsers}/${minimumViableUsers}). Auto-destroying...`);
-        await destroyRoomInternal(roomId, 'below_min_users');
-        return { success: true, roomId, remainingUsers: 0, destroyed: true, users: [] };
+        // Strong re-check: roomData.users can be stale during reconnect/app reopen.
+        // Validate remaining membership using the authoritative user:room:<userId> mappings.
+        const stillMappedUsers = [];
+        for (const u of updatedUsers) {
+          try {
+            const mappedRoomId = await redis.get(`user:room:${u.userId}`);
+            if (mappedRoomId === roomId) stillMappedUsers.push(u);
+          } catch { }
+        }
+
+        const authoritativeRemaining = stillMappedUsers.length;
+        console.log(
+          `🏠 [MMR] Viability re-check for ${roomId}: in-room-list=${remainingUsers}, mapped=${authoritativeRemaining} (min=${minimumViableUsers})`
+        );
+
+        if (authoritativeRemaining < minimumViableUsers) {
+          console.log(`💥 [MMR] Room ${roomId} below viable user threshold (${authoritativeRemaining}/${minimumViableUsers}). Auto-destroying...`);
+          await destroyRoomInternal(roomId, 'below_min_users');
+          return { success: true, roomId, remainingUsers: 0, destroyed: true, users: [] };
+        }
+
+        // Not actually below threshold; persist corrected room users and keep room alive.
+        roomData.users = stillMappedUsers;
+        await saveRoomToRedis(roomData);
+        console.log(`🏠 [MMR] Prevented false room destroy for ${roomId}. Remaining (authoritative): ${authoritativeRemaining}`);
+        return { success: true, roomId, remainingUsers: authoritativeRemaining, destroyed: false, users: stillMappedUsers };
       }
 
       // Save updated room state
@@ -432,7 +455,7 @@ export async function leaveRoom(userId) {
     }
 
     console.log(`🏠 [Matchmaking] Legacy marker for ${userId} cleared (room ${roomId} was already gone)`);
-    return { success: true, roomId, remainingUsers: 0, destroyed: true, users: [] };
+    return { success: true, roomId, remainingUsers: 0, destroyed: false, users: [] };
   } finally {
     await releaseLock();
   }
