@@ -1673,7 +1673,7 @@ const io = new Server(server, {
 
 // Initialize Redis-backed matchmaking
 matchmaking.init(pubClient, io, redlock);
-
+app.use(express.static(__dirname + '/public'));
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
