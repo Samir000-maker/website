@@ -1140,9 +1140,9 @@
 
       <div class="flex items-center gap-3 flex-shrink-0">
         <!-- Timer Display -->
-        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#2a2d33] rounded-lg border border-gray-700">
-          <span class="material-symbols-outlined text-gray-400 text-base">schedule</span>
-          <span id="timeRemaining" class="text-xs text-gray-300 font-medium">--:--</span>
+        <div class="flex items-center gap-2 px-2 sm:px-3 py-1.5 bg-[#2a2d33] rounded-lg border border-gray-700 min-w-0">
+          <span class="material-symbols-outlined text-gray-400 text-base flex-shrink-0">schedule</span>
+          <span id="timeRemaining" class="text-[11px] sm:text-xs text-gray-300 font-medium whitespace-nowrap">--:--</span>
         </div>
 
         <!-- Call Buttons -->
@@ -1374,6 +1374,93 @@
     let lastVisibilityHiddenAt = 0;
     let controlledReloadInProgress = false;
 
+    const SIGNALING_QUEUE_KEY = 'vibe_chat_socket_queue_v1';
+    let socketEmitQueue = [];
+
+    function loadSocketEmitQueue() {
+      try {
+        const raw = sessionStorage.getItem(SIGNALING_QUEUE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          socketEmitQueue = parsed;
+        }
+      } catch {
+        socketEmitQueue = [];
+      }
+    }
+
+    function persistSocketEmitQueue() {
+      try {
+        sessionStorage.setItem(SIGNALING_QUEUE_KEY, JSON.stringify(socketEmitQueue.slice(-500)));
+      } catch { }
+    }
+
+    function enqueueSocketEmit(eventName, payload) {
+      socketEmitQueue.push({
+        eventName,
+        payload,
+        queuedAt: Date.now()
+      });
+      persistSocketEmitQueue();
+    }
+
+    function flushSocketEmitQueue() {
+      if (!socketInstance?.connected) return;
+      if (!socketEmitQueue.length) return;
+
+      const now = Date.now();
+      const ttlMs = 2 * 60 * 1000;
+      const queue = socketEmitQueue;
+      socketEmitQueue = [];
+      persistSocketEmitQueue();
+
+      let flushed = 0;
+      for (const item of queue) {
+        if (!item || !item.eventName) continue;
+        if (item.queuedAt && (now - item.queuedAt) > ttlMs) continue;
+        try {
+          socketInstance.emit(item.eventName, item.payload);
+          flushed++;
+        } catch {
+          enqueueSocketEmit(item.eventName, item.payload);
+        }
+      }
+
+      if (flushed > 0) {
+        console.log(`📤 Flushed ${flushed} queued socket message(s)`);
+      }
+    }
+
+    function safeSocketEmit(eventName, payload, options = {}) {
+      const { queueWhenDisconnected = true } = options;
+      if (socketInstance?.connected) {
+        try {
+          socketInstance.emit(eventName, payload);
+          return true;
+        } catch {
+          if (queueWhenDisconnected) enqueueSocketEmit(eventName, payload);
+          return false;
+        }
+      }
+      if (queueWhenDisconnected) enqueueSocketEmit(eventName, payload);
+      return false;
+    }
+
+    function safeSocketEmitWithAck(eventName, payload, ack, options = {}) {
+      const { queueWhenDisconnected = true } = options;
+      if (socketInstance?.connected) {
+        try {
+          socketInstance.emit(eventName, payload, ack);
+          return true;
+        } catch {
+          if (queueWhenDisconnected) enqueueSocketEmit(eventName, payload);
+          return false;
+        }
+      }
+      if (queueWhenDisconnected) enqueueSocketEmit(eventName, payload);
+      return false;
+    }
+
 
     function startHeartbeat() {
       if (heartbeatInterval) stopHeartbeat();
@@ -1382,7 +1469,7 @@
 
       // Send initial heartbeat immediately
       if (socketInstance && socketInstance.connected && heartbeatRoomId) {
-        socketInstance.emit('heartbeat', {
+        safeSocketEmit('heartbeat', {
           roomId: heartbeatRoomId,
           location: 'chat',
           path: window.location.pathname
@@ -1393,7 +1480,7 @@
         if (socketInstance && socketInstance.connected) {
           const roomId = currentRoomId;
           if (roomId) {
-            socketInstance.emit('heartbeat', {
+            safeSocketEmit('heartbeat', {
               roomId,
               location: 'chat',
               path: window.location.pathname
@@ -1455,7 +1542,7 @@
         console.log(`🔄 [Socket] Reconnect requested (${trigger})`);
         socketInstance.connect();
       } else if (currentRoomId) {
-        socketInstance.emit('heartbeat', {
+        safeSocketEmit('heartbeat', {
           roomId: currentRoomId,
           location: 'chat',
           path: window.location.pathname
@@ -4432,10 +4519,11 @@
         } catch { }
 
         if (socketInstance?.connected) {
-          socketInstance.emit('page_context', payload, (response) => {
+          safeSocketEmitWithAck('page_context', payload, (response) => {
             if (!response) return;
             if (response.redirectTo && response.redirectTo !== window.location.pathname) {
               cleanupParentCallPage('/mood.html');
+              window.location.href = '/mood.html';
             }
           });
         }
@@ -4444,7 +4532,7 @@
       async function validateChatPresenceState(trigger = 'manual_validation') {
         if (!socketInstance?.connected || !roomData?.roomId) return;
 
-        socketInstance.emit('validate_presence_state', {
+        safeSocketEmitWithAck('validate_presence_state', {
           location: 'chat',
           roomId: roomData.roomId,
           path: window.location.pathname,
@@ -4453,7 +4541,7 @@
           if (!response) return;
           if (response.valid) {
             if ((trigger.includes('pageshow') || trigger.includes('visibility')) && socketInstance?.connected) {
-              socketInstance.emit('request_room_sync', { roomId: response.roomId || roomData.roomId });
+              safeSocketEmit('request_room_sync', { roomId: response.roomId || roomData.roomId });
             }
             return;
           }
@@ -4876,6 +4964,8 @@
               sessionId,
               tabId
             });
+            loadSocketEmitQueue();
+            flushSocketEmitQueue();
             reportChatPresenceContext('socket_connect', {
               allowRedirect: false,
               keepalive: true,
@@ -4909,10 +4999,16 @@
           }
         });
 
-        socketInstance.on('session_replaced', () => {
-          console.warn('⚠️ Session replaced by newer socket. Reconnecting silently...');
+        socketInstance.on('session_replaced', (data) => {
+          console.warn('⚠️ Session replaced by newer socket:', data);
           setAuthenticationState(false);
-          socketInstance.connect();
+          try { stopHeartbeat(); } catch { }
+          try { socketInstance.disconnect(); } catch { }
+          toast('This session was opened in another tab/device. Redirecting...', 'warning');
+          setTimeout(() => {
+            cleanupParentCallPage('/mood.html');
+            window.location.href = '/mood.html';
+          }, 1200);
         });
 
         socketInstance.on('server_ping', (payload = {}) => {
@@ -4970,7 +5066,7 @@
               const localRoomData = JSON.parse(roomStr);
               console.log('📦 Requesting fresh room data for clock sync...');
 
-              socketInstance.emit('request_room_sync', { roomId: localRoomData.roomId });
+              safeSocketEmit('request_room_sync', { roomId: localRoomData.roomId });
 
             } catch (e) {
               console.error('❌ Failed to parse room data:', e);
@@ -4978,7 +5074,7 @@
           }
 
           startCachedCallMonitoring();
-          socketInstance.emit('join_room', { roomId: roomData.roomId });
+          safeSocketEmit('join_room', { roomId: roomData.roomId });
           validateChatPresenceState('post_auth_join').catch(() => { });
 
           console.log('✅ ========================================\n');
@@ -5595,9 +5691,13 @@
 
               firebase.auth().currentUser?.getIdToken(true).then(idToken => {
                 console.log('📤 Re-sending authentication with fresh token...');
+                const sessionId = getStableSocketSessionId();
+                const tabId = window.tabManager?.tabId || null;
                 socketInstance.emit('authenticate', {
                   token: idToken,
-                  userId: currentUser.userId
+                  userId: currentUser.userId,
+                  sessionId,
+                  tabId
                 });
 
                 toast('Reconnecting...', 'info');
@@ -5723,12 +5823,12 @@
               lastRoomRecoveryAttemptAt = now;
 
               toast('Connection hiccup detected. Resyncing room...', 'warning');
-              socketInstance.emit('request_room_sync', { roomId: roomData.roomId });
-              socketInstance.emit('join_room', { roomId: roomData.roomId });
+              safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
+              safeSocketEmit('join_room', { roomId: roomData.roomId });
 
               setTimeout(() => {
                 roomRecoveryInProgress = false;
-              }, 3000);
+              }, 2000);
 
               console.warn(`🔄 Recovery attempt ${roomRecoveryAttempts}/3 initiated`);
               console.error('❌ ========================================\n');
@@ -7063,7 +7163,7 @@
                 hideAttachmentPreview();
 
                 console.log('📤 Emitting message metadata to server...');
-                socketInstance.emit('chat_message', serverMessageData);
+                safeSocketEmit('chat_message', serverMessageData);
 
                 console.log('✅ Attachment uploaded and message broadcasted');
 
@@ -7088,7 +7188,7 @@
             } else {
               // No attachment - send message normally
               console.log('📤 Emitting text-only message...');
-              socketInstance.emit('chat_message', serverMessageData);
+              safeSocketEmit('chat_message', serverMessageData);
               console.log('✅ Message sent to server');
             }
 
