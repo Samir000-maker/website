@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
-    <!-- Favicon -->
-<link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Vibegra Home Screen</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
     <link href="https://fonts.googleapis.com" rel="preconnect"/>
     <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -192,8 +192,8 @@
     <nav class="fixed w-full z-50 top-0 left-0 transition-all duration-300 backdrop-blur-md bg-background-dark/30 border-b border-white/5">
         <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
             <div class="flex items-center gap-3 group cursor-pointer">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-purple-800 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-all">
-                    <span class="material-icons-outlined text-white text-xl">bubble_chart</span>
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-purple-800 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-all overflow-hidden">
+                    <img src="/public/favicon.png" alt="Vibegra Logo" class="w-7 h-7 object-contain">
                 </div>
                 <span class="text-xl font-bold tracking-tight">Vibegra</span>
             </div>
@@ -227,11 +227,30 @@
                 <p class="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-light leading-relaxed">
                     A premium sanctuary to share your vibe and find people who resonate with you right now. No noise, just connection.
                 </p>
+                
+                <!-- CTA Section (Moved Here) -->
+                <div class="flex flex-col items-center gap-6 pt-4">
+                    <a href="signup.html" class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer no-underline">
+                        Connect Now
+                        <span class="material-icons-outlined text-xl">arrow_forward</span>
+                    </a>
+                    <div class="flex items-center gap-6 text-sm text-slate-500">
+                        <div class="flex items-center gap-1.5">
+                            <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
+                            <span>End-to-end Encrypted</span>
+                        </div>
+                        <div class="w-1 h-1 rounded-full bg-white/20"></div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="material-icons-outlined text-base text-primary">face</span>
+                            <span>Verified Profiles Only</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Mood Cards -->
             <div class="w-full max-w-6xl mx-auto mb-16">
-                <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
+                <p class="text-sm font-medium text-white/60 mb-6 uppercase tracking-widest">How are you feeling?</p>
                 <div class="grid grid-cols-2 md:grid-cols-5 gap-6">
                     <!-- Stressed Card -->
                     <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
@@ -293,25 +312,6 @@
                             <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">View all moods</p>
                         </div>
                     </button>
-                </div>
-            </div>
-
-            <!-- CTA Section -->
-            <div class="flex flex-col items-center gap-6">
-                <a href="signup.html" class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer no-underline">
-                    Connect Now
-                    <span class="material-icons-outlined text-xl">arrow_forward</span>
-                </a>
-                <div class="flex items-center gap-6 text-sm text-slate-500">
-                    <div class="flex items-center gap-1.5">
-                        <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
-                        <span>End-to-end Encrypted</span>
-                    </div>
-                    <div class="w-1 h-1 rounded-full bg-white/20"></div>
-                    <div class="flex items-center gap-1.5">
-                        <span class="material-icons-outlined text-base text-primary">face</span>
-                        <span>Verified Profiles Only</span>
-                    </div>
                 </div>
             </div>
         </div>
