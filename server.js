@@ -6,7 +6,7 @@
 const instanceId = process.env.INSTANCE_ID || process.env.NODE_APP_INSTANCE || '0';
 const isClusterMode = process.env.NODE_APP_INSTANCE !== undefined;
 const processId = process.pid;
-
+app.use(express.static(__dirname + '/public'));
 console.log('');
 console.log('🚀 ========================================');
 console.log('🚀 INSTANCE INITIALIZATION');
@@ -1673,7 +1673,7 @@ const io = new Server(server, {
 
 // Initialize Redis-backed matchmaking
 matchmaking.init(pubClient, io, redlock);
-app.use(express.static(__dirname + '/public'));
+
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
