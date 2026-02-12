@@ -839,6 +839,12 @@
         }
       }
 
+      function getScopedSocketSessionId(scope) {
+        const base = getStableSocketSessionId();
+        const safeScope = String(scope || 'default').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        return `${base}:${safeScope || 'default'}`;
+      }
+
       function triggerSocketRecoveryReload(reason = 'socket_recovery') {
         try {
           const key = 'mood_socket_recovery_state';
@@ -874,7 +880,7 @@
           // 1. Wait for TabManager to be ready
           const tabManager = await waitForTabManager();
           const tabId = tabManager.tabId;
-          const sessionId = getStableSocketSessionId();
+          const sessionId = getScopedSocketSessionId('mood');
 
           console.log('✅ [Auth] TabId retrieved:', tabId);
 
@@ -989,16 +995,14 @@
 
           // Connect Socket.IO to backend server
           const socketUrl = window.location.origin;
-          const sessionId = getStableSocketSessionId();
+          const sessionId = getScopedSocketSessionId('mood');
           const tabId = window.tabManager?.tabId || null;
           const socket = io(socketUrl, {
             transports: ['websocket', 'polling'],
             reconnection: true,
-            reconnectionAttempts: 1000,
-            reconnectionDelay: 500,
-            reconnectionDelayMax: 10000,
-            randomizationFactor: 0.5,
-            closeOnBeforeunload: false,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
             timeout: 15000,
             auth: {
               token: idToken,
