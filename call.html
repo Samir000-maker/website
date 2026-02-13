@@ -283,6 +283,10 @@
           class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all">
           <span class="material-symbols-outlined text-lg sm:text-2xl">videocam_off</span>
         </button>
+        <button id="flipCamBtn" disabled
+          class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span class="material-symbols-outlined text-lg sm:text-2xl">cameraswitch</span>
+        </button>
       </div>
 
       <div class="pl-1 sm:pl-2">
@@ -348,6 +352,10 @@
       let videoTrackAcquirePromise = null;
       const videoRecoveryAttempts = new Map();
       const MAX_VIDEO_RECOVERY_ATTEMPTS = 3;
+
+      let availableVideoDevices = [];
+      let activeVideoDeviceId = null;
+      let isFlippingCamera = false;
 
       let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
       let makingOffer = new Map();
@@ -1455,6 +1463,11 @@
           const deviceIds = videoInputs.map(d => d.deviceId).filter(Boolean);
           const uniqueDeviceIds = Array.from(new Set(deviceIds));
 
+          // Cache the camera list for flip button logic
+          try {
+            availableVideoDevices = videoInputs;
+          } catch { }
+
           // Constraint profiles: start higher quality, then relax.
           // WhatsApp-like: prefer "whatever works" first, then increase quality.
           // This avoids AbortError timeouts on some webcams when strict constraints/deviceId are used.
@@ -1509,6 +1522,12 @@
           }
 
           const { stream: videoStream, track } = chosen;
+
+          // Store the current camera deviceId if provided
+          try {
+            const settings = track.getSettings ? track.getSettings() : null;
+            if (settings?.deviceId) activeVideoDeviceId = settings.deviceId;
+          } catch { }
 
           if (!localStream) localStream = new MediaStream();
 
@@ -1567,6 +1586,155 @@
         });
 
         return videoTrackAcquirePromise;
+      }
+
+      async function refreshAvailableCameras() {
+        try {
+          if (!navigator.mediaDevices?.enumerateDevices) {
+            availableVideoDevices = [];
+            return [];
+          }
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          availableVideoDevices = devices.filter(d => d.kind === 'videoinput');
+          return availableVideoDevices;
+        } catch {
+          availableVideoDevices = [];
+          return [];
+        }
+      }
+
+      function updateFlipButtonState() {
+        try {
+          const flipBtn = document.getElementById('flipCamBtn');
+          if (!flipBtn) return;
+
+          const hasVideoTrack = !!(localStream && localStream.getVideoTracks().length > 0);
+          const canFlip = isVideoEnabled && hasVideoTrack && Array.isArray(availableVideoDevices) && availableVideoDevices.length >= 2;
+          flipBtn.disabled = !canFlip || isFlippingCamera;
+        } catch { }
+      }
+
+      async function switchToNextCamera() {
+        if (isFlippingCamera) return;
+        isFlippingCamera = true;
+        updateFlipButtonState();
+
+        try {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            toast('Camera not supported on this device.', 'error');
+            return;
+          }
+
+          await refreshAvailableCameras();
+          if (!availableVideoDevices || availableVideoDevices.length < 2) {
+            toast('No alternative camera found.', 'warning');
+            return;
+          }
+
+          const currentTrack = localStream?.getVideoTracks?.()[0] || null;
+          let currentId = activeVideoDeviceId;
+          try {
+            const s = currentTrack?.getSettings ? currentTrack.getSettings() : null;
+            if (s?.deviceId) currentId = s.deviceId;
+          } catch { }
+
+          const ids = availableVideoDevices.map(d => d.deviceId).filter(Boolean);
+          const uniqueIds = Array.from(new Set(ids));
+          if (uniqueIds.length < 2) {
+            toast('No alternative camera found.', 'warning');
+            return;
+          }
+
+          const idx = currentId ? uniqueIds.indexOf(currentId) : -1;
+          const nextId = uniqueIds[(idx >= 0 ? idx + 1 : 0) % uniqueIds.length];
+
+          showReconnectUI('Switching camera…', 'Applying camera change…');
+
+          // Acquire with ideal deviceId to reduce timeouts
+          const nextStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { ideal: nextId },
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            },
+            audio: false
+          });
+
+          const nextTrack = nextStream.getVideoTracks()[0];
+          if (!nextTrack) {
+            try { nextStream.getTracks().forEach(t => t.stop()); } catch { }
+            toast('Could not switch camera.', 'error');
+            return;
+          }
+
+          // Remove old video track
+          if (!localStream) localStream = new MediaStream();
+          try {
+            localStream.getVideoTracks().forEach(t => {
+              try { localStream.removeTrack(t); } catch { }
+              try { t.stop(); } catch { }
+            });
+          } catch { }
+
+          localStream.addTrack(nextTrack);
+          nextTrack.enabled = true;
+
+          try {
+            const settings = nextTrack.getSettings ? nextTrack.getSettings() : null;
+            if (settings?.deviceId) activeVideoDeviceId = settings.deviceId;
+            else activeVideoDeviceId = nextId;
+          } catch {
+            activeVideoDeviceId = nextId;
+          }
+
+          // Update local UI
+          try {
+            const localVid = document.getElementById(`video-${currentUser.userId}`);
+            if (localVid) {
+              localVid.srcObject = localStream;
+              await localVid.play().catch(() => { });
+            }
+          } catch { }
+
+          // Replace on all peer connections
+          peerConnections.forEach((pc, peerId) => {
+            try {
+              const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+              if (sender) {
+                sender.replaceTrack(nextTrack).catch(() => { });
+              } else {
+                pc.addTrack(nextTrack, localStream);
+              }
+
+              if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
+                setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+              } else {
+                pendingNegotiation.set(peerId, true);
+              }
+            } catch { }
+          });
+
+          // Stop extra tracks in the temp stream
+          try {
+            nextStream.getTracks().forEach(t => {
+              if (t !== nextTrack) {
+                try { t.stop(); } catch { }
+              }
+            });
+          } catch { }
+
+          // Broadcast state stays ON; no need to send OFF/ON flip. Still re-assert ON.
+          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
+          hideReconnectUI();
+        } catch (e) {
+          console.error('❌ Camera flip failed:', e);
+          try { toast('Camera flip failed. Check camera permissions or close other camera apps.', 'error'); } catch { }
+          showReconnectUI('Camera unavailable', 'Close other apps using the camera and try again.');
+          setTimeout(() => { try { hideReconnectUI(); } catch { } }, 1800);
+        } finally {
+          isFlippingCamera = false;
+          updateFlipButtonState();
+        }
       }
 
       async function acquireLocalAudioTrack() {
@@ -2195,6 +2363,8 @@
               safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
               safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
             }
+
+            refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
 
             if (pendingVideoToggleDesired !== null) {
               applyPendingVideoToggle('initLocalMedia');
@@ -4585,20 +4755,27 @@
 
           const mic = document.getElementById('micBtn');
           const vid = document.getElementById('videoBtn');
+          const flip = document.getElementById('flipCamBtn');
           const leave = document.getElementById('leaveCallBtn');
 
           if (mic) mic.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleMic());
           if (vid) vid.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleVideo());
+          if (flip) flip.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : switchToNextCamera());
           if (leave) leave.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : leaveCall());
 
           // ✅ Apply initial visual lockout
-          [mic, vid, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
+          [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
 
           // ✅ Set 3-second unlock timer
           setTimeout(() => {
             isControlsLocked = false;
-            [mic, vid, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
+            [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
             console.log('🔓 Controls unlocked (3s grace period complete)');
+
+            // Enable flip only if video is on and 2+ cameras exist
+            try {
+              refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
+            } catch { }
           }, 3000);
 
           // Setup back button handler for background call
