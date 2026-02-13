@@ -24,9 +24,9 @@
           fontFamily: {
             "display": ["Manrope", "sans-serif"]
           }
-        },
-      },
-    }
+        }
+      }
+    };
   </script>
   <style>
     .material-symbols-outlined {
@@ -1355,25 +1355,107 @@
         videoTrackAcquirePromise = (async () => {
           console.log(`📹 Prewarming camera access for instant video enable...`);
 
-          const videoStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-              facingMode: 'user'
+          if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Camera API not available on this device/browser');
+          }
+
+          const tryGetVideoStream = async (constraints, label) => {
+            try {
+              console.log(`📹 [Camera] getUserMedia attempt: ${label}`);
+              const s = await navigator.mediaDevices.getUserMedia(constraints);
+              const t = s.getVideoTracks()[0];
+              if (!t) {
+                try { s.getTracks().forEach(x => x.stop()); } catch { }
+                throw new Error('No video track received from camera');
+              }
+              return { stream: s, track: t };
+            } catch (e) {
+              console.warn(`⚠️ [Camera] Attempt failed (${label}): ${e.name || 'Error'}: ${e.message || ''}`);
+              throw e;
             }
-          });
+          };
 
-          const track = videoStream.getVideoTracks()[0];
-          if (!track) {
-            throw new Error('No video track received from camera');
+          // Enumerate cameras (labels may be empty until permission is granted)
+          let videoInputs = [];
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            videoInputs = devices.filter(d => d.kind === 'videoinput');
+          } catch { }
+
+          const deviceIds = videoInputs.map(d => d.deviceId).filter(Boolean);
+          const uniqueDeviceIds = Array.from(new Set(deviceIds));
+
+          // Constraint profiles: start higher quality, then relax.
+          const baseProfiles = [
+            { video: { width: { ideal: 1280 }, height: { ideal: 720 } } },
+            { video: { width: { ideal: 640 }, height: { ideal: 480 } } },
+            { video: true }
+          ];
+
+          const attempts = [];
+
+          // Prefer explicit deviceId attempts first (best for multi-camera systems)
+          for (const id of uniqueDeviceIds) {
+            attempts.push({
+              constraints: { video: { deviceId: { exact: id }, width: { ideal: 640 }, height: { ideal: 480 } } },
+              label: `deviceId exact + 640x480 (${id.substring(0, 6)}…)`
+            });
+            attempts.push({
+              constraints: { video: { deviceId: { exact: id } } },
+              label: `deviceId exact (${id.substring(0, 6)}…)`
+            });
           }
 
-          if (!localStream) {
-            localStream = new MediaStream();
+          for (const p of baseProfiles) {
+            attempts.push({ constraints: p, label: JSON.stringify(p.video) });
           }
+
+          let chosen = null;
+          let lastError = null;
+
+          for (let i = 0; i < attempts.length; i++) {
+            const { constraints, label } = attempts[i];
+            try {
+              chosen = await tryGetVideoStream(constraints, label);
+              break;
+            } catch (e) {
+              lastError = e;
+
+              // If camera is busy/not readable, give it a tiny cooldown before retrying next profile.
+              if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
+                await new Promise(r => setTimeout(r, 250));
+              }
+            }
+          }
+
+          if (!chosen?.track) {
+            throw lastError || new Error('Unable to access camera');
+          }
+
+          const { stream: videoStream, track } = chosen;
+
+          if (!localStream) localStream = new MediaStream();
+
+          // Ensure we don't accumulate duplicate video tracks
+          try {
+            localStream.getVideoTracks().forEach(t => {
+              try { localStream.removeTrack(t); } catch { }
+              try { t.stop(); } catch { }
+            });
+          } catch { }
 
           localStream.addTrack(track);
+          track.enabled = true;
           console.log(`✅ Video track added to localStream: ${track.id.substring(0, 8)}`);
+
+          // Stop extra tracks from temporary stream (keep the selected track alive because it's in localStream)
+          try {
+            videoStream.getTracks().forEach(t => {
+              if (t !== track) {
+                try { t.stop(); } catch { }
+              }
+            });
+          } catch { }
 
           const localVid = document.getElementById(`video-${currentUser.userId}`);
           if (localVid) {
@@ -1381,17 +1463,25 @@
             await localVid.play().catch(e => console.warn('Local play error:', e));
           }
 
-          peerConnections.forEach((pc, userId) => {
+          // Attach to all PCs and trigger renegotiation reliably
+          peerConnections.forEach((pc, peerId) => {
             try {
               const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
               if (sender) {
-                sender.replaceTrack(track).catch(err => console.warn(`   ⚠️ Failed to replace track for ${userId}:`, err.message));
+                sender.replaceTrack(track).catch(err => console.warn(`   ⚠️ Failed to replace track for ${peerId}:`, err.message));
               } else {
                 pc.addTrack(track, localStream);
-                console.log(`   ➕ Track added to PC for ${userId}`);
+                console.log(`   ➕ Track added to PC for ${peerId}`);
+              }
+
+              // Force offer if stable; otherwise mark pending
+              if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
+                setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+              } else {
+                pendingNegotiation.set(peerId, true);
               }
             } catch (pcErr) {
-              console.warn(`   ⚠️ Failed to attach track to PC ${userId}:`, pcErr.message);
+              console.warn(`   ⚠️ Failed to attach track to PC ${peerId}:`, pcErr.message);
             }
           });
 
@@ -1401,6 +1491,122 @@
         });
 
         return videoTrackAcquirePromise;
+      }
+
+      async function acquireLocalAudioTrack() {
+        if (localStream && localStream.getAudioTracks().length > 0) {
+          return localStream.getAudioTracks()[0];
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Microphone API not available on this device/browser');
+        }
+
+        const tryGetAudioStream = async (constraints, label) => {
+          try {
+            console.log(`🎙️ [Mic] getUserMedia attempt: ${label}`);
+            const s = await navigator.mediaDevices.getUserMedia(constraints);
+            const t = s.getAudioTracks()[0];
+            if (!t) {
+              try { s.getTracks().forEach(x => x.stop()); } catch { }
+              throw new Error('No audio track received from microphone');
+            }
+            return { stream: s, track: t };
+          } catch (e) {
+            console.warn(`⚠️ [Mic] Attempt failed (${label}): ${e.name || 'Error'}: ${e.message || ''}`);
+            throw e;
+          }
+        };
+
+        let audioInputs = [];
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          audioInputs = devices.filter(d => d.kind === 'audioinput');
+        } catch { }
+
+        const deviceIds = Array.from(new Set(audioInputs.map(d => d.deviceId).filter(Boolean)));
+        const profiles = [
+          { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false },
+          { audio: true, video: false }
+        ];
+
+        const attempts = [];
+        for (const id of deviceIds) {
+          attempts.push({
+            constraints: { audio: { deviceId: { exact: id }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false },
+            label: `deviceId exact + processing (${id.substring(0, 6)}…)`
+          });
+          attempts.push({
+            constraints: { audio: { deviceId: { exact: id } }, video: false },
+            label: `deviceId exact (${id.substring(0, 6)}…)`
+          });
+        }
+        for (const p of profiles) {
+          attempts.push({ constraints: p, label: JSON.stringify(p.audio) });
+        }
+
+        let chosen = null;
+        let lastError = null;
+        for (const a of attempts) {
+          try {
+            chosen = await tryGetAudioStream(a.constraints, a.label);
+            break;
+          } catch (e) {
+            lastError = e;
+            if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
+              await new Promise(r => setTimeout(r, 200));
+            }
+          }
+        }
+
+        if (!chosen?.track) {
+          throw lastError || new Error('Unable to access microphone');
+        }
+
+        const { stream: audioStream, track } = chosen;
+
+        if (!localStream) localStream = new MediaStream();
+
+        try {
+          localStream.getAudioTracks().forEach(t => {
+            try { localStream.removeTrack(t); } catch { }
+            try { t.stop(); } catch { }
+          });
+        } catch { }
+
+        localStream.addTrack(track);
+        track.enabled = true;
+        console.log(`✅ Audio track added to localStream: ${track.id.substring(0, 8)}`);
+
+        try {
+          audioStream.getTracks().forEach(t => {
+            if (t !== track) {
+              try { t.stop(); } catch { }
+            }
+          });
+        } catch { }
+
+        peerConnections.forEach((pc, peerId) => {
+          try {
+            const sender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+            if (sender) {
+              sender.replaceTrack(track).catch(err => console.warn(`   ⚠️ Failed to replace audio track for ${peerId}:`, err.message));
+            } else {
+              pc.addTrack(track, localStream);
+              console.log(`   ➕ Audio track added to PC for ${peerId}`);
+            }
+
+            if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
+              setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+            } else {
+              pendingNegotiation.set(peerId, true);
+            }
+          } catch (pcErr) {
+            console.warn(`   ⚠️ Failed to attach audio track to PC ${peerId}:`, pcErr.message);
+          }
+        });
+
+        return track;
       }
 
       async function applyPendingVideoToggle(context = 'pending') {
@@ -1896,6 +2102,16 @@
 
             const callIcon = document.getElementById('callIcon');
             if (callIcon) callIcon.textContent = isVideoEnabled ? 'videocam' : 'graphic_eq';
+
+            // If we somehow got video but no audio (common on some devices/permissions), try smart mic acquisition.
+            if (localStream && localStream.getAudioTracks().length === 0) {
+              try {
+                console.warn('⚠️ No audio track detected after initLocalMedia. Attempting microphone recovery...');
+                await acquireLocalAudioTrack();
+              } catch (micErr) {
+                console.warn('⚠️ Microphone recovery failed:', micErr?.message || micErr);
+              }
+            }
 
             console.log(`✅ initLocalMedia() complete - stream ready`);
 
