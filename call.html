@@ -1719,102 +1719,113 @@
           const targetFacing = oppositeFacingMode(currentFacing || preferredFacingMode);
           preferredFacingMode = targetFacing;
 
-          showReconnectUI('Switching camera…', 'Applying camera change…');
+  showReconnectUI('Switching camera…', 'Applying camera change…');
 
-          // Stop old track BEFORE requesting new camera to prevent black/frozen camera on iOS/Android.
-          try { currentTrack.stop(); } catch { }
-          try { localStream.removeTrack(currentTrack); } catch { }
+  // CRITICAL: Fully release camera before requesting new one
+  // 1) Detach video element first (prevents browser keeping camera reference)
+  try {
+    const localVid = document.getElementById(`video-${currentUser.userId}`);
+    if (localVid) localVid.srcObject = null;
+  } catch {}
 
-          const videoInputs = await listVideoInputsSafe();
-          const nextDeviceId = pickNextDeviceId(videoInputs, currentDeviceId, targetFacing);
+  // 2) Remove from localStream then stop track (order matters for iOS/Android)
+  try { localStream.removeTrack(currentTrack); } catch {}
+  try { currentTrack.stop(); } catch {}
 
-          const attempts = [
-            { label: `facingMode ideal (${targetFacing})`, constraints: { video: { facingMode: { ideal: targetFacing } }, audio: false } },
-            { label: `facingMode (${targetFacing})`, constraints: { video: { facingMode: targetFacing }, audio: false } },
-            ...(nextDeviceId ? [{ label: `deviceId ideal (${nextDeviceId.substring(0, 6)}…)`, constraints: { video: { deviceId: { ideal: nextDeviceId } }, audio: false } }] : []),
-            { label: 'video:true fallback', constraints: { video: true, audio: false } }
-          ];
+  // 3) Small delay to let hardware release (300-500ms is the sweet spot for mobile)
+  await new Promise(r => setTimeout(r, 400));
 
-          let nextStream = null;
-          let lastErr = null;
+  const videoInputs = await listVideoInputsSafe();
+  const nextDeviceId = pickNextDeviceId(videoInputs, currentDeviceId, targetFacing);
 
-          for (const a of attempts) {
-            try {
-              console.log(`📹 [Flip] getUserMedia attempt: ${a.label}`);
-              nextStream = await getUserMediaWithTimeout(a.constraints, 6500);
-              break;
-            } catch (e) {
-              lastErr = e;
-              console.warn(`⚠️ [Flip] Attempt failed (${a.label}): ${e?.name || 'Error'}: ${e?.message || ''}`);
-              if (e?.name === 'NotReadableError' || e?.name === 'AbortError' || e?.name === 'TimeoutError') {
-                await new Promise(r => setTimeout(r, 700));
-              }
-            }
-          }
+  const attempts = [
+    { label: `facingMode ideal (${targetFacing})`, constraints: { video: { facingMode: { ideal: targetFacing } }, audio: false } },
+    { label: `facingMode (${targetFacing})`, constraints: { video: { facingMode: targetFacing }, audio: false } },
+    ...(nextDeviceId ? [{ label: `deviceId ideal (${nextDeviceId.substring(0, 6)}…)`, constraints: { video: { deviceId: { ideal: nextDeviceId } }, audio: false } }] : []),
+    { label: 'video:true fallback', constraints: { video: true, audio: false } }
+  ];
 
-          if (!nextStream) {
-            throw lastErr || new Error('Failed to acquire camera stream during flip');
-          }
+  let nextStream = null;
+  let lastErr = null;
 
-          const nextTrack = nextStream.getVideoTracks()[0];
-          if (!nextTrack) {
-            try { nextStream.getTracks().forEach(t => t.stop()); } catch { }
-            throw new Error('No video track in new stream');
-          }
+  for (const a of attempts) {
+    try {
+      console.log(`📹 [Flip] getUserMedia attempt: ${a.label}`);
+      nextStream = await getUserMediaWithTimeout(a.constraints, 6500);
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`⚠️ [Flip] Attempt failed (${a.label}): ${e?.name || 'Error'}: ${e?.message || ''}`);
+      if (e?.name === 'NotReadableError' || e?.name === 'AbortError' || e?.name === 'TimeoutError') {
+        await new Promise(r => setTimeout(r, 700));
+      }
+    }
+  }
 
-          // Update persisted settings for subsequent flips
-          try {
-            const ns = nextTrack.getSettings ? nextTrack.getSettings() : null;
-            if (ns?.deviceId) activeVideoDeviceId = ns.deviceId;
-            else activeVideoDeviceId = nextDeviceId;
-            if (ns?.facingMode) activeFacingMode = ns.facingMode;
-            else activeFacingMode = targetFacing;
-          } catch {
-            activeVideoDeviceId = nextDeviceId;
-            activeFacingMode = targetFacing;
-          }
+  if (!nextStream) {
+    throw lastErr || new Error('Failed to acquire camera stream during flip');
+  }
 
-          // Keep the SAME localStream reference (important for your existing system)
-          localStream.addTrack(nextTrack);
-          nextTrack.enabled = true;
+  const nextTrack = nextStream.getVideoTracks()[0];
+  if (!nextTrack) {
+    try { nextStream.getTracks().forEach(t => t.stop()); } catch { }
+    throw new Error('No video track in new stream');
+  }
 
-          // Re-attach to the same video element
-          try {
-            const localVid = document.getElementById(`video-${currentUser.userId}`);
-            if (localVid) {
-              localVid.srcObject = localStream;
-              await localVid.play().catch(() => { });
-            }
-          } catch { }
+  // Update persisted settings
+  try {
+    const ns = nextTrack.getSettings ? nextTrack.getSettings() : null;
+    if (ns?.deviceId) activeVideoDeviceId = ns.deviceId;
+    else activeVideoDeviceId = nextDeviceId;
+    if (ns?.facingMode) activeFacingMode = ns.facingMode;
+    else activeFacingMode = targetFacing;
+  } catch {
+    activeVideoDeviceId = nextDeviceId;
+    activeFacingMode = targetFacing;
+  }
 
-          // Replace on all peer connections (keeps call alive)
-          peerConnections.forEach((pc, peerId) => {
-            try {
-              const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-              if (sender) {
-                sender.replaceTrack(nextTrack).catch(() => { });
-              } else {
-                pc.addTrack(nextTrack, localStream);
-              }
+  // Keep same localStream reference
+  localStream.addTrack(nextTrack);
+  nextTrack.enabled = true;
 
-              if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
-                setTimeout(() => createOffer(peerId).catch(() => { }), 0);
-              } else {
-                pendingNegotiation.set(peerId, true);
-              }
-            } catch { }
-          });
+  // Re-attach to video element
+  try {
+    const localVid = document.getElementById(`video-${currentUser.userId}`);
+    if (localVid) {
+      await new Promise(r => setTimeout(r, 50));
+      localVid.srcObject = localStream;
+      await localVid.play().catch(() => { });
+    }
+  } catch { }
 
-          // Stop temp tracks we no longer need (avoid leaks)
-          try {
-            nextStream.getTracks().forEach(t => {
-              if (t !== nextTrack) {
-                try { t.stop(); } catch { }
-              }
-            });
-          } catch { }
+  // Replace on peer connections
+  peerConnections.forEach((pc, peerId) => {
+    try {
+      const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (sender) {
+        sender.replaceTrack(nextTrack).catch(() => { });
+      } else {
+        pc.addTrack(nextTrack, localStream);
+      }
+      if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
+        setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+      } else {
+        pendingNegotiation.set(peerId, true);
+      }
+    } catch { }
+  });
 
-          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
+  // Stop temp tracks
+  try {
+    nextStream.getTracks().forEach(t => {
+      if (t !== nextTrack) {
+        try { t.stop(); } catch { }
+      }
+    });
+  } catch { }
+
+  safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
+
         })().finally(() => {
           try { hideReconnectUI(); } catch { }
           flipInFlightPromise = null;
@@ -1985,6 +1996,7 @@
           pendingVideoToggleDesired = null;
         }
       }
+
       async function handleStuckVideo(userId) {
         console.warn(`🛠️ Attempting aggressive recovery for ${userId}...`);
 
