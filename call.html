@@ -342,7 +342,6 @@
         console[t === 'error' ? 'error' : 'log'](m);
       };
 
-      
 
       let videoStateChangeTimeout = null;
       let isTogglingVideo = false;
@@ -828,8 +827,9 @@
             backgroundKeepAliveAudio = document.createElement('audio');
             backgroundKeepAliveAudio.autoplay = true;
             backgroundKeepAliveAudio.loop = true;
-            backgroundKeepAliveAudio.muted = true;
-            backgroundKeepAliveAudio.volume = 0;
+            backgroundKeepAliveAudio.muted = false;
+            backgroundKeepAliveAudio.volume = 0.00001;
+            try { backgroundKeepAliveAudio.setAttribute('playsinline', ''); } catch { }
 
             // 1s silent WAV (base64). Keeping an audio element active reduces background suspension in some browsers.
             backgroundKeepAliveAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=';
@@ -880,6 +880,12 @@
           stopBackgroundKeepAlive();
           stopBackgroundAudioWatchdog();
           resumeAllMedia();
+          try {
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+              socketInstance.connect();
+            }
+          } catch { }
           reportCallPresenceContext('call_visibility_visible', {
             keepalive: true,
             allowRedirect: true
@@ -898,11 +904,55 @@
       window.addEventListener('focus', () => {
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
+        try {
+          if (socketInstance && !socketInstance.connected) {
+            window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+            socketInstance.connect();
+          }
+        } catch { }
         reportCallPresenceContext('call_focus', {
           keepalive: true,
           allowRedirect: true
         }).catch(() => { });
         validateCallPresenceState('call_focus');
+      });
+
+      // Page Lifecycle API events (supported on modern mobile browsers)
+      try {
+        document.addEventListener('freeze', () => {
+          try {
+            ensureBackgroundKeepAlivePlaying().catch(() => { });
+            startBackgroundAudioWatchdog();
+          } catch { }
+        });
+      } catch { }
+
+      try {
+        document.addEventListener('resume', () => {
+          try {
+            stopBackgroundKeepAlive();
+            stopBackgroundAudioWatchdog();
+            resumeAllMedia();
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+              socketInstance.connect();
+            }
+            reportCallPresenceContext('call_resume', { keepalive: true, allowRedirect: true }).catch(() => { });
+            validateCallPresenceState('call_resume');
+          } catch { }
+        });
+      } catch { }
+
+      window.addEventListener('online', () => {
+        try {
+          if (!document.hidden) {
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Network is back. Restoring…');
+              socketInstance.connect();
+            }
+            validateCallPresenceState('call_online');
+          }
+        } catch { }
       });
 
       function setupCallBackButtonHandler() {
