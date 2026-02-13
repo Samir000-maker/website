@@ -1650,6 +1650,7 @@ async function getIceServers() {
 }
 
 const app = express();
+app.use(express.static(path.join(__dirname, "public")));
 app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
