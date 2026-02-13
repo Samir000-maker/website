@@ -329,10 +329,7 @@
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
   <script src="app.js"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>
-    eruda.init();
-</script>
+
 
   <script>
     (async () => {
@@ -359,6 +356,7 @@
       let availableVideoDevices = [];
       let activeVideoDeviceId = null;
       let isFlippingCamera = false;
+      let activeFacingMode = 'user';
 
       let negotiationMutex = new Map(); // userId -> Promise to prevent duplicate offer handling
       let makingOffer = new Map();
@@ -1530,6 +1528,7 @@
           try {
             const settings = track.getSettings ? track.getSettings() : null;
             if (settings?.deviceId) activeVideoDeviceId = settings.deviceId;
+            if (settings?.facingMode) activeFacingMode = settings.facingMode;
           } catch { }
 
           if (!localStream) localStream = new MediaStream();
@@ -1612,7 +1611,8 @@
           if (!flipBtn) return;
 
           const hasVideoTrack = !!(localStream && localStream.getVideoTracks().length > 0);
-          const canFlip = isVideoEnabled && hasVideoTrack && Array.isArray(availableVideoDevices) && availableVideoDevices.length >= 2;
+          const hasMultipleDevices = Array.isArray(availableVideoDevices) && availableVideoDevices.length >= 2;
+          const canFlip = isVideoEnabled && hasVideoTrack && (hasMultipleDevices || !!activeFacingMode);
           flipBtn.disabled = !canFlip || isFlippingCamera;
         } catch { }
       }
@@ -1652,34 +1652,35 @@
           };
 
           await refreshAvailableCameras();
-          if (!availableVideoDevices || availableVideoDevices.length < 2) {
-            toast('No alternative camera found.', 'warning');
-            return;
-          }
+          const devicesArr = Array.isArray(availableVideoDevices) ? availableVideoDevices : [];
 
           const currentTrack = localStream?.getVideoTracks?.()[0] || null;
           let currentId = activeVideoDeviceId;
           try {
             const s = currentTrack?.getSettings ? currentTrack.getSettings() : null;
             if (s?.deviceId) currentId = s.deviceId;
+            if (s?.facingMode) activeFacingMode = s.facingMode;
           } catch { }
 
-          const ids = availableVideoDevices.map(d => d.deviceId).filter(Boolean);
+          const oppositeFacing = (mode) => {
+            const m = (mode || '').toLowerCase();
+            if (m === 'environment') return 'user';
+            return 'environment';
+          };
+          const nextFacing = oppositeFacing(activeFacingMode);
+
+          const ids = devicesArr.map(d => d.deviceId).filter(Boolean);
           const uniqueIds = Array.from(new Set(ids));
-          if (uniqueIds.length < 2) {
-            toast('No alternative camera found.', 'warning');
-            return;
-          }
 
           const idx = currentId ? uniqueIds.indexOf(currentId) : -1;
-          const nextId = uniqueIds[(idx >= 0 ? idx + 1 : 0) % uniqueIds.length];
+          const nextId = uniqueIds.length >= 2 ? uniqueIds[(idx >= 0 ? idx + 1 : 0) % uniqueIds.length] : null;
 
           showReconnectUI('Switching camera…', 'Applying camera change…');
           let overlayShown = true;
 
           // Acquire with retry + fallback + hard timeout (prevents hanging forever on some devices)
           const flipAttempts = [
-            {
+            ...(nextId ? [{
               constraints: {
                 video: { deviceId: { ideal: nextId }, width: { ideal: 640 }, height: { ideal: 480 } },
                 audio: false
@@ -1692,6 +1693,14 @@
                 audio: false
               },
               label: 'deviceId ideal'
+            }] : []),
+            {
+              constraints: { video: { facingMode: { ideal: nextFacing } }, audio: false },
+              label: `facingMode ideal (${nextFacing})`
+            },
+            {
+              constraints: { video: { facingMode: nextFacing }, audio: false },
+              label: `facingMode (${nextFacing})`
             },
             {
               constraints: { video: true, audio: false },
@@ -1701,6 +1710,7 @@
 
           let nextStream = null;
           let lastFlipErr = null;
+          console.log('📹 [Flip] Starting camera flip', { currentId, nextId, activeFacingMode, nextFacing, devices: uniqueIds.length });
           for (const a of flipAttempts) {
             try {
               console.log(`📹 [Flip] getUserMedia attempt: ${a.label}`);
@@ -1726,6 +1736,11 @@
             return;
           }
 
+          try {
+            const ns = nextTrack.getSettings ? nextTrack.getSettings() : null;
+            if (ns?.facingMode) activeFacingMode = ns.facingMode;
+          } catch { }
+
           // Remove old video track
           if (!localStream) localStream = new MediaStream();
           try {
@@ -1742,6 +1757,7 @@
             const settings = nextTrack.getSettings ? nextTrack.getSettings() : null;
             if (settings?.deviceId) activeVideoDeviceId = settings.deviceId;
             else activeVideoDeviceId = nextId;
+            if (settings?.facingMode) activeFacingMode = settings.facingMode;
           } catch {
             activeVideoDeviceId = nextId;
           }
