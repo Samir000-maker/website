@@ -1625,6 +1625,29 @@
             return;
           }
 
+          const getUserMediaWithTimeout = async (constraints, timeoutMs = 6500) => {
+            let timedOut = false;
+            return new Promise((resolve, reject) => {
+              const timer = setTimeout(() => {
+                timedOut = true;
+                reject(Object.assign(new Error('Camera acquisition timed out'), { name: 'TimeoutError' }));
+              }, timeoutMs);
+
+              navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+                clearTimeout(timer);
+                // If it resolves AFTER we already timed out, stop tracks to avoid leaks.
+                if (timedOut) {
+                  try { stream.getTracks().forEach(t => t.stop()); } catch { }
+                  return;
+                }
+                resolve(stream);
+              }).catch((err) => {
+                clearTimeout(timer);
+                reject(err);
+              });
+            });
+          };
+
           await refreshAvailableCameras();
           if (!availableVideoDevices || availableVideoDevices.length < 2) {
             toast('No alternative camera found.', 'warning');
@@ -1649,16 +1672,49 @@
           const nextId = uniqueIds[(idx >= 0 ? idx + 1 : 0) % uniqueIds.length];
 
           showReconnectUI('Switching camera…', 'Applying camera change…');
+          let overlayShown = true;
 
-          // Acquire with ideal deviceId to reduce timeouts
-          const nextStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              deviceId: { ideal: nextId },
-              width: { ideal: 640 },
-              height: { ideal: 480 }
+          // Acquire with retry + fallback + hard timeout (prevents hanging forever on some devices)
+          const flipAttempts = [
+            {
+              constraints: {
+                video: { deviceId: { ideal: nextId }, width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
+              },
+              label: 'deviceId ideal + 640x480'
             },
-            audio: false
-          });
+            {
+              constraints: {
+                video: { deviceId: { ideal: nextId } },
+                audio: false
+              },
+              label: 'deviceId ideal'
+            },
+            {
+              constraints: { video: true, audio: false },
+              label: 'video:true fallback'
+            }
+          ];
+
+          let nextStream = null;
+          let lastFlipErr = null;
+          for (const a of flipAttempts) {
+            try {
+              console.log(`📹 [Flip] getUserMedia attempt: ${a.label}`);
+              nextStream = await getUserMediaWithTimeout(a.constraints, 6500);
+              break;
+            } catch (e) {
+              lastFlipErr = e;
+              console.warn(`⚠️ [Flip] Attempt failed (${a.label}): ${e?.name || 'Error'}: ${e?.message || ''}`);
+              if (e?.name === 'NotReadableError' || e?.name === 'AbortError' || e?.name === 'TimeoutError') {
+                await new Promise(r => setTimeout(r, 700));
+              }
+            }
+          }
+
+          if (!nextStream) {
+            throw lastFlipErr || new Error('Failed to acquire camera stream during flip');
+          }
 
           const nextTrack = nextStream.getVideoTracks()[0];
           if (!nextTrack) {
@@ -1726,6 +1782,7 @@
           // Broadcast state stays ON; no need to send OFF/ON flip. Still re-assert ON.
           safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
           hideReconnectUI();
+          overlayShown = false;
         } catch (e) {
           console.error('❌ Camera flip failed:', e);
           try { toast('Camera flip failed. Check camera permissions or close other camera apps.', 'error'); } catch { }
@@ -1734,6 +1791,7 @@
         } finally {
           isFlippingCamera = false;
           updateFlipButtonState();
+          try { hideReconnectUI(); } catch { }
         }
       }
 
