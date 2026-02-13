@@ -2077,6 +2077,11 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+app.get('/home', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'mood.html'));
+});
+
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
