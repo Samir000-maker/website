@@ -1386,28 +1386,31 @@
           const uniqueDeviceIds = Array.from(new Set(deviceIds));
 
           // Constraint profiles: start higher quality, then relax.
+          // WhatsApp-like: prefer "whatever works" first, then increase quality.
+          // This avoids AbortError timeouts on some webcams when strict constraints/deviceId are used.
           const baseProfiles = [
-            { video: { width: { ideal: 1280 }, height: { ideal: 720 } } },
+            { video: true },
             { video: { width: { ideal: 640 }, height: { ideal: 480 } } },
-            { video: true }
+            { video: { width: { ideal: 1280 }, height: { ideal: 720 } } }
           ];
 
           const attempts = [];
 
-          // Prefer explicit deviceId attempts first (best for multi-camera systems)
-          for (const id of uniqueDeviceIds) {
-            attempts.push({
-              constraints: { video: { deviceId: { exact: id }, width: { ideal: 640 }, height: { ideal: 480 } } },
-              label: `deviceId exact + 640x480 (${id.substring(0, 6)}…)`
-            });
-            attempts.push({
-              constraints: { video: { deviceId: { exact: id } } },
-              label: `deviceId exact (${id.substring(0, 6)}…)`
-            });
-          }
-
+          // Try generic profiles first (usually succeeds faster on laptops/desktops)
           for (const p of baseProfiles) {
             attempts.push({ constraints: p, label: JSON.stringify(p.video) });
+          }
+
+          // Then, if needed, try selecting specific devices (IDEAL, not EXACT) to avoid timeouts.
+          for (const id of uniqueDeviceIds) {
+            attempts.push({
+              constraints: { video: { deviceId: { ideal: id }, width: { ideal: 640 }, height: { ideal: 480 } } },
+              label: `deviceId ideal + 640x480 (${id.substring(0, 6)}…)`
+            });
+            attempts.push({
+              constraints: { video: { deviceId: { ideal: id } } },
+              label: `deviceId ideal (${id.substring(0, 6)}…)`
+            });
           }
 
           let chosen = null;
@@ -1423,12 +1426,15 @@
 
               // If camera is busy/not readable, give it a tiny cooldown before retrying next profile.
               if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
-                await new Promise(r => setTimeout(r, 250));
+                await new Promise(r => setTimeout(r, 700));
               }
             }
           }
 
           if (!chosen?.track) {
+            try {
+              toast('Camera could not start. Close other apps using the camera and allow camera permission, then try again.', 'error');
+            } catch { }
             throw lastError || new Error('Unable to access camera');
           }
 
