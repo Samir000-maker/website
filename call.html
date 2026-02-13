@@ -372,12 +372,6 @@
       let ICE_SERVERS = null;
       let useTurnFallback = false; // Global flag for TURN fallback
 
-      let icePreflight = {
-        ranAt: 0,
-        decidedTurn: false,
-        reason: ''
-      };
-
       // Persist STUN retry attempts across PC rebuilds (otherwise it resets to 0 every createPC())
       const stunAttemptTotals = new Map(); // userId -> number
 
@@ -424,154 +418,6 @@
           console.error('❌ ICE servers failed:', error);
           ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
           return ICE_SERVERS;
-        }
-      }
-
-      function readIcePreflightCache() {
-        try {
-          const raw = sessionStorage.getItem('vibe_ice_preflight_v1');
-          if (!raw) return null;
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== 'object') return null;
-          if (!parsed.ranAt || (Date.now() - parsed.ranAt) > 10 * 60 * 1000) return null;
-          return parsed;
-        } catch {
-          return null;
-        }
-      }
-
-      function writeIcePreflightCache(value) {
-        try {
-          sessionStorage.setItem('vibe_ice_preflight_v1', JSON.stringify(value));
-        } catch { }
-      }
-
-      async function runIcePreflightIfNeeded() {
-        try {
-          if (!navigator.onLine) return;
-
-          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-          const withTimeout = (p, ms) => Promise.race([p, sleep(ms).then(() => ({ __timeout: true }))]);
-
-          const cached = readIcePreflightCache();
-          if (cached) {
-            icePreflight = cached;
-            if (cached.decidedTurn && !useTurnFallback) {
-              useTurnFallback = true;
-            }
-            return;
-          }
-
-          const doProbe = async (servers, label, timeoutMs = 1800) => {
-            return await new Promise(resolve => {
-              let pc = null;
-              let done = false;
-              const found = { host: 0, srflx: 0, relay: 0, protocols: new Set() };
-              const finish = (ok, reason) => {
-                if (done) return;
-                done = true;
-                try { pc && pc.close(); } catch { }
-                resolve({ ok, reason, found });
-              };
-
-              try {
-                pc = new RTCPeerConnection({ iceServers: servers, iceCandidatePoolSize: 0 });
-                try { pc.createDataChannel('p'); } catch { }
-
-                pc.onicecandidate = (e) => {
-                  const c = e?.candidate;
-                  if (!c || !c.candidate) return;
-                  const s = String(c.candidate);
-                  if (s.includes(' typ host')) found.host++;
-                  if (s.includes(' typ srflx')) found.srflx++;
-                  if (s.includes(' typ relay')) found.relay++;
-                  try {
-                    const proto = c.protocol || (s.includes(' udp ') ? 'udp' : (s.includes(' tcp ') ? 'tcp' : 'unknown'));
-                    found.protocols.add(proto);
-                  } catch { }
-
-                  if (label === 'stun' && found.srflx > 0) {
-                    finish(true, 'srflx');
-                  }
-                  if (label === 'turn' && found.relay > 0) {
-                    finish(true, 'relay');
-                  }
-                };
-
-                pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false })
-                  .then(offer => pc.setLocalDescription(offer))
-                  .catch(() => { });
-
-                setTimeout(() => {
-                  if (label === 'stun') {
-                    finish(found.srflx > 0, found.srflx > 0 ? 'srflx' : 'no_srflx');
-                  } else {
-                    finish(found.relay > 0, found.relay > 0 ? 'relay' : 'no_relay');
-                  }
-                }, timeoutMs);
-              } catch {
-                finish(false, 'pc_error');
-              }
-            });
-          };
-
-          // NOTE: TURN credential generation can be slow; never allow preflight to block call init.
-          const stunPromise = withTimeout(
-            _API.get('/api/ice-servers').then(r => r.iceServers).catch(() => null),
-            900
-          );
-
-          const turnPromise = withTimeout(
-            _API.get('/api/ice-servers?includeTurn=true').then(r => r.iceServers).catch(() => null),
-            900
-          );
-
-          const stunResult = await stunPromise;
-          const stunServers = stunResult && !stunResult.__timeout ? stunResult : null;
-
-          // Only use TURN servers if they arrive quickly; otherwise skip and fall back to normal retry ladder.
-          const turnResult = await turnPromise;
-          const turnServers = turnResult && !turnResult.__timeout ? turnResult : null;
-
-          if (!stunServers || !Array.isArray(stunServers) || stunServers.length === 0) return;
-
-          console.log('🧪 [ICE] Preflight starting (STUN probe)…');
-          const stunProbe = await doProbe(stunServers, 'stun', 900);
-          console.log('🧪 [ICE] Preflight STUN result:', stunProbe.reason);
-
-          let decidedTurn = false;
-          let reason = '';
-
-          if (stunProbe.ok) {
-            decidedTurn = false;
-            reason = 'stun_ok';
-          } else {
-            if (turnServers && Array.isArray(turnServers) && turnServers.length > 0) {
-              console.log('🧪 [ICE] Preflight starting (TURN probe)…');
-              const turnProbe = await doProbe(turnServers, 'turn', 900);
-              console.log('🧪 [ICE] Preflight TURN result:', turnProbe.reason);
-              if (turnProbe.ok) {
-                decidedTurn = true;
-                reason = 'stun_no_srflx_turn_ok';
-              } else {
-                decidedTurn = false;
-                reason = 'stun_no_srflx_turn_no_relay';
-              }
-            } else {
-              decidedTurn = false;
-              reason = turnResult && turnResult.__timeout ? 'stun_no_srflx_turn_timeout' : 'stun_no_srflx_no_turn';
-            }
-          }
-
-          icePreflight = { ranAt: Date.now(), decidedTurn, reason };
-          writeIcePreflightCache(icePreflight);
-
-          if (decidedTurn && !useTurnFallback) {
-            console.warn('⚠️ [ICE] Preflight decided TURN-first for this session');
-            useTurnFallback = true;
-          }
-        } catch (e) {
-          console.warn('⚠️ [ICE] Preflight failed:', e?.message || e);
         }
       }
 
@@ -989,8 +835,9 @@
             backgroundKeepAliveAudio = document.createElement('audio');
             backgroundKeepAliveAudio.autoplay = true;
             backgroundKeepAliveAudio.loop = true;
-            backgroundKeepAliveAudio.muted = true;
-            backgroundKeepAliveAudio.volume = 0;
+            backgroundKeepAliveAudio.muted = false;
+            backgroundKeepAliveAudio.volume = 0.00001;
+            try { backgroundKeepAliveAudio.setAttribute('playsinline', ''); } catch { }
 
             // 1s silent WAV (base64). Keeping an audio element active reduces background suspension in some browsers.
             backgroundKeepAliveAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=';
@@ -1041,6 +888,12 @@
           stopBackgroundKeepAlive();
           stopBackgroundAudioWatchdog();
           resumeAllMedia();
+          try {
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+              socketInstance.connect();
+            }
+          } catch { }
           reportCallPresenceContext('call_visibility_visible', {
             keepalive: true,
             allowRedirect: true
@@ -1059,11 +912,55 @@
       window.addEventListener('focus', () => {
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
+        try {
+          if (socketInstance && !socketInstance.connected) {
+            window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+            socketInstance.connect();
+          }
+        } catch { }
         reportCallPresenceContext('call_focus', {
           keepalive: true,
           allowRedirect: true
         }).catch(() => { });
         validateCallPresenceState('call_focus');
+      });
+
+      // Page Lifecycle API events (supported on modern mobile browsers)
+      try {
+        document.addEventListener('freeze', () => {
+          try {
+            ensureBackgroundKeepAlivePlaying().catch(() => { });
+            startBackgroundAudioWatchdog();
+          } catch { }
+        });
+      } catch { }
+
+      try {
+        document.addEventListener('resume', () => {
+          try {
+            stopBackgroundKeepAlive();
+            stopBackgroundAudioWatchdog();
+            resumeAllMedia();
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
+              socketInstance.connect();
+            }
+            reportCallPresenceContext('call_resume', { keepalive: true, allowRedirect: true }).catch(() => { });
+            validateCallPresenceState('call_resume');
+          } catch { }
+        });
+      } catch { }
+
+      window.addEventListener('online', () => {
+        try {
+          if (!document.hidden) {
+            if (socketInstance && !socketInstance.connected) {
+              window.showReconnectUI?.('Reconnecting…', 'Network is back. Restoring…');
+              socketInstance.connect();
+            }
+            validateCallPresenceState('call_online');
+          }
+        } catch { }
       });
 
       function setupCallBackButtonHandler() {
@@ -4092,7 +3989,6 @@
 
         try {
           await _Auth.requireAuth();
-          await runIcePreflightIfNeeded();
           await fetchIceServers();
 
           const callStr = localStorage.getItem('activeCall');
