@@ -2027,6 +2027,7 @@
           await waitForLocalStream(6000);
 
           let track = localStream.getVideoTracks()[0];
+          const hadTrackInitially = !!track;
           if (!track && desired) {
             track = await acquireLocalVideoTrack();
           }
@@ -3708,6 +3709,7 @@
           }
 
           let track = localStream.getVideoTracks()[0];
+          const hadTrackInitially = !!track;
 
           // ✅ Handle missing video track (e.g. initial audio-only call)
           if (!track) {
@@ -3721,15 +3723,22 @@
             }
           }
 
-          // ✅ Normal toggle for existing track
-          isVideoEnabled = !track.enabled;
-          track.enabled = isVideoEnabled;
+          if (!hadTrackInitially) {
+            // If we just acquired a brand new track, video should turn ON (not immediately toggled OFF)
+            isVideoEnabled = true;
+            track.enabled = true;
+          } else {
+            // ✅ Normal toggle for existing track
+            isVideoEnabled = !track.enabled;
+            track.enabled = isVideoEnabled;
+          }
 
           console.log(`📹 Video state changed: ${isVideoEnabled ? 'ON' : 'OFF'}`);
 
           // Update UI
           updateVideoButton();
           scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
+          refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
 
           // Notify server
           safeSocketEmit('video_state_changed', {
