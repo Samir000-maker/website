@@ -653,10 +653,19 @@
         videoEl.style.setProperty('backface-visibility', 'hidden', 'important');
         videoEl.style.setProperty('-webkit-backface-visibility', 'hidden', 'important');
 
-        // Mirror ALL videos - both self-view and remote-view
-        videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
-        videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
-        videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
+        const isSelfView = videoEl.classList.contains('self-view') || (currentUser?.userId && videoEl.id === `video-${currentUser.userId}`);
+        if (isSelfView) {
+          const m = (activeFacingMode || 'user').toLowerCase();
+          const shouldMirror = m !== 'environment';
+          videoEl.style.setProperty('transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+        } else {
+          // Never mirror remote videos (receiver view)
+          videoEl.style.setProperty('transform', 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+        }
       }
 
       async function reportCallPresenceContext(reason = 'call_lifecycle', options = {}) {
@@ -1607,6 +1616,7 @@
           const localVid = document.getElementById(`video-${currentUser.userId}`);
           if (localVid) {
             localVid.srcObject = localStream;
+            applyLocalVideoMirror(activeFacingMode);
             await localVid.play().catch(e => console.warn('Local play error:', e));
           }
 
@@ -1742,6 +1752,18 @@
         } catch { }
       }
 
+      function applyLocalVideoMirror(mode) {
+        try {
+          if (!currentUser?.userId) return;
+          const localVid = document.getElementById(`video-${currentUser.userId}`);
+          if (!localVid) return;
+          const m = (mode || activeFacingMode || 'user').toLowerCase();
+          const shouldMirror = m !== 'environment';
+          localVid.style.setProperty('transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          localVid.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+        } catch { }
+      }
+
       // Production-grade front/back flip.
       // - Safe to spam: one in-flight flip at a time.
       // - No leaks: temp streams get stopped.
@@ -1844,9 +1866,11 @@
     if (localVid) {
       await new Promise(r => setTimeout(r, 50));
       localVid.srcObject = localStream;
+      applyLocalVideoMirror(activeFacingMode);
+      try { enforceNaturalVideoRendering(localVid); } catch { }
       await localVid.play().catch(() => { });
     }
-  } catch { }
+  } catch {}
 
   // Replace on peer connections
   peerConnections.forEach((pc, peerId) => {
