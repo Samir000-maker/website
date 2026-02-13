@@ -55,7 +55,7 @@ import Redlock from 'redlock';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+const moodFile = "/var/www/vibegra/mood.html";
 // Redis Clients
 const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
 const redisPort = config.REDIS_PORT || 6379;
@@ -2078,8 +2078,8 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/home', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'mood.html'));
+app.get("/home", (req, res) => {
+  res.sendFile(path.join(__dirname, "mood.html"));
 });
 
 
