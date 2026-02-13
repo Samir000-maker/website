@@ -330,13 +330,6 @@
   <script src="app.js"></script>
 
 
-<!-- Mobile Debug Console -->
-<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-<script>
-    eruda.init();
-</script>
-
-  
 
   <script>
     (async () => {
@@ -1726,7 +1719,7 @@
           const targetFacing = oppositeFacingMode(currentFacing || preferredFacingMode);
           preferredFacingMode = targetFacing;
 
-  showReconnectUI('Switching camera…', 'Applying camera change…');
+  try { window.showReconnectUI?.('Switching camera…', 'Applying camera change…'); } catch { }
 
   // CRITICAL: Fully release camera before requesting new one
   // 1) Detach video element first (prevents browser keeping camera reference)
@@ -1834,7 +1827,7 @@
   safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
 
         })().finally(() => {
-          try { hideReconnectUI(); } catch { }
+          try { window.hideReconnectUI?.(); } catch { }
           flipInFlightPromise = null;
         });
 
@@ -3982,6 +3975,8 @@
             } catch { }
           };
 
+          try { window.showReconnectUI = showReconnectUI; } catch { }
+
           // Reconnect gating: keep overlay until we truly resynced call + at least one peer connection
           let reconnectGate = {
             inProgress: false,
@@ -4035,6 +4030,8 @@
               }
             } catch { }
           };
+
+          try { window.hideReconnectUI = hideReconnectUI; } catch { }
 
           let reconnectWatchdogTimer = null;
           let reconnectHardResetTimer = null;
