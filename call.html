@@ -356,6 +356,9 @@
       let ICE_SERVERS = null;
       let useTurnFallback = false; // Global flag for TURN fallback
 
+      // Persist STUN retry attempts across PC rebuilds (otherwise it resets to 0 every createPC())
+      const stunAttemptTotals = new Map(); // userId -> number
+
       // ============================================
       // CALL CONNECTION STATE TRACKING
       // ============================================
@@ -2122,7 +2125,7 @@
           candidatesReceived: 0,
           candidatesSent: 0,
           iceRestartCount: 0,
-          stunAttemptCount: 0, // ✅ Track STUN attempts
+          stunAttemptCount: stunAttemptTotals.get(userId) || 0, // ✅ Track STUN attempts (persisted across rebuilds)
           lastIceCandidateTime: 0,
           watchdogTimer: null // ✅ For fast retry
         });
@@ -2131,7 +2134,7 @@
 
         // ✅ START RETRY WATCHDOG (STUN ONLY)
         if (!useTurnFallback) {
-          console.log(`⏱️ [ICE] Starting 7s watchdog for ${userId}`);
+          console.log(`⏱️ [ICE] Starting 2.5s watchdog for ${userId}`);
           stats.watchdogTimer = setTimeout(() => {
             const pcCurrent = peerConnections.get(userId);
             if (pcCurrent &&
@@ -2149,7 +2152,7 @@
                 handleIceFailure(userId);
               }
             }
-          }, 7000); // 7 seconds timeout for STUN
+          }, 2500); // fast timeout for STUN (WhatsApp-like)
         }
 
         const tracks = localStream.getTracks();
@@ -2419,6 +2422,9 @@
               }
               broadcastCallStateToChat();
               console.log('📞 ========================================\n');
+
+              // If we were reconnecting, only dismiss UI once ICE is actually back.
+              maybeResolveReconnectGate('ice_connected');
             }
 
             // Reset failure counter on success
@@ -2610,19 +2616,22 @@
         }
 
         const MAX_STUN_ATTEMPTS = 3;
-        const currentAttempts = stats.stunAttemptCount || 0;
+        const currentAttempts = stunAttemptTotals.get(userId) || 0;
 
         const subtitle = document.getElementById('callSubtitle');
 
         if (!useTurnFallback && currentAttempts < MAX_STUN_ATTEMPTS) {
-          stats.stunAttemptCount = currentAttempts + 1;
+          const nextAttempt = currentAttempts + 1;
+          stunAttemptTotals.set(userId, nextAttempt);
+          stats.stunAttemptCount = nextAttempt;
           stats.iceRestartCount++;
 
           console.warn(`🔄 [RETRY] Triggering STUN retry ${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS} for ${userId}`);
           if (subtitle) subtitle.textContent = `Reconnecting (Attempt ${stats.stunAttemptCount}/3)...`;
           toast(`Connection issues... Retrying (${stats.stunAttemptCount}/${MAX_STUN_ATTEMPTS})`, 'warning');
 
-          // Small delay before retry
+          // Fast retry ladder (WhatsApp-like)
+          const retryDelayMs = stats.stunAttemptCount === 1 ? 150 : (stats.stunAttemptCount === 2 ? 350 : 600);
           setTimeout(() => {
             const currentPC = peerConnections.get(userId);
             if (currentPC) {
@@ -2632,7 +2641,7 @@
             }
             console.log(`🚀 [RETRY] Executing createOffer for ${userId}`);
             createOffer(userId);
-          }, 500);
+          }, retryDelayMs);
 
         } else if (!useTurnFallback && currentAttempts >= MAX_STUN_ATTEMPTS) {
           console.error(`❌ [FALLBACK] STUN failed after ${MAX_STUN_ATTEMPTS} attempts. Switching to TURN.`);
@@ -2648,7 +2657,7 @@
             peerConnections.delete(userId);
 
             // Re-init with TURN
-            setTimeout(() => createOffer(userId), 1000);
+            setTimeout(() => createOffer(userId), 250);
           });
         } else if (useTurnFallback) {
           console.error(`❌ [CRITICAL] Connection failed even with TURN fallback for ${userId}`);
@@ -3389,6 +3398,46 @@
             } catch { }
           };
 
+          // Reconnect gating: keep overlay until we truly resynced call + at least one peer connection
+          let reconnectGate = {
+            inProgress: false,
+            authenticated: false,
+            callJoined: false,
+            participantsCount: 0
+          };
+
+          function startReconnectGate(source = 'unknown') {
+            reconnectGate.inProgress = true;
+            reconnectGate.authenticated = false;
+            reconnectGate.callJoined = false;
+            reconnectGate.participantsCount = 0;
+            try { showReconnectUI('Reconnecting…', `Restoring your call… (${source})`); } catch { }
+          }
+
+          function maybeResolveReconnectGate(source = 'unknown') {
+            try {
+              if (!reconnectGate.inProgress) return;
+              if (!socketInstance?.connected) return;
+              if (!reconnectGate.authenticated) return;
+              if (!reconnectGate.callJoined) return;
+
+              // If you're alone, don't wait for peer ICE.
+              if ((reconnectGate.participantsCount || 0) <= 1) {
+                reconnectGate.inProgress = false;
+                clearReconnectWatchdogs();
+                hideReconnectUI();
+                return;
+              }
+
+              // For multi-party: wait for at least one peer connection to establish.
+              if (hasEstablishedConnection) {
+                reconnectGate.inProgress = false;
+                clearReconnectWatchdogs();
+                hideReconnectUI();
+              }
+            } catch { }
+          }
+
           const hideReconnectUI = () => {
             try {
               if (reconnectOverlay) {
@@ -3548,6 +3597,7 @@
             console.log(`🔌 Connected: ${socketInstance.id}`);
             // Don't hide overlay immediately during a reconnect; wait for call re-sync.
             if (needsRejoinAfterReconnect) {
+              startReconnectGate('socket_connect');
               showReconnectUI('Reconnecting…', 'Syncing call…');
             } else {
               hideReconnectUI();
@@ -3576,6 +3626,7 @@
               needsRejoinAfterReconnect = true;
               lastDisconnectAt = Date.now();
               reconnectAttempts = 0;
+              startReconnectGate('disconnect');
               showReconnectUI('Reconnecting…', 'Your connection dropped. Restoring…');
               startReconnectWatchdogs('disconnect');
             }
@@ -3605,6 +3656,7 @@
           } catch { }
 
           socketInstance.on('connect_error', () => {
+            startReconnectGate('connect_error');
             showReconnectUI('Reconnecting…', 'Unable to reach server. Retrying…');
             startReconnectWatchdogs('connect_error');
           });
@@ -3687,6 +3739,11 @@
           socketInstance.on('authenticated', async () => {
             console.log('✅ Authenticated');
 
+            if (reconnectGate.inProgress) {
+              reconnectGate.authenticated = true;
+              maybeResolveReconnectGate('authenticated');
+            }
+
             // ✅ Signal CALL MODE to server
             if (callData && callData.roomId) {
               socketInstance.emit('enter_call_mode', { roomId: callData.roomId });
@@ -3737,9 +3794,8 @@
                 const joinData = await attemptJoinCall(callData.callId);
                 console.log('✅ Joined call successfully');
 
-                needsRejoinAfterReconnect = false;
-                clearReconnectWatchdogs();
-                hideReconnectUI();
+                // Resolution is handled by call_joined + ICE connected gate
+                maybeResolveReconnectGate('rejoin_success');
               } catch (error) {
                 console.error('❌ Failed to re-join call:', error);
                 startReconnectWatchdogs('rejoin_failed');
@@ -3907,10 +3963,10 @@
             console.log(`✅ ========================================`);
             console.log(`📊 Participants: ${data.participants.length}`);
 
-            if (needsRejoinAfterReconnect) {
-              needsRejoinAfterReconnect = false;
-              clearReconnectWatchdogs();
-              hideReconnectUI();
+            if (reconnectGate.inProgress) {
+              reconnectGate.callJoined = true;
+              reconnectGate.participantsCount = Array.isArray(data.participants) ? data.participants.length : 0;
+              maybeResolveReconnectGate('call_joined');
             }
 
             // CRITICAL: Update connection state
