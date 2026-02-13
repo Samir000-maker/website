@@ -736,6 +736,18 @@
       // ============================================
       // 🔄 BACKGROUND RECOVERY LOGIC
       // ============================================
+
+      // Bridge so WebRTC handlers (defined outside initCall scope) can resolve the reconnect gate safely.
+      // initCall() will register the real implementation when available.
+      window.__maybeResolveReconnectGate = null;
+      function maybeResolveReconnectGate(source = 'unknown') {
+        try {
+          if (typeof window.__maybeResolveReconnectGate === 'function') {
+            return window.__maybeResolveReconnectGate(source);
+          }
+        } catch { }
+      }
+
       async function resumeAllMedia() {
         if (document.hidden) return;
 
@@ -798,10 +810,66 @@
         console.log('🔄 ========================================\n');
       }
 
+      let backgroundKeepAliveAudio = null;
+      let backgroundAudioWatchdog = null;
+
+      async function ensureBackgroundKeepAlivePlaying() {
+        try {
+          if (!backgroundKeepAliveAudio) {
+            backgroundKeepAliveAudio = document.createElement('audio');
+            backgroundKeepAliveAudio.autoplay = true;
+            backgroundKeepAliveAudio.loop = true;
+            backgroundKeepAliveAudio.muted = true;
+            backgroundKeepAliveAudio.volume = 0;
+
+            // 1s silent WAV (base64). Keeping an audio element active reduces background suspension in some browsers.
+            backgroundKeepAliveAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAAAAA=';
+            try { document.body.appendChild(backgroundKeepAliveAudio); } catch { }
+          }
+
+          if (backgroundKeepAliveAudio.paused) {
+            await backgroundKeepAliveAudio.play().catch(() => { });
+          }
+        } catch { }
+      }
+
+      function stopBackgroundKeepAlive() {
+        try {
+          if (backgroundKeepAliveAudio && !backgroundKeepAliveAudio.paused) {
+            backgroundKeepAliveAudio.pause();
+          }
+        } catch { }
+      }
+
+      function startBackgroundAudioWatchdog() {
+        try {
+          if (backgroundAudioWatchdog) return;
+          backgroundAudioWatchdog = setInterval(() => {
+            try {
+              const audios = document.querySelectorAll('audio');
+              for (const a of audios) {
+                if (a && a.srcObject && a.paused) {
+                  a.play().catch(() => { });
+                }
+              }
+            } catch { }
+          }, 2000);
+        } catch { }
+      }
+
+      function stopBackgroundAudioWatchdog() {
+        try {
+          if (backgroundAudioWatchdog) clearInterval(backgroundAudioWatchdog);
+        } catch { }
+        backgroundAudioWatchdog = null;
+      }
+
       // Listen for visibility and focus
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
           console.log('👀 Page became VISIBLE - initiating recovery');
+          stopBackgroundKeepAlive();
+          stopBackgroundAudioWatchdog();
           resumeAllMedia();
           reportCallPresenceContext('call_visibility_visible', {
             keepalive: true,
@@ -809,6 +877,8 @@
           }).catch(() => { });
           validateCallPresenceState('call_visibility_visible');
         } else {
+          ensureBackgroundKeepAlivePlaying().catch(() => { });
+          startBackgroundAudioWatchdog();
           reportCallPresenceContext('call_visibility_hidden', {
             keepalive: true,
             allowRedirect: false
@@ -3659,6 +3729,9 @@
               }
             } catch { }
           }
+
+          // Expose to global WebRTC handlers that run outside initCall() scope.
+          try { window.__maybeResolveReconnectGate = maybeResolveReconnectGate; } catch { }
 
           const hideReconnectUI = () => {
             try {
