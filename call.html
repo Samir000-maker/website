@@ -311,6 +311,12 @@
     </div>
 </button> -->
 
+  <script>
+if (window.location.pathname === "/call.html") {
+  window.history.replaceState({}, "", "/call");
+}
+</script>
+
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script>
@@ -765,6 +771,49 @@
         } catch { }
       }
 
+      async function ensureLocalMicHealthy(trigger = 'unknown') {
+        try {
+          if (!isAudioEnabled) return;
+          if (!localStream) return;
+
+          const track = localStream.getAudioTracks()[0] || null;
+          const needsReacquire = !track || track.readyState === 'ended';
+
+          if (needsReacquire) {
+            console.warn(`🎙️ [Mic] Reacquiring mic (reason=${trigger}, state=${track?.readyState || 'missing'})`);
+            try {
+              localStream.getAudioTracks().forEach(t => {
+                try { localStream.removeTrack(t); } catch { }
+                try { t.stop(); } catch { }
+              });
+            } catch { }
+            await acquireLocalAudioTrack();
+            return;
+          }
+
+          // On mobile, the mic track can become "muted" after backgrounding even though it still exists.
+          // If it stays muted briefly after resume, force a reacquire so upstream audio resumes.
+          if (track.muted) {
+            setTimeout(() => {
+              try {
+                const t2 = localStream?.getAudioTracks?.()[0] || null;
+                if (!t2 || t2.readyState === 'ended') return;
+                if (t2.muted && isAudioEnabled && !document.hidden) {
+                  console.warn(`🎙️ [Mic] Track still muted after resume; forcing reacquire (${trigger})`);
+                  try {
+                    localStream.getAudioTracks().forEach(t => {
+                      try { localStream.removeTrack(t); } catch { }
+                      try { t.stop(); } catch { }
+                    });
+                  } catch { }
+                  acquireLocalAudioTrack().catch(() => { });
+                }
+              } catch { }
+            }, 1500);
+          }
+        } catch { }
+      }
+
       async function resumeAllMedia() {
         if (document.hidden) return;
 
@@ -823,6 +872,8 @@
             }
           });
         }
+
+        await ensureLocalMicHealthy('resumeAllMedia');
 
         console.log('🔄 ========================================\n');
       }
@@ -889,6 +940,7 @@
           stopBackgroundKeepAlive();
           stopBackgroundAudioWatchdog();
           resumeAllMedia();
+          ensureLocalMicHealthy('visibility_visible').catch(() => { });
           try {
             if (socketInstance && !socketInstance.connected) {
               window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
@@ -913,6 +965,7 @@
       window.addEventListener('focus', () => {
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
+        ensureLocalMicHealthy('focus').catch(() => { });
         try {
           if (socketInstance && !socketInstance.connected) {
             window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
@@ -942,6 +995,7 @@
             stopBackgroundKeepAlive();
             stopBackgroundAudioWatchdog();
             resumeAllMedia();
+            ensureLocalMicHealthy('resume').catch(() => { });
             if (socketInstance && !socketInstance.connected) {
               window.showReconnectUI?.('Reconnecting…', 'Restoring your call…');
               socketInstance.connect();
@@ -2765,6 +2819,8 @@
 
         const pc = new RTCPeerConnection({
           ...PEER_CONNECTION_CONFIG,
+          // Once we fall back to TURN, force relay-only to avoid wasting time on dead STUN paths.
+          iceTransportPolicy: useTurnFallback ? 'relay' : PEER_CONNECTION_CONFIG.iceTransportPolicy,
           iceServers: ICE_SERVERS
         });
 
@@ -2779,7 +2835,9 @@
           iceRestartCount: 0,
           stunAttemptCount: stunAttemptTotals.get(userId) || 0, // ✅ Track STUN attempts (persisted across rebuilds)
           lastIceCandidateTime: 0,
-          watchdogTimer: null // ✅ For fast retry
+          watchdogTimer: null, // ✅ For fast retry
+          connectWatchdogTimer: null,
+          turnRetryCount: 0
         });
 
         const stats = connectionStats.get(userId);
@@ -2806,6 +2864,44 @@
             }
           }, 2500); // fast timeout for STUN (WhatsApp-like)
         }
+
+        // Connection watchdog (covers the common "stuck on checking" case, including TURN relay connects).
+        // We intentionally keep this conservative to avoid flapping on slow networks.
+        try {
+          const timeoutMs = useTurnFallback ? 12000 : 8000;
+          if (stats.connectWatchdogTimer) clearTimeout(stats.connectWatchdogTimer);
+          stats.connectWatchdogTimer = setTimeout(() => {
+            try {
+              const pcCurrent = peerConnections.get(userId);
+              if (!pcCurrent) return;
+              const s = connectionStats.get(userId);
+              const state = pcCurrent.iceConnectionState;
+              if (state === 'connected' || state === 'completed') return;
+
+              console.warn(`⏱️ [ICE] Connect watchdog fired for ${userId} (state: ${state}, turn=${useTurnFallback})`);
+
+              if (useTurnFallback) {
+                // If we are already on TURN and still stuck, try a limited number of full PC rebuilds.
+                const retries = (s?.turnRetryCount || 0) + 1;
+                if (s) s.turnRetryCount = retries;
+
+                if (retries <= 2) {
+                  const subtitle = document.getElementById('callSubtitle');
+                  if (subtitle) subtitle.textContent = `Reconnecting via Relay… (Retry ${retries}/2)`;
+
+                  try { pcCurrent.close(); } catch { }
+                  try { peerConnections.delete(userId); } catch { }
+
+                  setTimeout(() => createOffer(userId).catch(() => { }), 150);
+                  return;
+                }
+              }
+
+              // Default path: treat as failure to trigger your existing ladder (STUN retries -> TURN fallback).
+              handleIceFailure(userId);
+            } catch { }
+          }, timeoutMs);
+        } catch { }
 
         const tracks = localStream.getTracks();
         console.log(`📊 Adding ${tracks.length} tracks to PC for ${userId}:`);
@@ -3050,6 +3146,10 @@
               clearTimeout(stats.watchdogTimer);
               stats.watchdogTimer = null;
               console.log(`⏱️ [ICE] Watchdog stopped for ${userId} (connected)`);
+            }
+            if (stats && stats.connectWatchdogTimer) {
+              clearTimeout(stats.connectWatchdogTimer);
+              stats.connectWatchdogTimer = null;
             }
           }
 
