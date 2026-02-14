@@ -690,6 +690,47 @@ const Presence = {
     return null;
   },
 
+  getActiveCallId() {
+    try {
+      const activeCallRaw = localStorage.getItem('activeCall');
+      if (!activeCallRaw) return null;
+      const activeCall = JSON.parse(activeCallRaw);
+      return activeCall?.callId || null;
+    } catch {
+      return null;
+    }
+  },
+
+  sendLeaveBeacon(reason = 'pagehide') {
+    try {
+      const location = this.classifyLocation();
+      if (!this.isChatContext(location)) return false;
+
+      const token = this._tokenCache;
+      if (!token) return false;
+
+      const roomId = this.getContextRoomId(location);
+      const callId = this.getActiveCallId();
+
+      if (!roomId && !callId) return false;
+
+      const payload = {
+        token,
+        roomId: roomId || null,
+        callId: callId || null,
+        location,
+        reason
+      };
+
+      if (navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        return navigator.sendBeacon('/api/beacon/leave', blob);
+      }
+    } catch { }
+
+    return false;
+  },
+
   async getAuthToken() {
     const user = this.getCurrentUser();
     if (!user) return null;
@@ -817,10 +858,15 @@ const Presence = {
     });
 
     window.addEventListener('pagehide', () => {
+      try { this.sendLeaveBeacon('pagehide'); } catch { }
       this.reportContext('pagehide', {
         allowRedirect: false,
         keepalive: true
       }).catch(() => { });
+    });
+
+    window.addEventListener('beforeunload', () => {
+      try { this.sendLeaveBeacon('beforeunload'); } catch { }
     });
 
     // Initial best-effort sync.
