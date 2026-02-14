@@ -333,15 +333,7 @@
     } catch { }
   </script>
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-  <script>
-    (function () {
-      if (window.MoodApp && window.MoodApp.API && window.tabManager) return;
-      const s = document.createElement('script');
-      s.src = 'app.js';
-      s.async = false;
-      document.head.appendChild(s);
-    })();
-  </script>
+  <script src="app.js"></script>
 
 
 
@@ -5125,8 +5117,30 @@
         }
       }
 
+      function waitForMoodAppAuthReady(timeoutMs = 8000) {
+        const start = Date.now();
+        return new Promise((resolve, reject) => {
+          const tick = () => {
+            const Auth = window.MoodApp && window.MoodApp.Auth;
+            if (Auth && typeof Auth.requireAuth === 'function') return resolve();
+            if (Date.now() - start > timeoutMs) return reject(new Error('MoodApp.Auth.requireAuth not ready'));
+            setTimeout(tick, 30);
+          };
+          tick();
+        });
+      }
+
       console.log('✅ Page loaded - starting initialization');
-      initCall();
+      (async () => {
+        try {
+          await waitForMoodAppAuthReady();
+          initCall();
+        } catch (e) {
+          console.error('❌ Init error:', e);
+          toast('Failed to initialize call', 'error');
+          setTimeout(() => window.location.href = '/chat.html', 2000);
+        }
+      })();
     })();
   </script>
 </body>
