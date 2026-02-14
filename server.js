@@ -2083,6 +2083,36 @@ app.get("/home", (req, res) => {
 });
 
 
+app.get("/signup", (req, res) => {
+  res.sendFile(path.join(__dirname, "signup.html"));
+});
+
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "login.html"));
+});
+
+
+app.get("/choose-profile-picture", (req, res) => {
+  res.sendFile(path.join(__dirname, "profile-picture.html"));
+});
+
+app.get("/username", (req, res) => {
+  res.sendFile(path.join(__dirname, "username.html"));
+});
+
+app.get("/discovery", (req, res) => {
+  res.sendFile(path.join(__dirname, "discovery.html"));
+});
+
+app.get("/chat", (req, res) => {
+  res.sendFile(path.join(__dirname, "chat.html"));
+});
+
+app.get("/call", (req, res) => {
+  res.sendFile(path.join(__dirname, "call.html"));
+});
+
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
