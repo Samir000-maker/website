@@ -6928,9 +6928,31 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // If this was the last socket, we can clean up immediately based on last known presence context.
+      // This avoids requiring the user to reopen the site to trigger leave.
+      const presence = await getUserPresence(userId);
+      const presenceLocation = normalizePresenceLocation(presence?.location);
+      const wasInChatContext = CHAT_CONTEXT_LOCATIONS.has(presenceLocation) || !!presence?.chatContextSeen;
+
+      if (wasInChatContext) {
+        const resolvedRoomId = await resolveRoomContextForUser(
+          userId,
+          firebaseUid,
+          presence?.roomId || presence?.activeRoomId || null,
+          { usePreferredFallback: true }
+        );
+
+        if (resolvedRoomId) {
+          console.log(`👤 [Presence] Last device disconnected for ${username}. Immediate leave for room ${resolvedRoomId}.`);
+          await performUserLeaveChat(userId, resolvedRoomId, 'socket_disconnect', firebaseUid);
+          await cancelUserCleanup(userId);
+          return;
+        }
+      }
+
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
-      // Use Redis TTL based cleanup instead of local setTimeout
+      // Fallback: Use Redis TTL based cleanup instead of local setTimeout
       // Longer grace period to survive transient transport disconnects and reconnect races.
       await scheduleUserCleanup(userId, SOCKET_DISCONNECT_GRACE_MS, {
         reason: 'socket_disconnect',
