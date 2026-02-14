@@ -3,6 +3,9 @@ export const config = {
   // Server configuration
   PORT: process.env.PORT || 3000,
 
+  CLOUDFLARE_TURN_TOKEN_ID: process.env.CLOUDFLARE_TURN_TOKEN_ID || '4ed26621ae28abbeb09c45542120c644',
+  CLOUDFLARE_TURN_API_TOKEN: process.env.CLOUDFLARE_TURN_API_TOKEN || 'c38bc628a54060b020cfe9d31017b24c92bc932728c9cf317d0deb3ded2d9519',
+
   // Cloudflare R2 configuration
   CLOUDFLARE_ENDPOINT: "https://d90a9dc9787962f745733993f3f1766d.r2.cloudflarestorage.com",
   BUCKET_NAME: "my-app-posts",
