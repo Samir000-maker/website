@@ -160,6 +160,12 @@
     <script src="app.js"></script>
 
     <script>
+if (window.location.pathname === "/profile-picture.html") {
+  window.history.replaceState({}, "", "/choose-profile-picture");
+}
+</script>
+
+    <script>
     (async () => {
         const firebaseConfig = {
             apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
