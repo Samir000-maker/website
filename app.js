@@ -802,6 +802,8 @@ const Presence = {
     if (!this.isChatContext()) return;
 
     this._heartbeatInterval = setInterval(() => {
+      // Keep token warm so sendBeacon can fire reliably on tab close.
+      this.getAuthToken().catch(() => { });
       this.reportContext('context_heartbeat', {
         allowRedirect: false,
         keepalive: true
@@ -830,6 +832,9 @@ const Presence = {
         this.stopContextHeartbeat();
         return;
       }
+
+      // Pre-fetch token ASAP so tab-close beacons can authenticate even if user closes quickly.
+      await this.getAuthToken();
 
       await this.reportContext('auth_state_change', {
         allowRedirect: true,
