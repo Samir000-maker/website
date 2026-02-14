@@ -457,5 +457,57 @@
             }
         })();
     </script>
+
+    <script>
+        (function () {
+            const btn = document.getElementById('contactSupportBtn');
+            const modal = document.getElementById('contactSupportModal');
+            const copyBtn = document.getElementById('contactSupportCopyBtn');
+            const emailEl = document.getElementById('contactSupportEmail');
+            const hint = document.getElementById('contactSupportCopyHint');
+            if (!btn || !modal || !copyBtn || !emailEl) return;
+
+            const open = () => {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            };
+            const close = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                if (hint) hint.classList.add('hidden');
+            };
+
+            btn.addEventListener('click', open);
+            modal.addEventListener('click', (e) => {
+                const t = e.target;
+                if (t && t.closest && t.closest('[data-close="1"]')) close();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') close();
+            });
+
+            copyBtn.addEventListener('click', async () => {
+                const text = emailEl.textContent || 'contact@vibegra.com';
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        ta.remove();
+                    }
+                    if (hint) {
+                        hint.classList.remove('hidden');
+                        setTimeout(() => hint.classList.add('hidden'), 1200);
+                    }
+                } catch { }
+            });
+        })();
+    </script>
 </body>
 </html>
