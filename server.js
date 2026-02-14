@@ -1678,6 +1678,49 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
+/**
+ * Tab-close Beacon Endpoint (navigator.sendBeacon)
+ * Uses token in request body because beacons cannot reliably set Authorization headers.
+ */
+app.post('/api/beacon/leave', async (req, res) => {
+  try {
+    const { token, roomId, callId, reason, location } = req.body || {};
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'token is required' });
+    }
+
+    const decodedToken = await verifyToken(token);
+    const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(decodedToken);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unable to resolve authenticated user' });
+    }
+
+    // If user still has active sockets, do NOT auto-leave.
+    // This prevents closing one tab from kicking the user out while another tab/device is still active.
+    try {
+      const activeSockets = await io.in(`user:${userId}`).fetchSockets();
+      if (activeSockets.length > 0) {
+        return res.json({ success: true, skipped: 'active_sockets' });
+      }
+    } catch { }
+
+    if (roomId && typeof roomId === 'string') {
+      await performUserLeaveChat(userId, roomId, 'beacon_close', firebaseUid);
+    }
+
+    if (callId && typeof callId === 'string') {
+      await handleCallLeaveInternal(userId, callId);
+    }
+
+    return res.json({ success: true, location: location || null, reason: reason || null });
+  } catch (error) {
+    console.error(`❌ [API] Error in beacon leave endpoint:`, error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.use(express.static(__dirname));
 
 const upload = multer({
