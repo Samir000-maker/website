@@ -56,16 +56,6 @@ import Redlock from 'redlock';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const moodFile = "/var/www/vibegra/mood.html";
-
-const signupFile = "/var/www/vibegra/signup.html";
-const loginFile = "/var/www/vibegra/login.html";
-const profile-pictureFile = "/var/www/vibegra/profile-picture.html";
-const usernameFile = "/var/www/vibegra/username.html";
-const discoveryFile = "/var/www/vibegra/discovery.html";
-const chatFile = "/var/www/vibegra/chat.html";
-const callFile = "/var/www/vibegra/call.html";
-
-
 // Redis Clients
 const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
 const redisPort = config.REDIS_PORT || 6379;
@@ -2092,35 +2082,6 @@ app.get("/home", (req, res) => {
   res.sendFile(path.join(__dirname, "mood.html"));
 });
 
-
-app.get("/signup", (req, res) => {
-  res.sendFile(signupFile);
-});
-
-app.get("/login", (req, res) => {
-  res.sendFile(loginFile);
-});
-
-
-app.get("/profile-picture", (req, res) => {
-  res.sendFile(profile-pictureFile);
-});
-
-app.get("/username", (req, res) => {
-  res.sendFile(usernameFile);
-});
-
-app.get("/discovery", (req, res) => {
-  res.sendFile(discoveryFile);
-});
-
-app.get("/chat", (req, res) => {
-  res.sendFile(chatFile);
-});
-
-app.get("/call", (req, res) => {
-  res.sendFile(callFile);
-});
 
 app.get('/health', (req, res) => {
   res.json({
