@@ -712,12 +712,18 @@ const Presence = {
       const roomId = this.getContextRoomId(location);
       const callId = this.getActiveCallId();
 
+      const socketId =
+        window.MoodApp?.socket?.instance?.id ||
+        window.socket?.instance?.id ||
+        null;
+
       if (!roomId && !callId) return false;
 
       const payload = {
         token,
         roomId: roomId || null,
         callId: callId || null,
+        socketId,
         location,
         reason
       };
@@ -843,6 +849,7 @@ const Presence = {
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        try { this.sendLeaveBeacon('visibility_hidden'); } catch { }
         this.reportContext('visibility_hidden', {
           allowRedirect: false,
           keepalive: true
