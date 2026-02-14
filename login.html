@@ -661,7 +661,7 @@
             btn.addEventListener('click', open);
             modal.addEventListener('click', (e) => {
                 const t = e.target;
-                if (t && t.getAttribute && t.getAttribute('data-close') === '1') close();
+                if (t && t.closest && t.closest('[data-close="1"]')) close();
             });
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') close();
