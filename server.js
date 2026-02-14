@@ -28,6 +28,7 @@ console.log('');
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import 'dotenv/config';
 import cors from 'cors';
 import multer from 'multer';
 import { ObjectId } from 'mongodb';
@@ -1682,6 +1683,26 @@ matchmaking.init(pubClient, io, redlock);
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+app.get('/env-config.js', (req, res) => {
+  try {
+    const firebaseConfig = {
+      apiKey: process.env.apiKey || '',
+      authDomain: process.env.authDomain || '',
+      projectId: process.env.projectId || process.env.FIREBASE_PROJECT_ID || '',
+      storageBucket: process.env.storageBucket || '',
+      messagingSenderId: process.env.messagingSenderId || '',
+      appId: process.env.appId || '',
+      measurementId: process.env.measurementId || ''
+    };
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('application/javascript');
+    res.send(`window.__VIBE_FIREBASE_CONFIG__ = window.__VIBE_FIREBASE_CONFIG__ || ${JSON.stringify(firebaseConfig)};`);
+  } catch {
+    res.status(500).type('application/javascript').send('window.__VIBE_FIREBASE_CONFIG__ = window.__VIBE_FIREBASE_CONFIG__ || {};');
+  }
+});
 
 /**
  * Tab-close Beacon Endpoint (navigator.sendBeacon)
