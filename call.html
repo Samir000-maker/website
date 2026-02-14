@@ -343,93 +343,6 @@
       };
 
 
-      const CALL_DEBUG = (() => {
-        try {
-          return localStorage.getItem('CALL_DEBUG') === '1';
-        } catch {
-          return false;
-        }
-      })();
-
-      const CALL_DEBUG_LEVEL = (() => {
-        try {
-          return (localStorage.getItem('CALL_DEBUG_LEVEL') || 'info').toLowerCase();
-        } catch {
-          return 'info';
-        }
-      })();
-
-      const __callDebugCounters = {
-        since: Date.now(),
-        mediaHealth: { ticks: 0, getStatsCalls: 0, getStatsMs: 0, recoveries: 0 },
-        connQuality: { ticks: 0, getStatsCalls: 0, getStatsMs: 0 },
-        bgAudioWatchdog: { ticks: 0, playAttempts: 0 },
-        negotiation: { offers: 0, answers: 0, offerCollisions: 0, offerDeferrals: 0, mutexDeferrals: 0 },
-        uiIntervals: { transformFixTicks: 0, transformFixMs: 0, transformFixVideos: 0 }
-      };
-
-      const __callDebugLast = new Map();
-      const __callDebugLevelRank = { error: 0, warn: 1, info: 2, debug: 3 };
-      const __callDebugShouldLog = (level) => {
-        if (!CALL_DEBUG) return false;
-        const want = __callDebugLevelRank[CALL_DEBUG_LEVEL] ?? 2;
-        const have = __callDebugLevelRank[level] ?? 2;
-        return have <= want;
-      };
-
-      const __callDbg = (level, key, payload, opts = {}) => {
-        if (!__callDebugShouldLog(level)) return;
-        const now = performance.now ? performance.now() : Date.now();
-        const last = __callDebugLast.get(key) || { at: 0, count: 0 };
-        const intervalMs = Number.isFinite(opts.intervalMs) ? opts.intervalMs : 500;
-        if (now - last.at < intervalMs) {
-          last.count++;
-          __callDebugLast.set(key, last);
-          return;
-        }
-        const suppressed = last.count;
-        __callDebugLast.set(key, { at: now, count: 0 });
-        const entry = {
-          t: Date.now(),
-          key,
-          suppressed,
-          ...payload
-        };
-        try {
-          const fn = level === 'error' ? 'error' : (level === 'warn' ? 'warn' : (level === 'debug' ? 'debug' : 'log'));
-          console[fn]('[CALL_DEBUG]', entry);
-        } catch { }
-      };
-
-      const __callDbgSpan = async (name, fn, meta = {}) => {
-        const start = performance.now ? performance.now() : Date.now();
-        try {
-          __callDbg('debug', `span:${name}:start`, { name, ...meta }, { intervalMs: 0 });
-        } catch { }
-        try {
-          return await fn();
-        } finally {
-          const end = performance.now ? performance.now() : Date.now();
-          __callDbg('debug', `span:${name}:end`, { name, ms: Math.round((end - start) * 10) / 10, ...meta }, { intervalMs: 0 });
-        }
-      };
-
-      try {
-        window.__CALL_DEBUG__ = {
-          enabled: CALL_DEBUG,
-          level: CALL_DEBUG_LEVEL,
-          counters: __callDebugCounters,
-          dump: () => {
-            try {
-              console.log('[CALL_DEBUG] counters', JSON.parse(JSON.stringify(__callDebugCounters)));
-            } catch {
-              console.log('[CALL_DEBUG] counters', __callDebugCounters);
-            }
-          }
-        };
-      } catch { }
-
-
       let videoStateChangeTimeout = null;
       let isTogglingVideo = false;
       let isJoiningCall = false;
@@ -612,11 +525,6 @@
       async function recoverRemoteMedia(userId, reason = 'unknown') {
         console.warn(`🩺 [MEDIA] Recovery triggered for ${userId} (reason=${reason})`);
 
-        try {
-          __callDebugCounters.mediaHealth.recoveries++;
-          __callDbg('warn', 'media:recovery', { userId, reason }, { intervalMs: 0 });
-        } catch { }
-
         const pc = peerConnections.get(userId);
         if (!pc || pc.connectionState === 'closed') {
           console.warn(`🩺 [MEDIA] No active PC for ${userId}.`);
@@ -654,43 +562,21 @@
       function startMediaHealthMonitor(userId, pc) {
         stopMediaHealthMonitor(userId);
 
-        let statsInFlight = false;
         const intervalId = setInterval(async () => {
-          try { __callDebugCounters.mediaHealth.ticks++; } catch { }
           const currentPc = peerConnections.get(userId);
           if (!currentPc || currentPc !== pc || currentPc.connectionState === 'closed') {
             stopMediaHealthMonitor(userId);
             return;
           }
 
-          // Avoid background/tab-hidden work that can spike CPU on mobile.
-          try {
-            if (document.hidden) return;
-          } catch { }
-
           // Only monitor when we believe we should be connected.
           if (currentPc.iceConnectionState !== 'connected' && currentPc.iceConnectionState !== 'completed') {
             return;
           }
 
-          // Prevent overlapping getStats calls (can happen on slow devices / many peers).
-          if (statsInFlight) return;
-          statsInFlight = true;
-
           const now = Date.now();
           try {
-            const t0 = performance.now ? performance.now() : Date.now();
-            __callDebugCounters.mediaHealth.getStatsCalls++;
             const stats = await currentPc.getStats();
-            const t1 = performance.now ? performance.now() : Date.now();
-            const dt = t1 - t0;
-            __callDebugCounters.mediaHealth.getStatsMs += dt;
-            __callDbg('debug', 'media:getStats', {
-              userId,
-              ms: Math.round(dt * 10) / 10,
-              ice: currentPc.iceConnectionState,
-              sig: currentPc.signalingState
-            }, { intervalMs: 2000 });
 
             let inboundVideo = null;
             let inboundAudio = null;
@@ -740,17 +626,6 @@
             const frozenMs = next.frozenSince ? (now - next.frozenSince) : 0;
             const silentMs = next.silentSince ? (now - next.silentSince) : 0;
 
-            if (frozenMs > 0 || silentMs > 0) {
-              __callDbg('debug', 'media:stalled', {
-                userId,
-                frozenMs,
-                silentMs,
-                videoBytes: next.videoBytes,
-                videoFramesDecoded: next.videoFramesDecoded,
-                audioBytes: next.audioBytes
-              }, { intervalMs: 2500 });
-            }
-
             if (frozenMs > 6000) {
               await recoverRemoteMedia(userId, 'frozen_video');
               next.frozenSince = now; // rate-limit
@@ -765,10 +640,8 @@
 
           } catch {
             // getStats can fail transiently; ignore.
-          } finally {
-            statsInFlight = false;
           }
-        }, 5000);
+        }, 2000);
 
         mediaHealthMonitors.set(userId, intervalId);
       }
@@ -1001,8 +874,6 @@
 
       let backgroundKeepAliveAudio = null;
       let backgroundAudioWatchdog = null;
-      let lastVisibilityRecoveryAt = 0;
-      let lastFocusRecoveryAt = 0;
 
       async function ensureBackgroundKeepAlivePlaying() {
         try {
@@ -1037,22 +908,15 @@
         try {
           if (backgroundAudioWatchdog) return;
           backgroundAudioWatchdog = setInterval(() => {
-            try { __callDebugCounters.bgAudioWatchdog.ticks++; } catch { }
             try {
-              // Keep this very lightweight; scanning DOM too frequently can spike CPU.
               const audios = document.querySelectorAll('audio');
               for (const a of audios) {
-                if (!a || !a.srcObject) continue;
-                if (!a.paused) continue;
-                // Avoid throwing work at the media pipeline if the page is fully hidden.
-                try { if (document.hidden) return; } catch { }
-                try { __callDebugCounters.bgAudioWatchdog.playAttempts++; } catch { }
-                __callDbg('debug', 'bgAudio:playAttempt', { paused: true }, { intervalMs: 5000 });
-                a.play().catch(() => { });
+                if (a && a.srcObject && a.paused) {
+                  a.play().catch(() => { });
+                }
               }
             } catch { }
-          }, 8000);
-          __callDbg('info', 'bgAudio:watchdogStart', { intervalMs: 8000 }, { intervalMs: 0 });
+          }, 2000);
         } catch { }
       }
 
@@ -1061,17 +925,11 @@
           if (backgroundAudioWatchdog) clearInterval(backgroundAudioWatchdog);
         } catch { }
         backgroundAudioWatchdog = null;
-        try { __callDbg('info', 'bgAudio:watchdogStop', {}, { intervalMs: 0 }); } catch { }
       }
 
       // Listen for visibility and focus
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
-          // Debounce: chat/call overlay transitions can trigger rapid hidden/visible flips.
-          const now = Date.now();
-          if (now - lastVisibilityRecoveryAt < 2500) return;
-          lastVisibilityRecoveryAt = now;
-
           console.log('👀 Page became VISIBLE - initiating recovery');
           stopBackgroundKeepAlive();
           stopBackgroundAudioWatchdog();
@@ -1099,10 +957,6 @@
       });
 
       window.addEventListener('focus', () => {
-        const now = Date.now();
-        if (now - lastFocusRecoveryAt < 2500) return;
-        lastFocusRecoveryAt = now;
-
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
         ensureLocalMicHealthy('focus').catch(() => { });
@@ -1694,7 +1548,7 @@
           const tryGetVideoStream = async (constraints, label) => {
             try {
               console.log(`📹 [Camera] getUserMedia attempt: ${label}`);
-              const s = await getUserMediaWithTimeout(constraints, 6500);
+              const s = await navigator.mediaDevices.getUserMedia(constraints);
               const t = s.getVideoTracks()[0];
               if (!t) {
                 try { s.getTracks().forEach(x => x.stop()); } catch { }
@@ -1713,13 +1567,6 @@
             const devices = await navigator.mediaDevices.enumerateDevices();
             videoInputs = devices.filter(d => d.kind === 'videoinput');
           } catch { }
-
-          // Fail fast if the device reports no cameras. This avoids long getUserMedia timeouts/freezes.
-          if (!videoInputs || videoInputs.length === 0) {
-            const err = Object.assign(new Error('No camera devices found'), { name: 'NotFoundError' });
-            try { toast('No camera available on this device', 'error'); } catch { }
-            throw err;
-          }
 
           const deviceIds = videoInputs.map(d => d.deviceId).filter(Boolean);
           const uniqueDeviceIds = Array.from(new Set(deviceIds));
@@ -1767,11 +1614,6 @@
               break;
             } catch (e) {
               lastError = e;
-
-              // If the browser reports no camera devices, do not keep retrying.
-              if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
-                break;
-              }
 
               // If camera is busy/not readable, give it a tiny cooldown before retrying next profile.
               if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
@@ -2471,25 +2313,13 @@
       // Add after createPC function to monitor connection quality
       function monitorConnectionQuality(userId, pc) {
         const monitorInterval = setInterval(async () => {
-          try { __callDebugCounters.connQuality.ticks++; } catch { }
           if (!pc || pc.connectionState === 'closed') {
             clearInterval(monitorInterval);
             return;
           }
 
           try {
-            const t0 = performance.now ? performance.now() : Date.now();
-            __callDebugCounters.connQuality.getStatsCalls++;
             const stats = await pc.getStats();
-            const t1 = performance.now ? performance.now() : Date.now();
-            const dt = t1 - t0;
-            __callDebugCounters.connQuality.getStatsMs += dt;
-            __callDbg('debug', 'connQuality:getStats', {
-              userId,
-              ms: Math.round(dt * 10) / 10,
-              ice: pc.iceConnectionState,
-              state: pc.connectionState
-            }, { intervalMs: 2000 });
             let connectionInfo = {
               candidateType: 'unknown',
               bytesReceived: 0,
@@ -3587,7 +3417,6 @@
         // CRITICAL: Check if already making offer
         if (makingOffer.get(userId)) {
           console.warn(`⚠️ Already making offer to ${userId}, skipping`);
-          try { __callDbg('warn', 'neg:createOffer:skipMakingOffer', { userId }, { intervalMs: 1000 }); } catch { }
           return;
         }
 
@@ -3595,33 +3424,18 @@
         if (negotiationMutex.has(userId)) {
           console.warn(`⚠️ Negotiation mutex active for ${userId}; deferring offer.`);
           pendingNegotiation.set(userId, true);
-          try {
-            __callDebugCounters.negotiation.mutexDeferrals++;
-            __callDbg('warn', 'neg:createOffer:mutexDeferral', { userId }, { intervalMs: 1000 });
-          } catch { }
           return;
         }
 
         try {
           makingOffer.set(userId, true);
 
-          __callDebugCounters.negotiation.offers++;
-          __callDbg('info', 'neg:createOffer:start', {
-            userId,
-            offers: __callDebugCounters.negotiation.offers,
-            sig: peerConnections.get(userId)?.signalingState,
-            ice: peerConnections.get(userId)?.iceConnectionState
-          }, { intervalMs: 0 });
           console.log(`📤 Creating offer for ${userId}`);
 
           // Validate local stream early; we need it to create a PC.
           if (!localStream || localStream.getTracks().length === 0) {
             console.warn(`⚠️ Local media not ready yet; deferring offer for ${userId}`);
             pendingNegotiation.set(userId, true);
-            try {
-              __callDebugCounters.negotiation.offerDeferrals++;
-              __callDbg('warn', 'neg:createOffer:deferNoLocalMedia', { userId }, { intervalMs: 1000 });
-            } catch { }
             return;
           }
 
@@ -3635,21 +3449,17 @@
           if (pc.signalingState !== 'stable') {
             console.warn(`⚠️ Skipping offer for ${userId} (signalingState=${pc.signalingState}). Will retry when stable.`);
             pendingNegotiation.set(userId, true);
-            try {
-              __callDebugCounters.negotiation.offerDeferrals++;
-              __callDbg('warn', 'neg:createOffer:deferNotStable', { userId, signalingState: pc.signalingState }, { intervalMs: 1000 });
-            } catch { }
             return;
           }
 
           console.log(`📊 Local stream for offer: ${localStream.getTracks().map(t => `${t.kind}(${t.enabled})`).join(', ')}`);
 
-          const offer = await __callDbgSpan('pc.createOffer', () => pc.createOffer({
+          const offer = await pc.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: true
-          }), { userId });
+          });
 
-          await __callDbgSpan('pc.setLocalDescription(offer)', () => pc.setLocalDescription(offer), { userId });
+          await pc.setLocalDescription(offer);
 
           console.log(`✅ Offer created and set as local description for ${userId}`);
           console.log(`   Offer type: ${offer.type}`);
@@ -3668,10 +3478,8 @@
           console.error(`❌ Offer creation error for ${userId}:`, e);
           console.error(`   Error name: ${e.name}`);
           console.error(`   Error message: ${e.message}`);
-          try { __callDbg('error', 'neg:createOffer:error', { userId, name: e?.name, message: e?.message }, { intervalMs: 0 }); } catch { }
         } finally {
           makingOffer.set(userId, false);
-          try { __callDbg('info', 'neg:createOffer:end', { userId }, { intervalMs: 0 }); } catch { }
         }
       }
 
@@ -3679,7 +3487,6 @@
         // CRITICAL: Prevent duplicate offer processing with mutex
         if (negotiationMutex.has(fromUserId)) {
           console.warn(`⚠️ Already processing offer from ${fromUserId}, ignoring duplicate`);
-          try { __callDbg('warn', 'neg:handleOffer:skipMutex', { fromUserId }, { intervalMs: 500 }); } catch { }
           return;
         }
 
@@ -3688,14 +3495,6 @@
           try {
             console.log(`📥 [OFFER] Received offer from ${fromUserId}`);
             console.log(`   Offer type: ${offer.type}, SDP length: ${offer.sdp?.length || 0}`);
-
-            try {
-              __callDbg('info', 'neg:handleOffer:start', {
-                fromUserId,
-                type: offer?.type,
-                sdpLen: offer?.sdp?.length || 0
-              }, { intervalMs: 0 });
-            } catch { }
 
             // Validate localStream
             if (!localStream) {
@@ -3716,17 +3515,6 @@
             const polite = currentUser.userId < fromUserId;
 
             console.log(`   Collision: ${offerCollision}, Polite: ${polite}, State: ${signalingState}`);
-
-            try {
-              if (offerCollision) __callDebugCounters.negotiation.offerCollisions++;
-              __callDbg('warn', 'neg:handleOffer:collision', {
-                fromUserId,
-                offerCollision,
-                polite,
-                isMakingOffer,
-                signalingState
-              }, { intervalMs: 500 });
-            } catch { }
 
             if (offerCollision) {
               if (!polite) {
@@ -3751,12 +3539,11 @@
             console.log(`   PC state before: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
 
             // CRITICAL: Use Promise.all to queue operations properly
-            await __callDbgSpan('pc.setRemoteDescription(offer)', async () => {
-              await Promise.all([
-                pc.setRemoteDescription(new RTCSessionDescription(offer)),
-                new Promise(resolve => setTimeout(resolve, 0))
-              ]);
-            }, { fromUserId });
+            await Promise.all([
+              pc.setRemoteDescription(new RTCSessionDescription(offer)),
+              // Queue ICE candidate processing after setRemoteDescription
+              new Promise(resolve => setTimeout(resolve, 0))
+            ]);
 
             console.log(`✅ Remote description set successfully`);
             console.log(`   PC state after: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
@@ -3799,8 +3586,7 @@
             const answer = await pc.createAnswer();
             console.log(`   Answer created: type=${answer.type}, SDP length=${answer.sdp?.length || 0}`);
 
-            __callDebugCounters.negotiation.answers++;
-            await __callDbgSpan('pc.setLocalDescription(answer)', () => pc.setLocalDescription(answer), { fromUserId });
+            await pc.setLocalDescription(answer);
             console.log(`✅ Answer set as local description`);
             console.log(`   PC state: signalingState=${pc.signalingState}, connectionState=${pc.connectionState}`);
 
@@ -3816,7 +3602,6 @@
             console.error(`❌ Handle offer error for ${fromUserId}:`, e);
             console.error(`   Error name: ${e.name}`);
             console.error(`   Error message: ${e.message}`);
-            try { __callDbg('error', 'neg:handleOffer:error', { fromUserId, name: e?.name, message: e?.message }, { intervalMs: 0 }); } catch { }
           } finally {
             // Remove mutex after 100ms to allow for any in-flight duplicates to be caught
             setTimeout(() => {
@@ -3833,21 +3618,12 @@
         // Mutex to prevent race conditions
         if (negotiationMutex.has(fromUserId)) {
           console.log(`⏳ Waiting for negotiation mutex for ${fromUserId} (in handleAnswer)`);
-          try { __callDbg('warn', 'neg:handleAnswer:waitMutex', { fromUserId }, { intervalMs: 1000 }); } catch { }
           try {
             await negotiationMutex.get(fromUserId);
-          } catch {
-            // ignore
+          } catch (e) {
+            console.warn(`⚠️ Mutex wait interrupted: ${e.message}`);
           }
         }
-
-        try {
-          __callDbg('info', 'neg:handleAnswer:start', {
-            fromUserId,
-            type: answer?.type,
-            sdpLen: answer?.sdp?.length || 0
-          }, { intervalMs: 0 });
-        } catch { }
 
         const mutexPromise = (async () => {
           try {
@@ -4060,22 +3836,7 @@
               track = await acquireLocalVideoTrack();
             } catch (camErr) {
               console.error('❌ Camera access failed:', camErr);
-              isVideoEnabled = false;
-              updateVideoButton();
-              scheduleVideoVisibilityUpdate(currentUser.userId, false, false);
-
-              const n = camErr?.name || '';
-              if (n === 'NotFoundError' || n === 'DevicesNotFoundError') {
-                toast('No camera available on this device', 'error');
-              } else if (n === 'NotAllowedError' || n === 'PermissionDeniedError') {
-                toast('Camera permission denied', 'error');
-              } else if (n === 'NotReadableError') {
-                toast('Camera is busy in another app', 'error');
-              } else if (n === 'TimeoutError') {
-                toast('Camera did not respond (timeout)', 'error');
-              } else {
-                toast('Failed to access camera', 'error');
-              }
+              toast('Failed to access camera', 'error');
               return;
             }
           }
