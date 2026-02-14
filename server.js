@@ -1684,7 +1684,7 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
  */
 app.post('/api/beacon/leave', async (req, res) => {
   try {
-    const { token, roomId, callId, reason, location } = req.body || {};
+    const { token, roomId, callId, reason, location, socketId } = req.body || {};
 
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'token is required' });
@@ -1697,12 +1697,23 @@ app.post('/api/beacon/leave', async (req, res) => {
       return res.status(401).json({ error: 'Unable to resolve authenticated user' });
     }
 
+    console.log(`📡 [API] Beacon leave: user=${userId}, room=${roomId || '-'}, call=${callId || '-'}, socket=${socketId || '-'}, reason=${reason || '-'}`);
+
+    // Proactively unregister the socket that is closing.
+    // Without this, fetchSockets() can still see the soon-to-close socket and we incorrectly skip the leave.
+    if (socketId && typeof socketId === 'string') {
+      try {
+        await unregisterSocketForUser(socketId);
+        await unbindSocketSession(socketId);
+      } catch { }
+    }
+
     // If user still has active sockets, do NOT auto-leave.
     // This prevents closing one tab from kicking the user out while another tab/device is still active.
     try {
       const activeSockets = await io.in(`user:${userId}`).fetchSockets();
       if (activeSockets.length > 0) {
-        return res.json({ success: true, skipped: 'active_sockets' });
+        return res.json({ success: true, skipped: 'active_sockets', activeSockets: activeSockets.length });
       }
     } catch { }
 
