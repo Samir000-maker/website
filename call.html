@@ -1560,7 +1560,7 @@
           const tryGetVideoStream = async (constraints, label) => {
             try {
               console.log(`📹 [Camera] getUserMedia attempt: ${label}`);
-              const s = await navigator.mediaDevices.getUserMedia(constraints);
+              const s = await getUserMediaWithTimeout(constraints, 6500);
               const t = s.getVideoTracks()[0];
               if (!t) {
                 try { s.getTracks().forEach(x => x.stop()); } catch { }
@@ -1579,6 +1579,13 @@
             const devices = await navigator.mediaDevices.enumerateDevices();
             videoInputs = devices.filter(d => d.kind === 'videoinput');
           } catch { }
+
+          // Fail fast if the device reports no cameras. This avoids long getUserMedia timeouts/freezes.
+          if (!videoInputs || videoInputs.length === 0) {
+            const err = Object.assign(new Error('No camera devices found'), { name: 'NotFoundError' });
+            try { toast('No camera available on this device', 'error'); } catch { }
+            throw err;
+          }
 
           const deviceIds = videoInputs.map(d => d.deviceId).filter(Boolean);
           const uniqueDeviceIds = Array.from(new Set(deviceIds));
@@ -1626,6 +1633,11 @@
               break;
             } catch (e) {
               lastError = e;
+
+              // If the browser reports no camera devices, do not keep retrying.
+              if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError') {
+                break;
+              }
 
               // If camera is busy/not readable, give it a tiny cooldown before retrying next profile.
               if (e?.name === 'NotReadableError' || e?.name === 'AbortError') {
@@ -3848,7 +3860,22 @@
               track = await acquireLocalVideoTrack();
             } catch (camErr) {
               console.error('❌ Camera access failed:', camErr);
-              toast('Failed to access camera', 'error');
+              isVideoEnabled = false;
+              updateVideoButton();
+              scheduleVideoVisibilityUpdate(currentUser.userId, false, false);
+
+              const n = camErr?.name || '';
+              if (n === 'NotFoundError' || n === 'DevicesNotFoundError') {
+                toast('No camera available on this device', 'error');
+              } else if (n === 'NotAllowedError' || n === 'PermissionDeniedError') {
+                toast('Camera permission denied', 'error');
+              } else if (n === 'NotReadableError') {
+                toast('Camera is busy in another app', 'error');
+              } else if (n === 'TimeoutError') {
+                toast('Camera did not respond (timeout)', 'error');
+              } else {
+                toast('Failed to access camera', 'error');
+              }
               return;
             }
           }
