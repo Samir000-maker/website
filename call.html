@@ -886,6 +886,8 @@
 
       let backgroundKeepAliveAudio = null;
       let backgroundAudioWatchdog = null;
+      let lastVisibilityRecoveryAt = 0;
+      let lastFocusRecoveryAt = 0;
 
       async function ensureBackgroundKeepAlivePlaying() {
         try {
@@ -921,14 +923,17 @@
           if (backgroundAudioWatchdog) return;
           backgroundAudioWatchdog = setInterval(() => {
             try {
+              // Keep this very lightweight; scanning DOM too frequently can spike CPU.
               const audios = document.querySelectorAll('audio');
               for (const a of audios) {
-                if (a && a.srcObject && a.paused) {
-                  a.play().catch(() => { });
-                }
+                if (!a || !a.srcObject) continue;
+                if (!a.paused) continue;
+                // Avoid throwing work at the media pipeline if the page is fully hidden.
+                try { if (document.hidden) return; } catch { }
+                a.play().catch(() => { });
               }
             } catch { }
-          }, 2000);
+          }, 8000);
         } catch { }
       }
 
@@ -942,6 +947,11 @@
       // Listen for visibility and focus
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
+          // Debounce: chat/call overlay transitions can trigger rapid hidden/visible flips.
+          const now = Date.now();
+          if (now - lastVisibilityRecoveryAt < 2500) return;
+          lastVisibilityRecoveryAt = now;
+
           console.log('👀 Page became VISIBLE - initiating recovery');
           stopBackgroundKeepAlive();
           stopBackgroundAudioWatchdog();
@@ -969,6 +979,10 @@
       });
 
       window.addEventListener('focus', () => {
+        const now = Date.now();
+        if (now - lastFocusRecoveryAt < 2500) return;
+        lastFocusRecoveryAt = now;
+
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
         ensureLocalMicHealthy('focus').catch(() => { });
