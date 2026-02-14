@@ -258,6 +258,12 @@
     <div id="toastContainer" class="fixed top-24 right-6 z-[60] flex flex-col gap-3 max-w-sm"></div>
 
     <script>
+if (window.location.pathname === "/login.html") {
+  window.history.replaceState({}, "", "/login");
+}
+</script>
+
+    <script>
         // Initialize Firebase (Replace with your config)
 const firebaseConfig = {
   apiKey: "AIzaSyA0aEEUk7uPGk2vK69HjhW7Ug0GCWOksLU",
