@@ -55,7 +55,7 @@ import Redlock from 'redlock';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const moodFile = "/var/www/vibegra/mood.html";
+
 // Redis Clients
 const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
 const redisPort = config.REDIS_PORT || 6379;
@@ -1650,7 +1650,6 @@ async function getIceServers() {
 }
 
 const app = express();
-app.use(express.static(path.join(__dirname, "public")));
 app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
@@ -2077,41 +2076,6 @@ const OFFER_DEDUPE_WINDOW = 2000; // 2 seconds
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
-
-app.get("/home", (req, res) => {
-  res.sendFile(path.join(__dirname, "mood.html"));
-});
-
-
-app.get("/signup", (req, res) => {
-  res.sendFile(path.join(__dirname, "signup.html"));
-});
-
-app.get("/login", (req, res) => {
-  res.sendFile(path.join(__dirname, "login.html"));
-});
-
-
-app.get("/choose-profile-picture", (req, res) => {
-  res.sendFile(path.join(__dirname, "profile-picture.html"));
-});
-
-app.get("/username", (req, res) => {
-  res.sendFile(path.join(__dirname, "username.html"));
-});
-
-app.get("/discovery", (req, res) => {
-  res.sendFile(path.join(__dirname, "discovery.html"));
-});
-
-app.get("/chat", (req, res) => {
-  res.sendFile(path.join(__dirname, "chat.html"));
-});
-
-app.get("/call", (req, res) => {
-  res.sendFile(path.join(__dirname, "call.html"));
-});
-
 
 app.get('/health', (req, res) => {
   res.json({
@@ -6760,7 +6724,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('video_state_changed', async ({ callId, enabled }) => {
+  socket.on('video_state_changed', async ({ callId, enabled, facingMode }) => {
     try {
       const user = await getSocketUser(socket.id);
 
@@ -6786,15 +6750,19 @@ io.on('connection', (socket) => {
           audioEnabled: true
         };
 
+        const nextFacingMode = (typeof facingMode === 'string' && facingMode) ? facingMode : (currentState.facingMode || undefined);
+
         if (call.userMediaStates instanceof Map) {
           call.userMediaStates.set(user.userId, {
             ...currentState,
-            videoEnabled: enabled
+            videoEnabled: enabled,
+            facingMode: nextFacingMode
           });
         } else {
           call.userMediaStates[user.userId] = {
             ...currentState,
-            videoEnabled: enabled
+            videoEnabled: enabled,
+            facingMode: nextFacingMode
           };
         }
 
@@ -6805,7 +6773,8 @@ io.on('connection', (socket) => {
         // ✅ FIX: Broadcast to OTHER users only (exclude sender)
         socket.to(`call-${callId}`).emit('video_state_changed', {
           userId: user.userId,
-          enabled: enabled
+          enabled: enabled,
+          facingMode: nextFacingMode
         });
       } finally {
         await releaseCallLock();
