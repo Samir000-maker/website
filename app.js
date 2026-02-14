@@ -22,7 +22,7 @@
    TAB MANAGER (IMMEDIATE BLOCKING - NO ACTIVITY ALLOWED)
    ========================================================= */
 
-class TabManager {
+const TabManager = window.TabManager || class TabManager {
   constructor() {
     // ✅ CRITICAL FIX: Use sessionStorage to persist tab ID across page navigation
     // sessionStorage persists within the SAME browser tab/window, but is unique per tab
@@ -305,10 +305,12 @@ class TabManager {
   }
 }
 
+window.TabManager = TabManager;
+
 // ✅ CRITICAL: Initialize TabManager IMMEDIATELY (blocking)
 console.log(`🚀 [App] Initializing TabManager...`);
-const tabManager = new TabManager();
-window.tabManager = tabManager;
+window.tabManager = window.tabManager || new TabManager();
+const tabManager = window.tabManager;
 
 // ✅ CRITICAL: Wait for tab check BEFORE doing ANYTHING else
 (async () => {
