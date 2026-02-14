@@ -661,10 +661,12 @@
           videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
           videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         } else {
-          // Never mirror remote videos (receiver view)
-          videoEl.style.setProperty('transform', 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+          const id = videoEl.id || '';
+          const m = (id.startsWith('video-') ? (remoteMediaStates.get(id.slice('video-'.length))?.facingMode || '') : '').toString().toLowerCase();
+          const shouldMirror = m === 'user' || m === 'front';
+          videoEl.style.setProperty('transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         }
       }
 
@@ -1946,7 +1948,7 @@
     });
   } catch { }
 
-  safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true });
+  safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true, facingMode: activeFacingMode || 'user' });
 
         })().finally(() => {
           try { window.hideReconnectUI?.(); } catch { }
@@ -2112,7 +2114,7 @@
           updateVideoButton();
           scheduleVideoVisibilityUpdate(currentUser.userId, desired, true);
 
-          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
         } catch (err) {
           console.warn(`⚠️ Pending video toggle failed:`, err.message);
         } finally {
@@ -2599,7 +2601,7 @@
 
             if (socketInstance?.connected) {
               safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
-              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
             }
 
             refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
@@ -2612,7 +2614,7 @@
               updateVideoButton();
               scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
               if (socketInstance?.connected) {
-                safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+                safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
               }
             }
 
@@ -3861,7 +3863,8 @@
           // Notify server
           safeSocketEmit('video_state_changed', {
             callId: callData.callId,
-            enabled: isVideoEnabled
+            enabled: isVideoEnabled,
+            facingMode: activeFacingMode || 'user'
           });
 
           // Set debounce timer
@@ -4855,7 +4858,7 @@
             // ✅ Force local UI sync after join to avoid mismatched toggles
             scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
             if (socketInstance?.connected) {
-              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
               safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
             }
 
@@ -5031,7 +5034,7 @@
 
             // ✅ Persist intended state immediately (eliminates delay)
             const existingState = remoteMediaStates.get(data.userId) || {};
-            remoteMediaStates.set(data.userId, { ...existingState, video: data.enabled });
+            remoteMediaStates.set(data.userId, { ...existingState, video: data.enabled, facingMode: data.facingMode || existingState.facingMode });
 
             if (data.userId === currentUser.userId) {
               console.log(`📹 Own state reflected, ignoring UI update`);
@@ -5042,6 +5045,11 @@
             // ✅ Apply state transition immediately
             // updateVideoVisibility now handles showing a loading spinner if enabled=true but no track yet
             scheduleVideoVisibilityUpdate(data.userId, data.enabled, true);
+
+            try {
+              const remoteVid = document.getElementById(`video-${data.userId}`);
+              if (remoteVid) enforceNaturalVideoRendering(remoteVid);
+            } catch { }
 
             console.log(`✅ Remote video state handled`);
             console.log(`📹 ========================================\n`);
