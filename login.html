@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - MoodEmoji</title>
+    <title>Login - Vibegra</title>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -76,12 +76,6 @@
     </style>
 </head>
 <body class="bg-dark-900 font-display min-h-screen flex flex-col text-slate-200 selection:bg-teal-500/30 overflow-x-hidden relative">
-    <div class="fixed top-4 left-4 z-[60]">
-        <button id="contactSupportBtn" type="button" class="group inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 backdrop-blur-md transition-colors">
-            <span class="material-symbols-outlined text-[18px] text-white/80">support_agent</span>
-            <span>Contact</span>
-        </button>
-    </div>
 
     <div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-close="1"></div>
@@ -120,13 +114,9 @@
                 <div class="size-10 flex items-center justify-center rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 text-primary shadow-lg shadow-teal-900/20 group-hover:shadow-teal-500/20 transition-all duration-300">
                     <span class="material-symbols-outlined text-[26px]">mood</span>
                 </div>
-                <h2 class="text-xl font-bold tracking-tight text-white group-hover:text-primary transition-colors">MoodEmoji</h2>
+                <h2 class="text-xl font-bold tracking-tight text-white group-hover:text-primary transition-colors">Login</h2>
             </a>
-            <nav class="hidden md:flex items-center gap-8">
-                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">Home</a>
-                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">About</a>
-                <a href="#" class="text-sm font-medium text-slate-400 hover:text-white transition-colors relative after:content-[''] after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-[2px] after:bg-primary after:transition-all hover:after:w-full">Features</a>
-            </nav>
+            <nav class="hidden md:flex items-center gap-8"></nav>
             <div class="flex items-center gap-4">
                 <a href="/signup.html" class="text-sm font-semibold text-slate-300 hover:text-white transition-colors hidden sm:block">Sign Up</a>
                 <button class="sm:hidden text-white"><span class="material-symbols-outlined">menu</span></button>
@@ -229,6 +219,12 @@
                     Don't have an account? 
                     <a href="/signup.html" class="text-primary font-semibold hover:text-teal-300 transition-colors ml-1">Sign Up</a>
                 </p>
+                <div class="mt-4 flex justify-center relative z-10">
+                    <button id="contactSupportBtn" type="button" class="group inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 backdrop-blur-md transition-colors">
+                        <span class="material-symbols-outlined text-[18px] text-white/80">support_agent</span>
+                        <span>Contact</span>
+                    </button>
+                </div>
             </div>
         </div>
     </main>
