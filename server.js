@@ -1540,8 +1540,8 @@ function checkRoomMessageRateLimit(roomId) {
 // ============================================
 
 async function generateCloudTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || config.CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || config.CLOUDFLARE_TURN_API_TOKEN;
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - operating with STUN only');
@@ -1582,7 +1582,12 @@ async function generateCloudTurnCredentials() {
     console.log('📦 Raw TURN response:', JSON.stringify(data, null, 2));
 
     if (data.iceServers) {
-      const turnConfig = data.iceServers;
+      const turnConfig = Array.isArray(data.iceServers) ? data.iceServers[0] : data.iceServers;
+
+      if (!turnConfig) {
+        console.error('❌ Unexpected TURN response structure:', data);
+        return null;
+      }
 
       const iceServer = {
         urls: Array.isArray(turnConfig.urls) ? turnConfig.urls : [turnConfig.urls],
