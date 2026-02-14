@@ -584,6 +584,35 @@
 </head>
 
 <body>
+  <div style="position: fixed; top: 16px; left: 16px; z-index: 60;">
+    <button id="contactSupportBtn" type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9999px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); cursor: pointer; backdrop-filter: blur(10px);">
+      <span class="material-symbols-outlined" style="font-size: 18px; color: rgba(255, 255, 255, 0.85);">support_agent</span>
+      <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">Contact</span>
+    </button>
+  </div>
+
+  <div id="contactSupportModal" class="hidden" style="position: fixed; inset: 0; z-index: 70; align-items: center; justify-content: center;">
+    <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"></div>
+    <div style="position: relative; width: 92vw; max-width: 420px; border-radius: 16px; background: rgba(30, 33, 57, 0.95); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 20px 60px rgba(0,0,0,0.45); padding: 20px;">
+      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+        <div>
+          <div style="font-size: 16px; font-weight: 800;">Contact support</div>
+          <div style="margin-top: 4px; font-size: 13px; color: var(--text-secondary);">Email us and we’ll get back to you.</div>
+        </div>
+        <button type="button" data-close="1" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer;">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; border-radius: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 12px 12px;">
+        <span id="contactSupportEmail" style="font-size: 14px; font-weight: 700; user-select: all;">contact@vibegra.com</span>
+        <button id="contactSupportCopyBtn" type="button" style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 8px 10px; cursor: pointer; color: rgba(255,255,255,0.9);">
+          <span class="material-symbols-outlined" style="font-size: 18px;">content_copy</span>
+        </button>
+      </div>
+      <div id="contactSupportCopyHint" class="hidden" style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Copied</div>
+    </div>
+  </div>
   <header class="header">
     <div class="header-content">
       <div class="logo">
@@ -673,12 +702,62 @@
         <span>© 2026 Vibegra</span>
       </div>
       <div class="footer-links">
-        <a href="#">Privacy</a>
-        <a href="#">Terms</a>
-        <a href="#">Help</a>
+        <a href="vibegra-privacy-policy.html">Privacy</a>
       </div>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('contactSupportBtn');
+      const modal = document.getElementById('contactSupportModal');
+      const copyBtn = document.getElementById('contactSupportCopyBtn');
+      const emailEl = document.getElementById('contactSupportEmail');
+      const hint = document.getElementById('contactSupportCopyHint');
+      if (!btn || !modal || !copyBtn || !emailEl) return;
+
+      const open = () => {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+      };
+      const close = () => {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+        if (hint) hint.classList.add('hidden');
+      };
+
+      btn.addEventListener('click', open);
+      modal.addEventListener('click', (e) => {
+        const t = e.target;
+        if (t && t.getAttribute && t.getAttribute('data-close') === '1') close();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+
+      copyBtn.addEventListener('click', async () => {
+        const text = emailEl.textContent || 'contact@vibegra.com';
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+          }
+          if (hint) {
+            hint.classList.remove('hidden');
+            setTimeout(() => hint.classList.add('hidden'), 1200);
+          }
+        } catch { }
+      });
+    })();
+  </script>
 
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
@@ -723,14 +802,6 @@
     }
   </script>
 
-
-<script>
-if (window.location.pathname === "/mood.html") {
-  window.history.replaceState({}, "", "/home");
-}
-</script>
-
-  
   <!-- Load app.js -->
   <script src="app.js"></script>
 
