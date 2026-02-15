@@ -287,6 +287,11 @@
           class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
           <span class="material-symbols-outlined text-lg sm:text-2xl">cameraswitch</span>
         </button>
+        <button id="speakerBtn" disabled
+          class="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-lg sm:rounded-xl bg-slate-200 dark:bg-background-dark text-slate-700 dark:text-white hover:bg-slate-300 dark:hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="Audio output">
+          <span id="speakerIcon" class="material-symbols-outlined text-lg sm:text-2xl">volume_up</span>
+        </button>
       </div>
 
       <div class="pl-1 sm:pl-2">
@@ -431,6 +436,9 @@
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
       let loadingWatchdogs = new Map(); // ✅ userId -> timeoutId
       const videoRenderState = new Map(); // userId -> 'video' | 'loading' | 'pfp'
+
+      const AUDIO_OUTPUT_STORAGE_KEY = 'vibe_audio_output_device_id';
+      let selectedAudioOutputDeviceId = 'default';
       let callHeartbeatInterval = null;
 
       const mediaHealthMonitors = new Map(); // userId -> intervalId
@@ -5061,20 +5069,111 @@
           const mic = document.getElementById('micBtn');
           const vid = document.getElementById('videoBtn');
           const flip = document.getElementById('flipCamBtn');
+          const speaker = document.getElementById('speakerBtn');
           const leave = document.getElementById('leaveCallBtn');
+
+          async function applyAudioOutputDevice(deviceId) {
+            selectedAudioOutputDeviceId = deviceId || 'default';
+            try {
+              sessionStorage.setItem(AUDIO_OUTPUT_STORAGE_KEY, selectedAudioOutputDeviceId);
+            } catch { }
+
+            const mediaEls = Array.from(document.querySelectorAll('audio, video'));
+            await Promise.all(mediaEls.map(async (el) => {
+              try {
+                if (typeof el.setSinkId === 'function') {
+                  await el.setSinkId(selectedAudioOutputDeviceId);
+                }
+              } catch { }
+            }));
+          }
+
+          function isIOSLike() {
+            const ua = navigator.userAgent || '';
+            const platform = navigator.platform || '';
+            const maxTouchPoints = navigator.maxTouchPoints || 0;
+            return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && maxTouchPoints > 1);
+          }
+
+          function setSpeakerButtonState({ enabled, mode }) {
+            if (!speaker) return;
+            speaker.disabled = !enabled;
+            const icon = document.getElementById('speakerIcon');
+            if (icon) {
+              icon.textContent = mode === 'phone' ? 'phone_in_talk' : 'volume_up';
+            }
+          }
+
+          async function initAudioOutputControl() {
+            if (!speaker) return;
+
+            const hasSetSinkId = typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function';
+            const hasSelectAudioOutput = !!(navigator.mediaDevices && typeof navigator.mediaDevices.selectAudioOutput === 'function');
+
+            if (isIOSLike() || (!hasSetSinkId && !hasSelectAudioOutput)) {
+              speaker.title = 'Audio output switching is not supported on this device/browser';
+              setSpeakerButtonState({ enabled: false, mode: 'speaker' });
+              return;
+            }
+
+            try {
+              const saved = sessionStorage.getItem(AUDIO_OUTPUT_STORAGE_KEY);
+              if (saved) selectedAudioOutputDeviceId = saved;
+            } catch { }
+
+            setSpeakerButtonState({ enabled: true, mode: selectedAudioOutputDeviceId && selectedAudioOutputDeviceId !== 'default' ? 'phone' : 'speaker' });
+
+            try {
+              await applyAudioOutputDevice(selectedAudioOutputDeviceId);
+            } catch { }
+
+            speaker.addEventListener('click', async (e) => {
+              if (isControlsLocked) {
+                e.preventDefault();
+                return;
+              }
+
+              try {
+                if (navigator.mediaDevices && typeof navigator.mediaDevices.selectAudioOutput === 'function') {
+                  const selection = await navigator.mediaDevices.selectAudioOutput();
+                  const deviceId = selection && selection.deviceId ? selection.deviceId : 'default';
+                  await applyAudioOutputDevice(deviceId);
+                  setSpeakerButtonState({ enabled: true, mode: deviceId !== 'default' ? 'phone' : 'speaker' });
+                  return;
+                }
+
+                if (selectedAudioOutputDeviceId && selectedAudioOutputDeviceId !== 'default') {
+                  await applyAudioOutputDevice('default');
+                  setSpeakerButtonState({ enabled: true, mode: 'speaker' });
+                  return;
+                }
+
+                const devices = await (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices ? navigator.mediaDevices.enumerateDevices() : []);
+                const outs = (devices || []).filter((d) => d && d.kind === 'audiooutput');
+                const candidate = (outs.find((d) => d.deviceId && d.deviceId !== 'default') || {}).deviceId;
+                const nextId = candidate || 'default';
+                await applyAudioOutputDevice(nextId);
+                setSpeakerButtonState({ enabled: true, mode: nextId !== 'default' ? 'phone' : 'speaker' });
+              } catch {
+                setSpeakerButtonState({ enabled: true, mode: selectedAudioOutputDeviceId !== 'default' ? 'phone' : 'speaker' });
+              }
+            });
+          }
 
           if (mic) mic.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleMic());
           if (vid) vid.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleVideo());
           if (flip) flip.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : switchToNextCamera());
           if (leave) leave.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : leaveCall());
 
+          try { initAudioOutputControl(); } catch { }
+
           // ✅ Apply initial visual lockout
-          [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
+          [mic, vid, flip, speaker, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
 
           // ✅ Set 3-second unlock timer
           setTimeout(() => {
             isControlsLocked = false;
-            [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
+            [mic, vid, flip, speaker, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
             console.log('🔓 Controls unlocked (3s grace period complete)');
 
             // Enable flip only if video is on and 2+ cameras exist
