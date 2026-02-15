@@ -913,8 +913,8 @@ async function handleUserCleanup(userId) {
 }
 
 const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000;
-const ROOM_CLEANUP_GRACE = 600000; // 30 seconds
-const ROOM_WARNING_TIME = 600000; // 60 seconds warning before expiry
+const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds
+const ROOM_WARNING_TIME = 60 * 1000; // 60 seconds warning before expiry
 
 // ============================================
 // REAL-TIME MOOD USER COUNTERS (REDIS-BACKED)
