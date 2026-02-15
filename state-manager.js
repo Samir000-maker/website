@@ -65,12 +65,12 @@ class StateManager {
       if (savedState) {
         const parsed = JSON.parse(savedState);
         
-        // Validate state freshness (10 minute room expiration)
+        // Validate state freshness (30 minute room expiration)
         if (parsed.lastActivity) {
           const age = Date.now() - parsed.lastActivity;
-          const tenMinutes = 10 * 60 * 1000;
+          const thirtyMinutes = 30 * 60 * 1000;
           
-          if (age > tenMinutes && parsed.room) {
+          if (age > thirtyMinutes && parsed.room) {
             // Room expired - clear room and call state
             console.log('⏱️ Room expired, clearing room state');
             parsed.room = null;
@@ -332,9 +332,9 @@ class StateManager {
     }
     
     const age = Date.now() - this.currentState.lastActivity;
-    const tenMinutes = 10 * 60 * 1000;
+    const thirtyMinutes = 30 * 60 * 1000;
     
-    return age > tenMinutes;
+    return age > thirtyMinutes;
   }
 
   /**
@@ -346,9 +346,9 @@ class StateManager {
     }
     
     const age = Date.now() - this.currentState.lastActivity;
-    const tenMinutes = 10 * 60 * 1000;
+    const thirtyMinutes = 30 * 60 * 1000;
     
-    return Math.max(0, tenMinutes - age);
+    return Math.max(0, thirtyMinutes - age);
   }
 }
 
