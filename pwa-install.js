@@ -1,6 +1,5 @@
 (function () {
-  const LS_DISMISSED = 'vibe_pwa_install_dismissed_v1';
-  const LS_INSTALLED = 'vibe_pwa_installed_v1';
+  const LS_DISMISS_UNTIL = 'vibe_pwa_install_dismiss_until_v1';
 
   function ensureStyles() {
     if (document.getElementById('vibePwaInstallStyles')) return;
@@ -186,8 +185,9 @@
     if (isInIframe()) return true;
     if (isStandalone()) return true;
     try {
-      if (localStorage.getItem(LS_INSTALLED) === '1') return true;
-      if (localStorage.getItem(LS_DISMISSED) === '1') return true;
+      const untilRaw = localStorage.getItem(LS_DISMISS_UNTIL);
+      const until = untilRaw ? Number(untilRaw) : 0;
+      if (until && Number.isFinite(until) && Date.now() < until) return true;
     } catch { }
     return false;
   }
@@ -261,12 +261,13 @@
     setHidden(modal, false);
   }
 
-  function markDismissed() {
-    try { localStorage.setItem(LS_DISMISSED, '1'); } catch { }
+  function markDismissed(ms) {
+    const ttlMs = typeof ms === 'number' && ms > 0 ? ms : (24 * 60 * 60 * 1000);
+    try { localStorage.setItem(LS_DISMISS_UNTIL, String(Date.now() + ttlMs)); } catch { }
   }
 
-  function markInstalled() {
-    try { localStorage.setItem(LS_INSTALLED, '1'); } catch { }
+  function clearDismissed() {
+    try { localStorage.removeItem(LS_DISMISS_UNTIL); } catch { }
   }
 
   function initInstallButtons() {
@@ -281,83 +282,109 @@
       b.disabled = false;
     });
 
-    if (shouldSuppressUI()) {
-      buttons.forEach((b) => setHidden(b, true));
-      return;
-    }
-
     let deferredPrompt = null;
     let promptInFlight = false;
 
-    function showButtons() {
-      if (shouldSuppressUI()) return;
-      buttons.forEach((b) => setHidden(b, false));
+    function updateVisibility() {
+      if (isStandalone() || isInIframe()) {
+        buttons.forEach((b) => setHidden(b, true));
+        return;
+      }
+
+      // If the browser says we're installable (we have a prompt), never suppress.
+      if (deferredPrompt) {
+        clearDismissed();
+        buttons.forEach((b) => setHidden(b, false));
+        return;
+      }
+
+      if (shouldSuppressUI()) {
+        buttons.forEach((b) => setHidden(b, true));
+        return;
+      }
+
+      // iOS does not emit beforeinstallprompt. Show button for iOS (unless suppressed).
+      if (isIOS()) {
+        buttons.forEach((b) => setHidden(b, false));
+        return;
+      }
+
+      // Non-iOS: only show when we actually have a deferred prompt.
+      buttons.forEach((b) => setHidden(b, !deferredPrompt));
     }
 
-    function hideButtonsPermanently() {
-      buttons.forEach((b) => setHidden(b, true));
-    }
+    // Keep visibility synced in real time.
+    try {
+      const m1 = window.matchMedia && window.matchMedia('(display-mode: standalone)');
+      const m2 = window.matchMedia && window.matchMedia('(display-mode: fullscreen)');
+      if (m1 && m1.addEventListener) m1.addEventListener('change', updateVisibility);
+      if (m2 && m2.addEventListener) m2.addEventListener('change', updateVisibility);
+      window.addEventListener('visibilitychange', updateVisibility);
+      window.addEventListener('focus', updateVisibility);
+    } catch { }
 
     window.addEventListener('beforeinstallprompt', (e) => {
       // Chrome/Edge/Android/Desktop.
       e.preventDefault();
       deferredPrompt = e;
-      showButtons();
+      clearDismissed();
+      updateVisibility();
     });
 
     window.addEventListener('appinstalled', () => {
-      markInstalled();
-      hideButtonsPermanently();
+      // Don't persist an "installed" flag; uninstall would not clear it.
+      // We rely on real-time eligibility (beforeinstallprompt + display-mode) instead.
+      deferredPrompt = null;
+      updateVisibility();
     });
 
-    // iOS: no beforeinstallprompt.
-    if (isIOS()) {
-      // Only show when not standalone and not dismissed.
-      if (!shouldSuppressUI()) {
-        showButtons();
-      }
-    }
+    // Initial state
+    updateVisibility();
 
     buttons.forEach((btn) => {
       btn.addEventListener('click', async () => {
-        if (shouldSuppressUI()) {
-          hideButtonsPermanently();
+        if (isStandalone() || isInIframe()) {
+          buttons.forEach((b) => setHidden(b, true));
           return;
         }
 
         if (isIOS()) {
           showIOSModal();
-          // Don't mark dismissed unless user closes the modal (they might want later); but you asked to store dismissal.
-          // We'll mark dismissal when they close via any close target.
+          // Store dismissal on close, but only temporarily so uninstall doesn't break reinstall later.
           const modal = ensureIOSModal();
           const observer = new MutationObserver(() => {
             if (modal.classList.contains('hidden')) {
               observer.disconnect();
-              markDismissed();
-              hideButtonsPermanently();
+              markDismissed(10 * 60 * 1000);
+              updateVisibility();
             }
           });
           observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
           return;
         }
 
-        if (!deferredPrompt || promptInFlight) return;
+        if (!deferredPrompt || promptInFlight) {
+          updateVisibility();
+          return;
+        }
 
         promptInFlight = true;
         try {
           deferredPrompt.prompt();
           const choice = await deferredPrompt.userChoice;
           if (choice && choice.outcome === 'accepted') {
-            // appinstalled should also fire, but mark as installed defensively.
-            markInstalled();
-            hideButtonsPermanently();
+            deferredPrompt = null;
+            updateVisibility();
           } else {
-            markDismissed();
-            hideButtonsPermanently();
+            // Don't annoy users; hide for a while, but allow future installs (incl after uninstall).
+            markDismissed(0);
+            deferredPrompt = null;
+            updateVisibility();
           }
         } catch {
-          markDismissed();
-          hideButtonsPermanently();
+          markDismissed(0);
+          deferredPrompt = null;
+          updateVisibility();
         } finally {
           deferredPrompt = null;
           promptInFlight = false;
