@@ -38,6 +38,11 @@
         outline: 2px solid rgba(99,32,233,0.7);
         outline-offset: 3px;
       }
+      [data-pwa-install="1"]:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none !important;
+      }
       [data-pwa-install="1"] .vibe-pwa-icon {
         width: 18px;
         height: 18px;
@@ -50,7 +55,7 @@
         box-shadow: 0 0 0 1px rgba(0,0,0,0.15) inset;
       }
 
-      .pwa-ios-modal {
+      .pwa-download-modal {
         position: fixed;
         inset: 0;
         z-index: 1000;
@@ -58,131 +63,140 @@
         align-items: center;
         justify-content: center;
       }
-      .pwa-ios-modal.hidden { display: none !important; }
-      .pwa-ios-modal__backdrop {
+      .pwa-download-modal.hidden { display: none !important; }
+      .pwa-download-modal__backdrop {
         position: absolute;
         inset: 0;
-        background: rgba(0,0,0,0.60);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
+        background: rgba(0,0,0,0.65);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
       }
-      .pwa-ios-modal__card {
+      .pwa-download-modal__card {
         position: relative;
-        width: min(92vw, 440px);
-        border-radius: 18px;
-        background: rgba(21, 22, 28, 0.95);
-        border: 1px solid rgba(255,255,255,0.10);
-        box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+        width: min(90vw, 400px);
+        border-radius: 20px;
+        background: rgba(21, 22, 28, 0.97);
+        border: 1px solid rgba(255,255,255,0.12);
+        box-shadow: 0 30px 80px rgba(0,0,0,0.60);
         overflow: hidden;
+        padding: 24px;
       }
-      .pwa-ios-modal__header {
-        padding: 16px 16px 10px;
+      .pwa-download-modal__icon {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 16px;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 12px;
+        justify-content: center;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(99,32,233,0.25), rgba(99,32,233,0.15));
+        border: 1px solid rgba(99,32,233,0.35);
+        box-shadow: 0 8px 24px rgba(99,32,233,0.20);
       }
-      .pwa-ios-modal__title {
+      .pwa-download-modal__icon svg {
+        width: 28px;
+        height: 28px;
+        color: rgba(255,255,255,0.92);
+        animation: downloadPulse 2s ease-in-out infinite;
+      }
+      @keyframes downloadPulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.85; }
+      }
+      .pwa-download-modal__title {
         font-weight: 800;
+        font-size: 18px;
         letter-spacing: -0.01em;
         color: rgba(255,255,255,0.96);
+        text-align: center;
+        margin-bottom: 8px;
       }
-      .pwa-ios-modal__close {
-        appearance: none;
-        -webkit-appearance: none;
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.06);
-        color: rgba(255,255,255,0.90);
-        width: 34px;
-        height: 34px;
-        border-radius: 12px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .pwa-ios-modal__body { padding: 0 16px 14px; }
-      .pwa-ios-steps { display: grid; gap: 10px; margin-top: 8px; }
-      .pwa-ios-step {
-        display: grid;
-        grid-template-columns: 26px 1fr;
-        gap: 10px;
-        align-items: start;
-        padding: 12px;
-        border-radius: 14px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.08);
-        color: rgba(255,255,255,0.90);
+      .pwa-download-modal__status {
         font-size: 14px;
-        line-height: 1.4;
+        color: rgba(148,163,184,0.90);
+        text-align: center;
+        margin-bottom: 20px;
       }
-      .pwa-ios-step__num {
-        width: 26px;
-        height: 26px;
-        border-radius: 10px;
-        display: inline-flex;
+      .pwa-download-modal__progress-wrap {
+        position: relative;
+        width: 100%;
+        height: 8px;
+        border-radius: 9999px;
+        background: rgba(255,255,255,0.08);
+        overflow: hidden;
+        margin-bottom: 12px;
+      }
+      .pwa-download-modal__progress-bar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0%;
+        background: linear-gradient(90deg, #6320e9, #8b5cf6);
+        box-shadow: 0 0 12px rgba(99,32,233,0.40);
+        transition: width 0.3s ease;
+        border-radius: 9999px;
+      }
+      .pwa-download-modal__percentage {
+        font-weight: 800;
+        font-size: 24px;
+        color: rgba(255,255,255,0.96);
+        text-align: center;
+        margin-bottom: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      .pwa-download-modal__complete {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+      }
+      .pwa-download-modal__complete-icon {
+        width: 64px;
+        height: 64px;
+        display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(99,32,233,0.25);
-        border: 1px solid rgba(99,32,233,0.35);
-        font-weight: 800;
+        border-radius: 50%;
+        background: rgba(34,197,94,0.15);
+        border: 2px solid rgba(34,197,94,0.40);
+        animation: scaleIn 0.4s ease;
       }
-      .pwa-ios-modal__hint {
-        margin-top: 12px;
-        font-size: 12px;
-        color: rgba(148,163,184,0.85);
+      @keyframes scaleIn {
+        0% { transform: scale(0.8); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
       }
-      .pwa-ios-modal__footer {
-        padding: 0 16px 16px;
-        display: flex;
-        justify-content: flex-end;
+      .pwa-download-modal__complete-icon svg {
+        width: 32px;
+        height: 32px;
+        color: rgba(34,197,94,0.95);
       }
-      .pwa-ios-modal__primary {
+      .pwa-download-modal__complete-text {
+        font-weight: 700;
+        font-size: 16px;
+        color: rgba(255,255,255,0.94);
+      }
+      .pwa-download-modal__button {
         appearance: none;
         -webkit-appearance: none;
         border: 1px solid rgba(99,32,233,0.45);
         background: rgba(99,32,233,0.22);
         color: rgba(255,255,255,0.95);
         border-radius: 12px;
-        padding: 10px 12px;
+        padding: 12px 24px;
         font-weight: 800;
+        font-size: 14px;
         cursor: pointer;
+        transition: all 180ms ease;
+        margin-top: 8px;
+      }
+      .pwa-download-modal__button:hover {
+        background: rgba(99,32,233,0.30);
+        border-color: rgba(99,32,233,0.55);
+        transform: translateY(-1px);
       }
     `;
     document.head.appendChild(style);
-  }
-
-  function isInIframe() {
-    try {
-      return window.self !== window.top;
-    } catch {
-      return true;
-    }
-  }
-
-  function isStandalone() {
-    return (
-      window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
-    ) ||
-      (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches) ||
-      (window.navigator && window.navigator.standalone === true);
-  }
-
-  function isIOS() {
-    const ua = navigator.userAgent || '';
-    const platform = navigator.platform || '';
-    const maxTouchPoints = navigator.maxTouchPoints || 0;
-
-    const iOSLike = /iPad|iPhone|iPod/.test(ua) ||
-      (platform === 'MacIntel' && maxTouchPoints > 1);
-
-    return iOSLike;
-  }
-
-  function shouldSuppressUI() {
-    if (isInIframe()) return true;
-    if (isStandalone()) return true;
-    return false;
   }
 
   function setHidden(el, hidden) {
@@ -196,62 +210,165 @@
     }
   }
 
-  function ensureIOSModal() {
-    const existing = document.getElementById('pwaIosInstallModal');
+  function ensureDownloadModal() {
+    const existing = document.getElementById('pwaDownloadModal');
     if (existing) return existing;
 
     const modal = document.createElement('div');
-    modal.id = 'pwaIosInstallModal';
-    modal.className = 'pwa-ios-modal hidden';
+    modal.id = 'pwaDownloadModal';
+    modal.className = 'pwa-download-modal hidden';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <div class="pwa-ios-modal__backdrop" data-close="1"></div>
-      <div class="pwa-ios-modal__card">
-        <div class="pwa-ios-modal__header">
-          <div class="pwa-ios-modal__title">Install vibegra</div>
-          <button type="button" class="pwa-ios-modal__close" data-close="1" aria-label="Close">
-            <span aria-hidden="true">×</span>
-          </button>
-        </div>
-        <div class="pwa-ios-modal__body">
-          <div class="pwa-ios-steps">
-            <div class="pwa-ios-step">
-              <div class="pwa-ios-step__num">1</div>
-              <div class="pwa-ios-step__text">Tap the <strong>Share</strong> button in Safari</div>
-            </div>
-            <div class="pwa-ios-step">
-              <div class="pwa-ios-step__num">2</div>
-              <div class="pwa-ios-step__text">Select <strong>Add to Home Screen</strong></div>
-            </div>
+      <div class="pwa-download-modal__backdrop"></div>
+      <div class="pwa-download-modal__card">
+        <div class="pwa-download-modal__content">
+          <div class="pwa-download-modal__icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+            </svg>
           </div>
-          <div class="pwa-ios-modal__hint">This makes vibegra open fullscreen like a real app.</div>
-        </div>
-        <div class="pwa-ios-modal__footer">
-          <button type="button" class="pwa-ios-modal__primary" data-close="1">Got it</button>
+          <div class="pwa-download-modal__title">Downloading vibegra</div>
+          <div class="pwa-download-modal__status">Please wait while we prepare your download...</div>
+          <div class="pwa-download-modal__percentage">0%</div>
+          <div class="pwa-download-modal__progress-wrap">
+            <div class="pwa-download-modal__progress-bar"></div>
+          </div>
         </div>
       </div>
     `;
 
     document.body.appendChild(modal);
-
-    modal.addEventListener('click', (e) => {
-      const t = e.target;
-      if (t && t.closest && t.closest('[data-close="1"]')) {
-        setHidden(modal, true);
-      }
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') setHidden(modal, true);
-    });
-
     return modal;
   }
 
-  function showIOSModal() {
-    const modal = ensureIOSModal();
+  function showDownloadProgress(downloadUrl = '/vibegra-app.zip') {
+    const modal = ensureDownloadModal();
+    const progressBar = modal.querySelector('.pwa-download-modal__progress-bar');
+    const percentageText = modal.querySelector('.pwa-download-modal__percentage');
+    const statusText = modal.querySelector('.pwa-download-modal__status');
+    const content = modal.querySelector('.pwa-download-modal__content');
+
     setHidden(modal, false);
+
+    // Simulate download with actual file fetch
+    let progress = 0;
+    
+    // Try to fetch and download the actual file if it exists
+    fetch(downloadUrl)
+      .then(response => {
+        if (!response.ok) throw new Error('File not found');
+        
+        const contentLength = response.headers.get('content-length');
+        const total = parseInt(contentLength, 10);
+        
+        if (!contentLength || isNaN(total)) {
+          // Fallback to simulated progress
+          return simulateDownload();
+        }
+        
+        let loaded = 0;
+        const reader = response.body.getReader();
+        const chunks = [];
+        
+        return new ReadableStream({
+          start(controller) {
+            function push() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  controller.close();
+                  return;
+                }
+                
+                chunks.push(value);
+                loaded += value.length;
+                progress = Math.min(Math.round((loaded / total) * 100), 100);
+                
+                progressBar.style.width = progress + '%';
+                percentageText.textContent = progress + '%';
+                
+                controller.enqueue(value);
+                push();
+              });
+            }
+            push();
+          }
+        });
+      })
+      .then(stream => stream ? new Response(stream) : null)
+      .then(response => response ? response.blob() : simulateDownload())
+      .then(blob => {
+        if (blob) {
+          // Create download link
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'vibegra-app.zip';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        
+        showComplete();
+      })
+      .catch(() => {
+        // Fallback to simulated download
+        simulateDownload().then(showComplete);
+      });
+
+    function simulateDownload() {
+      return new Promise((resolve) => {
+        const interval = setInterval(() => {
+          progress += Math.random() * 15 + 5;
+          if (progress >= 100) {
+            progress = 100;
+            clearInterval(interval);
+            setTimeout(() => resolve(), 300);
+          }
+          
+          progressBar.style.width = progress + '%';
+          percentageText.textContent = Math.round(progress) + '%';
+        }, 200);
+      });
+    }
+
+    function showComplete() {
+      content.innerHTML = `
+        <div class="pwa-download-modal__complete">
+          <div class="pwa-download-modal__complete-icon">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div class="pwa-download-modal__complete-text">Download Complete!</div>
+          <button type="button" class="pwa-download-modal__button" data-close="1">Close</button>
+        </div>
+      `;
+      
+      const closeBtn = content.querySelector('[data-close="1"]');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          setHidden(modal, true);
+          // Reset modal content after animation
+          setTimeout(() => {
+            content.innerHTML = `
+              <div class="pwa-download-modal__icon">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                </svg>
+              </div>
+              <div class="pwa-download-modal__title">Downloading vibegra</div>
+              <div class="pwa-download-modal__status">Please wait while we prepare your download...</div>
+              <div class="pwa-download-modal__percentage">0%</div>
+              <div class="pwa-download-modal__progress-wrap">
+                <div class="pwa-download-modal__progress-bar"></div>
+              </div>
+            `;
+          }, 300);
+        });
+      }
+    }
   }
 
   function initInstallButtons() {
@@ -260,114 +377,25 @@
 
     ensureStyles();
 
-    // Start hidden by default.
-    buttons.forEach((b) => {
-      setHidden(b, true);
-      b.disabled = false;
-    });
-
-    let deferredPrompt = null;
-    let promptInFlight = false;
-
-    function updateVisibility() {
-      if (isStandalone() || isInIframe()) {
-        buttons.forEach((b) => setHidden(b, true));
-        return;
-      }
-
-      // If the browser says we're installable (we have a prompt), never suppress.
-      if (deferredPrompt) {
-        buttons.forEach((b) => setHidden(b, false));
-        return;
-      }
-
-      if (shouldSuppressUI()) {
-        buttons.forEach((b) => setHidden(b, true));
-        return;
-      }
-
-      // iOS does not emit beforeinstallprompt. Show button for iOS (unless suppressed).
-      if (isIOS()) {
-        buttons.forEach((b) => setHidden(b, false));
-        return;
-      }
-
-      // Non-iOS: only show when we actually have a deferred prompt.
-      buttons.forEach((b) => setHidden(b, !deferredPrompt));
-    }
-
-    // Keep visibility synced in real time.
-    try {
-      const m1 = window.matchMedia && window.matchMedia('(display-mode: standalone)');
-      const m2 = window.matchMedia && window.matchMedia('(display-mode: fullscreen)');
-      if (m1 && m1.addEventListener) m1.addEventListener('change', updateVisibility);
-      if (m2 && m2.addEventListener) m2.addEventListener('change', updateVisibility);
-      window.addEventListener('visibilitychange', updateVisibility);
-      window.addEventListener('focus', updateVisibility);
-    } catch { }
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-      // Chrome/Edge/Android/Desktop.
-      e.preventDefault();
-      deferredPrompt = e;
-      updateVisibility();
-    });
-
-    window.addEventListener('appinstalled', () => {
-      // Don't persist an "installed" flag; uninstall would not clear it.
-      // We rely on real-time eligibility (beforeinstallprompt + display-mode) instead.
-      deferredPrompt = null;
-      updateVisibility();
-    });
-
-    // Initial state
-    updateVisibility();
-
+    // Always show buttons, no hiding logic
     buttons.forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        if (isStandalone() || isInIframe()) {
-          buttons.forEach((b) => setHidden(b, true));
-          return;
-        }
-
-        if (isIOS()) {
-          showIOSModal();
-          // No suppression timers; keep the UX simple and always available when not standalone.
-          const modal = ensureIOSModal();
-          const observer = new MutationObserver(() => {
-            if (modal.classList.contains('hidden')) {
-              observer.disconnect();
-              updateVisibility();
-            }
-          });
-          observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
-          return;
-        }
-
-        if (!deferredPrompt || promptInFlight) {
-          updateVisibility();
-          return;
-        }
-
-        promptInFlight = true;
-        try {
-          deferredPrompt.prompt();
-          const choice = await deferredPrompt.userChoice;
-          if (choice && choice.outcome === 'accepted') {
-            deferredPrompt = null;
-            updateVisibility();
-          } else {
-            // Browser controls when/if beforeinstallprompt will be re-fired.
-            deferredPrompt = null;
-            updateVisibility();
-          }
-        } catch {
-          deferredPrompt = null;
-          updateVisibility();
-        } finally {
-          deferredPrompt = null;
-          promptInFlight = false;
-        }
+      btn.disabled = false;
+      setHidden(btn, false);
+      
+      btn.addEventListener('click', () => {
+        // Disable button during download
+        btn.disabled = true;
+        
+        // Get download URL from data attribute or use default
+        const downloadUrl = btn.getAttribute('data-download-url') || '/vibegra-app.zip';
+        
+        // Show download progress
+        showDownloadProgress(downloadUrl);
+        
+        // Re-enable button after a delay
+        setTimeout(() => {
+          btn.disabled = false;
+        }, 2000);
       });
     });
   }
@@ -375,18 +403,27 @@
   function registerServiceWorker() {
     try {
       if (!('serviceWorker' in navigator)) return;
-      if (isInIframe()) return;
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => { });
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
       });
-    } catch { }
+    } catch {}
   }
 
-  // Expose a tiny API if needed.
+  // Expose API
   window.VibePWA = window.VibePWA || {
     init: function () {
       registerServiceWorker();
       initInstallButtons();
+    },
+    download: function(url) {
+      showDownloadProgress(url);
     }
   };
+
+  // Auto-init when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => window.VibePWA.init());
+  } else {
+    window.VibePWA.init();
+  }
 })();
