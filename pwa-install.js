@@ -1,6 +1,4 @@
 (function () {
-  const LS_DISMISS_UNTIL = 'vibe_pwa_install_dismiss_until_v1';
-
   function ensureStyles() {
     if (document.getElementById('vibePwaInstallStyles')) return;
     const style = document.createElement('style');
@@ -184,11 +182,6 @@
   function shouldSuppressUI() {
     if (isInIframe()) return true;
     if (isStandalone()) return true;
-    try {
-      const untilRaw = localStorage.getItem(LS_DISMISS_UNTIL);
-      const until = untilRaw ? Number(untilRaw) : 0;
-      if (until && Number.isFinite(until) && Date.now() < until) return true;
-    } catch { }
     return false;
   }
 
@@ -261,15 +254,6 @@
     setHidden(modal, false);
   }
 
-  function markDismissed(ms) {
-    const ttlMs = typeof ms === 'number' && ms > 0 ? ms : (24 * 60 * 60 * 1000);
-    try { localStorage.setItem(LS_DISMISS_UNTIL, String(Date.now() + ttlMs)); } catch { }
-  }
-
-  function clearDismissed() {
-    try { localStorage.removeItem(LS_DISMISS_UNTIL); } catch { }
-  }
-
   function initInstallButtons() {
     const buttons = Array.from(document.querySelectorAll('[data-pwa-install="1"]'));
     if (!buttons.length) return;
@@ -293,7 +277,6 @@
 
       // If the browser says we're installable (we have a prompt), never suppress.
       if (deferredPrompt) {
-        clearDismissed();
         buttons.forEach((b) => setHidden(b, false));
         return;
       }
@@ -327,7 +310,6 @@
       // Chrome/Edge/Android/Desktop.
       e.preventDefault();
       deferredPrompt = e;
-      clearDismissed();
       updateVisibility();
     });
 
@@ -350,12 +332,11 @@
 
         if (isIOS()) {
           showIOSModal();
-          // Store dismissal on close, but only temporarily so uninstall doesn't break reinstall later.
+          // No suppression timers; keep the UX simple and always available when not standalone.
           const modal = ensureIOSModal();
           const observer = new MutationObserver(() => {
             if (modal.classList.contains('hidden')) {
               observer.disconnect();
-              markDismissed(10 * 60 * 1000);
               updateVisibility();
             }
           });
@@ -376,13 +357,11 @@
             deferredPrompt = null;
             updateVisibility();
           } else {
-            // Don't annoy users; hide for a while, but allow future installs (incl after uninstall).
-            markDismissed(0);
+            // Browser controls when/if beforeinstallprompt will be re-fired.
             deferredPrompt = null;
             updateVisibility();
           }
         } catch {
-          markDismissed(0);
           deferredPrompt = null;
           updateVisibility();
         } finally {
