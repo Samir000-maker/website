@@ -270,12 +270,15 @@
                     <span class="w-2 h-2 rounded-full bg-accent-teal shadow-[0_0_10px_rgba(45,212,191,0.5)]"></span>
                     <span class="text-xs font-medium text-white/70 uppercase tracking-wider">Safe Space Verified</span>
                 </div>
+                
+                <!-- PWA Install Button - Now Visible and Styled -->
                 <div class="mb-4">
-                    <button type="button" class="hidden" data-pwa-install="1">
+                    <button type="button" data-pwa-install="1" data-download-url="/vibegra-app.zip">
                         <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
                         <span>Install App</span>
                     </button>
                 </div>
+                
                 <h1 class="text-5xl md:text-7xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
                     Connect on a <br/><span class="text-white">Deeper Level.</span>
                 </h1>
@@ -441,9 +444,14 @@
             });
         })();
     </script>
-    <script src="/pwa-install.js"></script>
+    
+    <!-- Updated PWA Install Script -->
+    <script src="/vibePwaInstall.js"></script>
     <script>
-        try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+        // Auto-initialize the PWA install system
+        if (window.VibePWA && typeof window.VibePWA.init === 'function') {
+            window.VibePWA.init();
+        }
     </script>
 </body>
 </html>
