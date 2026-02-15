@@ -439,6 +439,8 @@
 
       const AUDIO_OUTPUT_STORAGE_KEY = 'vibe_audio_output_device_id';
       let selectedAudioOutputDeviceId = 'default';
+      const MOBILE_AUDIO_ROUTE_KEY = 'vibe_mobile_audio_route_mode';
+      let mobileAudioRouteMode = 'speaker';
       let callHeartbeatInterval = null;
 
       const mediaHealthMonitors = new Map(); // userId -> intervalId
@@ -5088,6 +5090,51 @@
             }));
           }
 
+          function applyMobileRouteMode(mode) {
+            mobileAudioRouteMode = mode === 'phone' ? 'phone' : 'speaker';
+            try {
+              sessionStorage.setItem(MOBILE_AUDIO_ROUTE_KEY, mobileAudioRouteMode);
+            } catch { }
+
+            const videos = Array.from(document.querySelectorAll('video'));
+            const audios = Array.from(document.querySelectorAll('audio[id^="audio-"]'));
+
+            if (mobileAudioRouteMode === 'phone') {
+              // Best-effort: make the call audio-only from the browser POV.
+              videos.forEach((v) => {
+                try {
+                  v.muted = true;
+                  v.volume = 0;
+                } catch { }
+              });
+              audios.forEach((a) => {
+                try {
+                  a.muted = false;
+                  a.volume = 1.0;
+                  a.play().catch(() => { });
+                } catch { }
+              });
+              setSpeakerButtonState({ enabled: true, mode: 'phone' });
+              toast('Phone mode enabled (best-effort): audio-only routing for earpiece', 'success');
+              return;
+            }
+
+            // Speaker mode: allow video elements to output audio again and mute hidden audio nodes.
+            videos.forEach((v) => {
+              try {
+                v.muted = false;
+                v.volume = 1.0;
+              } catch { }
+            });
+            audios.forEach((a) => {
+              try {
+                a.muted = true;
+              } catch { }
+            });
+            setSpeakerButtonState({ enabled: true, mode: 'speaker' });
+            toast('Speaker mode enabled', 'success');
+          }
+
           function isIOSLike() {
             const ua = navigator.userAgent || '';
             const platform = navigator.platform || '';
@@ -5113,12 +5160,30 @@
             if (isIOSLike() || (!hasSetSinkId && !hasSelectAudioOutput)) {
               speaker.title = 'Audio output switching is not supported on this device/browser';
               setSpeakerButtonState({ enabled: true, mode: 'speaker' });
+
+              try {
+                const savedMode = sessionStorage.getItem(MOBILE_AUDIO_ROUTE_KEY);
+                if (savedMode === 'phone' || savedMode === 'speaker') {
+                  mobileAudioRouteMode = savedMode;
+                }
+              } catch { }
+
+              // Apply initial mode after a short delay so remote <audio> elements exist.
+              setTimeout(() => {
+                try { applyMobileRouteMode(mobileAudioRouteMode); } catch { }
+              }, 600);
+
               speaker.addEventListener('click', (e) => {
                 if (isControlsLocked) {
                   e.preventDefault();
                   return;
                 }
-                toast('Switch speaker/earpiece from your phone audio controls (not supported in browser)', 'warning');
+                try {
+                  const next = mobileAudioRouteMode === 'phone' ? 'speaker' : 'phone';
+                  applyMobileRouteMode(next);
+                } catch {
+                  toast('Unable to toggle audio route on this device', 'warning');
+                }
               });
               return;
             }
