@@ -6,6 +6,7 @@
 const instanceId = process.env.INSTANCE_ID || process.env.NODE_APP_INSTANCE || '0';
 const isClusterMode = process.env.NODE_APP_INSTANCE !== undefined;
 const processId = process.pid;
+const path = require('path');
 console.log('');
 console.log('🚀 ========================================');
 console.log('🚀 INSTANCE INITIALIZATION');
@@ -1656,7 +1657,7 @@ async function getIceServers() {
 }
 
 const app = express();
-app.use(express.static(__dirname + '/public'));
+// app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
 const io = new Server(server, {
@@ -1762,8 +1763,8 @@ app.post('/api/beacon/leave', async (req, res) => {
   }
 });
 
-app.use(express.static(__dirname));
-
+// app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
