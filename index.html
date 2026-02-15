@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
-    <meta name="msvalidate.01" content="56FBCD512CAE60FA89AAD6C582BEDF28" />
     <!-- Favicon -->
-<link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#6320e9">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>Vibegra Home Screen</title>
@@ -252,6 +255,12 @@
                     <span class="w-2 h-2 rounded-full bg-accent-teal shadow-[0_0_10px_rgba(45,212,191,0.5)]"></span>
                     <span class="text-xs font-medium text-white/70 uppercase tracking-wider">Safe Space Verified</span>
                 </div>
+                <div class="mb-4">
+                    <button type="button" class="hidden" data-pwa-install="1">
+                        <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
+                        <span>Install App</span>
+                    </button>
+                </div>
                 <h1 class="text-5xl md:text-7xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
                     Connect on a <br/><span class="text-white">Deeper Level.</span>
                 </h1>
@@ -358,7 +367,7 @@
     <footer class="border-t border-white/5 bg-background-dark/50 backdrop-blur-sm relative z-10">
         <div class="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4">
             <div class="text-slate-500 text-sm">
-                © 2026 Vibegra. All rights reserved.
+                &copy; 2026 Vibegra. All rights reserved.
             </div>
             <div class="flex gap-6">
                 <a class="text-slate-500 hover:text-white text-sm transition-colors" href="vibegra-privacy-policy.html">Privacy Policy</a>
@@ -416,6 +425,10 @@
                 } catch { }
             });
         })();
+    </script>
+    <script src="/pwa-install.js"></script>
+    <script>
+        try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
     </script>
 </body>
 </html>
