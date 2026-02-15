@@ -387,6 +387,15 @@
     }
   }
 
+  function isRunningAsPWA() {
+    // Check if app is running in standalone mode (installed PWA)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const isIOSStandalone = window.navigator.standalone === true;
+    const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+    
+    return isStandalone || isIOSStandalone || isFullscreen;
+  }
+
   function initInstallButtons() {
     const buttons = Array.from(document.querySelectorAll('[data-pwa-install="1"]'));
     if (!buttons.length) return;
@@ -395,11 +404,45 @@
 
     let deferredPrompt = null;
 
-    // Always show buttons
+    // Hide buttons if already running as PWA
+    if (isRunningAsPWA()) {
+      buttons.forEach(btn => {
+        setHidden(btn, true);
+        btn.disabled = true;
+      });
+      console.log('Running as installed PWA - install button hidden');
+      return;
+    }
+
+    // Show buttons if running in browser
     buttons.forEach(btn => {
       btn.disabled = false;
       setHidden(btn, false);
     });
+
+    // Monitor display mode changes
+    const updateButtonVisibility = () => {
+      const isPWA = isRunningAsPWA();
+      buttons.forEach(btn => {
+        setHidden(btn, isPWA);
+        btn.disabled = isPWA;
+      });
+    };
+
+    // Listen for display mode changes
+    try {
+      const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+      const fullscreenMedia = window.matchMedia('(display-mode: fullscreen)');
+      
+      if (standaloneMedia.addEventListener) {
+        standaloneMedia.addEventListener('change', updateButtonVisibility);
+      }
+      if (fullscreenMedia.addEventListener) {
+        fullscreenMedia.addEventListener('change', updateButtonVisibility);
+      }
+    } catch (e) {
+      console.log('Display mode monitoring not supported');
+    }
 
     // Capture the beforeinstallprompt event
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -412,6 +455,12 @@
     window.addEventListener('appinstalled', () => {
       console.log('PWA installed successfully');
       deferredPrompt = null;
+      
+      // Hide install buttons after successful installation
+      buttons.forEach(btn => {
+        setHidden(btn, true);
+        btn.disabled = true;
+      });
     });
 
     // Handle button clicks
