@@ -4088,6 +4088,58 @@
       }
 
 
+      let callSetupWatchdogTimer = null;
+      const CALL_SETUP_WATCHDOG_MS = 25000;
+
+      function dismissCallLoadingOverlay() {
+        try {
+          const overlay = document.getElementById('callLoadingOverlay');
+          if (!overlay) return;
+          if (overlay.classList.contains('hidden')) return;
+          overlay.style.opacity = '0';
+          setTimeout(() => {
+            try {
+              overlay.classList.add('hidden');
+              const header = document.querySelector('header');
+              const main = document.querySelector('main');
+              const footer = document.querySelector('footer');
+              if (header) header.style.visibility = 'visible';
+              if (main) main.style.visibility = 'visible';
+              if (footer) footer.style.visibility = 'visible';
+            } catch { }
+          }, 450);
+        } catch { }
+      }
+
+      function clearCallSetupWatchdog() {
+        try {
+          if (callSetupWatchdogTimer) clearTimeout(callSetupWatchdogTimer);
+        } catch { }
+        callSetupWatchdogTimer = null;
+      }
+
+      function startCallSetupWatchdog(reason = 'call_setup') {
+        clearCallSetupWatchdog();
+        callSetupWatchdogTimer = setTimeout(() => {
+          try {
+            const overlay = document.getElementById('callLoadingOverlay');
+            const stillVisible = overlay && !overlay.classList.contains('hidden');
+            if (!stillVisible) return;
+          } catch { }
+          try { toast('Call could not be established. Returning to chat...', 'warning'); } catch { }
+          try { dismissCallLoadingOverlay(); } catch { }
+          setTimeout(() => { window.location.href = '/chat.html'; }, 900);
+        }, CALL_SETUP_WATCHDOG_MS);
+      }
+
+      function failCallSetupAndExit(message) {
+        try { clearCallSetupWatchdog(); } catch { }
+        try { if (message) toast(message, 'warning'); } catch { }
+        try { dismissCallLoadingOverlay(); } catch { }
+        setTimeout(() => { window.location.href = '/chat.html'; }, 900);
+      }
+
+
       async function initCall() {
 
         const returningToBackground = sessionStorage.getItem('returningToBackgroundCall') === 'true';
@@ -4109,6 +4161,9 @@
         if (isInitializing) return;
         isInitializing = true;
         console.log('=== INIT CALL ===');
+
+        // If call setup hangs (callee rejected / call ended / signaling stalled), never leave the user stuck on the overlay.
+        startCallSetupWatchdog('init_call');
 
         try {
           await _Auth.requireAuth();
@@ -4585,17 +4640,8 @@
                 console.log('✅ Joined call successfully');
 
                 // Dismiss loading overlay
-                const overlay = document.getElementById('callLoadingOverlay');
-                if (overlay) {
-                  overlay.style.opacity = '0';
-                  setTimeout(() => {
-                    overlay.classList.add('hidden');
-                    // Restore visibility of main elements if they were hidden
-                    document.querySelector('header').style.visibility = 'visible';
-                    document.querySelector('main').style.visibility = 'visible';
-                    document.querySelector('footer').style.visibility = 'visible';
-                  }, 500);
-                }
+                clearCallSetupWatchdog();
+                dismissCallLoadingOverlay();
               } catch (error) {
                 console.error('❌ Failed to join call:', error);
                 toast('Failed to join call. Returning to chat...', 'error');
@@ -5056,7 +5102,23 @@
             console.log(`📹 ========================================\n`);
           });
 
-          socketInstance.on('call_ended', () => { toast('Call ended', 'warning'); leaveCall(); });
+          socketInstance.on('call_ended', () => {
+            try { clearCallSetupWatchdog(); } catch { }
+            try { toast('Call ended', 'warning'); } catch { }
+            try { dismissCallLoadingOverlay(); } catch { }
+            leaveCall();
+          });
+
+          socketInstance.on('user_declined_call', () => {
+            failCallSetupAndExit('The other user declined the call');
+          });
+
+          socketInstance.on('error', (err) => {
+            const code = err && (err.code || err?.data?.code);
+            if (code === 'CALL_NOT_FOUND' || code === 'CALL_ENDED') {
+              failCallSetupAndExit(err.message || 'Call is no longer available');
+            }
+          });
 
           const mic = document.getElementById('micBtn');
           const vid = document.getElementById('videoBtn');
