@@ -5,8 +5,8 @@ let redis = null;
 let io = null;
 let redlock = null;
 
-const ROOM_LIFETIME = 1800000; // 10 minutes
-const ROOM_WARNING_TIME = 600000; // 1 minute
+const ROOM_LIFETIME = 30 * 60 * 1000; // 30 minutes
+const ROOM_WARNING_TIME = 60 * 1000; // 1 minute
 
 /**
  * Initialize matchmaking with Redis client, Socket.IO, and Redlock
