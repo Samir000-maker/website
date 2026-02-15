@@ -6,6 +6,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>How are you feeling? - MoodJournal</title>
 
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#8b5cf6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
     rel="stylesheet">
@@ -73,7 +78,7 @@
     .logo-icon {
       width: 32px;
       height: 32px;
-      /* background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); */
+      background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -609,7 +614,7 @@
   <header class="header">
     <div class="header-content">
       <div class="logo">
-        <div class="logo-icon"><img src="/public/favicon.png" alt="Vibegra" style="width: 100%; height: 100%; object-fit: contain;"></div>
+        <div class="logo-icon">✦</div>
         <span class="logo-text">Vibegra</span>
       </div>
       <nav class="nav">
@@ -637,6 +642,12 @@
         <span class="status-indicator"></span>
         <!-- 4,281 USERS ONLINE -->
         <span>Welcome to Vibegra</span>
+      </div>
+      <div style="margin-top: 12px; display: flex; justify-content: center;">
+        <button type="button" class="hidden" data-pwa-install="1">
+          <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
+          <span>Install App</span>
+        </button>
       </div>
       <h1>
         Connect with your<br>
@@ -795,6 +806,11 @@
 
   <!-- Load app.js -->
   <script src="app.js"></script>
+
+  <script src="/pwa-install.js"></script>
+  <script>
+    try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+  </script>
 
   <!-- Page-specific script -->
   <script>
