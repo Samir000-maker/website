@@ -41,7 +41,6 @@
       [data-pwa-install="1"]:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-        transform: none !important;
       }
       [data-pwa-install="1"] .vibe-pwa-icon {
         width: 18px;
@@ -55,7 +54,7 @@
         box-shadow: 0 0 0 1px rgba(0,0,0,0.15) inset;
       }
 
-      .pwa-download-modal {
+      .pwa-install-modal {
         position: fixed;
         inset: 0;
         z-index: 1000;
@@ -63,15 +62,15 @@
         align-items: center;
         justify-content: center;
       }
-      .pwa-download-modal.hidden { display: none !important; }
-      .pwa-download-modal__backdrop {
+      .pwa-install-modal.hidden { display: none !important; }
+      .pwa-install-modal__backdrop {
         position: absolute;
         inset: 0;
         background: rgba(0,0,0,0.65);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
       }
-      .pwa-download-modal__card {
+      .pwa-install-modal__card {
         position: relative;
         width: min(90vw, 400px);
         border-radius: 20px;
@@ -81,7 +80,7 @@
         overflow: hidden;
         padding: 24px;
       }
-      .pwa-download-modal__icon {
+      .pwa-install-modal__icon {
         width: 56px;
         height: 56px;
         margin: 0 auto 16px;
@@ -93,17 +92,17 @@
         border: 1px solid rgba(99,32,233,0.35);
         box-shadow: 0 8px 24px rgba(99,32,233,0.20);
       }
-      .pwa-download-modal__icon svg {
+      .pwa-install-modal__icon svg {
         width: 28px;
         height: 28px;
         color: rgba(255,255,255,0.92);
-        animation: downloadPulse 2s ease-in-out infinite;
+        animation: installPulse 2s ease-in-out infinite;
       }
-      @keyframes downloadPulse {
+      @keyframes installPulse {
         0%, 100% { transform: scale(1); opacity: 1; }
         50% { transform: scale(1.05); opacity: 0.85; }
       }
-      .pwa-download-modal__title {
+      .pwa-install-modal__title {
         font-weight: 800;
         font-size: 18px;
         letter-spacing: -0.01em;
@@ -111,47 +110,31 @@
         text-align: center;
         margin-bottom: 8px;
       }
-      .pwa-download-modal__status {
+      .pwa-install-modal__status {
         font-size: 14px;
         color: rgba(148,163,184,0.90);
         text-align: center;
         margin-bottom: 20px;
       }
-      .pwa-download-modal__progress-wrap {
-        position: relative;
-        width: 100%;
-        height: 8px;
-        border-radius: 9999px;
-        background: rgba(255,255,255,0.08);
-        overflow: hidden;
-        margin-bottom: 12px;
+      .pwa-install-modal__spinner {
+        width: 40px;
+        height: 40px;
+        margin: 0 auto 16px;
+        border: 3px solid rgba(99,32,233,0.2);
+        border-top-color: #6320e9;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
       }
-      .pwa-download-modal__progress-bar {
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 0%;
-        background: linear-gradient(90deg, #6320e9, #8b5cf6);
-        box-shadow: 0 0 12px rgba(99,32,233,0.40);
-        transition: width 0.3s ease;
-        border-radius: 9999px;
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
-      .pwa-download-modal__percentage {
-        font-weight: 800;
-        font-size: 24px;
-        color: rgba(255,255,255,0.96);
-        text-align: center;
-        margin-bottom: 8px;
-        font-variant-numeric: tabular-nums;
-      }
-      .pwa-download-modal__complete {
+      .pwa-install-modal__complete {
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 16px;
       }
-      .pwa-download-modal__complete-icon {
+      .pwa-install-modal__complete-icon {
         width: 64px;
         height: 64px;
         display: flex;
@@ -166,17 +149,17 @@
         0% { transform: scale(0.8); opacity: 0; }
         100% { transform: scale(1); opacity: 1; }
       }
-      .pwa-download-modal__complete-icon svg {
+      .pwa-install-modal__complete-icon svg {
         width: 32px;
         height: 32px;
         color: rgba(34,197,94,0.95);
       }
-      .pwa-download-modal__complete-text {
+      .pwa-install-modal__complete-text {
         font-weight: 700;
         font-size: 16px;
         color: rgba(255,255,255,0.94);
       }
-      .pwa-download-modal__button {
+      .pwa-install-modal__button {
         appearance: none;
         -webkit-appearance: none;
         border: 1px solid rgba(99,32,233,0.45);
@@ -190,7 +173,7 @@
         transition: all 180ms ease;
         margin-top: 8px;
       }
-      .pwa-download-modal__button:hover {
+      .pwa-install-modal__button:hover {
         background: rgba(99,32,233,0.30);
         border-color: rgba(99,32,233,0.55);
         transform: translateY(-1px);
@@ -210,30 +193,27 @@
     }
   }
 
-  function ensureDownloadModal() {
-    const existing = document.getElementById('pwaDownloadModal');
+  function ensureInstallModal() {
+    const existing = document.getElementById('pwaInstallModal');
     if (existing) return existing;
 
     const modal = document.createElement('div');
-    modal.id = 'pwaDownloadModal';
-    modal.className = 'pwa-download-modal hidden';
+    modal.id = 'pwaInstallModal';
+    modal.className = 'pwa-install-modal hidden';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-modal', 'true');
     modal.innerHTML = `
-      <div class="pwa-download-modal__backdrop"></div>
-      <div class="pwa-download-modal__card">
-        <div class="pwa-download-modal__content">
-          <div class="pwa-download-modal__icon">
+      <div class="pwa-install-modal__backdrop"></div>
+      <div class="pwa-install-modal__card">
+        <div class="pwa-install-modal__content">
+          <div class="pwa-install-modal__icon">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
             </svg>
           </div>
-          <div class="pwa-download-modal__title">Downloading vibegra</div>
-          <div class="pwa-download-modal__status">Please wait while we prepare your download...</div>
-          <div class="pwa-download-modal__percentage">0%</div>
-          <div class="pwa-download-modal__progress-wrap">
-            <div class="pwa-download-modal__progress-bar"></div>
-          </div>
+          <div class="pwa-install-modal__title">Installing Vibegra</div>
+          <div class="pwa-install-modal__status">Please wait...</div>
+          <div class="pwa-install-modal__spinner"></div>
         </div>
       </div>
     `;
@@ -242,318 +222,167 @@
     return modal;
   }
 
-  function clearBrowserCache() {
+  async function clearAllCaches() {
     try {
-      // Clear service worker caches
-      if ('serviceWorker' in navigator && 'caches' in window) {
-        caches.keys().then(names => {
-          names.forEach(name => {
-            caches.delete(name);
-          });
-        });
-        
-        // Unregister all service workers to ensure clean state
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-          registrations.forEach(registration => {
-            registration.unregister();
-          });
-        });
+      // Clear all service worker caches
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(name => caches.delete(name)));
       }
-      
-      // Clear localStorage
+
+      // Unregister all service workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(reg => reg.unregister()));
+      }
+
+      // Clear localStorage completely
       try {
-        if (window.localStorage) {
-          // Only clear app-specific keys, not all localStorage
-          const keysToRemove = [];
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && (key.includes('vibegra') || key.includes('pwa') || key.includes('install'))) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(key => localStorage.removeItem(key));
-        }
-      } catch (e) {
-        console.log('localStorage clearing not supported');
-      }
-      
+        localStorage.clear();
+      } catch (e) {}
+
       // Clear sessionStorage
       try {
-        if (window.sessionStorage) {
-          const keysToRemove = [];
-          for (let i = 0; i < sessionStorage.length; i++) {
-            const key = sessionStorage.key(i);
-            if (key && (key.includes('vibegra') || key.includes('pwa') || key.includes('install'))) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(key => sessionStorage.removeItem(key));
-        }
-      } catch (e) {
-        console.log('sessionStorage clearing not supported');
-      }
-      
-      // Clear IndexedDB for app-specific databases
+        sessionStorage.clear();
+      } catch (e) {}
+
+      // Clear IndexedDB
       try {
         if (window.indexedDB) {
-          indexedDB.databases().then(databases => {
-            databases.forEach(db => {
-              if (db.name && (db.name.includes('vibegra') || db.name.includes('pwa'))) {
-                indexedDB.deleteDatabase(db.name);
-              }
-            });
-          }).catch(() => {});
-        }
-      } catch (e) {
-        console.log('IndexedDB clearing not supported');
-      }
-      
-      return true;
-    } catch (e) {
-      console.log('Cache clearing not supported:', e);
-    }
-    return false;
-  }
-
-  function autoLaunchApp(filePath) {
-    try {
-      // Detect file type from URL
-      const fileExtension = filePath.split('.').pop().toLowerCase().split('?')[0];
-      
-      // Try to open the file/app automatically
-      const link = document.createElement('a');
-      link.href = filePath;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      
-      // Set appropriate MIME types for different file types
-      const mimeTypes = {
-        'apk': 'application/vnd.android.package-archive',
-        'exe': 'application/x-msdownload',
-        'msi': 'application/x-msi',
-        'dmg': 'application/x-apple-diskimage',
-        'pkg': 'application/x-newton-compatible-pkg',
-        'deb': 'application/x-debian-package',
-        'rpm': 'application/x-rpm',
-        'app': 'application/x-app',
-        'ipa': 'application/x-ios-app',
-        'zip': 'application/zip',
-        'tar': 'application/x-tar',
-        'gz': 'application/gzip'
-      };
-      
-      if (mimeTypes[fileExtension]) {
-        link.type = mimeTypes[fileExtension];
-      }
-      
-      // Trigger click to open/launch
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // For desktop apps, try additional launch methods
-      if (['exe', 'msi', 'dmg', 'app', 'deb', 'rpm'].includes(fileExtension)) {
-        // Set a small delay and try to open in system file manager
-        setTimeout(() => {
-          try {
-            // Try to trigger system open dialog
-            const openLink = document.createElement('a');
-            openLink.href = filePath;
-            openLink.download = '';
-            document.body.appendChild(openLink);
-            openLink.click();
-            document.body.removeChild(openLink);
-          } catch (e) {}
-        }, 500);
-      }
-      
-      return true;
-    } catch (e) {
-      console.log('Auto-launch not supported:', e);
-      return false;
-    }
-  }
-
-  function showDownloadProgress(downloadUrl = '/vibegra-app.zip') {
-    const modal = ensureDownloadModal();
-    const progressBar = modal.querySelector('.pwa-download-modal__progress-bar');
-    const percentageText = modal.querySelector('.pwa-download-modal__percentage');
-    const statusText = modal.querySelector('.pwa-download-modal__status');
-    const content = modal.querySelector('.pwa-download-modal__content');
-
-    setHidden(modal, false);
-
-    // Clear cache before download
-    statusText.textContent = 'Clearing cache and preparing download...';
-    clearBrowserCache();
-
-    // Add cache-busting timestamp to URL
-    const cacheBuster = `?t=${Date.now()}&nocache=${Math.random().toString(36).substring(7)}`;
-    const finalUrl = downloadUrl + (downloadUrl.includes('?') ? '&' : '') + cacheBuster.substring(1);
-
-    // Simulate download with actual file fetch
-    let progress = 0;
-    let downloadedBlob = null;
-    let downloadedUrl = null;
-    
-    // Try to fetch and download the actual file if it exists
-    fetch(finalUrl, {
-      cache: 'no-store', // Ensure fresh download, bypass cache
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      },
-      mode: 'cors',
-      credentials: 'omit'
-    })
-      .then(response => {
-        if (!response.ok) throw new Error('File not found');
-        
-        statusText.textContent = 'Downloading...';
-        
-        const contentLength = response.headers.get('content-length');
-        const total = parseInt(contentLength, 10);
-        
-        if (!contentLength || isNaN(total)) {
-          // Fallback to simulated progress
-          return simulateDownload();
-        }
-        
-        let loaded = 0;
-        const reader = response.body.getReader();
-        const chunks = [];
-        
-        return new ReadableStream({
-          start(controller) {
-            function push() {
-              reader.read().then(({ done, value }) => {
-                if (done) {
-                  controller.close();
-                  return;
-                }
-                
-                chunks.push(value);
-                loaded += value.length;
-                progress = Math.min(Math.round((loaded / total) * 100), 100);
-                
-                progressBar.style.width = progress + '%';
-                percentageText.textContent = progress + '%';
-                
-                controller.enqueue(value);
-                push();
+          const dbs = await indexedDB.databases();
+          await Promise.all(dbs.map(db => {
+            if (db.name) {
+              return new Promise((resolve) => {
+                const request = indexedDB.deleteDatabase(db.name);
+                request.onsuccess = () => resolve();
+                request.onerror = () => resolve();
               });
             }
-            push();
-          }
-        });
-      })
-      .then(stream => stream ? new Response(stream) : null)
-      .then(response => response ? response.blob() : simulateDownload())
-      .then(blob => {
-        if (blob) {
-          downloadedBlob = blob;
-          // Create download link
-          const url = URL.createObjectURL(blob);
-          downloadedUrl = url;
-          
-          const a = document.createElement('a');
-          a.href = url;
-          
-          // Extract filename from URL or use default
-          const filename = downloadUrl.split('/').pop() || 'vibegra-app.zip';
-          a.download = filename;
-          
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          
-          // Don't revoke URL yet, we'll use it for auto-launch
-          // URL.revokeObjectURL(url);
+          }));
         }
-        
-        showComplete(downloadedUrl);
-      })
-      .catch(() => {
-        // Fallback to simulated download
-        statusText.textContent = 'Downloading...';
-        simulateDownload().then(() => showComplete(null));
-      });
+      } catch (e) {}
 
-    function simulateDownload() {
-      return new Promise((resolve) => {
-        const interval = setInterval(() => {
-          progress += Math.random() * 15 + 5;
-          if (progress >= 100) {
-            progress = 100;
-            clearInterval(interval);
-            setTimeout(() => resolve(), 300);
-          }
-          
-          progressBar.style.width = progress + '%';
-          percentageText.textContent = Math.round(progress) + '%';
-        }, 200);
-      });
+      // Clear cookies related to PWA
+      try {
+        document.cookie.split(";").forEach(c => {
+          document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        });
+      } catch (e) {}
+
+    } catch (err) {
+      console.log('Cache clearing:', err);
     }
+  }
 
-    function showComplete(fileUrl) {
-      // Attempt auto-launch
-      let launchAttempted = false;
-      if (fileUrl) {
-        launchAttempted = autoLaunchApp(fileUrl);
+  async function showInstallProcess(deferredPrompt) {
+    const modal = ensureInstallModal();
+    const content = modal.querySelector('.pwa-install-modal__content');
+    
+    setHidden(modal, false);
+
+    try {
+      // Step 1: Clear all caches
+      content.innerHTML = `
+        <div class="pwa-install-modal__icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </div>
+        <div class="pwa-install-modal__title">Clearing Cache</div>
+        <div class="pwa-install-modal__status">Removing old data...</div>
+        <div class="pwa-install-modal__spinner"></div>
+      `;
+      
+      await clearAllCaches();
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Step 2: Installing
+      content.innerHTML = `
+        <div class="pwa-install-modal__icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        </div>
+        <div class="pwa-install-modal__title">Installing Vibegra</div>
+        <div class="pwa-install-modal__status">Setting up your app...</div>
+        <div class="pwa-install-modal__spinner"></div>
+      `;
+
+      // Trigger the install prompt
+      if (deferredPrompt) {
+        await deferredPrompt.prompt();
+        const choiceResult = await deferredPrompt.userChoice;
+        
+        if (choiceResult.outcome === 'accepted') {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Step 3: Success
+          content.innerHTML = `
+            <div class="pwa-install-modal__complete">
+              <div class="pwa-install-modal__complete-icon">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div class="pwa-install-modal__complete-text">Installed Successfully!</div>
+              <div class="pwa-install-modal__status">Launching Vibegra...</div>
+            </div>
+          `;
+
+          // Auto-launch the PWA
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Try to open the installed PWA
+          try {
+            // Get the app's start URL
+            const startUrl = window.location.origin + '/';
+            
+            // Try to launch the installed app
+            if (navigator.setAppBadge) {
+              // PWA is installed, can use app APIs
+              window.location.href = startUrl;
+            } else {
+              // Fallback: open in new window
+              window.open(startUrl, '_blank');
+            }
+          } catch (e) {
+            console.log('Launch:', e);
+          }
+
+          // Close modal after launching
+          await new Promise(resolve => setTimeout(resolve, 500));
+          setHidden(modal, true);
+          
+        } else {
+          // User cancelled
+          content.innerHTML = `
+            <div class="pwa-install-modal__title">Installation Cancelled</div>
+            <div class="pwa-install-modal__status">You can install anytime by clicking the button again.</div>
+            <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
+          `;
+          
+          const closeBtn = content.querySelector('[data-close="1"]');
+          if (closeBtn) {
+            closeBtn.addEventListener('click', () => setHidden(modal, true));
+          }
+        }
+      } else {
+        throw new Error('No install prompt available');
       }
       
+    } catch (err) {
+      console.error('Install error:', err);
+      
+      // Show error state
       content.innerHTML = `
-        <div class="pwa-download-modal__complete">
-          <div class="pwa-download-modal__complete-icon">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div class="pwa-download-modal__complete-text">Download Complete!</div>
-          ${launchAttempted ? '<div class="pwa-download-modal__status" style="margin-top: 8px;">Opening app automatically...</div>' : '<div class="pwa-download-modal__status" style="margin-top: 8px;">Please check your downloads folder.</div>'}
-          <button type="button" class="pwa-download-modal__button" data-close="1">Close</button>
-        </div>
+        <div class="pwa-install-modal__title">Installation Not Available</div>
+        <div class="pwa-install-modal__status">Your browser doesn't support PWA installation, or the app is already installed.</div>
+        <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
       `;
       
       const closeBtn = content.querySelector('[data-close="1"]');
       if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-          // Clean up blob URL if it exists
-          if (fileUrl) {
-            try {
-              URL.revokeObjectURL(fileUrl);
-            } catch (e) {}
-          }
-          
-          setHidden(modal, true);
-          
-          // Reset modal content after animation
-          setTimeout(() => {
-            content.innerHTML = `
-              <div class="pwa-download-modal__icon">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                </svg>
-              </div>
-              <div class="pwa-download-modal__title">Downloading vibegra</div>
-              <div class="pwa-download-modal__status">Please wait while we prepare your download...</div>
-              <div class="pwa-download-modal__percentage">0%</div>
-              <div class="pwa-download-modal__progress-wrap">
-                <div class="pwa-download-modal__progress-bar"></div>
-              </div>
-            `;
-          }, 300);
-        });
-      }
-      
-      // Auto-close modal after 3 seconds if launch was successful
-      if (launchAttempted) {
-        setTimeout(() => {
-          if (!modal.classList.contains('hidden')) {
-            closeBtn.click();
-          }
-        }, 3000);
+        closeBtn.addEventListener('click', () => setHidden(modal, true));
       }
     }
   }
@@ -564,25 +393,66 @@
 
     ensureStyles();
 
-    // Always show buttons, no hiding logic
-    buttons.forEach((btn) => {
+    let deferredPrompt = null;
+
+    // Always show buttons
+    buttons.forEach(btn => {
       btn.disabled = false;
       setHidden(btn, false);
-      
-      btn.addEventListener('click', () => {
-        // Disable button during download
+    });
+
+    // Capture the beforeinstallprompt event
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      console.log('PWA install prompt captured');
+    });
+
+    // Listen for successful install
+    window.addEventListener('appinstalled', () => {
+      console.log('PWA installed successfully');
+      deferredPrompt = null;
+    });
+
+    // Handle button clicks
+    buttons.forEach(btn => {
+      btn.addEventListener('click', async () => {
         btn.disabled = true;
         
-        // Get download URL from data attribute or use default
-        const downloadUrl = btn.getAttribute('data-download-url') || '/vibegra-app.zip';
+        // If we have a deferred prompt, use it
+        if (deferredPrompt) {
+          await showInstallProcess(deferredPrompt);
+        } else {
+          // No prompt available - clear caches and try to force it
+          const modal = ensureInstallModal();
+          const content = modal.querySelector('.pwa-install-modal__content');
+          
+          setHidden(modal, false);
+          
+          content.innerHTML = `
+            <div class="pwa-install-modal__icon">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div class="pwa-install-modal__title">Preparing Installation</div>
+            <div class="pwa-install-modal__status">Clearing cache and refreshing...</div>
+            <div class="pwa-install-modal__spinner"></div>
+          `;
+          
+          // Clear everything
+          await clearAllCaches();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Show refresh prompt
+          content.innerHTML = `
+            <div class="pwa-install-modal__title">Ready to Install</div>
+            <div class="pwa-install-modal__status">Cache cleared! Please refresh the page to enable installation.</div>
+            <button type="button" class="pwa-install-modal__button" onclick="window.location.reload()">Refresh Now</button>
+          `;
+        }
         
-        // Show download progress
-        showDownloadProgress(downloadUrl);
-        
-        // Re-enable button after a delay
-        setTimeout(() => {
-          btn.disabled = false;
-        }, 2000);
+        btn.disabled = false;
       });
     });
   }
@@ -590,24 +460,33 @@
   function registerServiceWorker() {
     try {
       if (!('serviceWorker' in navigator)) return;
-      window.addEventListener('load', () => {
-        // Clear old registrations first
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-          // Unregister old service workers
-          registrations.forEach(registration => registration.unregister());
+      
+      window.addEventListener('load', async () => {
+        try {
+          // First unregister any existing service workers
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(reg => reg.unregister()));
           
-          // Register fresh service worker after clearing
-          setTimeout(() => {
-            navigator.serviceWorker.register('/sw.js', {
-              updateViaCache: 'none' // Don't cache the service worker file itself
-            }).then(registration => {
-              // Force update check
-              registration.update();
-            }).catch(() => {});
-          }, 100);
-        });
+          // Wait a bit
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          // Register fresh service worker
+          const registration = await navigator.serviceWorker.register('/sw.js', {
+            updateViaCache: 'none'
+          });
+          
+          console.log('Service Worker registered:', registration);
+          
+          // Force update
+          registration.update();
+          
+        } catch (err) {
+          console.log('Service Worker registration failed:', err);
+        }
       });
-    } catch {}
+    } catch (err) {
+      console.log('Service Worker not supported:', err);
+    }
   }
 
   // Expose API
@@ -616,9 +495,7 @@
       registerServiceWorker();
       initInstallButtons();
     },
-    download: function(url) {
-      showDownloadProgress(url);
-    }
+    clearCache: clearAllCaches
   };
 
   // Auto-init when DOM is ready
