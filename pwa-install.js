@@ -242,6 +242,138 @@
     return modal;
   }
 
+  function clearBrowserCache() {
+    try {
+      // Clear service worker caches
+      if ('serviceWorker' in navigator && 'caches' in window) {
+        caches.keys().then(names => {
+          names.forEach(name => {
+            caches.delete(name);
+          });
+        });
+        
+        // Unregister all service workers to ensure clean state
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          registrations.forEach(registration => {
+            registration.unregister();
+          });
+        });
+      }
+      
+      // Clear localStorage
+      try {
+        if (window.localStorage) {
+          // Only clear app-specific keys, not all localStorage
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.includes('vibegra') || key.includes('pwa') || key.includes('install'))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(key => localStorage.removeItem(key));
+        }
+      } catch (e) {
+        console.log('localStorage clearing not supported');
+      }
+      
+      // Clear sessionStorage
+      try {
+        if (window.sessionStorage) {
+          const keysToRemove = [];
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && (key.includes('vibegra') || key.includes('pwa') || key.includes('install'))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(key => sessionStorage.removeItem(key));
+        }
+      } catch (e) {
+        console.log('sessionStorage clearing not supported');
+      }
+      
+      // Clear IndexedDB for app-specific databases
+      try {
+        if (window.indexedDB) {
+          indexedDB.databases().then(databases => {
+            databases.forEach(db => {
+              if (db.name && (db.name.includes('vibegra') || db.name.includes('pwa'))) {
+                indexedDB.deleteDatabase(db.name);
+              }
+            });
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.log('IndexedDB clearing not supported');
+      }
+      
+      return true;
+    } catch (e) {
+      console.log('Cache clearing not supported:', e);
+    }
+    return false;
+  }
+
+  function autoLaunchApp(filePath) {
+    try {
+      // Detect file type from URL
+      const fileExtension = filePath.split('.').pop().toLowerCase().split('?')[0];
+      
+      // Try to open the file/app automatically
+      const link = document.createElement('a');
+      link.href = filePath;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      
+      // Set appropriate MIME types for different file types
+      const mimeTypes = {
+        'apk': 'application/vnd.android.package-archive',
+        'exe': 'application/x-msdownload',
+        'msi': 'application/x-msi',
+        'dmg': 'application/x-apple-diskimage',
+        'pkg': 'application/x-newton-compatible-pkg',
+        'deb': 'application/x-debian-package',
+        'rpm': 'application/x-rpm',
+        'app': 'application/x-app',
+        'ipa': 'application/x-ios-app',
+        'zip': 'application/zip',
+        'tar': 'application/x-tar',
+        'gz': 'application/gzip'
+      };
+      
+      if (mimeTypes[fileExtension]) {
+        link.type = mimeTypes[fileExtension];
+      }
+      
+      // Trigger click to open/launch
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // For desktop apps, try additional launch methods
+      if (['exe', 'msi', 'dmg', 'app', 'deb', 'rpm'].includes(fileExtension)) {
+        // Set a small delay and try to open in system file manager
+        setTimeout(() => {
+          try {
+            // Try to trigger system open dialog
+            const openLink = document.createElement('a');
+            openLink.href = filePath;
+            openLink.download = '';
+            document.body.appendChild(openLink);
+            openLink.click();
+            document.body.removeChild(openLink);
+          } catch (e) {}
+        }, 500);
+      }
+      
+      return true;
+    } catch (e) {
+      console.log('Auto-launch not supported:', e);
+      return false;
+    }
+  }
+
   function showDownloadProgress(downloadUrl = '/vibegra-app.zip') {
     const modal = ensureDownloadModal();
     const progressBar = modal.querySelector('.pwa-download-modal__progress-bar');
@@ -251,13 +383,34 @@
 
     setHidden(modal, false);
 
+    // Clear cache before download
+    statusText.textContent = 'Clearing cache and preparing download...';
+    clearBrowserCache();
+
+    // Add cache-busting timestamp to URL
+    const cacheBuster = `?t=${Date.now()}&nocache=${Math.random().toString(36).substring(7)}`;
+    const finalUrl = downloadUrl + (downloadUrl.includes('?') ? '&' : '') + cacheBuster.substring(1);
+
     // Simulate download with actual file fetch
     let progress = 0;
+    let downloadedBlob = null;
+    let downloadedUrl = null;
     
     // Try to fetch and download the actual file if it exists
-    fetch(downloadUrl)
+    fetch(finalUrl, {
+      cache: 'no-store', // Ensure fresh download, bypass cache
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      },
+      mode: 'cors',
+      credentials: 'omit'
+    })
       .then(response => {
         if (!response.ok) throw new Error('File not found');
+        
+        statusText.textContent = 'Downloading...';
         
         const contentLength = response.headers.get('content-length');
         const total = parseInt(contentLength, 10);
@@ -299,22 +452,32 @@
       .then(response => response ? response.blob() : simulateDownload())
       .then(blob => {
         if (blob) {
+          downloadedBlob = blob;
           // Create download link
           const url = URL.createObjectURL(blob);
+          downloadedUrl = url;
+          
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'vibegra-app.zip';
+          
+          // Extract filename from URL or use default
+          const filename = downloadUrl.split('/').pop() || 'vibegra-app.zip';
+          a.download = filename;
+          
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+          
+          // Don't revoke URL yet, we'll use it for auto-launch
+          // URL.revokeObjectURL(url);
         }
         
-        showComplete();
+        showComplete(downloadedUrl);
       })
       .catch(() => {
         // Fallback to simulated download
-        simulateDownload().then(showComplete);
+        statusText.textContent = 'Downloading...';
+        simulateDownload().then(() => showComplete(null));
       });
 
     function simulateDownload() {
@@ -333,7 +496,13 @@
       });
     }
 
-    function showComplete() {
+    function showComplete(fileUrl) {
+      // Attempt auto-launch
+      let launchAttempted = false;
+      if (fileUrl) {
+        launchAttempted = autoLaunchApp(fileUrl);
+      }
+      
       content.innerHTML = `
         <div class="pwa-download-modal__complete">
           <div class="pwa-download-modal__complete-icon">
@@ -342,6 +511,7 @@
             </svg>
           </div>
           <div class="pwa-download-modal__complete-text">Download Complete!</div>
+          ${launchAttempted ? '<div class="pwa-download-modal__status" style="margin-top: 8px;">Opening app automatically...</div>' : '<div class="pwa-download-modal__status" style="margin-top: 8px;">Please check your downloads folder.</div>'}
           <button type="button" class="pwa-download-modal__button" data-close="1">Close</button>
         </div>
       `;
@@ -349,7 +519,15 @@
       const closeBtn = content.querySelector('[data-close="1"]');
       if (closeBtn) {
         closeBtn.addEventListener('click', () => {
+          // Clean up blob URL if it exists
+          if (fileUrl) {
+            try {
+              URL.revokeObjectURL(fileUrl);
+            } catch (e) {}
+          }
+          
           setHidden(modal, true);
+          
           // Reset modal content after animation
           setTimeout(() => {
             content.innerHTML = `
@@ -367,6 +545,15 @@
             `;
           }, 300);
         });
+      }
+      
+      // Auto-close modal after 3 seconds if launch was successful
+      if (launchAttempted) {
+        setTimeout(() => {
+          if (!modal.classList.contains('hidden')) {
+            closeBtn.click();
+          }
+        }, 3000);
       }
     }
   }
@@ -404,7 +591,21 @@
     try {
       if (!('serviceWorker' in navigator)) return;
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        // Clear old registrations first
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          // Unregister old service workers
+          registrations.forEach(registration => registration.unregister());
+          
+          // Register fresh service worker after clearing
+          setTimeout(() => {
+            navigator.serviceWorker.register('/sw.js', {
+              updateViaCache: 'none' // Don't cache the service worker file itself
+            }).then(registration => {
+              // Force update check
+              registration.update();
+            }).catch(() => {});
+          }, 100);
+        });
       });
     } catch {}
   }
