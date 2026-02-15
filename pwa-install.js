@@ -1,4 +1,13 @@
 (function () {
+  'use strict';
+
+  // Prevent duplicate initialization
+  if (window.__VibePWAInitialized) {
+    console.log('✅ VibePWA already initialized, skipping duplicate');
+    return;
+  }
+  window.__VibePWAInitialized = true;
+
   function ensureStyles() {
     if (document.getElementById('vibePwaInstallStyles')) return;
     const style = document.createElement('style');
@@ -186,18 +195,27 @@
     if (!el) return;
     if (hidden) {
       el.classList.add('hidden');
+      el.style.display = 'none';
       el.setAttribute('aria-hidden', 'true');
     } else {
       el.classList.remove('hidden');
+      el.style.display = '';
       el.setAttribute('aria-hidden', 'false');
     }
   }
 
-  function ensureInstallModal() {
-    const existing = document.getElementById('pwaInstallModal');
-    if (existing) return existing;
+  function isRunningAsPWA() {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const isIOSStandalone = window.navigator.standalone === true;
+    const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+    return isStandalone || isIOSStandalone || isFullscreen;
+  }
 
-    const modal = document.createElement('div');
+  function ensureInstallModal() {
+    let modal = document.getElementById('pwaInstallModal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
     modal.id = 'pwaInstallModal';
     modal.className = 'pwa-install-modal hidden';
     modal.setAttribute('role', 'dialog');
@@ -222,58 +240,6 @@
     return modal;
   }
 
-  async function clearAllCaches() {
-    try {
-      // Clear all service worker caches
-      if ('caches' in window) {
-        const cacheNames = await caches.keys();
-        await Promise.all(cacheNames.map(name => caches.delete(name)));
-      }
-
-      // Unregister all service workers
-      if ('serviceWorker' in navigator) {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map(reg => reg.unregister()));
-      }
-
-      // Clear localStorage completely
-      try {
-        localStorage.clear();
-      } catch (e) {}
-
-      // Clear sessionStorage
-      try {
-        sessionStorage.clear();
-      } catch (e) {}
-
-      // Clear IndexedDB
-      try {
-        if (window.indexedDB) {
-          const dbs = await indexedDB.databases();
-          await Promise.all(dbs.map(db => {
-            if (db.name) {
-              return new Promise((resolve) => {
-                const request = indexedDB.deleteDatabase(db.name);
-                request.onsuccess = () => resolve();
-                request.onerror = () => resolve();
-              });
-            }
-          }));
-        }
-      } catch (e) {}
-
-      // Clear cookies related to PWA
-      try {
-        document.cookie.split(";").forEach(c => {
-          document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-        });
-      } catch (e) {}
-
-    } catch (err) {
-      console.log('Cache clearing:', err);
-    }
-  }
-
   async function showInstallProcess(deferredPrompt) {
     const modal = ensureInstallModal();
     const content = modal.querySelector('.pwa-install-modal__content');
@@ -281,22 +247,7 @@
     setHidden(modal, false);
 
     try {
-      // Step 1: Clear all caches
-      content.innerHTML = `
-        <div class="pwa-install-modal__icon">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </div>
-        <div class="pwa-install-modal__title">Clearing Cache</div>
-        <div class="pwa-install-modal__status">Removing old data...</div>
-        <div class="pwa-install-modal__spinner"></div>
-      `;
-      
-      await clearAllCaches();
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      // Step 2: Installing
+      // Installing
       content.innerHTML = `
         <div class="pwa-install-modal__icon">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -304,79 +255,55 @@
           </svg>
         </div>
         <div class="pwa-install-modal__title">Installing Vibegra</div>
-        <div class="pwa-install-modal__status">Setting up your app...</div>
+        <div class="pwa-install-modal__status">Click "Install" in the browser prompt...</div>
         <div class="pwa-install-modal__spinner"></div>
       `;
 
       // Trigger the install prompt
-      if (deferredPrompt) {
-        await deferredPrompt.prompt();
-        const choiceResult = await deferredPrompt.userChoice;
+      await deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+      
+      if (choiceResult.outcome === 'accepted') {
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        if (choiceResult.outcome === 'accepted') {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Step 3: Success
-          content.innerHTML = `
-            <div class="pwa-install-modal__complete">
-              <div class="pwa-install-modal__complete-icon">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div class="pwa-install-modal__complete-text">Installed Successfully!</div>
-              <div class="pwa-install-modal__status">Launching Vibegra...</div>
+        // Success
+        content.innerHTML = `
+          <div class="pwa-install-modal__complete">
+            <div class="pwa-install-modal__complete-icon">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
             </div>
-          `;
+            <div class="pwa-install-modal__complete-text">Installed Successfully!</div>
+            <div class="pwa-install-modal__status">You can now use Vibegra as an app!</div>
+          </div>
+        `;
 
-          // Auto-launch the PWA
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Try to open the installed PWA
-          try {
-            // Get the app's start URL
-            const startUrl = window.location.origin + '/';
-            
-            // Try to launch the installed app
-            if (navigator.setAppBadge) {
-              // PWA is installed, can use app APIs
-              window.location.href = startUrl;
-            } else {
-              // Fallback: open in new window
-              window.open(startUrl, '_blank');
-            }
-          } catch (e) {
-            console.log('Launch:', e);
-          }
-
-          // Close modal after launching
-          await new Promise(resolve => setTimeout(resolve, 500));
-          setHidden(modal, true);
-          
-        } else {
-          // User cancelled
-          content.innerHTML = `
-            <div class="pwa-install-modal__title">Installation Cancelled</div>
-            <div class="pwa-install-modal__status">You can install anytime by clicking the button again.</div>
-            <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
-          `;
-          
-          const closeBtn = content.querySelector('[data-close="1"]');
-          if (closeBtn) {
-            closeBtn.addEventListener('click', () => setHidden(modal, true));
-          }
-        }
+        // Close modal after 2 seconds
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        setHidden(modal, true);
+        
       } else {
-        throw new Error('No install prompt available');
+        // User cancelled
+        content.innerHTML = `
+          <div class="pwa-install-modal__title">Installation Cancelled</div>
+          <div class="pwa-install-modal__status">You can install anytime by clicking the button again.</div>
+          <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
+        `;
+        
+        const closeBtn = content.querySelector('[data-close="1"]');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', () => setHidden(modal, true));
+        }
       }
       
     } catch (err) {
       console.error('Install error:', err);
       
-      // Show error state
+      // Show error
       content.innerHTML = `
-        <div class="pwa-install-modal__title">Installation Not Available</div>
-        <div class="pwa-install-modal__status">Your browser doesn't support PWA installation, or the app is already installed.</div>
+        <div class="pwa-install-modal__title">Installation Failed</div>
+        <div class="pwa-install-modal__status">Please try again or check if the app is already installed.</div>
         <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
       `;
       
@@ -387,18 +314,14 @@
     }
   }
 
-  function isRunningAsPWA() {
-    // Check if app is running in standalone mode (installed PWA)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    const isIOSStandalone = window.navigator.standalone === true;
-    const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
-    
-    return isStandalone || isIOSStandalone || isFullscreen;
-  }
-
   function initInstallButtons() {
-    const buttons = Array.from(document.querySelectorAll('[data-pwa-install="1"]'));
-    if (!buttons.length) return;
+    const buttons = Array.from(document.querySelectorAll('[data-pwa-install="1"]:not([data-pwa-initialized])'));
+    if (!buttons.length) {
+      console.log('✅ No new install buttons to initialize');
+      return;
+    }
+
+    console.log(`🔧 Initializing ${buttons.length} PWA install button(s)`);
 
     ensureStyles();
 
@@ -409,8 +332,9 @@
       buttons.forEach(btn => {
         setHidden(btn, true);
         btn.disabled = true;
+        btn.setAttribute('data-pwa-initialized', 'true');
       });
-      console.log('Running as installed PWA - install button hidden');
+      console.log('🙈 Running as PWA - install buttons hidden');
       return;
     }
 
@@ -418,6 +342,7 @@
     buttons.forEach(btn => {
       btn.disabled = false;
       setHidden(btn, false);
+      btn.setAttribute('data-pwa-initialized', 'true');
     });
 
     // Monitor display mode changes
@@ -448,15 +373,16 @@
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredPrompt = e;
-      console.log('PWA install prompt captured');
+      window.__pwaPromptCaptured = true;
+      console.log('✅ PWA install prompt captured');
     });
 
     // Listen for successful install
     window.addEventListener('appinstalled', () => {
-      console.log('PWA installed successfully');
+      console.log('✅ PWA installed successfully');
       deferredPrompt = null;
       
-      // Hide install buttons after successful installation
+      // Hide install buttons
       buttons.forEach(btn => {
         setHidden(btn, true);
         btn.disabled = true;
@@ -468,42 +394,36 @@
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         
-        // If we have a deferred prompt, use it
         if (deferredPrompt) {
+          // We have a prompt - proceed with installation
+          console.log('📱 Starting PWA installation...');
           await showInstallProcess(deferredPrompt);
         } else {
-          // No prompt available - clear caches and try to force it
+          // No prompt available
+          console.warn('⚠️ No install prompt available');
+          
           const modal = ensureInstallModal();
           const content = modal.querySelector('.pwa-install-modal__content');
           
           setHidden(modal, false);
           
           content.innerHTML = `
-            <div class="pwa-install-modal__icon">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </div>
-            <div class="pwa-install-modal__title">Preparing Installation</div>
-            <div class="pwa-install-modal__status">Clearing cache and refreshing...</div>
-            <div class="pwa-install-modal__spinner"></div>
+            <div class="pwa-install-modal__title">Can't Install Right Now</div>
+            <div class="pwa-install-modal__status">The app might already be installed, or your browser doesn't support PWA installation.</div>
+            <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
           `;
           
-          // Clear everything
-          await clearAllCaches();
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Show refresh prompt
-          content.innerHTML = `
-            <div class="pwa-install-modal__title">Ready to Install</div>
-            <div class="pwa-install-modal__status">Cache cleared! Please refresh the page to enable installation.</div>
-            <button type="button" class="pwa-install-modal__button" onclick="window.location.reload()">Refresh Now</button>
-          `;
+          const closeBtn = content.querySelector('[data-close="1"]');
+          if (closeBtn) {
+            closeBtn.addEventListener('click', () => setHidden(modal, true));
+          }
         }
         
         btn.disabled = false;
       });
     });
+
+    console.log('✅ PWA install buttons initialized');
   }
 
   function registerServiceWorker() {
@@ -512,45 +432,41 @@
       
       window.addEventListener('load', async () => {
         try {
-          // First unregister any existing service workers
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(registrations.map(reg => reg.unregister()));
-          
-          // Wait a bit
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          // Register fresh service worker
           const registration = await navigator.serviceWorker.register('/sw.js', {
             updateViaCache: 'none'
           });
           
-          console.log('Service Worker registered:', registration);
+          console.log('✅ Service Worker registered:', registration.scope);
           
           // Force update
           registration.update();
           
         } catch (err) {
-          console.log('Service Worker registration failed:', err);
+          console.log('❌ Service Worker registration failed:', err);
         }
       });
     } catch (err) {
-      console.log('Service Worker not supported:', err);
+      console.log('❌ Service Worker not supported:', err);
     }
   }
 
   // Expose API
   window.VibePWA = window.VibePWA || {
     init: function () {
+      console.log('🚀 Initializing VibePWA...');
       registerServiceWorker();
       initInstallButtons();
-    },
-    clearCache: clearAllCaches
+    }
   };
 
   // Auto-init when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => window.VibePWA.init());
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('📄 DOM ready - initializing VibePWA');
+      window.VibePWA.init();
+    });
   } else {
+    console.log('📄 DOM already ready - initializing VibePWA now');
     window.VibePWA.init();
   }
 })();
