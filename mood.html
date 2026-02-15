@@ -644,7 +644,11 @@
         <span>Welcome to Vibegra</span>
       </div>
       <div style="margin-top: 12px; display: flex; justify-content: center;">
-        <button type="button" class="hidden" data-pwa-install="1">
+        <!-- REMOVE THIS: class="hidden" -->
+<button type="button" data-pwa-install="1">
+  <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
+  <span>Install App</span>
+</button>
           <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
           <span>Install App</span>
         </button>
@@ -774,6 +778,13 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
+<script src="/pwa-install.js"></script> <!-- LOAD EARLY! -->
+<script>
+  if (window.VibePWA && typeof window.VibePWA.init === 'function') {
+    window.VibePWA.init();
+  }
+</script>
+
   <!-- Socket.IO Client -->
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
 
@@ -806,13 +817,6 @@
 
   <!-- Load app.js -->
   <script src="app.js"></script>
-
-  <script src="/pwa-install.js"></script>
-  <script>
-    if (window.VibePWA && typeof window.VibePWA.init === 'function') {
-            window.VibePWA.init();
-        }
-  </script>
 
   <!-- Page-specific script -->
   <script>
