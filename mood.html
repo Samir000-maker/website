@@ -809,7 +809,9 @@
 
   <script src="/pwa-install.js"></script>
   <script>
-    try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+    if (window.VibePWA && typeof window.VibePWA.init === 'function') {
+            window.VibePWA.init();
+        }
   </script>
 
   <!-- Page-specific script -->
