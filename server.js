@@ -2468,7 +2468,6 @@ app.post('/api/users/upload-pfp',
       const firebaseUser = req.firebaseUser;
       const db = getDB();
 
-      // ✅ FIX: Add maxTimeMS timeout
       const user = await db.collection('users').findOne(
         { email: firebaseUser.email },
         {
@@ -2479,7 +2478,7 @@ app.post('/api/users/upload-pfp',
             email: 1,
             firebaseUid: 1
           },
-          maxTimeMS: 3000 // ✅ 3-second timeout
+          maxTimeMS: 3000
         }
       );
 
@@ -2493,7 +2492,6 @@ app.post('/api/users/upload-pfp',
         user._id.toString()
       );
 
-      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: user._id },
         { $set: { pfpUrl, updatedAt: new Date() } },
@@ -2505,7 +2503,14 @@ app.post('/api/users/upload-pfp',
 
       res.json({ success: true, pfpUrl });
     } catch (error) {
-      // ✅ FIX: Handle timeout errors
+      if (error && error.code === 'STORAGE_NOT_CONFIGURED') {
+        return res.status(503).json({
+          error: 'Profile picture storage is not configured. Please contact support.',
+          code: 'STORAGE_NOT_CONFIGURED',
+          retryable: false
+        });
+      }
+
       if (error.code === 50) {
         console.error('❌ Database timeout in upload-pfp:', error.message);
         return res.status(503).json({
@@ -2514,48 +2519,11 @@ app.post('/api/users/upload-pfp',
         });
       }
 
-      console.error('Upload PFP error:', error);
+      console.error('Upload PFP error:', error && (error.stack || error));
       res.status(500).json({ error: 'Failed to upload profile picture' });
     }
   }
 );
-
-app.get('/api/users/me', authenticateFirebase, async (req, res) => {
-  try {
-    const firebaseUser = req.firebaseUser;
-    const db = getDB();
-
-    // ✅ FIX: Add maxTimeMS timeout
-    const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
-      {
-        projection: { password: 0 },
-        maxTimeMS: 3000
-      }
-    );
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json(user);
-  } catch (error) {
-    // ✅ FIX: Handle timeout errors
-    if (error.code === 50) {
-      console.error('❌ Database timeout in get profile:', error.message);
-      return res.status(503).json({
-        error: 'Database temporarily slow. Please try again.',
-        retryable: true
-      });
-    }
-
-    console.error('Get profile error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-
-
 
 app.post('/api/chat/attachments',
   authenticateFirebase,
