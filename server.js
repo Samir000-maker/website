@@ -1708,6 +1708,11 @@ app.get('/env-config.js', (req, res) => {
   }
 });
 
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 /**
  * Tab-close Beacon Endpoint (navigator.sendBeacon)
  * Uses token in request body because beacons cannot reliably set Authorization headers.
