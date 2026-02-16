@@ -201,6 +201,62 @@
 
         const { Auth, API, Toast, Loading, PageTransition } = window.MoodApp;
 
+        const toastError = (msg) => {
+            try {
+                if (Toast && typeof Toast.error === 'function') return Toast.error(msg);
+            } catch { }
+            console.error(msg);
+        };
+        const toastSuccess = (msg) => {
+            try {
+                if (Toast && typeof Toast.success === 'function') return Toast.success(msg);
+            } catch { }
+            console.log(msg);
+        };
+
+        const ensureLoadingPopup = () => {
+            let el = document.getElementById('profileUploadLoadingPopup');
+            if (el) return el;
+            el = document.createElement('div');
+            el.id = 'profileUploadLoadingPopup';
+            el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
+            el.innerHTML = `
+              <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+              <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#0f1115]/95 border border-white/10 shadow-2xl p-6">
+                <div class="flex items-center gap-3">
+                  <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: spin 1s linear infinite;"></div>
+                  <div>
+                    <div class="text-base font-bold text-white">Uploading…</div>
+                    <div id="profileUploadLoadingText" class="mt-1 text-sm text-gray-400">Uploading your picture…</div>
+                  </div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(el);
+            return el;
+        };
+
+        const loadingShow = (msg) => {
+            try {
+                if (Loading && typeof Loading.show === 'function') return Loading.show(msg || 'Uploading...');
+            } catch { }
+            const el = ensureLoadingPopup();
+            const t = el.querySelector('#profileUploadLoadingText');
+            if (t && msg) t.textContent = msg;
+            el.classList.remove('hidden');
+            el.classList.add('flex');
+        };
+
+        const loadingHide = () => {
+            try {
+                if (Loading && typeof Loading.hide === 'function') return Loading.hide();
+            } catch { }
+            const el = document.getElementById('profileUploadLoadingPopup');
+            if (!el) return;
+            el.classList.add('hidden');
+            el.classList.remove('flex');
+        };
+
         try {
             await Auth.requireAuth();
         } catch (err) {
@@ -246,11 +302,11 @@
 
         saveBtn.addEventListener('click', async () => {
             if (!selectedFile) {
-                Toast.error('Please select a file first');
+                toastError('Please select a file first');
                 return;
             }
 
-            Loading.show('Uploading your picture...');
+            loadingShow('Uploading your picture...');
 
             try {
                 console.log('Uploading file:', selectedFile.name, selectedFile.type, selectedFile.size);
@@ -259,17 +315,33 @@
                 
                 console.log('Upload result:', result);
                 
-                Loading.hide();
-                Toast.success('Profile picture saved!');
+                loadingHide();
+                toastSuccess('Profile picture saved!');
 
                 setTimeout(() => {
                     PageTransition.navigateTo('/mood.html');
                 }, 1000);
 
             } catch (error) {
-                Loading.hide();
+                loadingHide();
                 console.error('Upload error:', error);
-                Toast.error(error.message || 'Failed to upload picture. Please try again.');
+
+                let msg = 'Failed to upload picture. Please try again.';
+                try {
+                    if (error && typeof error.message === 'string' && error.message.trim()) {
+                        // app.js sometimes throws with message being JSON string
+                        const maybeJson = error.message.trim();
+                        if (maybeJson.startsWith('{') && maybeJson.endsWith('}')) {
+                            const parsed = JSON.parse(maybeJson);
+                            if (parsed && parsed.error) msg = parsed.error;
+                            else msg = error.message;
+                        } else {
+                            msg = error.message;
+                        }
+                    }
+                } catch { }
+
+                toastError(msg);
             }
         });
 
