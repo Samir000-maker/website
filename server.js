@@ -2295,25 +2295,23 @@ app.post('/api/check-username', async (req, res) => {
     }
 
     console.error('Check username error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       available: false,
       error: 'Internal server error'
     });
   }
 });
 
-
 app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
       { email: firebaseUser.email },
       {
         projection: { username: 1, pfpUrl: 1, _id: 1 },
-        maxTimeMS: 3000 // ✅ 3-second timeout
+        maxTimeMS: 3000
       }
     );
 
@@ -2325,16 +2323,13 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
     }
 
     const hasUsername = !!(user.username && user.username.trim());
-
     return res.json({
       exists: true,
-      hasUsername: hasUsername,
+      hasUsername,
       username: user.username || null,
       userId: user._id.toString()
     });
-
   } catch (error) {
-    // ✅ FIX: Handle timeout errors
     if (error.code === 50) {
       console.error('❌ Database timeout in check-profile:', error.message);
       return res.status(503).json({
@@ -2351,7 +2346,6 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   }
 });
 
-
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
@@ -2363,9 +2357,7 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
 
     const trimmedUsername = username.trim().toLowerCase();
     if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
-      return res.status(400).json({
-        error: 'Username must be between 3 and 20 characters'
-      });
+      return res.status(400).json({ error: 'Username must be between 3 and 20 characters' });
     }
 
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUsername)) {
@@ -2375,71 +2367,62 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-
-    // ✅ FIX: Add maxTimeMS timeout
     const existingUser = await db.collection('users').findOne(
       { email: firebaseUser.email },
       { maxTimeMS: 3000 }
     );
 
-    // Check if username is taken by someone else
     if (existingUser && existingUser.username !== trimmedUsername) {
-      // ✅ FIX: Add maxTimeMS timeout
       const usernameExists = await db.collection('users').findOne(
         { username: trimmedUsername },
         { maxTimeMS: 3000 }
       );
-      if (usernameExists) {
-        return res.status(400).json({ error: 'Username already taken' });
-      }
+      if (usernameExists) return res.status(400).json({ error: 'Username already taken' });
     } else if (!existingUser) {
-      // New user - check if username is available
-      // ✅ FIX: Add maxTimeMS timeout
       const usernameExists = await db.collection('users').findOne(
         { username: trimmedUsername },
         { maxTimeMS: 3000 }
       );
-      if (usernameExists) {
-        return res.status(400).json({ error: 'Username already taken' });
-      }
+      if (usernameExists) return res.status(400).json({ error: 'Username already taken' });
     }
+
+    const nextPfpUrl =
+      (typeof pfpUrl === 'string' && pfpUrl.trim())
+        ? pfpUrl.trim()
+        : (existingUser && existingUser.pfpUrl)
+          ? existingUser.pfpUrl
+          : getDefaultProfilePicture();
 
     const userData = {
       email: firebaseUser.email,
       firebaseUid: firebaseUser.uid,
       username: trimmedUsername,
-      pfpUrl: pfpUrl || getDefaultProfilePicture(),
+      pfpUrl: nextPfpUrl,
       updatedAt: new Date()
     };
 
     if (existingUser) {
-      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: existingUser._id },
         { $set: userData },
-        { maxTimeMS: 5000 } // ✅ Write operations can take longer
+        { maxTimeMS: 5000 }
       );
       await invalidateUserProfileCache(existingUser._id.toString());
-      res.json({
+      return res.json({
         success: true,
         userId: existingUser._id.toString(),
         message: 'Profile updated'
       });
-    } else {
-      // Create new user
-      userData.createdAt = new Date();
-      // ✅ FIX: Add maxTimeMS timeout
-      const result = await db.collection('users').insertOne(userData, {
-        maxTimeMS: 5000
-      });
-      res.json({
-        success: true,
-        userId: result.insertedId.toString(),
-        message: 'Profile created'
-      });
     }
+
+    userData.createdAt = new Date();
+    const result = await db.collection('users').insertOne(userData, { maxTimeMS: 5000 });
+    return res.json({
+      success: true,
+      userId: result.insertedId.toString(),
+      message: 'Profile created'
+    });
   } catch (error) {
-    // ✅ FIX: Handle timeout errors
     if (error.code === 50) {
       console.error('❌ Database timeout in profile update:', error.message);
       return res.status(503).json({
@@ -2447,7 +2430,6 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
         retryable: true
       });
     }
-
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Username already taken' });
     }
@@ -2471,13 +2453,7 @@ app.post('/api/users/upload-pfp',
       const user = await db.collection('users').findOne(
         { email: firebaseUser.email },
         {
-          projection: {
-            _id: 1,
-            username: 1,
-            pfpUrl: 1,
-            email: 1,
-            firebaseUid: 1
-          },
+          projection: { _id: 1, username: 1, pfpUrl: 1, email: 1, firebaseUid: 1 },
           maxTimeMS: 3000
         }
       );
@@ -2486,7 +2462,7 @@ app.post('/api/users/upload-pfp',
         return res.status(404).json({ error: 'User not found' });
       }
 
-      const pfpUrl = await uploadProfilePicture(
+      const uploadedUrl = await uploadProfilePicture(
         req.file.buffer,
         req.file.mimetype,
         user._id.toString()
@@ -2494,14 +2470,14 @@ app.post('/api/users/upload-pfp',
 
       await db.collection('users').updateOne(
         { _id: user._id },
-        { $set: { pfpUrl, updatedAt: new Date() } },
+        { $set: { pfpUrl: uploadedUrl, updatedAt: new Date() } },
         { maxTimeMS: 5000 }
       );
 
-      const updatedUser = { ...user, pfpUrl };
+      const updatedUser = { ...user, pfpUrl: uploadedUrl };
       await updateUserProfileCache(user._id.toString(), updatedUser);
 
-      res.json({ success: true, pfpUrl });
+      return res.json({ success: true, pfpUrl: uploadedUrl });
     } catch (error) {
       if (error && error.code === 'STORAGE_NOT_CONFIGURED') {
         return res.status(503).json({
@@ -2532,10 +2508,7 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
     const user = await db.collection('users').findOne(
       { email: firebaseUser.email },
-      {
-        projection: { password: 0 },
-        maxTimeMS: 3000
-      }
+      { projection: { password: 0 }, maxTimeMS: 3000 }
     );
 
     if (!user) {
