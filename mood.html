@@ -1,1795 +1,592 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html class="dark" lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>How are you feeling? - MoodJournal</title>
-
-  <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#8b5cf6">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-    rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    :root {
-      --bg-dark: #16172b;
-      --bg-card: #1e2139;
-      --bg-card-hover: #252846;
-      --border-dark: #2a2d4a;
-      --text-primary: #ffffff;
-      --text-secondary: #9ca3af;
-      --text-muted: #6b7280;
-      --accent-purple: #8b5cf6;
-      --accent-purple-light: #a78bfa;
-      --accent-blue: #6366f1;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg-dark);
-      color: var(--text-primary);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    .gradient-text {
-      background: linear-gradient(135deg, #a78bfa 0%, #d946ef 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .header {
-      border-bottom: 1px solid var(--border-dark);
-      background: rgba(22, 23, 43, 0.8);
-      backdrop-filter: blur(10px);
-    }
-
-    .header-content {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      height: 64px;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .logo-icon {
-      width: 32px;
-      height: 32px;
-      background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    }
-
-    .logo-text {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
-    .nav {
-      display: flex;
-      gap: 32px;
-      align-items: center;
-    }
-
-    .nav a {
-      color: var(--text-secondary);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-
-    .nav a:hover {
-      color: var(--text-primary);
-    }
-
-    .user-actions {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .user-menu {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
-    }
-
-    .logout-text {
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      user-select: none;
-      transition: color 0.2s;
-    }
-
-    .logout-text:hover {
-      color: var(--text-primary);
-    }
-
-    .profile-icon-btn {
-      width: 40px;
-      height: 40px;
-      border-radius: 9999px;
-      border: 2px solid rgba(255, 255, 255, 0.08);
-      background: rgba(30, 33, 57, 0.75);
-      overflow: hidden;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      transition: transform 0.15s, border-color 0.2s, background 0.2s;
-    }
-
-    .profile-icon-btn:hover {
-      transform: translateY(-1px);
-      border-color: rgba(167, 139, 250, 0.55);
-      background: rgba(30, 33, 57, 0.9);
-    }
-
-    .profile-icon-img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-
-    .profile-icon-fallback {
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      color: #16172b;
-      background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
-      font-size: 14px;
-      letter-spacing: 0.5px;
-    }
-
-    .profile-menu {
-      position: absolute;
-      top: calc(100% + 10px);
-      right: 0;
-      width: 220px;
-      background: rgba(30, 33, 57, 0.98);
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      border-radius: 14px;
-      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
-      padding: 8px;
-      z-index: 50;
-      backdrop-filter: blur(10px);
-    }
-
-    .profile-menu button {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 10px;
-      border-radius: 10px;
-      background: transparent;
-      border: none;
-      color: rgba(255, 255, 255, 0.92);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 700;
-      text-align: left;
-      transition: background 0.15s;
-    }
-
-    .profile-menu button:hover {
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .profile-menu .material-symbols-outlined {
-      font-size: 18px;
-      color: rgba(167, 139, 250, 0.95);
-    }
-
-    .notification-btn {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-secondary);
-      font-size: 20px;
-      transition: all 0.2s;
-    }
-
-    .notification-btn:hover {
-      background: var(--bg-card);
-      color: var(--text-primary);
-    }
-
-    .user-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
-      cursor: pointer;
-      border: 2px solid transparent;
-      transition: border-color 0.2s;
-    }
-
-    .user-avatar:hover {
-      border-color: var(--accent-purple);
-    }
-
-    main {
-      flex: 1;
-      width: 100%;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 48px 24px;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(139, 92, 246, 0.15);
-      color: var(--accent-purple-light);
-      padding: 8px 16px;
-      border-radius: 24px;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      margin-bottom: 24px;
-    }
-
-    .status-indicator {
-      width: 6px;
-      height: 6px;
-      background: var(--accent-purple-light);
-      border-radius: 50%;
-    }
-
-    .hero {
-      text-align: center;
-      margin-bottom: 48px;
-    }
-
-    .hero h1 {
-      font-size: 56px;
-      font-weight: 800;
-      line-height: 1.1;
-      margin-bottom: 16px;
-      letter-spacing: -0.02em;
-    }
-
-    .hero p {
-      font-size: 16px;
-      color: var(--text-secondary);
-      max-width: 560px;
-      margin: 0 auto 40px;
-      line-height: 1.6;
-    }
-
-    .primary-btn {
-      background: white;
-      color: #16172b;
-      border: none;
-      padding: 16px 32px;
-      border-radius: 48px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      transition: all 0.2s;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-
-    .primary-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-    }
-
-    .primary-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .helper-text {
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 13px;
-      margin-bottom: 32px;
-      margin-top: 12px;
-    }
-
-    .moods-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 16px;
-      max-width: 800px;
-      margin: 0 auto 40px;
-    }
-
-    .mood-card {
-      background: var(--bg-card);
-      border: 2px solid var(--border-dark);
-      border-radius: 16px;
-      padding: 32px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-      position: relative;
-    }
-
-    .mood-card:hover {
-      background: var(--bg-card-hover);
-      border-color: #3d4062;
-    }
-
-    .mood-card.selected {
-      background: rgba(99, 102, 241, 0.1);
-      border-color: #6366f1;
-      box-shadow: 0 0 0 1px #6366f1;
-    }
-
-    .mood-card.selected::after {
-      content: '✓';
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      width: 24px;
-      height: 24px;
-      background: #6366f1;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 14px;
-      font-weight: 700;
-      color: white;
-    }
-
-    .mood-emoji {
-      font-size: 56px;
-      line-height: 1;
-    }
-
-    .mood-label {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-      text-transform: capitalize;
-    }
-
-    .context-section {
-      max-width: 700px;
-      margin: 0 auto 48px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-dark);
-      border-radius: 16px;
-      padding: 24px;
-    }
-
-    .context-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-
-    .context-icon {
-      font-size: 18px;
-    }
-
-    .context-label {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-
-    .context-textarea {
-      width: 100%;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--border-dark);
-      border-radius: 12px;
-      padding: 16px;
-      color: var(--text-primary);
-      font-size: 14px;
-      font-family: inherit;
-      resize: none;
-      outline: none;
-      transition: all 0.2s;
-      line-height: 1.6;
-    }
-
-    .context-textarea::placeholder {
-      color: var(--text-muted);
-    }
-
-    .context-textarea:focus {
-      border-color: var(--accent-blue);
-      background: rgba(0, 0, 0, 0.3);
-    }
-
-    .context-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 12px;
-      gap: 8px;
-    }
-
-    .privacy-badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    .secondary-btn {
-      background: rgba(139, 92, 246, 0.15);
-      color: var(--accent-purple-light);
-      border: 1px solid rgba(139, 92, 246, 0.3);
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.2s;
-    }
-
-    .secondary-btn:hover:not(:disabled) {
-      background: rgba(139, 92, 246, 0.25);
-      border-color: rgba(139, 92, 246, 0.5);
-    }
-
-    .secondary-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .secondary-btn .material-symbols-outlined {
-      font-size: 18px;
-    }
-
-    .sessions-section {
-      margin-top: 64px;
-    }
-
-    .sessions-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-    }
-
-    .sessions-title {
-      font-size: 20px;
-      font-weight: 700;
-    }
-
-    .view-all-link {
-      color: var(--accent-purple-light);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      transition: color 0.2s;
-    }
-
-    .view-all-link:hover {
-      color: var(--accent-purple);
-    }
-
-    .sessions-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-    }
-
-    .session-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-dark);
-      border-radius: 12px;
-      padding: 20px;
-      transition: all 0.2s;
-      cursor: pointer;
-    }
-
-    .session-card:hover {
-      background: var(--bg-card-hover);
-      border-color: #3d4062;
-      transform: translateY(-2px);
-    }
-
-    .session-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .session-emoji {
-      width: 40px;
-      height: 40px;
-      background: rgba(139, 92, 246, 0.15);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-    }
-
-    .session-info {
-      flex: 1;
-    }
-
-    .session-mood {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .session-time {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
-    .session-text {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
-
-    footer {
-      border-top: 1px solid var(--border-dark);
-      padding: 24px;
-      margin-top: 64px;
-    }
-
-    .footer-content {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .footer-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-
-    .footer-links {
-      display: flex;
-      gap: 24px;
-    }
-
-    .footer-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 13px;
-      transition: color 0.2s;
-    }
-
-    .footer-links a:hover {
-      color: var(--text-primary);
-    }
-
-    @keyframes fadeInUp {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .animate-fade-in-up {
-      animation: fadeInUp 0.5s ease-out;
-    }
-
-    .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid var(--border-dark);
-      border-top-color: var(--accent-purple);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
-    @media (max-width: 768px) {
-      .hero h1 {
-        font-size: 40px;
-      }
-
-      .moods-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-      }
-
-      .mood-card {
-        padding: 24px 16px;
-      }
-
-      .mood-emoji {
-        font-size: 40px;
-      }
-
-      .nav {
-        display: none;
-      }
-
-      .sessions-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Username - MoodLog</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2dd4bf",
+                        "primary-hover": "#14b8a6",
+                        "accent": "#6366f1",
+                        "dark-bg": "#050505",
+                        "dark-surface": "#0f1115",
+                        "glass-border": "rgba(255, 255, 255, 0.06)",
+                        "glass-surface": "rgba(20, 22, 27, 0.7)",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    backgroundImage: {
+                        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+                        'metallic': 'linear-gradient(145deg, #1a1d23, #0f1115)',
+                    },
+                    boxShadow: {
+                        'glow': '0 0 25px -5px rgba(45, 212, 191, 0.15)',
+                        'card': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        'inner-light': 'inset 0 1px 0 0 rgba(255, 255, 255, 0.05)',
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #050505;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #444;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
+<body class="relative flex min-h-screen w-full flex-col bg-dark-bg text-white font-display overflow-x-hidden selection:bg-primary/20 selection:text-primary">
+    <div class="fixed top-4 left-4 z-[60]">
+        <button id="contactSupportBtn" type="button" class="group inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 backdrop-blur-md transition-colors">
+            <span class="material-symbols-outlined text-[18px] text-white/80">support_agent</span>
+            <span>Contact</span>
+        </button>
+    </div>
 
-<body>
-  <div id="contactSupportModal" class="hidden" style="position: fixed; inset: 0; z-index: 70; align-items: center; justify-content: center;">
-    <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"></div>
-    <div style="position: relative; width: 92vw; max-width: 420px; border-radius: 16px; background: rgba(30, 33, 57, 0.95); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 20px 60px rgba(0,0,0,0.45); padding: 20px;">
-      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
-        <div>
-          <div style="font-size: 16px; font-weight: 800;">Contact support</div>
-          <div style="margin-top: 4px; font-size: 13px; color: var(--text-secondary);">Email us and we’ll get back to you.</div>
+    <div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-close="1"></div>
+        <div class="relative w-[92vw] max-w-md rounded-2xl bg-[#0f1115]/95 border border-white/10 shadow-2xl p-6">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h3 class="text-lg font-bold tracking-tight text-white">Contact support</h3>
+                    <p class="mt-1 text-sm text-gray-400">Email us and we’ll get back to you.</p>
+                </div>
+                <button type="button" class="text-gray-400 hover:text-white transition-colors" data-close="1">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+
+            <div class="mt-5 flex items-center gap-2 rounded-xl bg-black/30 border border-white/10 px-4 py-3">
+                <span class="text-sm font-semibold text-white select-all" id="contactSupportEmail">contact@vibegra.com</span>
+                <button id="contactSupportCopyBtn" type="button" class="ml-auto inline-flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 transition-colors">
+                    <span class="material-symbols-outlined text-[18px]">content_copy</span>
+                </button>
+            </div>
+            <p id="contactSupportCopyHint" class="mt-2 text-xs text-gray-500 hidden">Copied</p>
         </div>
-        <button type="button" data-close="1" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer;">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-
-      <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; border-radius: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 12px 12px;">
-        <span id="contactSupportEmail" style="font-size: 14px; font-weight: 700; user-select: all;">contact@vibegra.com</span>
-        <button id="contactSupportCopyBtn" type="button" style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 8px 10px; cursor: pointer; color: rgba(255,255,255,0.9);">
-          <span class="material-symbols-outlined" style="font-size: 18px;">content_copy</span>
-        </button>
-      </div>
-      <div id="contactSupportCopyHint" class="hidden" style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Copied</div>
     </div>
-  </div>
-  <header class="header">
-    <div class="header-content">
-      <div class="logo">
-        <div class="logo-icon">✦</div>
-        <span class="logo-text">Vibegra</span>
-      </div>
-      <nav class="nav">
-        <a href="#"></a>
-        <a href="#"></a><!-- discover -->
-        <a href="#"></a>
-      </nav>
-      <div class="user-actions">
-        <button class="notification-btn"></button>
-        <div class="user-menu" id="userMenu">
-          <span class="logout-text" id="logoutBtn">Logout</span>
-          <button type="button" class="profile-icon-btn" id="profileIconBtn" aria-haspopup="menu" aria-expanded="false">
-            <div class="profile-icon-fallback" id="profileIconFallback">U</div>
-            <img class="profile-icon-img hidden" id="profileIconImg" alt="Profile" />
-          </button>
-          <div class="profile-menu hidden" id="profileMenu" role="menu" aria-label="Profile menu">
-            <button type="button" id="menuChangePfp" role="menuitem">
-              <span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>
-              <span>Change profile picture</span>
-            </button>
-            <button type="button" id="menuChangeUsername" role="menuitem">
-              <span class="material-symbols-outlined" aria-hidden="true">badge</span>
-              <span>Change username</span>
-            </button>
-          </div>
+    <!-- Animated Background -->
+    <div class="fixed inset-0 z-0 pointer-events-none">
+        <div class="absolute inset-0 bg-gradient-to-br from-[#121418] via-[#050505] to-[#08090b]"></div>
+        <div class="absolute -top-[20%] left-[10%] w-[50vw] h-[50vw] bg-primary/5 rounded-full blur-[120px] opacity-40"></div>
+        <div class="absolute top-[40%] -right-[10%] w-[40vw] h-[40vw] bg-accent/5 rounded-full blur-[100px] opacity-30"></div>
+        <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDI1Ii8+Cjwvc3ZnPg==')] opacity-20"></div>
+    </div>
+
+    <!-- Header -->
+    <header class="relative z-10 flex items-center justify-between px-6 py-6 md:px-12 lg:px-40 border-b border-white/5 bg-dark-bg/50 backdrop-blur-sm">
+        <div class="flex items-center gap-3">
+            <div class="size-8 text-primary flex items-center justify-center drop-shadow-[0_0_8px_rgba(45,212,191,0.5)]">
+                <svg class="w-full h-full" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                    <path clip-rule="evenodd" d="M24 4H6V17.3333V30.6667H24V44H42V30.6667V17.3333H24V4Z" fill="currentColor" fill-rule="evenodd"></path>
+                </svg>
+            </div>
+            <h2 class="text-xl font-bold tracking-tight text-white/90">MoodLog</h2>
         </div>
-      </div>
-    </div>
-    </div>
-  </header>
-
-  <main>
-    <div class="hero animate-fade-in-up">
-      <div style="margin-bottom: 16px; display: flex; justify-content: center;">
-        <button id="contactSupportBtn" type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9999px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); cursor: pointer; backdrop-filter: blur(10px);">
-          <span class="material-symbols-outlined" style="font-size: 18px; color: rgba(255, 255, 255, 0.85);">support_agent</span>
-          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">Contact</span>
-        </button>
-      </div>
-      <div class="status-badge">
-        <span class="status-indicator"></span>
-        <!-- 4,281 USERS ONLINE -->
-        <span>Welcome to Vibegra</span>
-      </div>
-      <div style="margin-top: 12px; display: flex; justify-content: center;">
-        <button type="button" class="hidden" data-pwa-install="1">
-          <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
-          <span>Install App</span>
-        </button>
-      </div>
-      <h1>
-        Connect with your<br>
-        <span class="gradient-text">Vibe</span>
-      </h1>
-      <p>
-        Choose your current mood to chat with people who feel the same way
-      </p>
-      <button id="enterChatBtn" class="primary-btn" disabled>
-        <span>Enter Chat Room</span>
-        <span>→</span>
-      </button>
-      <div class="helper-text">Select a mood card below first</div>
-    </div>
-
-    <div id="moodsGrid" class="moods-grid animate-fade-in-up" style="animation-delay: 0.1s">
-      <!-- Moods will be loaded here -->
-    </div>
-
-    <div class="context-section">
-      <div class="context-header">
-        <span class="context-icon">✍️</span>
-        <span class="context-label">Add Public NOTE (Optional)</span>
-      </div>
-      <textarea id="noteText" class="context-textarea" rows="3" maxlength="500"
-        placeholder="Briefly describe why you are feeling Calm... This helps match you with better conversations."></textarea>
-      <div class="context-footer">
-        <span class="privacy-badge">
-          <span>🌐 Global</span>
-          <span></span>
-        </span>
-        <button id="logMoodBtn" disabled class="secondary-btn">
-          <span class="material-symbols-outlined">edit</span>
-          <span>Log Mood</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="sessions-section">
-      <div class="sessions-header">
-        <h2 class="sessions-title">Public Notes</h2>
-        <span class="view-all-link" style="cursor: default; opacity: 0.6;">
-          <span>Scroll for more</span>
-          <span>↓</span>
-        </span>
-      </div>
-
-      <div id="notesList" class="sessions-grid">
-        <!-- Sessions will be loaded here -->
-      </div>
-
-      <div id="loading" class="hidden" style="text-align: center; padding: 32px;">
-        <div class="loading-spinner" style="margin: 0 auto;"></div>
-      </div>
-    </div>
-  </main>
-
-  <footer>
-    <div class="footer-content">
-      <div class="footer-brand">
-        <span>✦</span>
-        <span>© 2026 Vibegra</span>
-      </div>
-      <div class="footer-links">
-        <a href="vibegra-privacy-policy.html">Privacy</a>
-      </div>
-    </div>
-  </footer>
-
-  <script>
-    (function () {
-      const btn = document.getElementById('contactSupportBtn');
-      const modal = document.getElementById('contactSupportModal');
-      const copyBtn = document.getElementById('contactSupportCopyBtn');
-      const emailEl = document.getElementById('contactSupportEmail');
-      const hint = document.getElementById('contactSupportCopyHint');
-      if (!btn || !modal || !copyBtn || !emailEl) return;
-
-      const open = () => {
-        modal.classList.remove('hidden');
-        modal.style.display = 'flex';
-      };
-      const close = () => {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        if (hint) hint.classList.add('hidden');
-      };
-
-      btn.addEventListener('click', open);
-      modal.addEventListener('click', (e) => {
-        const t = e.target;
-        if (t && t.closest && t.closest('[data-close="1"]')) close();
-      });
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') close();
-      });
-
-      copyBtn.addEventListener('click', async () => {
-        const text = emailEl.textContent || 'contact@vibegra.com';
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-          } else {
-            const ta = document.createElement('textarea');
-            ta.value = text;
-            ta.style.position = 'fixed';
-            ta.style.opacity = '0';
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            ta.remove();
-          }
-          if (hint) {
-            hint.classList.remove('hidden');
-            setTimeout(() => hint.classList.add('hidden'), 1200);
-          }
-        } catch { }
-      });
-    })();
-  </script>
-
-  <!-- Firebase SDKs -->
-  <script src="/env-config.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-
-  <!-- Socket.IO Client -->
-  <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-
-  <!-- Initialize Firebase -->
-  <script>
-
-    // At the start of your page script
-    if (window.StateManager) {
-      const state = window.StateManager.getState();
-
-      // If coming from expired room, clear state
-      if (state.room && window.StateManager.isRoomExpired()) {
-        window.StateManager.clearRoom();
-      }
-
-      // Set current page
-      window.StateManager.setPage('mood');
-    }
-
-    try {
-      if (!firebase.apps?.length) {
-        firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-      }
-      // Critical: Set auth persistence
-      firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-    } catch (err) {
-      console.error('Firebase init error', err);
-    }
-  </script>
-
-  <!-- Load app.js -->
-  <script src="app.js"></script>
-
-  <script src="/pwa-install.js"></script>
-  <script>
-   if (window.VibePWA && typeof window.VibePWA.init === 'function') {
-    window.VibePWA.init();
-  }
-  </script>
-
-  <!-- Page-specific script -->
-  <script>
-    (async function () {
-      const MoodApp = window.MoodApp || {};
-      const _Auth = MoodApp.Auth;
-      const _API = MoodApp.API;
-      const _Toast = MoodApp.Toast;
-      const _Loading = MoodApp.Loading;
-      const _PageTransition = MoodApp.PageTransition;
-      const _Utils = MoodApp.Utils;
-      const _Session = MoodApp.Session;
-
-      // Helper functions
-      const toast = (m, t = 'success') => {
-        if (_Toast && typeof _Toast[t] === 'function') return _Toast[t](m);
-        console[t === 'error' ? 'error' : 'log'](m);
-      };
-      const showLoading = (m) => {
-        if (_Loading && typeof _Loading.show === 'function') _Loading.show(m);
-      };
-      const hideLoading = () => {
-        if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
-      };
-
-      // DOM refs
-      const moodsGrid = document.getElementById('moodsGrid');
-      const noteText = document.getElementById('noteText');
-      const logMoodBtn = document.getElementById('logMoodBtn');
-      const enterChatBtn = document.getElementById('enterChatBtn');
-      const notesList = document.getElementById('notesList');
-      const loadingEl = document.getElementById('loading');
-      const loadMoreBtn = document.getElementById('loadMoreBtn');
-      const logoutBtn = document.getElementById('logoutBtn');
-
-      const moods = {
-        happy: '😊', sad: '😭', angry: '😠', lonely: '😔',
-        calm: '😌', excited: '🤩', tired: '😴', stressed: '😣', confused: '😕'
-      };
-
-      let selectedMood = null;
-      let page = 0;
-      let socketInstance = null;
-      let currentUser = null;
-      let socketConnectFailures = 0;
-
-      const profileIconBtn = document.getElementById('profileIconBtn');
-      const profileIconFallback = document.getElementById('profileIconFallback');
-      const profileIconImg = document.getElementById('profileIconImg');
-      const profileMenu = document.getElementById('profileMenu');
-      const menuChangePfp = document.getElementById('menuChangePfp');
-      const menuChangeUsername = document.getElementById('menuChangeUsername');
-
-      function isDefaultAvatarUrl(url) {
-        if (!url || typeof url !== 'string') return true;
-        const u = url.trim();
-        if (!u || u === 'null') return true;
-        if (/ui-avatars\.com\/api\/.+name=User/i.test(u)) return true;
-        return false;
-      }
-
-      function setProfileIcon(pfpUrl, username) {
-        if (!profileIconFallback || !profileIconImg) return;
-        const name = typeof username === 'string' ? username.trim() : '';
-        const initial = (name ? name.charAt(0) : 'U').toUpperCase();
-        profileIconFallback.textContent = initial;
-
-        if (pfpUrl && !isDefaultAvatarUrl(pfpUrl)) {
-          profileIconImg.src = pfpUrl;
-          profileIconImg.classList.remove('hidden');
-          profileIconFallback.classList.add('hidden');
-          profileIconImg.onerror = () => {
-            profileIconImg.classList.add('hidden');
-            profileIconFallback.classList.remove('hidden');
-            profileIconImg.onerror = null;
-          };
-        } else {
-          profileIconImg.classList.add('hidden');
-          profileIconFallback.classList.remove('hidden');
-        }
-      }
-
-      function openProfileMenu() {
-        if (!profileMenu || !profileIconBtn) return;
-        profileMenu.classList.remove('hidden');
-        profileIconBtn.setAttribute('aria-expanded', 'true');
-      }
-
-      function closeProfileMenu() {
-        if (!profileMenu || !profileIconBtn) return;
-        profileMenu.classList.add('hidden');
-        profileIconBtn.setAttribute('aria-expanded', 'false');
-      }
-
-      function toggleProfileMenu() {
-        if (!profileMenu) return;
-        if (profileMenu.classList.contains('hidden')) openProfileMenu();
-        else closeProfileMenu();
-      }
-
-      // ============================================
-      // SOCKET.IO CONNECTION
-      // ============================================
-
-
-      function preventBackNavigation() {
-        // Push a dummy state to history
-        history.pushState(null, null, location.href);
-
-        // Listen for popstate (back button)
-        window.addEventListener('popstate', function (event) {
-          // Push state again to prevent navigation
-          history.pushState(null, null, location.href);
-
-          // Optional: Show a toast message
-          if (_Toast && typeof _Toast.warning === 'function') {
-            _Toast.warning('Please use logout to exit');
-          }
-        });
-      }
-
-
-      function waitForTabManager() {
-        return new Promise((resolve, reject) => {
-          // Check if already available
-          if (window.tabManager && window.tabManager.tabId) {
-            console.log('✅ [Auth] TabManager already ready:', window.tabManager.tabId);
-            resolve(window.tabManager);
-            return;
-          }
-
-          console.log('⏳ [Auth] Waiting for TabManager to initialize...');
-
-          // Poll for TabManager (handles race conditions)
-          let attempts = 0;
-          const maxAttempts = 100; // 10 seconds max wait
-
-          const interval = setInterval(() => {
-            attempts++;
-
-            if (window.tabManager && window.tabManager.tabId) {
-              clearInterval(interval);
-              console.log('✅ [Auth] TabManager ready after waiting:', window.tabManager.tabId);
-              resolve(window.tabManager);
-            } else if (attempts >= maxAttempts) {
-              clearInterval(interval);
-              console.error('❌ [Auth] TabManager timeout after 10s');
-              reject(new Error('TabManager initialization timeout'));
-            }
-          }, 100); // Check every 100ms
-        });
-      }
-
-      function getStableSocketSessionId() {
-        if (_Session && typeof _Session.getSocketSessionId === 'function') {
-          return _Session.getSocketSessionId();
-        }
-        try {
-          let sessionId = sessionStorage.getItem('vibe_socket_session_id');
-          if (sessionId) return sessionId;
-          sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-          sessionStorage.setItem('vibe_socket_session_id', sessionId);
-          return sessionId;
-        } catch {
-          return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-        }
-      }
-
-      function getScopedSocketSessionId(scope) {
-        const base = getStableSocketSessionId();
-        const safeScope = String(scope || 'default').toLowerCase().replace(/[^a-z0-9_-]/g, '');
-        return `${base}:${safeScope || 'default'}`;
-      }
-
-      function triggerSocketRecoveryReload(reason = 'socket_recovery') {
-        try {
-          const key = 'mood_socket_recovery_state';
-          const now = Date.now();
-          const state = JSON.parse(sessionStorage.getItem(key) || '{}');
-          const recentWindowMs = 5 * 60 * 1000;
-          const withinWindow = state.lastReloadAt && (now - state.lastReloadAt) < recentWindowMs;
-          const count = withinWindow ? (state.count || 0) + 1 : 1;
-
-          if (count > 2) {
-            console.error(`❌ [Socket] Reload suppressed (loop guard): ${reason}`);
-            return;
-          }
-
-          sessionStorage.setItem(key, JSON.stringify({ count, lastReloadAt: now, reason }));
-        } catch { }
-
-        window.location.reload();
-      }
-
-      /**
-       * Authenticate socket with tab management
-       * Call this INSTEAD of manually emitting 'authenticate'
-       * 
-       * @param {Socket} socket - Socket.IO instance
-       * @param {string} userId - User's database ID
-       * @returns {Promise} - Resolves when authenticated
-       */
-      async function authenticateSocketWithTabManagement(socket, userId) {
-        try {
-          console.log('🔐 [Auth] Starting socket authentication...');
-
-          // 1. Wait for TabManager to be ready
-          const tabManager = await waitForTabManager();
-          const tabId = tabManager.tabId;
-          const sessionId = getScopedSocketSessionId('mood');
-
-          console.log('✅ [Auth] TabId retrieved:', tabId);
-
-          // 2. Get Firebase token
-          const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) {
-            throw new Error('Not authenticated with Firebase');
-          }
-
-          const token = await firebaseUser.getIdToken();
-          console.log('✅ [Auth] Firebase token retrieved');
-
-          // 3. Send authentication event
-          console.log('📤 [Auth] Sending authenticate event:', {
-            userId,
-            tabId,
-            socketId: socket.id
-          });
-
-          socket.emit('authenticate', {
-            token: token,
-            userId: userId,
-            tabId: tabId,  // ← CRITICAL: Include tabId
-            sessionId
-          });
-
-          // 4. Wait for authentication response
-          return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(new Error('Authentication timeout (10s)'));
-            }, 10000);
-
-            // Success handler
-            socket.once('authenticated', (data) => {
-              clearTimeout(timeout);
-              console.log('✅ [Auth] Socket authenticated successfully:', data);
-              resolve(data);
-            });
-
-            // Error handler
-            socket.once('auth_error', (error) => {
-              clearTimeout(timeout);
-              console.error('❌ [Auth] Authentication failed:', error);
-
-              // Handle specific error codes
-              if (error.code === 'DUPLICATE_TAB') {
-                console.warn('⚠️ [Auth] Another tab is active');
-                // The TabManager will handle showing the overlay
-              }
-
-              reject(new Error(error.message || 'Authentication failed'));
-            });
-          });
-
-        } catch (error) {
-          console.error('❌ [Auth] Socket authentication error:', error);
-          throw error;
-        }
-      }
-
-      /**
-       * Setup session replacement handler
-       * Call this ONCE after socket connection
-       * 
-       * @param {Socket} socket - Socket.IO instance
-       */
-      function setupSessionReplacementHandler(socket) {
-        socket.on('session_replaced', (data) => {
-          console.log('⚠️ [Session] This tab has been replaced by another:', data);
-
-          // The TabManager will automatically show the "Use Here" overlay
-          // No need for additional UI here
-
-          // Optionally: Clean up page-specific state
-          // e.g., stop timers, clear intervals, etc.
-        });
-
-        console.log('✅ [Session] Replacement handler registered');
-      }
-
-      console.log('✅ Socket authentication helpers loaded');
-
-
-
-      async function initializeSocket() {
-        try {
-          // Get current Firebase user
-          const firebaseUser = firebase.auth().currentUser;
-          if (!firebaseUser) {
-            console.error('No Firebase user found');
-            return null;
-          }
-
-          // Get fresh ID token
-          const idToken = await firebaseUser.getIdToken();
-
-          // Get user profile from API
-          if (!_API || typeof _API.get !== 'function') {
-            console.error('API helper not available');
-            return null;
-          }
-
-          const userData = await _API.get('/api/users/me');
-          currentUser = {
-            userId: userData._id,
-            username: userData.username,
-            pfpUrl: userData.pfpUrl,
-            email: userData.email
-          };
-
-          try { setProfileIcon(currentUser.pfpUrl, currentUser.username); } catch { }
-
-          console.log('✅ Current user loaded:', currentUser);
-
-          // Connect Socket.IO to backend server
-          const socketUrl = window.location.origin;
-          const sessionId = getScopedSocketSessionId('mood');
-          const tabId = window.tabManager?.tabId || null;
-          const socket = io(socketUrl, {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            timeout: 15000,
-            auth: {
-              token: idToken,
-              sessionId,
-              tabId
-            }
-          });
-
-          // ✅ CRITICAL: Setup mood count listeners BEFORE authentication
-          // This ensures we catch 'mood_counts_initial' event
-          socket.on('mood_counts_initial', (counts) => {
-            console.log('📊 Received initial mood counts:', counts);
-            Object.entries(counts).forEach(([mood, count]) => {
-              updateMoodCount(mood, count);
-            });
-          });
-
-          socket.on('mood_count_update', ({ mood, count }) => {
-            console.log(`📊 Mood count update: ${mood} = ${count}`);
-            updateMoodCount(mood, count);
-          });
-
-          socket.on('connect', async () => {
-            console.log('🔌 Socket connected:', socket.id);
-            socketConnectFailures = 0;
+        <div class="hidden md:flex items-center gap-3 text-sm font-medium text-gray-500">
+            <span class="hover:text-gray-300 transition-colors cursor-pointer">Account</span>
+            <span class="material-symbols-outlined text-[16px] text-gray-600">chevron_right</span>
+            <span class="text-primary drop-shadow-[0_0_8px_rgba(45,212,191,0.3)]">Profile</span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="relative z-10 flex flex-1 flex-col justify-center items-center px-4 py-12 md:py-16">
+        <div class="w-full max-w-[560px]">
+            <!-- Header Text -->
+            <div class="mb-10 text-center md:text-left">
+                <div class="inline-flex items-center justify-center size-14 rounded-2xl bg-gradient-to-br from-primary/10 to-transparent text-primary mb-6 shadow-glow ring-1 ring-primary/20 backdrop-blur-md">
+                    <span class="material-symbols-outlined text-[28px]">alternate_email</span>
+                </div>
+                <h1 class="text-3xl md:text-4xl font-bold leading-tight tracking-tight text-white mb-3 drop-shadow-lg">
+                    Claim your unique handle
+                </h1>
+                <p class="text-gray-400 text-lg leading-relaxed font-light tracking-wide max-w-md">
+                    Pick a username to connect with friends and start your mood logging journey
+                </p>
+            </div>
+
+            <!-- Card -->
+            <div class="relative bg-glass-surface backdrop-blur-xl rounded-2xl border border-glass-border shadow-card p-8 md:p-12 overflow-hidden group/card">
+                <div class="absolute inset-0 bg-gradient-to-tr from-white/5 via-transparent to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity duration-700 pointer-events-none"></div>
+                
+                <!-- Form -->
+                <form id="usernameForm" class="relative z-10 flex flex-col gap-6">
+                    <!-- Username Input -->
+                    <div class="relative group/input">
+                        <label for="username" class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">Username</label>
+                        <div class="relative flex items-center">
+                            <span class="absolute left-4 text-gray-500 font-semibold text-lg select-none">@</span>
+                            <input 
+                                type="text" 
+                                id="username" 
+                                class="block w-full rounded-xl border border-white/10 bg-[#0a0c0f] text-white h-14 pl-10 pr-12 text-base font-medium focus:border-primary/50 focus:ring-4 focus:ring-primary/10 focus:outline-none transition-all placeholder-gray-600"
+                                placeholder="your_username"
+                                maxlength="20" 
+                                autocomplete="off"
+                            >
+                            <div id="statusIcon" class="absolute right-4 hidden"></div>
+                        </div>
+                        <div id="feedback" class="mt-3"></div>
+                    </div>
+
+                    <!-- Guidelines Box -->
+                    <div class="bg-[#0a0c0f] rounded-xl p-5 border border-white/5">
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Guidelines</h4>
+                        <ul class="space-y-2.5">
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                3-20 characters in length
+                            </li>
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                Letters, numbers, underscores, and hyphens only
+                            </li>
+                            <li class="flex items-center gap-3 text-sm text-gray-400">
+                                <span class="size-1.5 rounded-full bg-primary/60"></span>
+                                Must be unique across the platform
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="pt-2">
+                        <button 
+                            type="submit" 
+                            id="submitBtn" 
+                            disabled
+                            class="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-primary via-teal-300 to-primary text-slate-900 shadow-[0_0_25px_-5px_rgba(45,212,191,0.25)] hover:shadow-[0_0_35px_-5px_rgba(45,212,191,0.4)] transition-all duration-300 h-14 flex items-center justify-center gap-2 group/btn disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="font-bold text-base tracking-wide z-10">Confirm Username</span>
+                            <span class="material-symbols-outlined transition-transform duration-300 group-hover/btn:translate-x-1 z-10">arrow_forward</span>
+                            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/btn:translate-x-full transition-transform duration-700 ease-in-out"></div>
+                        </button>
+                        <p class="mt-4 text-center text-sm text-gray-500">
+                            You can change this later in settings
+                        </p>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Footer Links -->
+            <div class="mt-8 flex justify-center gap-8">
+                <a href="vibegra-privacy-policy.html" class="text-xs font-medium text-gray-600 hover:text-primary transition-colors flex items-center gap-1.5 uppercase tracking-wider">
+                    <span class="material-symbols-outlined text-[14px]">help</span>
+                    Help Center
+                </a>
+                <a href="vibegra-privacy-policy.html" class="text-xs font-medium text-gray-600 hover:text-primary transition-colors flex items-center gap-1.5 uppercase tracking-wider">
+                    <span class="material-symbols-outlined text-[14px]">security</span>
+                    Privacy Policy
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+    <script src="/env-config.js"></script>
+
+    <script>
+        (function () {
+            const MoodApp = window.MoodApp || {};
+            const _Auth = MoodApp.Auth;
+            const _API = MoodApp.API;
+            const _Toast = MoodApp.Toast;
+            const _Loading = MoodApp.Loading;
+            const _PageTransition = MoodApp.PageTransition;
 
             try {
-              await authenticateSocketWithTabManagement(socket, currentUser.userId);
-              setupSessionReplacementHandler(socket);
-              console.log('✅ Socket authenticated and ready');
+                if (!firebase.apps?.length) {
+                    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+                }
             } catch (error) {
-              console.error('❌ Authentication failed:', error);
-              MoodApp.Toast.error('Connection failed. Please refresh the page.');
+                console.error('Firebase init error:', error);
             }
-          });
 
-          socket.on('authenticated', (data) => {
-            console.log('✅ Socket authenticated:', data);
-            // Note: mood_counts_initial will be sent by server after this event
-          });
+            const toastError = (msg) => {
+                if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
+                else console.error('Toast.error:', msg);
+            };
+            const toastSuccess = (msg) => {
+                if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
+                else console.log('Toast.success:', msg);
+            };
 
-          socket.on('auth_error', (data) => {
-            console.error('❌ Socket auth error:', data);
-            toast('Authentication failed. Please refresh the page.', 'error');
-          });
+            const ensureLoadingPopup = () => {
+                let el = document.getElementById('usernameSaveLoadingPopup');
+                if (el) return el;
+                el = document.createElement('div');
+                el.id = 'usernameSaveLoadingPopup';
+                el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
+                el.innerHTML = `
+                  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+                  <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#0f1115]/95 border border-white/10 shadow-2xl p-6">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: spin 1s linear infinite;"></div>
+                      <div>
+                        <div class="text-base font-bold text-white">Saving…</div>
+                        <div id="usernameSaveLoadingText" class="mt-1 text-sm text-gray-400">Setting up your profile…</div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                document.body.appendChild(el);
+                return el;
+            };
 
-          socket.on('connect_error', (error) => {
-            console.error('🔌 Socket connection error:', error);
-            socketConnectFailures += 1;
-            if (socketConnectFailures >= 6) {
-              triggerSocketRecoveryReload('mood_connect_error_threshold');
+            const loadingShow = (msg) => {
+                try {
+                    if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+                } catch { }
+                const el = ensureLoadingPopup();
+                const t = el.querySelector('#usernameSaveLoadingText');
+                if (t && msg) t.textContent = msg;
+                el.classList.remove('hidden');
+                el.classList.add('flex');
+            };
+
+            const loadingHide = () => {
+                try {
+                    if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+                } catch { }
+                const el = document.getElementById('usernameSaveLoadingPopup');
+                if (!el) return;
+                el.classList.add('hidden');
+                el.classList.remove('flex');
+            };
+
+            const debounce = (fn, wait = 300) => {
+                let timer = null;
+                return function (...args) {
+                    if (timer) clearTimeout(timer);
+                    timer = setTimeout(() => fn.apply(this, args), wait);
+                };
+            };
+
+            const isValidUsername = (u) => {
+                if (!u || typeof u !== 'string') return false;
+                const trimmed = u.trim();
+                return /^[a-zA-Z0-9_-]{3,20}$/.test(trimmed);
+            };
+
+            const usernameInput = document.getElementById('username');
+            const submitBtn = document.getElementById('submitBtn');
+            const statusIcon = document.getElementById('statusIcon');
+            const feedback = document.getElementById('feedback');
+            const usernameForm = document.getElementById('usernameForm');
+
+            try {
+                if (_Auth && typeof _Auth.requireAuth === 'function') {
+                    _Auth.requireAuth();
+                }
+            } catch (err) {
+                console.error('Error calling Auth.requireAuth():', err);
             }
-          });
 
-          socket.on('disconnect', (reason) => {
-            console.log('🔌 Socket disconnected:', reason);
-            if (reason === 'io server disconnect') {
-              socket.connect();
+            function showFeedback(type, message) {
+                if (!feedback) return;
+                const color = type === 'success' ? 'emerald' : 'red';
+                const icon = type === 'success' ? '✓' : '✗';
+                feedback.innerHTML = `
+                    <div class="flex items-start gap-2 px-1">
+                        <span class="text-${color}-400 text-[18px] shrink-0">${icon}</span>
+                        <p class="text-sm font-medium text-${color}-400 leading-normal">${message}</p>
+                    </div>
+                `;
             }
-          });
 
-          socket.on('server_ping', (payload = {}) => {
-            if (!socket.connected) return;
-            socket.emit('client_pong', {
-              roomId: null,
-              location: 'mood',
-              path: window.location.pathname,
-              serverPingTs: payload.ts || null
+            const hideStatusIcon = () => {
+                if (!statusIcon) return;
+                statusIcon.classList.add('hidden');
+                statusIcon.innerHTML = '';
+            };
+
+            const showSpinner = () => {
+                if (!statusIcon) return;
+                statusIcon.innerHTML = '<div class="loading-spinner" style="width:20px;height:20px;border-width:2px;border-radius:9999px;border-style:solid;border-color:#6b7280;border-top-color:transparent;animation:spin 1s linear infinite"></div>';
+                statusIcon.classList.remove('hidden');
+            };
+
+            let isAvailable = false;
+            let lastCheckedUsername = '';
+
+            const getApiBaseUrl = () => {
+                try {
+                    const { hostname, port } = window.location;
+                    if ((hostname === '127.0.0.1' || hostname === 'localhost') && port === '5500') {
+                        return 'http://localhost:3000';
+                    }
+                } catch {}
+                return window.location.origin;
+            };
+
+            const API_BASE_URL = getApiBaseUrl();
+
+            const checkUsername = debounce(async (username) => {
+                if (!isValidUsername(username)) {
+                    showFeedback('error', 'Username must be 3-20 characters: letters, numbers, underscores, hyphens');
+                    isAvailable = false;
+                    if (submitBtn) submitBtn.disabled = true;
+                    hideStatusIcon();
+                    return;
+                }
+
+                if (lastCheckedUsername === username && isAvailable) {
+                    return;
+                }
+
+                lastCheckedUsername = username;
+                showSpinner();
+                if (feedback) feedback.innerHTML = '';
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                try {
+                    console.log('Checking username availability:', username);
+                    
+                    const response = await fetch(`${API_BASE_URL}/api/check-username`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username }),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`Server returned ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Username check result:', result);
+
+                    if (result && result.available) {
+                        isAvailable = true;
+                        if (submitBtn) submitBtn.disabled = false;
+                        statusIcon.innerHTML = '<span class="text-emerald-400 text-2xl">✓</span>';
+                        statusIcon.classList.remove('hidden');
+                        showFeedback('success', `Excellent! <strong>@${username}</strong> is available`);
+                    } else {
+                        isAvailable = false;
+                        if (submitBtn) submitBtn.disabled = true;
+                        statusIcon.innerHTML = '<span class="text-red-400 text-2xl">✗</span>';
+                        statusIcon.classList.remove('hidden');
+
+                        let suggestionsHtml = '';
+                        if (result && Array.isArray(result.suggestions) && result.suggestions.length) {
+                            suggestionsHtml = `<br><small>Try: ${result.suggestions.map(s => `<strong>@${s}</strong>`).join(', ')}</small>`;
+                        }
+                        showFeedback('error', `Username taken${suggestionsHtml}`);
+                    }
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    console.error('Error checking username:', error);
+                    
+                    hideStatusIcon();
+                    
+                    if (error.name === 'AbortError') {
+                        showFeedback('error', 'Request timeout. Please try again.');
+                    } else {
+                        showFeedback('error', 'Unable to check availability. Please try again.');
+                    }
+                    
+                    isAvailable = false;
+                    if (submitBtn) submitBtn.disabled = true;
+                }
+            }, 500);
+
+            if (usernameInput) {
+                usernameInput.addEventListener('input', (e) => {
+                    const username = (e.target.value || '').trim().toLowerCase();
+
+                    if (!username) {
+                        hideStatusIcon();
+                        if (feedback) feedback.innerHTML = '';
+                        if (submitBtn) submitBtn.disabled = true;
+                        isAvailable = false;
+                        lastCheckedUsername = '';
+                        return;
+                    }
+
+                    if (!isValidUsername(username)) {
+                        hideStatusIcon();
+                        showFeedback('error', 'Only letters, numbers, underscores, and hyphens allowed');
+                        if (submitBtn) submitBtn.disabled = true;
+                        isAvailable = false;
+                        return;
+                    }
+
+                    checkUsername(username);
+                });
+            }
+
+            if (usernameForm) {
+                usernameForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const username = usernameInput ? usernameInput.value.trim().toLowerCase() : '';
+
+                    console.log('Form submitted with username:', username, 'isAvailable:', isAvailable);
+
+                    if (!username || !isValidUsername(username)) {
+                        toastError('Please enter a valid username');
+                        return;
+                    }
+
+                    if (!isAvailable) {
+                        toastError('Please choose an available username');
+                        return;
+                    }
+
+                    if (submitBtn) submitBtn.disabled = true;
+                    loadingShow('Setting up your profile...');
+
+                    try {
+                        let result;
+                        
+                        if (_API && typeof _API.post === 'function') {
+                            result = await _API.post('/api/users/profile', { username });
+                        } else {
+                            const user = firebase.auth().currentUser;
+                            if (!user) {
+                                throw new Error('Not authenticated');
+                            }
+                            
+                            const token = await user.getIdToken();
+                            
+                            const response = await fetch(`${API_BASE_URL}/api/users/profile`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({ username })
+                            });
+
+                            if (!response.ok) {
+                                let msg = `Failed to save username: ${response.status}`;
+                                try {
+                                    const data = await response.json();
+                                    if (data && data.error) msg = data.error;
+                                } catch { }
+                                throw new Error(msg);
+                            }
+
+                            result = await response.json();
+                        }
+
+                        console.log('Profile save result:', result);
+
+                        try {
+                            localStorage.setItem('moodapp_username', username);
+                        } catch (err) {
+                            console.warn('Could not save to localStorage:', err);
+                        }
+
+                        loadingHide();
+                        toastSuccess('Username saved!');
+
+                        setTimeout(() => {
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/profile-picture.html');
+                            } else {
+                                window.location.href = '/profile-picture.html';
+                            }
+                        }, 1000);
+                    } catch (error) {
+                        loadingHide();
+                        console.error('Failed to save username:', error);
+                        let msg = (error && error.message) ? error.message : 'Failed to save username. Please try again.';
+                        try {
+                            const maybeJson = String(msg).trim();
+                            if (maybeJson.startsWith('{') && maybeJson.endsWith('}')) {
+                                const parsed = JSON.parse(maybeJson);
+                                if (parsed && parsed.error) msg = parsed.error;
+                            }
+                        } catch { }
+                        toastError(msg);
+                    } finally {
+                        if (submitBtn) submitBtn.disabled = !isAvailable;
+                    }
+                });
+            }
+        })();
+    </script>
+    <script>
+        (function () {
+            const btn = document.getElementById('contactSupportBtn');
+            const modal = document.getElementById('contactSupportModal');
+            const copyBtn = document.getElementById('contactSupportCopyBtn');
+            const emailEl = document.getElementById('contactSupportEmail');
+            const hint = document.getElementById('contactSupportCopyHint');
+            if (!btn || !modal || !copyBtn || !emailEl) return;
+
+            const open = () => {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            };
+            const close = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                if (hint) hint.classList.add('hidden');
+            };
+
+            btn.addEventListener('click', open);
+            modal.addEventListener('click', (e) => {
+                const t = e.target;
+                if (t && t.closest && t.closest('[data-close="1"]')) close();
             });
-          });
-
-          if (socket.io) {
-            socket.io.on('reconnect_attempt', (attempt) => {
-              console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') close();
             });
-            socket.io.on('reconnect_failed', () => {
-              triggerSocketRecoveryReload('mood_reconnect_failed');
+
+            copyBtn.addEventListener('click', async () => {
+                const text = emailEl.textContent || 'contact@vibegra.com';
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.opacity = '0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        ta.remove();
+                    }
+                    if (hint) {
+                        hint.classList.remove('hidden');
+                        setTimeout(() => hint.classList.add('hidden'), 1200);
+                    }
+                } catch { }
             });
-          }
-
-          return socket;
-        } catch (error) {
-          console.error('Socket initialization error:', error);
-          return null;
-        }
-      }
-
-      // ============================================
-      // MOOD SELECTION
-      // ============================================
-      function renderMoods() {
-        if (!moodsGrid) return;
-        moodsGrid.innerHTML = '';
-        Object.entries(moods).forEach(([id, emoji]) => {
-          const card = document.createElement('div');
-          card.className = 'mood-card';
-          card.setAttribute('data-mood', id);
-          card.innerHTML = `
-      <div class="mood-emoji">${emoji}</div>
-      <div class="mood-label">${id}</div>
-      <div class="mood-user-count" id="mood-count-${id}" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-        <span>—</span>
-      </div>
-    `;
-          card.addEventListener('click', () => selectMood(id, card));
-          moodsGrid.appendChild(card);
-        });
-      }
-
-      function selectMood(mood, el) {
-        selectedMood = mood;
-        document.querySelectorAll('.mood-card').forEach(b => {
-          b.classList.remove('selected');
-        });
-        if (el) {
-          el.classList.add('selected');
-        }
-        if (enterChatBtn) enterChatBtn.disabled = false;
-        if (logMoodBtn) logMoodBtn.disabled = false;
-      }
-
-      // ============================================
-      // ENTER CHAT (MATCHMAKING)
-      // ============================================
-      async function handleEnterChat() {
-        if (!selectedMood) {
-          toast('Please select a mood first', 'warning');
-          return;
-        }
-
-        if (!socketInstance || !socketInstance.connected) {
-          toast('Connecting to server...', 'warning');
-          socketInstance = await initializeSocket();
-
-          // Wait for connection
-          await new Promise((resolve) => {
-            if (socketInstance && socketInstance.connected) {
-              resolve();
-            } else if (socketInstance) {
-              socketInstance.once('connect', resolve);
-              setTimeout(() => resolve(), 5000); // Timeout after 5 seconds
-            } else {
-              resolve();
-            }
-          });
-
-          if (!socketInstance || !socketInstance.connected) {
-            toast('Failed to connect to server. Please try again.', 'error');
-            return;
-          }
-        }
-
-        // Store selected mood
-        try {
-          localStorage.setItem('selectedMood', selectedMood);
-        } catch (e) {
-          console.warn('LocalStorage not available:', e);
-        }
-
-        console.log('🎮 Joining matchmaking with mood:', selectedMood);
-
-        // Navigate to discovery page
-        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/discovery.html');
-        } else {
-          window.location.href = '/discovery.html';
-        }
-      }
-
-      // ============================================
-      // LOG MOOD (NOTES)
-      // ============================================
-      async function handleLogMood() {
-        const text = (noteText && noteText.value) ? noteText.value.trim() : '';
-        if (!text) {
-          toast('Please add a note', 'warning');
-          return;
-        }
-        if (!selectedMood) {
-          toast('Please select a mood', 'warning');
-          return;
-        }
-
-        showLoading('Saving your mood...');
-        try {
-          if (!_API || typeof _API.post !== 'function') throw new Error('API helper missing');
-
-          console.log(`💾 Logging mood: ${selectedMood} - "${text.substring(0, 50)}..."`);
-
-          await _API.post('/api/notes', { text, mood: selectedMood });
-
-          hideLoading();
-          toast('Mood logged!', 'success');
-
-          if (noteText) noteText.value = '';
-
-          // CRITICAL: Reset pagination and reload from start
-          console.log(`🔄 Refreshing notes list after new entry`);
-          currentNotePage = 0;
-          hasMoreNotes = true;
-          loadNotes(0, false); // Fresh load, not append
-
-        } catch (err) {
-          hideLoading();
-          console.error('❌ Failed to log mood:', err);
-          toast(err.message || 'Failed to log mood', 'error');
-        }
-      }
-
-      // ============================================
-      // NOTES DISPLAY
-      // ============================================
-      function renderNote(note) {
-        console.log(`📝 Rendering note:`, {
-          id: note._id,
-          username: note.username,
-          hasPfp: !!note.pfpUrl,
-          mood: note.mood
-        });
-
-        const card = document.createElement('div');
-        card.className = 'session-card';
-
-        // CRITICAL FIX: Prioritize profile picture, fallback to username initial
-        const rawUsername = typeof note?.username === 'string' ? note.username : '';
-        const username = rawUsername.trim() || 'Anonymous';
-        const initial = username.charAt(0).toUpperCase();
-        const defaultAvatarRegex = /ui-avatars\.com\/api\/.+name=User/i;
-        const hasPfp = typeof note?.pfpUrl === 'string'
-          ? note.pfpUrl.trim().length > 0
-          && note.pfpUrl !== 'null'
-          && !defaultAvatarRegex.test(note.pfpUrl)
-          : false;
-
-        const createdAt = note?.createdAt ?
-          (_Utils && typeof _Utils.formatDate === 'function' ?
-            _Utils.formatDate(note.createdAt) :
-            new Date(note.createdAt).toLocaleString()) : '';
-
-        const moodLabel = note?.mood ?
-          note.mood.charAt(0).toUpperCase() + note.mood.slice(1) :
-          'Unknown';
-
-        const textHtml = note?.text ?
-          (_Utils && typeof _Utils.escapeHtml === 'function' ?
-            _Utils.escapeHtml(note.text) :
-            (() => { const d = document.createElement('div'); d.textContent = note.text; return d.innerHTML; })()) : '';
-
-        // CRITICAL FIX: Conditional rendering - profile picture OR username initial
-        const avatarHtml = hasPfp
-          ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
-          : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`;
-
-        console.log(`✅ Using ${hasPfp ? 'profile picture' : 'initial fallback'} for ${username}`);
-
-        card.innerHTML = `
-    <div class="session-header">
-      ${avatarHtml}
-      <div class="session-info">
-        <div class="session-mood">${username} · ${moodLabel}</div>
-        <div class="session-time">${createdAt}</div>
-      </div>
-    </div>
-    <div class="session-text">${textHtml}</div>
-  `;
-
-        return card;
-      }
-
-      let isLoadingNotes = false;
-      let hasMoreNotes = true;
-      let currentNotePage = 0;
-
-      async function loadNotes(pageNum = 0, append = false) {
-        if (isLoadingNotes) {
-          console.log(`⏳ Already loading notes, skipping duplicate request`);
-          return;
-        }
-
-        if (!hasMoreNotes && append) {
-          console.log(`✋ No more notes to load`);
-          return;
-        }
-
-        isLoadingNotes = true;
-        console.log(`📥 Loading notes: page=${pageNum}, append=${append}`);
-
-        if (loadingEl) loadingEl.classList.remove('hidden');
-
-        try {
-          if (!_API || typeof _API.get !== 'function') {
-            throw new Error('API.get missing');
-          }
-
-          const data = await _API.get(`/api/notes?page=${pageNum}&limit=10`);
-
-          console.log(`✅ Received ${data.notes?.length || 0} notes from server`);
-          console.log(`   Total in database: ${data.total}`);
-          console.log(`   Has more: ${data.hasMore}`);
-
-          // Clear or append based on mode
-          if (!append && notesList) {
-            notesList.innerHTML = '';
-            console.log(`🗑️ Cleared notes list (fresh load)`);
-          }
-
-          const notesArray = Array.isArray(data.notes) ? data.notes : [];
-
-          if (notesArray.length === 0) {
-            console.log(`ℹ️ No notes returned for page ${pageNum}`);
-            if (!append && notesList) {
-              notesList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">No mood entries yet. Log your first mood above!</div>';
-            }
-          } else {
-            notesArray.forEach((n, idx) => {
-              console.log(`  [${idx}] ${n.username}: ${n.mood}`);
-              if (notesList) notesList.appendChild(renderNote(n));
-            });
-            console.log(`✅ Rendered ${notesArray.length} note cards`);
-          }
-
-          currentNotePage = pageNum;
-          hasMoreNotes = data.hasMore;
-
-          console.log(`📊 Pagination state: page=${currentNotePage}, hasMore=${hasMoreNotes}`);
-
-        } catch (err) {
-          console.error('❌ Failed to load notes:', err);
-          toast(err.message || 'Failed to load notes', 'error');
-        } finally {
-          if (loadingEl) loadingEl.classList.add('hidden');
-          isLoadingNotes = false;
-          console.log(`🔓 Released loading lock`);
-        }
-      }
-
-      // CRITICAL: Implement scroll-based lazy loading
-      function initInfiniteScroll() {
-        const scrollContainer = window;
-        let scrollTimeout;
-
-        scrollContainer.addEventListener('scroll', () => {
-          // Debounce scroll events
-          clearTimeout(scrollTimeout);
-          scrollTimeout = setTimeout(() => {
-            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-            const windowHeight = window.innerHeight;
-            const documentHeight = document.documentElement.scrollHeight;
-
-            // Trigger when 200px from bottom
-            const threshold = 200;
-            const distanceFromBottom = documentHeight - (scrollTop + windowHeight);
-
-            if (distanceFromBottom < threshold && hasMoreNotes && !isLoadingNotes) {
-              console.log(`📜 Scroll threshold reached (${distanceFromBottom.toFixed(0)}px from bottom)`);
-              console.log(`   Loading next page: ${currentNotePage + 1}`);
-              loadNotes(currentNotePage + 1, true); // Append mode
-            }
-          }, 100); // 100ms debounce
-        });
-
-        console.log(`✅ Infinite scroll initialized (threshold: 200px from bottom)`);
-      }
-
-      // ============================================
-      // LOGOUT
-      // ============================================
-      function handleLogout() {
-        try {
-          // Disconnect socket
-          if (socketInstance) {
-            socketInstance.disconnect();
-            socketInstance = null;
-          }
-
-          // Clear auth
-          if (_Auth && typeof _Auth.clearAuth === 'function') {
-            _Auth.clearAuth();
-          } else {
-            localStorage.removeItem('user');
-          }
-
-          // Sign out from Firebase
-          firebase.auth().signOut();
-        } catch (e) {
-          console.error('Logout error', e);
-        }
-
-        if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/login.html');
-        } else {
-          window.location.href = '/login.html';
-        }
-      }
-
-      // ============================================
-      // EVENT LISTENERS
-      // ============================================
-      function attachListeners() {
-        if (logMoodBtn) logMoodBtn.addEventListener('click', handleLogMood);
-        if (enterChatBtn) enterChatBtn.addEventListener('click', handleEnterChat);
-
-        // REMOVED: Manual "View History" button - now auto-loads on scroll
-        // if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
-
-        if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-
-        if (profileIconBtn) {
-          profileIconBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleProfileMenu();
-          });
-        }
-
-        if (menuChangePfp) {
-          menuChangePfp.addEventListener('click', () => {
-            closeProfileMenu();
-            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-              _PageTransition.navigateTo('/profile-picture.html');
-            } else {
-              window.location.href = '/profile-picture.html';
-            }
-          });
-        }
-
-        if (menuChangeUsername) {
-          menuChangeUsername.addEventListener('click', () => {
-            closeProfileMenu();
-            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-              _PageTransition.navigateTo('/username.html');
-            } else {
-              window.location.href = '/username.html';
-            }
-          });
-        }
-
-        document.addEventListener('click', (e) => {
-          if (!profileMenu || profileMenu.classList.contains('hidden')) return;
-          const t = e.target;
-          if (t && t.closest && (t.closest('#profileMenu') || t.closest('#profileIconBtn'))) return;
-          closeProfileMenu();
-        });
-
-        document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape') closeProfileMenu();
-        });
-        if (noteText) {
-          noteText.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              if (!logMoodBtn.disabled) handleLogMood();
-            }
-          });
-        }
-
-        // CRITICAL: Initialize infinite scroll
-        initInfiniteScroll();
-        console.log(`✅ Event listeners attached`);
-      }
-
-
-      function formatUserCount(count) {
-        if (count >= 1000000) {
-          return `${(count / 1000000).toFixed(1)}M users`;
-        } else if (count >= 1000) {
-          return `${(count / 1000).toFixed(1)}K users`;
-        } else {
-          return `${count} user${count !== 1 ? 's' : ''}`;
-        }
-      }
-
-      function updateMoodCount(mood, count) {
-        const countEl = document.getElementById(`mood-count-${mood}`);
-        if (countEl) {
-          countEl.innerHTML = `<span>${formatUserCount(count)}</span>`;
-        }
-      }
-
-      function setupMoodCountListeners() {
-        console.log('📊 Setting up mood count listeners...');
-
-        // ✅ CRITICAL: These must be set up BEFORE socket.on('connect')
-        // Otherwise the 'mood_counts_initial' event will be missed
-
-        // We can't attach to socketInstance yet (it doesn't exist)
-        // So we'll attach these in initializeSocket() BEFORE authentication
-      }
-
-      // ============================================
-      // INITIALIZATION
-      // ============================================
-      async function initPage() {
-        // Require authentication
-        try {
-          if (_Auth && typeof _Auth.requireAuth === 'function') {
-            await _Auth.requireAuth();
-          }
-        } catch (err) {
-          console.error('Error running requireAuth():', err);
-          return;
-        }
-
-        // Prevent back navigation
-        preventBackNavigation();
-
-        // Render UI first (so DOM elements exist)
-        renderMoods();
-
-        // ✅ CRITICAL: Setup mood count listeners BEFORE socket connects
-        setupMoodCountListeners();
-
-        // Initialize Socket.IO (will trigger authenticated event → mood_counts_initial)
-        console.log('🔌 Initializing socket connection...');
-        socketInstance = await initializeSocket();
-
-        // Attach other listeners and load notes
-        attachListeners();
-        loadNotes(0);
-      }
-
-
-      // Start the page
-      initPage();
-    })();
-  </script>
+        })();
+    </script>
 </body>
-
 </html>
