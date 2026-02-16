@@ -116,6 +116,108 @@
       gap: 16px;
     }
 
+    .user-menu {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+    }
+
+    .logout-text {
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.2s;
+    }
+
+    .logout-text:hover {
+      color: var(--text-primary);
+    }
+
+    .profile-icon-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 9999px;
+      border: 2px solid rgba(255, 255, 255, 0.08);
+      background: rgba(30, 33, 57, 0.75);
+      overflow: hidden;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: transform 0.15s, border-color 0.2s, background 0.2s;
+    }
+
+    .profile-icon-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(167, 139, 250, 0.55);
+      background: rgba(30, 33, 57, 0.9);
+    }
+
+    .profile-icon-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .profile-icon-fallback {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: #16172b;
+      background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
+      font-size: 14px;
+      letter-spacing: 0.5px;
+    }
+
+    .profile-menu {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      width: 220px;
+      background: rgba(30, 33, 57, 0.98);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 14px;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+      padding: 8px;
+      z-index: 50;
+      backdrop-filter: blur(10px);
+    }
+
+    .profile-menu button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 10px;
+      border-radius: 10px;
+      background: transparent;
+      border: none;
+      color: rgba(255, 255, 255, 0.92);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: left;
+      transition: background 0.15s;
+    }
+
+    .profile-menu button:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .profile-menu .material-symbols-outlined {
+      font-size: 18px;
+      color: rgba(167, 139, 250, 0.95);
+    }
+
     .notification-btn {
       width: 40px;
       height: 40px;
@@ -624,7 +726,23 @@
       </nav>
       <div class="user-actions">
         <button class="notification-btn"></button>
-        <span class="logout-text" id="logoutBtn">Logout</span>
+        <div class="user-menu" id="userMenu">
+          <span class="logout-text" id="logoutBtn">Logout</span>
+          <button type="button" class="profile-icon-btn" id="profileIconBtn" aria-haspopup="menu" aria-expanded="false">
+            <div class="profile-icon-fallback" id="profileIconFallback">U</div>
+            <img class="profile-icon-img hidden" id="profileIconImg" alt="Profile" />
+          </button>
+          <div class="profile-menu hidden" id="profileMenu" role="menu" aria-label="Profile menu">
+            <button type="button" id="menuChangePfp" role="menuitem">
+              <span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>
+              <span>Change profile picture</span>
+            </button>
+            <button type="button" id="menuChangeUsername" role="menuitem">
+              <span class="material-symbols-outlined" aria-hidden="true">badge</span>
+              <span>Change username</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     </div>
@@ -643,12 +761,12 @@
         <!-- 4,281 USERS ONLINE -->
         <span>Welcome to Vibegra</span>
       </div>
-      <div class="mb-4">
-                    <button type="button" data-pwa-install="1" data-download-url="/vibegra-app.zip">
-                        <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
-                        <span>Install App</span>
-                    </button>
-                </div>
+      <div style="margin-top: 12px; display: flex; justify-content: center;">
+        <button type="button" class="hidden" data-pwa-install="1">
+          <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
+          <span>Install App</span>
+        </button>
+      </div>
       <h1>
         Connect with your<br>
         <span class="gradient-text">Vibe</span>
@@ -774,13 +892,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
-<script src="/pwa-install.js"></script> <!-- LOAD EARLY! -->
-<script>
-  if (window.VibePWA && typeof window.VibePWA.init === 'function') {
-    window.VibePWA.init();
-  }
-</script>
-
   <!-- Socket.IO Client -->
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
 
@@ -813,6 +924,13 @@
 
   <!-- Load app.js -->
   <script src="app.js"></script>
+
+  <script src="/pwa-install.js"></script>
+  <script>
+   if (window.VibePWA && typeof window.VibePWA.init === 'function') {
+    window.VibePWA.init();
+  }
+  </script>
 
   <!-- Page-specific script -->
   <script>
@@ -858,6 +976,60 @@
       let socketInstance = null;
       let currentUser = null;
       let socketConnectFailures = 0;
+
+      const profileIconBtn = document.getElementById('profileIconBtn');
+      const profileIconFallback = document.getElementById('profileIconFallback');
+      const profileIconImg = document.getElementById('profileIconImg');
+      const profileMenu = document.getElementById('profileMenu');
+      const menuChangePfp = document.getElementById('menuChangePfp');
+      const menuChangeUsername = document.getElementById('menuChangeUsername');
+
+      function isDefaultAvatarUrl(url) {
+        if (!url || typeof url !== 'string') return true;
+        const u = url.trim();
+        if (!u || u === 'null') return true;
+        if (/ui-avatars\.com\/api\/.+name=User/i.test(u)) return true;
+        return false;
+      }
+
+      function setProfileIcon(pfpUrl, username) {
+        if (!profileIconFallback || !profileIconImg) return;
+        const name = typeof username === 'string' ? username.trim() : '';
+        const initial = (name ? name.charAt(0) : 'U').toUpperCase();
+        profileIconFallback.textContent = initial;
+
+        if (pfpUrl && !isDefaultAvatarUrl(pfpUrl)) {
+          profileIconImg.src = pfpUrl;
+          profileIconImg.classList.remove('hidden');
+          profileIconFallback.classList.add('hidden');
+          profileIconImg.onerror = () => {
+            profileIconImg.classList.add('hidden');
+            profileIconFallback.classList.remove('hidden');
+            profileIconImg.onerror = null;
+          };
+        } else {
+          profileIconImg.classList.add('hidden');
+          profileIconFallback.classList.remove('hidden');
+        }
+      }
+
+      function openProfileMenu() {
+        if (!profileMenu || !profileIconBtn) return;
+        profileMenu.classList.remove('hidden');
+        profileIconBtn.setAttribute('aria-expanded', 'true');
+      }
+
+      function closeProfileMenu() {
+        if (!profileMenu || !profileIconBtn) return;
+        profileMenu.classList.add('hidden');
+        profileIconBtn.setAttribute('aria-expanded', 'false');
+      }
+
+      function toggleProfileMenu() {
+        if (!profileMenu) return;
+        if (profileMenu.classList.contains('hidden')) openProfileMenu();
+        else closeProfileMenu();
+      }
 
       // ============================================
       // SOCKET.IO CONNECTION
@@ -1078,6 +1250,8 @@
             pfpUrl: userData.pfpUrl,
             email: userData.email
           };
+
+          try { setProfileIcon(currentUser.pfpUrl, currentUser.username); } catch { }
 
           console.log('✅ Current user loaded:', currentUser);
 
@@ -1497,6 +1671,47 @@
         // if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadNotes(page + 1));
 
         if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+
+        if (profileIconBtn) {
+          profileIconBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleProfileMenu();
+          });
+        }
+
+        if (menuChangePfp) {
+          menuChangePfp.addEventListener('click', () => {
+            closeProfileMenu();
+            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+              _PageTransition.navigateTo('/profile-picture.html');
+            } else {
+              window.location.href = '/profile-picture.html';
+            }
+          });
+        }
+
+        if (menuChangeUsername) {
+          menuChangeUsername.addEventListener('click', () => {
+            closeProfileMenu();
+            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+              _PageTransition.navigateTo('/username.html');
+            } else {
+              window.location.href = '/username.html';
+            }
+          });
+        }
+
+        document.addEventListener('click', (e) => {
+          if (!profileMenu || profileMenu.classList.contains('hidden')) return;
+          const t = e.target;
+          if (t && t.closest && (t.closest('#profileMenu') || t.closest('#profileIconBtn'))) return;
+          closeProfileMenu();
+        });
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') closeProfileMenu();
+        });
         if (noteText) {
           noteText.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
