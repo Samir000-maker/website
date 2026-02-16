@@ -181,6 +181,7 @@
         cursor: pointer;
         transition: all 180ms ease;
         margin-top: 8px;
+        width: 100%;
       }
       .pwa-install-modal__button:hover {
         background: rgba(99,32,233,0.30);
@@ -202,6 +203,13 @@
       el.style.display = '';
       el.setAttribute('aria-hidden', 'false');
     }
+  }
+
+  function isRunningAsPWA() {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const isIOSStandalone = window.navigator.standalone === true;
+    const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+    return isStandalone || isIOSStandalone || isFullscreen;
   }
 
   function ensureInstallModal() {
@@ -277,33 +285,14 @@
         setHidden(modal, true);
         
       } else {
-        // User cancelled
-        content.innerHTML = `
-          <div class="pwa-install-modal__title">Installation Cancelled</div>
-          <div class="pwa-install-modal__status">You can install anytime by clicking the button again.</div>
-          <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
-        `;
-        
-        const closeBtn = content.querySelector('[data-close="1"]');
-        if (closeBtn) {
-          closeBtn.addEventListener('click', () => setHidden(modal, true));
-        }
+        // User cancelled - just close the modal
+        setHidden(modal, true);
       }
       
     } catch (err) {
       console.error('Install error:', err);
-      
-      // Show error
-      content.innerHTML = `
-        <div class="pwa-install-modal__title">Installation Failed</div>
-        <div class="pwa-install-modal__status">Please try again or check if the app is already installed.</div>
-        <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
-      `;
-      
-      const closeBtn = content.querySelector('[data-close="1"]');
-      if (closeBtn) {
-        closeBtn.addEventListener('click', () => setHidden(modal, true));
-      }
+      // On error, just close the modal
+      setHidden(modal, true);
     }
   }
 
@@ -320,8 +309,17 @@
 
     let deferredPrompt = null;
 
-    // REMOVED: All checks for isRunningAsPWA() - buttons always visible
-    // Always show and enable buttons
+    // Hide buttons ONLY if running as PWA app
+    if (isRunningAsPWA()) {
+      buttons.forEach(btn => {
+        setHidden(btn, true);
+        btn.setAttribute('data-pwa-initialized', 'true');
+      });
+      console.log('🙈 Running as PWA - install buttons hidden');
+      return;
+    }
+
+    // Show buttons when in browser
     buttons.forEach(btn => {
       btn.disabled = false;
       setHidden(btn, false);
@@ -336,69 +334,18 @@
       console.log('✅ PWA install prompt captured');
     });
 
-    // Listen for successful install (but don't hide buttons anymore)
-    window.addEventListener('appinstalled', () => {
-      console.log('✅ PWA installed successfully');
-      // REMOVED: Button hiding - allow reinstallation
-      // Reset the deferred prompt so it can be captured again
-      deferredPrompt = null;
-    });
-
     // Handle button clicks - IMMEDIATE TRIGGER
     buttons.forEach(btn => {
       btn.addEventListener('click', async () => {
-        console.log('📱 Install button clicked - triggering immediately...');
-        
-        // Don't disable button - allow multiple clicks
+        console.log('📱 Install button clicked - triggering installation...');
         
         if (deferredPrompt) {
-          // We have a prompt - proceed with installation immediately
-          console.log('📱 Starting PWA installation with captured prompt...');
+          // We have a prompt - proceed with installation
+          console.log('📱 Starting PWA installation...');
           await showInstallProcess(deferredPrompt);
         } else {
-          // No prompt available - try to trigger it anyway
-          console.log('⚠️ No install prompt captured yet, attempting installation...');
-          
-          const modal = ensureInstallModal();
-          const content = modal.querySelector('.pwa-install-modal__content');
-          
-          setHidden(modal, false);
-          
-          // Show installing status
-          content.innerHTML = `
-            <div class="pwa-install-modal__icon">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-            </div>
-            <div class="pwa-install-modal__title">Attempting Installation</div>
-            <div class="pwa-install-modal__status">Checking browser compatibility...</div>
-            <div class="pwa-install-modal__spinner"></div>
-          `;
-          
-          // Wait a bit to see if prompt arrives
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          if (deferredPrompt) {
-            // Prompt arrived, use it
-            setHidden(modal, true);
-            await showInstallProcess(deferredPrompt);
-          } else {
-            // Still no prompt, show info
-            content.innerHTML = `
-              <div class="pwa-install-modal__title">Installation Unavailable</div>
-              <div class="pwa-install-modal__status">
-                Your browser either doesn't support PWA installation, the app is already installed, 
-                or you need to access this page via HTTPS. You can still use the app in your browser!
-              </div>
-              <button type="button" class="pwa-install-modal__button" data-close="1">Continue Anyway</button>
-            `;
-            
-            const closeBtn = content.querySelector('[data-close="1"]');
-            if (closeBtn) {
-              closeBtn.addEventListener('click', () => setHidden(modal, true));
-            }
-          }
+          // No prompt - silently do nothing or log
+          console.log('⚠️ No install prompt available - browser may not support PWA installation');
         }
       });
     });
@@ -412,14 +359,6 @@
       
       window.addEventListener('load', async () => {
         try {
-          // Force unregister old service workers first
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          for (let registration of registrations) {
-            await registration.unregister();
-            console.log('🗑️ Unregistered old service worker');
-          }
-          
-          // Register new service worker
           const registration = await navigator.serviceWorker.register('/sw.js', {
             updateViaCache: 'none'
           });
