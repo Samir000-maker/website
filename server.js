@@ -1685,7 +1685,8 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 // import path from "path";
 
-app.use(express.static(path.join(process.cwd(), "build")));
+// app.use(express.static(path.join(process.cwd(), "build")));
+app.use(express.static(__dirname));
 
 
 app.get('/env-config.js', (req, res) => {
@@ -1768,7 +1769,7 @@ app.post('/api/beacon/leave', async (req, res) => {
 });
 
 // app.use(express.static(__dirname));
-app.use(express.static(path.join(__dirname, 'public')));
+// app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
