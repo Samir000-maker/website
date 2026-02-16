@@ -234,11 +234,48 @@
                 if (_Toast && typeof _Toast.success === 'function') _Toast.success(msg);
                 else console.log('Toast.success:', msg);
             };
-            const loadingShow = (msg) => {
-                if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+
+            const ensureLoadingPopup = () => {
+                let el = document.getElementById('usernameSaveLoadingPopup');
+                if (el) return el;
+                el = document.createElement('div');
+                el.id = 'usernameSaveLoadingPopup';
+                el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
+                el.innerHTML = `
+                  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+                  <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#0f1115]/95 border border-white/10 shadow-2xl p-6">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: spin 1s linear infinite;"></div>
+                      <div>
+                        <div class="text-base font-bold text-white">Saving…</div>
+                        <div id="usernameSaveLoadingText" class="mt-1 text-sm text-gray-400">Setting up your profile…</div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                document.body.appendChild(el);
+                return el;
             };
+
+            const loadingShow = (msg) => {
+                try {
+                    if (_Loading && typeof _Loading.show === 'function') _Loading.show(msg);
+                } catch { }
+                const el = ensureLoadingPopup();
+                const t = el.querySelector('#usernameSaveLoadingText');
+                if (t && msg) t.textContent = msg;
+                el.classList.remove('hidden');
+                el.classList.add('flex');
+            };
+
             const loadingHide = () => {
-                if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+                try {
+                    if (_Loading && typeof _Loading.hide === 'function') _Loading.hide();
+                } catch { }
+                const el = document.getElementById('usernameSaveLoadingPopup');
+                if (!el) return;
+                el.classList.add('hidden');
+                el.classList.remove('flex');
             };
 
             const debounce = (fn, wait = 300) => {
@@ -426,6 +463,7 @@
                         return;
                     }
 
+                    if (submitBtn) submitBtn.disabled = true;
                     loadingShow('Setting up your profile...');
 
                     try {
@@ -451,7 +489,12 @@
                             });
 
                             if (!response.ok) {
-                                throw new Error(`Failed to save username: ${response.status}`);
+                                let msg = `Failed to save username: ${response.status}`;
+                                try {
+                                    const data = await response.json();
+                                    if (data && data.error) msg = data.error;
+                                } catch { }
+                                throw new Error(msg);
                             }
 
                             result = await response.json();
@@ -478,7 +521,17 @@
                     } catch (error) {
                         loadingHide();
                         console.error('Failed to save username:', error);
-                        toastError(error && error.message ? error.message : 'Failed to save username. Please try again.');
+                        let msg = (error && error.message) ? error.message : 'Failed to save username. Please try again.';
+                        try {
+                            const maybeJson = String(msg).trim();
+                            if (maybeJson.startsWith('{') && maybeJson.endsWith('}')) {
+                                const parsed = JSON.parse(maybeJson);
+                                if (parsed && parsed.error) msg = parsed.error;
+                            }
+                        } catch { }
+                        toastError(msg);
+                    } finally {
+                        if (submitBtn) submitBtn.disabled = !isAvailable;
                     }
                 });
             }
