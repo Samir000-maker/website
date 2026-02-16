@@ -53,6 +53,10 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #444;
         }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="relative flex min-h-screen w-full flex-col bg-dark-bg text-white font-display overflow-x-hidden selection:bg-primary/20 selection:text-primary">
@@ -199,7 +203,12 @@
             console.error('Firebase init error:', error);
         }
 
-        const { Auth, API, Toast, Loading, PageTransition } = window.MoodApp;
+        const MoodApp = window.MoodApp || {};
+        const Auth = MoodApp.Auth;
+        const API = MoodApp.API;
+        const Toast = MoodApp.Toast;
+        const Loading = MoodApp.Loading;
+        const PageTransition = MoodApp.PageTransition;
 
         const toastError = (msg) => {
             try {
@@ -258,7 +267,9 @@
         };
 
         try {
-            await Auth.requireAuth();
+            if (Auth && typeof Auth.requireAuth === 'function') {
+                await Auth.requireAuth();
+            }
         } catch (err) {
             console.error('Auth required failed:', err);
             return;
@@ -277,12 +288,12 @@
             if (!file) return;
 
             if (file.size > 5 * 1024 * 1024) {
-                Toast.error('File size must be under 5MB');
+                toastError('File size must be under 5MB');
                 return;
             }
 
             if (!file.type.startsWith('image/')) {
-                Toast.error('Please select an image file');
+                toastError('Please select an image file');
                 return;
             }
 
@@ -306,11 +317,17 @@
                 return;
             }
 
+            saveBtn.disabled = true;
+            skipBtn.disabled = true;
             loadingShow('Uploading your picture...');
 
             try {
                 console.log('Uploading file:', selectedFile.name, selectedFile.type, selectedFile.size);
-                
+
+                if (!API || typeof API.uploadFile !== 'function') {
+                    throw new Error('Upload API unavailable');
+                }
+
                 const result = await API.uploadFile('/api/users/upload-pfp', selectedFile);
                 
                 console.log('Upload result:', result);
@@ -342,11 +359,22 @@
                 } catch { }
 
                 toastError(msg);
+            } finally {
+                saveBtn.disabled = !selectedFile;
+                skipBtn.disabled = false;
             }
         });
 
         skipBtn.addEventListener('click', () => {
-            PageTransition.navigateTo('/mood.html');
+            try {
+                if (PageTransition && typeof PageTransition.navigateTo === 'function') {
+                    PageTransition.navigateTo('/mood.html');
+                } else {
+                    window.location.href = '/mood.html';
+                }
+            } catch {
+                window.location.href = '/mood.html';
+            }
         });
     })();
     </script>
