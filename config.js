@@ -24,7 +24,7 @@ export const config = {
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
 
   // Matchmaking configuration
-  MATCHMAKING_TIMEOUT: 10000, // 5 seconds - global configurable search timeout
+  MATCHMAKING_TIMEOUT: 30000, 
   MIN_USERS_FOR_ROOM: 2, // Minimum users required to create a room
 
   // File upload limits
