@@ -107,6 +107,12 @@ function parseRange(rangeHeader, totalLength) {
  */
 export async function uploadProfilePicture(fileBuffer, mimeType, userId) {
   try {
+    if (!config.CLOUDFLARE_ENDPOINT || !config.BUCKET_NAME || !config.ACCESS_KEY || !config.SECRET_KEY || !config.R2_PUBLIC_URL) {
+      const err = new Error('Storage not configured');
+      err.code = 'STORAGE_NOT_CONFIGURED';
+      throw err;
+    }
+
     const extension = mimeType?.split('/')[1] || 'png';
     const fileName = `profiles/${userId}-${uuidv4()}.${extension}`;
 
@@ -125,7 +131,10 @@ export async function uploadProfilePicture(fileBuffer, mimeType, userId) {
     return publicUrl;
   } catch (err) {
     console.error('❌ R2 upload failed:', err);
-    throw new Error('Profile picture upload failed');
+    if (err && err.code === 'STORAGE_NOT_CONFIGURED') throw err;
+    const e = new Error('Profile picture upload failed');
+    e.code = err && err.code ? err.code : 'R2_UPLOAD_FAILED';
+    throw e;
   }
 }
 
