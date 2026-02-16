@@ -204,13 +204,6 @@
     }
   }
 
-  function isRunningAsPWA() {
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    const isIOSStandalone = window.navigator.standalone === true;
-    const isFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
-    return isStandalone || isIOSStandalone || isFullscreen;
-  }
-
   function ensureInstallModal() {
     let modal = document.getElementById('pwaInstallModal');
     if (modal) return modal;
@@ -327,47 +320,13 @@
 
     let deferredPrompt = null;
 
-    // Hide buttons if already running as PWA
-    if (isRunningAsPWA()) {
-      buttons.forEach(btn => {
-        setHidden(btn, true);
-        btn.disabled = true;
-        btn.setAttribute('data-pwa-initialized', 'true');
-      });
-      console.log('🙈 Running as PWA - install buttons hidden');
-      return;
-    }
-
-    // Show buttons if running in browser
+    // REMOVED: All checks for isRunningAsPWA() - buttons always visible
+    // Always show and enable buttons
     buttons.forEach(btn => {
       btn.disabled = false;
       setHidden(btn, false);
       btn.setAttribute('data-pwa-initialized', 'true');
     });
-
-    // Monitor display mode changes
-    const updateButtonVisibility = () => {
-      const isPWA = isRunningAsPWA();
-      buttons.forEach(btn => {
-        setHidden(btn, isPWA);
-        btn.disabled = isPWA;
-      });
-    };
-
-    // Listen for display mode changes
-    try {
-      const standaloneMedia = window.matchMedia('(display-mode: standalone)');
-      const fullscreenMedia = window.matchMedia('(display-mode: fullscreen)');
-      
-      if (standaloneMedia.addEventListener) {
-        standaloneMedia.addEventListener('change', updateButtonVisibility);
-      }
-      if (fullscreenMedia.addEventListener) {
-        fullscreenMedia.addEventListener('change', updateButtonVisibility);
-      }
-    } catch (e) {
-      console.log('Display mode monitoring not supported');
-    }
 
     // Capture the beforeinstallprompt event
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -377,53 +336,74 @@
       console.log('✅ PWA install prompt captured');
     });
 
-    // Listen for successful install
+    // Listen for successful install (but don't hide buttons anymore)
     window.addEventListener('appinstalled', () => {
       console.log('✅ PWA installed successfully');
+      // REMOVED: Button hiding - allow reinstallation
+      // Reset the deferred prompt so it can be captured again
       deferredPrompt = null;
-      
-      // Hide install buttons
-      buttons.forEach(btn => {
-        setHidden(btn, true);
-        btn.disabled = true;
-      });
     });
 
-    // Handle button clicks
+    // Handle button clicks - IMMEDIATE TRIGGER
     buttons.forEach(btn => {
       btn.addEventListener('click', async () => {
-        btn.disabled = true;
+        console.log('📱 Install button clicked - triggering immediately...');
+        
+        // Don't disable button - allow multiple clicks
         
         if (deferredPrompt) {
-          // We have a prompt - proceed with installation
-          console.log('📱 Starting PWA installation...');
+          // We have a prompt - proceed with installation immediately
+          console.log('📱 Starting PWA installation with captured prompt...');
           await showInstallProcess(deferredPrompt);
         } else {
-          // No prompt available
-          console.warn('⚠️ No install prompt available');
+          // No prompt available - try to trigger it anyway
+          console.log('⚠️ No install prompt captured yet, attempting installation...');
           
           const modal = ensureInstallModal();
           const content = modal.querySelector('.pwa-install-modal__content');
           
           setHidden(modal, false);
           
+          // Show installing status
           content.innerHTML = `
-            <div class="pwa-install-modal__title">Can't Install Right Now</div>
-            <div class="pwa-install-modal__status">The app might already be installed, or your browser doesn't support PWA installation.</div>
-            <button type="button" class="pwa-install-modal__button" data-close="1">Close</button>
+            <div class="pwa-install-modal__icon">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            </div>
+            <div class="pwa-install-modal__title">Attempting Installation</div>
+            <div class="pwa-install-modal__status">Checking browser compatibility...</div>
+            <div class="pwa-install-modal__spinner"></div>
           `;
           
-          const closeBtn = content.querySelector('[data-close="1"]');
-          if (closeBtn) {
-            closeBtn.addEventListener('click', () => setHidden(modal, true));
+          // Wait a bit to see if prompt arrives
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          if (deferredPrompt) {
+            // Prompt arrived, use it
+            setHidden(modal, true);
+            await showInstallProcess(deferredPrompt);
+          } else {
+            // Still no prompt, show info
+            content.innerHTML = `
+              <div class="pwa-install-modal__title">Installation Unavailable</div>
+              <div class="pwa-install-modal__status">
+                Your browser either doesn't support PWA installation, the app is already installed, 
+                or you need to access this page via HTTPS. You can still use the app in your browser!
+              </div>
+              <button type="button" class="pwa-install-modal__button" data-close="1">Continue Anyway</button>
+            `;
+            
+            const closeBtn = content.querySelector('[data-close="1"]');
+            if (closeBtn) {
+              closeBtn.addEventListener('click', () => setHidden(modal, true));
+            }
           }
         }
-        
-        btn.disabled = false;
       });
     });
 
-    console.log('✅ PWA install buttons initialized');
+    console.log('✅ PWA install buttons initialized (unlimited mode)');
   }
 
   function registerServiceWorker() {
@@ -432,6 +412,14 @@
       
       window.addEventListener('load', async () => {
         try {
+          // Force unregister old service workers first
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (let registration of registrations) {
+            await registration.unregister();
+            console.log('🗑️ Unregistered old service worker');
+          }
+          
+          // Register new service worker
           const registration = await navigator.serviceWorker.register('/sw.js', {
             updateViaCache: 'none'
           });
@@ -453,9 +441,16 @@
   // Expose API
   window.VibePWA = window.VibePWA || {
     init: function () {
-      console.log('🚀 Initializing VibePWA...');
+      console.log('🚀 Initializing VibePWA (Unlimited Mode)...');
       registerServiceWorker();
       initInstallButtons();
+    },
+    // Manual trigger function
+    triggerInstall: function() {
+      const btn = document.querySelector('[data-pwa-install="1"]');
+      if (btn) {
+        btn.click();
+      }
     }
   };
 
