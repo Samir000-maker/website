@@ -1127,6 +1127,15 @@
         setProfileModalError('');
         profileModalSelectedFile = null;
 
+        if (!currentUser) {
+          showLoading('Loading profile...');
+          ensureCurrentUserLoaded().finally(() => {
+            hideLoading();
+            openProfileSettingsModal(focus);
+          });
+          return;
+        }
+
         const name = (currentUser && currentUser.username) ? String(currentUser.username).trim() : '';
         const initial = (name ? name.charAt(0) : 'U').toUpperCase();
         if (profileModalAvatarFallback) profileModalAvatarFallback.textContent = initial;
@@ -1174,6 +1183,38 @@
           email: userData.email
         };
         try { setProfileIcon(currentUser.pfpUrl, currentUser.username); } catch { }
+      }
+
+      async function ensureCurrentUserLoaded() {
+        if (currentUser && currentUser.userId) return currentUser;
+
+        if (_API && typeof _API.get === 'function') {
+          await refreshCurrentUserAndIcon();
+          return currentUser;
+        }
+
+        try {
+          const firebaseUser = firebase.auth().currentUser;
+          if (!firebaseUser) return null;
+          const token = await firebaseUser.getIdToken();
+          const res = await fetch('/api/users/me', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!res.ok) return null;
+          const userData = await res.json();
+          currentUser = {
+            userId: userData._id,
+            username: userData.username,
+            pfpUrl: userData.pfpUrl,
+            email: userData.email
+          };
+          try { setProfileIcon(currentUser.pfpUrl, currentUser.username); } catch { }
+          return currentUser;
+        } catch {
+          return null;
+        }
       }
 
       function openProfileMenu() {
@@ -1897,6 +1938,7 @@
         if (profileModalSaveBtn) {
           profileModalSaveBtn.addEventListener('click', async () => {
             setProfileModalError('');
+            await ensureCurrentUserLoaded();
             if (!currentUser) {
               setProfileModalError('User not loaded. Please refresh.');
               return;
