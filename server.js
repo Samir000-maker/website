@@ -2452,7 +2452,7 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
       return res.status(400).json({ error: 'Username already taken' });
     }
     console.error('Create profile error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2520,10 +2520,42 @@ app.post('/api/users/upload-pfp',
       }
 
       console.error('Upload PFP error:', error && (error.stack || error));
-      res.status(500).json({ error: 'Failed to upload profile picture' });
+      return res.status(500).json({ error: 'Failed to upload profile picture' });
     }
   }
 );
+
+app.get('/api/users/me', authenticateFirebase, async (req, res) => {
+  try {
+    const firebaseUser = req.firebaseUser;
+    const db = getDB();
+
+    const user = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      {
+        projection: { password: 0 },
+        maxTimeMS: 3000
+      }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json(user);
+  } catch (error) {
+    if (error.code === 50) {
+      console.error('❌ Database timeout in get profile:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+
+    console.error('Get profile error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 app.post('/api/chat/attachments',
   authenticateFirebase,
