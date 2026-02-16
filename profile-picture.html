@@ -53,10 +53,6 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #444;
         }
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body class="relative flex min-h-screen w-full flex-col bg-dark-bg text-white font-display overflow-x-hidden selection:bg-primary/20 selection:text-primary">
@@ -203,12 +199,7 @@
             console.error('Firebase init error:', error);
         }
 
-        const MoodApp = window.MoodApp || {};
-        const Auth = MoodApp.Auth;
-        const API = MoodApp.API;
-        const Toast = MoodApp.Toast;
-        const Loading = MoodApp.Loading;
-        const PageTransition = MoodApp.PageTransition;
+        const { Auth, API, Toast, Loading, PageTransition } = window.MoodApp;
 
         const toastError = (msg) => {
             try {
@@ -247,7 +238,7 @@
 
         const loadingShow = (msg) => {
             try {
-                if (Loading && typeof Loading.show === 'function') return Loading.show(msg || 'Uploading...');
+                if (Loading && typeof Loading.show === 'function') Loading.show(msg || 'Uploading...');
             } catch { }
             const el = ensureLoadingPopup();
             const t = el.querySelector('#profileUploadLoadingText');
@@ -258,7 +249,7 @@
 
         const loadingHide = () => {
             try {
-                if (Loading && typeof Loading.hide === 'function') return Loading.hide();
+                if (Loading && typeof Loading.hide === 'function') Loading.hide();
             } catch { }
             const el = document.getElementById('profileUploadLoadingPopup');
             if (!el) return;
@@ -267,9 +258,7 @@
         };
 
         try {
-            if (Auth && typeof Auth.requireAuth === 'function') {
-                await Auth.requireAuth();
-            }
+            await Auth.requireAuth();
         } catch (err) {
             console.error('Auth required failed:', err);
             return;
@@ -317,17 +306,11 @@
                 return;
             }
 
-            saveBtn.disabled = true;
-            skipBtn.disabled = true;
             loadingShow('Uploading your picture...');
 
             try {
                 console.log('Uploading file:', selectedFile.name, selectedFile.type, selectedFile.size);
-
-                if (!API || typeof API.uploadFile !== 'function') {
-                    throw new Error('Upload API unavailable');
-                }
-
+                
                 const result = await API.uploadFile('/api/users/upload-pfp', selectedFile);
                 
                 console.log('Upload result:', result);
@@ -359,22 +342,11 @@
                 } catch { }
 
                 toastError(msg);
-            } finally {
-                saveBtn.disabled = !selectedFile;
-                skipBtn.disabled = false;
             }
         });
 
         skipBtn.addEventListener('click', () => {
-            try {
-                if (PageTransition && typeof PageTransition.navigateTo === 'function') {
-                    PageTransition.navigateTo('/mood.html');
-                } else {
-                    window.location.href = '/mood.html';
-                }
-            } catch {
-                window.location.href = '/mood.html';
-            }
+            PageTransition.navigateTo('/mood.html');
         });
     })();
     </script>
