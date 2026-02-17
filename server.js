@@ -2936,11 +2936,26 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
 
     const db = getDB();
 
-    // ✅ FIX: Add maxTimeMS timeout
-    const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
-      { maxTimeMS: 3000 }
-    );
+    const { userId: resolvedUserId, firebaseUid } = await resolveAuthenticatedRequestUser(firebaseUser);
+
+    if (!resolvedUserId && firebaseUid) {
+      await ensureMongoUserForFirebaseUid(firebaseUid);
+    }
+
+    let user = null;
+    if (resolvedUserId) {
+      user = await db.collection('users').findOne(
+        { _id: new ObjectId(resolvedUserId) },
+        { maxTimeMS: 3000 }
+      );
+    }
+
+    if (!user && firebaseUid) {
+      user = await db.collection('users').findOne(
+        { firebaseUid },
+        { maxTimeMS: 3000 }
+      );
+    }
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -5041,10 +5056,21 @@ io.on('connection', (socket) => {
 
           } else {
             console.error(`❌ User ${roomUser.username} not connected (Presence Check Failed)`);
-            // Check for active call before leaving matchmaking room
-            const activeCall = await findActiveCallForRoom(room.id);
-            const hasActiveCall = !!activeCall;
-            await matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
+
+            // IMPORTANT: Presence can be transiently missing during page transitions.
+            // Do NOT evict users here, because matchmaking.leaveRoom() can destroy the room
+            // (below_min_users) and cause ROOM_NOT_FOUND for users who are actively joining.
+            // Instead, allow a grace window; periodic cleanup / disconnect logic will handle
+            // truly stale users.
+            setTimeout(async () => {
+              try {
+                const recheck = await getUserPresence(roomUser.userId);
+                if (recheck) return;
+                console.warn(`⚠️ [Matchmaking] Presence still missing for ${roomUser.username} (${roomUser.userId}) after grace period; leaving to cleanup handlers.`);
+              } catch (e) {
+                console.warn(`⚠️ [Matchmaking] Presence recheck failed for ${roomUser.userId}:`, e?.message || e);
+              }
+            }, 8000);
           }
         }
 
