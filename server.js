@@ -2674,10 +2674,20 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     } catch (firestoreErr) {
-      console.error('❌ Firestore write failed in ensure-guest:', firestoreErr);
+      console.error('❌ Firestore write failed in ensure-guest:', {
+        message: firestoreErr?.message,
+        code: firestoreErr?.code,
+        name: firestoreErr?.name,
+        details: firestoreErr?.details,
+        stack: firestoreErr?.stack
+      });
       return res.status(503).json({
         error: 'Unable to persist guest profile to Firebase',
-        code: 'FIREBASE_WRITE_FAILED'
+        code: 'FIREBASE_WRITE_FAILED',
+        firebase: {
+          code: firestoreErr?.code || null,
+          message: firestoreErr?.message || null
+        }
       });
     }
 
