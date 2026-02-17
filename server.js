@@ -2307,8 +2307,22 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
+    const firebaseUid = firebaseUser?.uid || null;
+    const email = firebaseUser?.email || null;
+
+    const query = email
+      ? { email }
+      : (firebaseUid ? { firebaseUid } : null);
+
+    if (!query) {
+      return res.json({
+        exists: false,
+        hasUsername: false
+      });
+    }
+
     const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
+      query,
       {
         projection: { username: 1, pfpUrl: 1, _id: 1 },
         maxTimeMS: 3000
@@ -2351,6 +2365,9 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     const { username, pfpUrl } = req.body;
     const firebaseUser = req.firebaseUser;
 
+    const firebaseUid = firebaseUser?.uid || null;
+    const email = firebaseUser?.email || null;
+
     if (!username) {
       return res.status(400).json({ error: 'Username is required' });
     }
@@ -2367,10 +2384,15 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-    const existingUser = await db.collection('users').findOne(
-      { email: firebaseUser.email },
-      { maxTimeMS: 3000 }
-    );
+    const query = email
+      ? { email }
+      : (firebaseUid ? { firebaseUid } : null);
+
+    if (!query) {
+      return res.status(401).json({ error: 'Unable to resolve authenticated user' });
+    }
+
+    const existingUser = await db.collection('users').findOne(query, { maxTimeMS: 3000 });
 
     if (existingUser && existingUser.username !== trimmedUsername) {
       const usernameExists = await db.collection('users').findOne(
@@ -2394,8 +2416,8 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
           : getDefaultProfilePicture();
 
     const userData = {
-      email: firebaseUser.email,
-      firebaseUid: firebaseUser.uid,
+      email: email || null,
+      firebaseUid: firebaseUid,
       username: trimmedUsername,
       pfpUrl: nextPfpUrl,
       updatedAt: new Date()
@@ -2450,8 +2472,19 @@ app.post('/api/users/upload-pfp',
       const firebaseUser = req.firebaseUser;
       const db = getDB();
 
+      const firebaseUid = firebaseUser?.uid || null;
+      const email = firebaseUser?.email || null;
+
+      const query = email
+        ? { email }
+        : (firebaseUid ? { firebaseUid } : null);
+
+      if (!query) {
+        return res.status(401).json({ error: 'Unable to resolve authenticated user' });
+      }
+
       const user = await db.collection('users').findOne(
-        { email: firebaseUser.email },
+        query,
         {
           projection: { _id: 1, username: 1, pfpUrl: 1, email: 1, firebaseUid: 1 },
           maxTimeMS: 3000
@@ -2506,10 +2539,21 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
-      { projection: { password: 0 }, maxTimeMS: 3000 }
-    );
+    const firebaseUid = firebaseUser?.uid || null;
+    const email = firebaseUser?.email || null;
+
+    const query = email
+      ? { email }
+      : (firebaseUid ? { firebaseUid } : null);
+
+    if (!query) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    const user = await db.collection('users').findOne(query, {
+      projection: { password: 0 },
+      maxTimeMS: 3000
+    });
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -2527,6 +2571,131 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
 
     console.error('Get profile error:', error);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+function capitalizeWord(word) {
+  if (!word) return '';
+  const w = String(word);
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+function generateRedditStyleUsername() {
+  const adjectives = [
+    'calm', 'silent', 'gentle', 'bright', 'kind', 'curious', 'cosmic', 'mellow',
+    'lucid', 'bold', 'swift', 'golden', 'crystal', 'happy', 'serene', 'shy',
+    'wild', 'brave', 'cool', 'sunny'
+  ];
+  const nouns = [
+    'river', 'moon', 'forest', 'ocean', 'breeze', 'comet', 'field', 'shadow',
+    'sparrow', 'phoenix', 'valley', 'mountain', 'garden', 'cascade', 'meadow',
+    'ember', 'nebula', 'harbor', 'aurora', 'stone'
+  ];
+
+  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  const number = Math.floor(Math.random() * 900) + 10;
+  return `${capitalizeWord(adjective)}${capitalizeWord(noun)}${number}`;
+}
+
+async function ensureMongoUserForFirebaseUid(firebaseUid) {
+  const db = getDB();
+  const existing = await db.collection('users').findOne(
+    { firebaseUid },
+    { projection: { password: 0 }, maxTimeMS: 3000 }
+  );
+  if (existing) return existing;
+
+  const now = new Date();
+  const maxAttempts = 25;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const username = generateRedditStyleUsername();
+    const userDoc = {
+      email: null,
+      firebaseUid,
+      username: String(username).toLowerCase(),
+      pfpUrl: getDefaultProfilePicture(),
+      createdAt: now,
+      updatedAt: now,
+      isGuest: true
+    };
+
+    try {
+      const result = await db.collection('users').insertOne(userDoc, { maxTimeMS: 5000 });
+      const inserted = await db.collection('users').findOne(
+        { _id: result.insertedId },
+        { projection: { password: 0 }, maxTimeMS: 3000 }
+      );
+      return inserted;
+    } catch (error) {
+      if (error && error.code === 11000) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error('Failed to generate unique username');
+}
+
+app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
+  try {
+    const firebaseUid = req.firebaseUser?.uid || null;
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const mood = req.body?.mood ? String(req.body.mood).trim().toLowerCase() : null;
+    if (!mood) {
+      return res.status(400).json({ error: 'mood is required' });
+    }
+
+    const user = await ensureMongoUserForFirebaseUid(firebaseUid);
+
+    let admin;
+    try {
+      admin = initializeFirebase();
+    } catch (initErr) {
+      console.error('❌ Firebase Admin not configured for ensure-guest:', initErr.message);
+      return res.status(503).json({
+        error: 'Firebase is not configured on the server',
+        code: 'FIREBASE_NOT_CONFIGURED'
+      });
+    }
+
+    try {
+      const firestore = admin.firestore();
+      await firestore.collection('guest_users').doc(firebaseUid).set({
+        uid: firebaseUid,
+        username: user.username,
+        mood,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch (firestoreErr) {
+      console.error('❌ Firestore write failed in ensure-guest:', firestoreErr);
+      return res.status(503).json({
+        error: 'Unable to persist guest profile to Firebase',
+        code: 'FIREBASE_WRITE_FAILED'
+      });
+    }
+
+    return res.json({
+      success: true,
+      user
+    });
+  } catch (error) {
+    if (error.code === 50) {
+      console.error('❌ Database timeout in ensure-guest:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+
+    console.error('❌ ensure-guest failed:', error);
+    return res.status(500).json({ error: 'Failed to ensure guest user' });
   }
 });
 
