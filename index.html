@@ -284,15 +284,8 @@
                 <p class="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-light leading-relaxed">
                     A premium sanctuary to share your vibe and find people who resonate with you right now. No noise, just connection.
                 </p>
-            </div>
-
-            <!-- Mood Cards -->
-            <div class="w-full max-w-6xl mx-auto mb-16">
-                <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
-                <div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
-            </div>
-
-            <!-- CTA Section -->
+                
+                <!-- CTA Section -->
             <div class="flex flex-col items-center gap-6">
                 <button id="connectNowBtn" disabled class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary">
                     Connect Now
@@ -310,6 +303,15 @@
                     </div>
                 </div>
             </div>
+                
+            </div>
+
+            <!-- Mood Cards -->
+            <div class="w-full max-w-6xl mx-auto mb-16">
+                <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
+                <div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
+            </div>
+
         </div>
 
         <!-- Decorative Background Elements -->
@@ -525,7 +527,6 @@
 
                     try {
                         localStorage.setItem('guest_uid', user.uid);
-                        if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
                         localStorage.setItem('guest_mood', selectedMood);
                         localStorage.setItem('guest_timestamp', String(Date.now()));
                     } catch { }
