@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
-    <!-- Favicon -->
+        <!-- Favicon -->
     <link rel="icon" href="/favicon.ico">
 
 <!-- PNG favicon fallback -->
@@ -17,7 +17,6 @@
 
 <!-- Theme color for mobile browser UI -->
 <meta name="theme-color" content="#0f172a">
-
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#6320e9">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -31,6 +30,9 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script src="/env-config.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -270,15 +272,12 @@
                     <span class="w-2 h-2 rounded-full bg-accent-teal shadow-[0_0_10px_rgba(45,212,191,0.5)]"></span>
                     <span class="text-xs font-medium text-white/70 uppercase tracking-wider">Safe Space Verified</span>
                 </div>
-                
-                <!-- PWA Install Button - Now Visible and Styled -->
                 <div class="mb-4">
-                    <button type="button" data-pwa-install="1" data-download-url="/vibegra-app.zip">
+                    <button type="button" class="hidden" data-pwa-install="1">
                         <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
                         <span>Install App</span>
                     </button>
                 </div>
-                
                 <h1 class="text-5xl md:text-7xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
                     Connect on a <br/><span class="text-white">Deeper Level.</span>
                 </h1>
@@ -290,76 +289,15 @@
             <!-- Mood Cards -->
             <div class="w-full max-w-6xl mx-auto mb-16">
                 <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-6">
-                    <!-- Stressed Card -->
-                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
-                        <div class="absolute inset-0 bg-gradient-to-br from-red-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
-                            <span class="emoji-3d">😫</span>
-                        </div>
-                        <div class="relative z-10">
-                            <h3 class="text-lg font-semibold text-white mb-1">Stressed</h3>
-                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Overwhelmed</p>
-                        </div>
-                    </button>
-
-                    <!-- Lonely Card -->
-                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
-                        <div class="absolute inset-0 bg-gradient-to-br from-blue-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
-                            <span class="emoji-3d">🥺</span>
-                        </div>
-                        <div class="relative z-10">
-                            <h3 class="text-lg font-semibold text-white mb-1">Lonely</h3>
-                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Seeking connection</p>
-                        </div>
-                    </button>
-
-                    <!-- Tired Card (Selected) -->
-                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden ring-2 ring-primary/50 shadow-[0_0_30px_rgba(99,32,233,0.15)] transform -translate-y-2 h-full">
-                        <div class="absolute inset-0 bg-gradient-to-br from-primary/20 to-transparent opacity-100 transition-opacity duration-300"></div>
-                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
-                            <span class="emoji-3d">😴</span>
-                        </div>
-                        <div class="relative z-10">
-                            <h3 class="text-lg font-semibold text-white mb-1">Tired</h3>
-                            <p class="text-xs text-white/60 font-light group-hover:text-white/80 transition-colors">Low energy</p>
-                        </div>
-                        <div class="absolute top-4 right-4 w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(99,32,233,1)]"></div>
-                    </button>
-
-                    <!-- Sad Card -->
-                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full">
-                        <div class="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                        <div class="w-20 h-20 flex items-center justify-center emoji-wrapper">
-                            <span class="emoji-3d">😢</span>
-                        </div>
-                        <div class="relative z-10">
-                            <h3 class="text-lg font-semibold text-white mb-1">Sad</h3>
-                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">Feeling down</p>
-                        </div>
-                    </button>
-
-                    <!-- More Card -->
-                    <button class="group glass-card rounded-2xl p-6 flex flex-col items-center justify-center gap-4 text-center cursor-pointer relative overflow-hidden h-full border-dashed border-white/20 hover:border-white/40">
-                        <div class="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                        <div class="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform duration-300 border border-white/10 group-hover:border-purple-400/30">
-                            <span class="material-icons-outlined text-3xl text-white/50 group-hover:text-white/80">more_horiz</span>
-                        </div>
-                        <div class="relative z-10">
-                            <h3 class="text-lg font-semibold text-white mb-1">More...</h3>
-                            <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">View all moods</p>
-                        </div>
-                    </button>
-                </div>
+                <div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
             </div>
 
             <!-- CTA Section -->
             <div class="flex flex-col items-center gap-6">
-                <a href="signup.html" class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer no-underline">
+                <button id="connectNowBtn" disabled class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary">
                     Connect Now
                     <span class="material-icons-outlined text-xl">arrow_forward</span>
-                </a>
+                </button>
                 <div class="flex items-center gap-6 text-sm text-slate-500">
                     <div class="flex items-center gap-1.5">
                         <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
@@ -444,14 +382,180 @@
             });
         })();
     </script>
-    
-    <!-- Updated PWA Install Script -->
     <script src="/pwa-install.js"></script>
     <script>
-        // Auto-initialize the PWA install system
-        if (window.VibePWA && typeof window.VibePWA.init === 'function') {
-            window.VibePWA.init();
-        }
+        try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+    </script>
+
+    <script>
+        (function () {
+            const connectBtn = document.getElementById('connectNowBtn');
+            const grid = document.getElementById('moodCardsGrid');
+
+            const moods = [
+                { id: 'happy', name: 'Happy', emoji: '😊', hint: 'Feeling good', tint: 'from-emerald-400/10' },
+                { id: 'sad', name: 'Sad', emoji: '😭', hint: 'Feeling down', tint: 'from-indigo-500/10' },
+                { id: 'angry', name: 'Angry', emoji: '😠', hint: 'Frustrated', tint: 'from-orange-500/10' },
+                { id: 'lonely', name: 'Lonely', emoji: '😔', hint: 'Seeking connection', tint: 'from-blue-400/10' },
+                { id: 'calm', name: 'Calm', emoji: '😌', hint: 'Peaceful', tint: 'from-teal-400/10' },
+                { id: 'excited', name: 'Excited', emoji: '🤩', hint: 'High energy', tint: 'from-pink-500/10' },
+                { id: 'tired', name: 'Tired', emoji: '😴', hint: 'Low energy', tint: 'from-primary/15' },
+                { id: 'stressed', name: 'Stressed', emoji: '😣', hint: 'Overwhelmed', tint: 'from-red-400/10' },
+                { id: 'confused', name: 'Confused', emoji: '😕', hint: 'Uncertain', tint: 'from-purple-400/10' },
+            ];
+
+            let selectedMood = null;
+
+            function ensureOverlay() {
+                let el = document.getElementById('guestConnectOverlay');
+                if (el) return el;
+                el = document.createElement('div');
+                el.id = 'guestConnectOverlay';
+                el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
+                el.innerHTML = `
+                  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+                  <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
+                    <div class="flex items-center gap-3">
+                      <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: breathe 1.2s ease-in-out infinite;"></div>
+                      <div>
+                        <div class="text-base font-bold text-white">Connecting…</div>
+                        <div id="guestConnectOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profile…</div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+                document.body.appendChild(el);
+                return el;
+            }
+
+            function showOverlay(msg) {
+                const el = ensureOverlay();
+                const t = el.querySelector('#guestConnectOverlayText');
+                if (t && msg) t.textContent = msg;
+                el.classList.remove('hidden');
+                el.classList.add('flex');
+            }
+
+            function render() {
+                if (!grid) return;
+                grid.innerHTML = '';
+
+                moods.forEach((m) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'group glass-card rounded-2xl p-5 flex flex-col items-center justify-center gap-3 text-center cursor-pointer relative overflow-hidden h-full';
+                    btn.dataset.mood = m.id;
+                    btn.innerHTML = `
+                      <div class="absolute inset-0 bg-gradient-to-br ${m.tint} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                      <div class="w-16 h-16 flex items-center justify-center emoji-wrapper">
+                        <span class="emoji-3d" style="font-size: 3rem;">${m.emoji}</span>
+                      </div>
+                      <div class="relative z-10">
+                        <h3 class="text-base font-semibold text-white mb-1">${m.name}</h3>
+                        <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">${m.hint}</p>
+                      </div>
+                    `;
+                    btn.addEventListener('click', () => {
+                        selectedMood = m.id;
+                        try { localStorage.setItem('selectedMood', selectedMood); } catch { }
+                        updateSelection();
+                    });
+                    grid.appendChild(btn);
+                });
+
+                updateSelection();
+            }
+
+            function updateSelection() {
+                const cards = grid ? Array.from(grid.querySelectorAll('button[data-mood]')) : [];
+                cards.forEach((c) => {
+                    const isSelected = c.dataset.mood === selectedMood;
+                    c.classList.toggle('ring-2', isSelected);
+                    c.classList.toggle('ring-primary/50', isSelected);
+                    c.classList.toggle('shadow-[0_0_30px_rgba(99,32,233,0.15)]', isSelected);
+                    c.classList.toggle('transform', isSelected);
+                    c.classList.toggle('-translate-y-2', isSelected);
+                });
+                if (connectBtn) connectBtn.disabled = !selectedMood;
+            }
+
+            async function initFirebase() {
+                if (typeof firebase === 'undefined') throw new Error('Firebase not loaded');
+                if (!firebase.apps?.length) {
+                    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+                }
+                firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+            }
+
+            async function connectNow() {
+                if (!selectedMood) return;
+                if (!connectBtn || connectBtn.disabled) return;
+
+                connectBtn.disabled = true;
+                showOverlay('Signing you in anonymously…');
+
+                try {
+                    await initFirebase();
+
+                    let user = firebase.auth().currentUser;
+                    if (!user) {
+                        const credential = await firebase.auth().signInAnonymously();
+                        user = credential.user;
+                    }
+
+                    if (!user) throw new Error('Anonymous auth failed');
+
+                    showOverlay('Creating your guest profile…');
+                    const token = await user.getIdToken();
+
+                    const res = await fetch('/api/users/ensure-guest', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ mood: selectedMood })
+                    });
+
+                    const text = await res.text();
+                    if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+
+                    let payload = null;
+                    try { payload = JSON.parse(text); } catch { }
+
+                    try {
+                        localStorage.setItem('guest_uid', user.uid);
+                        if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
+                        localStorage.setItem('guest_mood', selectedMood);
+                        localStorage.setItem('guest_timestamp', String(Date.now()));
+                    } catch { }
+
+                    showOverlay('Entering discovery…');
+                    window.location.href = '/discovery.html';
+                } catch (err) {
+                    console.error('Guest connect failed:', err);
+                    const msg = (err && err.message) ? String(err.message) : 'Connection failed';
+                    alert(msg);
+                    const overlay = document.getElementById('guestConnectOverlay');
+                    if (overlay) {
+                        overlay.classList.add('hidden');
+                        overlay.classList.remove('flex');
+                    }
+                    connectBtn.disabled = !selectedMood;
+                }
+            }
+
+            render();
+            if (connectBtn) connectBtn.addEventListener('click', connectNow);
+
+            try {
+                const persisted = localStorage.getItem('selectedMood');
+                if (persisted) {
+                    selectedMood = persisted;
+                    updateSelection();
+                }
+            } catch { }
+        })();
     </script>
 </body>
 </html>
