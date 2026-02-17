@@ -46,8 +46,8 @@
     .video-tile {
       position: relative;
       width: 100%;
-      aspect-ratio: 1 / 1;
-      max-width: 400px;
+      height: 100%;
+      max-width: none;
       background: #000;
       overflow: hidden;
       border-radius: 1rem;
@@ -97,29 +97,57 @@
 
     .participant-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 400px));
-      justify-content: center;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      justify-content: stretch;
+      align-content: stretch;
       gap: 1rem;
       width: 100%;
       padding: 1rem;
       max-width: 1400px;
       margin: 0 auto;
+      height: 100%;
+      min-height: 0;
+      grid-auto-rows: 1fr;
     }
 
     @media (min-width: 1024px) {
       .participant-grid {
-        grid-template-columns: repeat(auto-fit, minmax(300px, 400px));
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       }
     }
 
     @media (max-width: 640px) {
       .participant-grid {
-        grid-template-columns: 1fr;
-        padding: 0.75rem;
+        padding: 0.5rem;
+        gap: 0.5rem;
+        max-width: 100%;
       }
 
       .video-tile {
         max-width: 100%;
+        border-radius: 0.85rem;
+      }
+
+      .participant-grid[data-count="1"] {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr;
+      }
+
+      .participant-grid[data-count="2"] {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(2, 1fr);
+      }
+
+      .participant-grid[data-count="3"],
+      .participant-grid[data-count="4"] {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(2, 1fr);
+      }
+
+      .participant-grid[data-count="5"],
+      .participant-grid[data-count="6"] {
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: repeat(3, 1fr);
       }
     }
 
@@ -267,7 +295,7 @@
     </div>
   </div>
 
-  <main class="flex-1 overflow-y-auto">
+  <main class="flex-1 overflow-hidden">
     <div id="participantGrid" class="participant-grid"></div>
   </main>
 
@@ -2310,6 +2338,13 @@
         console.log(`   Orientation: TRUE (non-mirrored) for all`);
         console.log(`📊 Rendered participants now:`, Array.from(renderedParticipants));
         return tile;
+      }
+
+      function syncGridCount() {
+        const grid = document.getElementById('participantGrid');
+        if (!grid) return;
+        const count = grid.children ? grid.children.length : 0;
+        grid.dataset.count = String(count);
       }
 
 
@@ -4892,6 +4927,8 @@
 
             grid.appendChild(fragment);
 
+            syncGridCount();
+
             console.log(`🎨 Grid complete: ${grid.children.length} tiles`);
             console.log(`📊 Rendered participants:`, Array.from(renderedParticipants));
 
@@ -4977,6 +5014,8 @@
               if (tile) {
                 grid.appendChild(tile);
 
+                syncGridCount();
+
                 const micIndicator = document.getElementById(`mic-${data.user.userId}`);
                 if (micIndicator && audioState === false) {
                   micIndicator.classList.remove('hidden');
@@ -5011,6 +5050,8 @@
             const tile = document.getElementById(`participant-${data.userId}`);
             if (tile) tile.remove();
             renderedParticipants.delete(data.userId);
+
+            syncGridCount();
 
             // Clean up peer connection
             const pc = peerConnections.get(data.userId);
