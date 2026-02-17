@@ -2598,6 +2598,12 @@ function generateRedditStyleUsername() {
   return `${capitalizeWord(adjective)}${capitalizeWord(noun)}${number}`;
 }
 
+function avatarUrlFromUsername(username) {
+  const u = String(username || '').trim();
+  const initial = u ? u.charAt(0).toUpperCase() : 'U';
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=367d7d&color=ffffff&size=200`;
+}
+
 async function ensureMongoUserForFirebaseUid(firebaseUid) {
   const db = getDB();
   const existing = await db.collection('users').findOne(
@@ -2615,7 +2621,7 @@ async function ensureMongoUserForFirebaseUid(firebaseUid) {
       email: null,
       firebaseUid,
       username: String(username).toLowerCase(),
-      pfpUrl: getDefaultProfilePicture(),
+      pfpUrl: avatarUrlFromUsername(username),
       createdAt: now,
       updatedAt: now,
       isGuest: true
@@ -2653,42 +2659,21 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
 
     const user = await ensureMongoUserForFirebaseUid(firebaseUid);
 
-    let admin;
     try {
-      admin = initializeFirebase();
-    } catch (initErr) {
-      console.error('❌ Firebase Admin not configured for ensure-guest:', initErr.message);
-      return res.status(503).json({
-        error: 'Firebase is not configured on the server',
-        code: 'FIREBASE_NOT_CONFIGURED'
-      });
-    }
-
-    try {
-      const firestore = admin.firestore();
-      await firestore.collection('guest_users').doc(firebaseUid).set({
-        uid: firebaseUid,
-        username: user.username,
-        mood,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-    } catch (firestoreErr) {
-      console.error('❌ Firestore write failed in ensure-guest:', {
-        message: firestoreErr?.message,
-        code: firestoreErr?.code,
-        name: firestoreErr?.name,
-        details: firestoreErr?.details,
-        stack: firestoreErr?.stack
-      });
-      return res.status(503).json({
-        error: 'Unable to persist guest profile to Firebase',
-        code: 'FIREBASE_WRITE_FAILED',
-        firebase: {
-          code: firestoreErr?.code || null,
-          message: firestoreErr?.message || null
-        }
-      });
+      const db = getDB();
+      await db.collection('users').updateOne(
+        { firebaseUid },
+        {
+          $set: {
+            lastMood: mood,
+            lastMoodAt: new Date(),
+            updatedAt: new Date()
+          }
+        },
+        { maxTimeMS: 5000 }
+      );
+    } catch (updateErr) {
+      console.error('❌ Failed to update guest mood in MongoDB:', updateErr);
     }
 
     return res.json({
