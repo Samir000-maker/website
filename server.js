@@ -2,7 +2,7 @@
 // ============================================
 // PM2 CLUSTER INSTANCE DETECTION
 // ============================================
-
+const app = express();
 const instanceId = process.env.INSTANCE_ID || process.env.NODE_APP_INSTANCE || '0';
 const isClusterMode = process.env.NODE_APP_INSTANCE !== undefined;
 const processId = process.pid;
@@ -1794,7 +1794,7 @@ async function getIceServers() {
   return iceServers;
 }
 
-const app = express();
+
 // app.use(express.static(__dirname + '/public'));
 app.use(express.static(__dirname));
 const server = createServer(app);
