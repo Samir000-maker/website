@@ -2,7 +2,7 @@
 // ============================================
 // PM2 CLUSTER INSTANCE DETECTION
 // ============================================
-const app = express();
+
 const instanceId = process.env.INSTANCE_ID || process.env.NODE_APP_INSTANCE || '0';
 const isClusterMode = process.env.NODE_APP_INSTANCE !== undefined;
 const processId = process.pid;
@@ -26,6 +26,7 @@ console.log('');
 // 5. Production-ready TURN server integration with Cloudflare
 
 import express from 'express';
+const app = express();
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
