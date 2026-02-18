@@ -26,7 +26,6 @@ console.log('');
 // 5. Production-ready TURN server integration with Cloudflare
 
 import express from 'express';
-const app = express();
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -91,12 +90,13 @@ const redlock = new Redlock(
 redlock.on('error', (error) => {
   // Ignore errors from resource not locked (expected)
   if (error.message && error.message.includes('exceeded')) {
-    console.error('❌ [Redlock] Lock acquisition exceeded retry limit:', error.message);
+    console.error(' [Redlock] Lock acquisition exceeded retry limit:', error.message);
   }
 });
 
 function requireSocialClubAdmin(req, res, next) {
-  const expected = process.env.SOCIAL_CLUB_ADMIN_TOKEN || '';
+  const token = (req.get('x-admin-token') || '').trim();
+  const expected = (process.env.SOCIAL_CLUB_ADMIN_TOKEN || '').trim();
   if (!expected) {
     return res.status(503).json({ error: 'Admin not configured' });
   }
@@ -190,54 +190,6 @@ async function notifySocialClubWaitlist(db, payload = {}) {
 
   return { sent, failed };
 }
-
-app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res) => {
-  try {
-    const { isEventOpen } = req.body || {};
-    const nextOpen = !!isEventOpen;
-    const db = getDB();
-    const now = new Date();
-
-    const prev = await db.collection('event').findOne(
-      { name: 'social_club' },
-      { projection: { _id: 0, isEventOpen: 1 }, maxTimeMS: 3000 }
-    );
-
-    await db.collection('event').updateOne(
-      { name: 'social_club' },
-      {
-        $set: {
-          name: 'social_club',
-          isEventOpen: nextOpen,
-          updatedAt: now
-        },
-        $setOnInsert: {
-          createdAt: now
-        }
-      },
-      { upsert: true }
-    );
-
-    let notify = null;
-    if (!prev?.isEventOpen && nextOpen) {
-      try {
-        notify = await notifySocialClubWaitlist(db, {
-          title: 'Social Club is Live',
-          body: 'Tap to enter now.',
-          clickUrl: '/chat.html?mode=social-club'
-        });
-      } catch (e) {
-        console.error('❌ [SocialClub] notify waitlist failed:', e?.message || e);
-        notify = { error: e?.message || String(e) };
-      }
-    }
-
-    return res.json({ success: true, isEventOpen: nextOpen, notified: notify });
-  } catch (error) {
-    console.error('❌ [SocialClub] Admin event update failed:', error);
-    return res.status(500).json({ error: 'Failed to update event' });
-  }
-});
 
 console.log('✅ Redlock initialized for distributed locking');
 
@@ -1795,9 +1747,8 @@ async function getIceServers() {
   return iceServers;
 }
 
-
-// app.use(express.static(__dirname + '/public'));
-app.use(express.static(__dirname));
+const app = express();
+app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
 const io = new Server(server, {
@@ -1826,6 +1777,54 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.use(express.static(__dirname));
+
+app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res) => {
+  try {
+    const { isEventOpen } = req.body || {};
+    const nextOpen = !!isEventOpen;
+    const db = getDB();
+    const now = new Date();
+
+    const prev = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 0, isEventOpen: 1 }, maxTimeMS: 3000 }
+    );
+
+    await db.collection('event').updateOne(
+      { name: 'social_club' },
+      {
+        $set: {
+          name: 'social_club',
+          isEventOpen: nextOpen,
+          updatedAt: now
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true }
+    );
+
+    let notify = null;
+    if (!prev?.isEventOpen && nextOpen) {
+      try {
+        notify = await notifySocialClubWaitlist(db, {
+          title: 'Social Club is Live',
+          body: 'Tap to enter now.',
+          clickUrl: '/chat.html?mode=social-club'
+        });
+      } catch (e) {
+        console.error('❌ [SocialClub] notify waitlist failed:', e?.message || e);
+        notify = { error: e?.message || String(e) };
+      }
+    }
+
+    return res.json({ success: true, isEventOpen: nextOpen, notified: notify });
+  } catch (error) {
+    console.error('❌ [SocialClub] Admin event update failed:', error);
+    return res.status(500).json({ error: 'Failed to update event' });
+  }
+});
 
 app.get('/env-config.js', (req, res) => {
   try {
