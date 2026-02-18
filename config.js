@@ -20,11 +20,12 @@ export const config = {
   // App-level variables
   ROOM_DURATION_MINUTES: 30,
   MAX_USERS_PER_ROOM: 4, // Changed from 4 to 2 for easier testing
+  GLOBAL_SOCIAL_ROOM_SIZE: parseInt(process.env.GLOBAL_SOCIAL_ROOM_SIZE || '2', 10),
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
 
   // Matchmaking configuration
-  MATCHMAKING_TIMEOUT: 30000, 
+  MATCHMAKING_TIMEOUT: 30000, // 5 seconds - global configurable search timeout
   MIN_USERS_FOR_ROOM: 2, // Minimum users required to create a room
 
   // File upload limits
@@ -35,7 +36,7 @@ export const config = {
   MAX_NOTE_LENGTH: 500,
 
   // Rate limiting
-  MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 10,
+  MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 100,
 
   // Firebase (you'll need to add your Firebase service account key)
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
