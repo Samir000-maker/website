@@ -179,18 +179,18 @@
     }
 
     .profile-menu {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  width: 220px;
-  background: rgba(30, 33, 57, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
-  padding: 8px;
-  z-index: 100; /* Changed from 50 to 100 to appear above contact button */
-  backdrop-filter: blur(10px);
-}
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      width: 220px;
+      background: rgba(30, 33, 57, 0.98);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 14px;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+      padding: 8px;
+      z-index: 50;
+      backdrop-filter: blur(10px);
+    }
 
     .profile-menu button {
       width: 100%;
@@ -687,38 +687,7 @@
         grid-template-columns: 1fr;
       }
     }
-    
-    @media (max-width: 640px) {
-  .profile-menu {
-    width: 200px;
-    right: -8px; /* Adjust for small screens */
-  }
-
-  #profileSettingsModal > div:last-child {
-    max-height: 90vh;
-    overflow-y: auto;
-    padding: 16px !important;
-  }
-
-  #profileSettingsModal .grid {
-    grid-template-columns: 1fr !important;
-    gap: 12px !important;
-  }
-
-  #profileModalAvatar {
-    width: 120px !important;
-    height: 120px !important;
-    margin: 0 auto;
-  }
-
-  #profileModalAvatarFallback {
-    font-size: 32px !important;
-  }
-}
-    
   </style>
-  
-
 </head>
 
 <body>
@@ -745,9 +714,9 @@
     </div>
   </div>
 
-<div id="profileSettingsModal" class="hidden" style="position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; padding: 16px; overflow-y: auto;">
-  <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);"></div>
-  <div style="position: relative; width: 100%; max-width: 560px; border-radius: 18px; background: rgba(15, 17, 21, 0.96); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 22px 70px rgba(0,0,0,0.55); padding: 20px; margin: auto;">
+  <div id="profileSettingsModal" class="hidden" style="position: fixed; inset: 0; z-index: 80; align-items: center; justify-content: center;">
+    <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);"></div>
+    <div style="position: relative; width: 92vw; max-width: 560px; border-radius: 18px; background: rgba(15, 17, 21, 0.96); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 22px 70px rgba(0,0,0,0.55); padding: 20px;">
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
         <div>
           <div style="font-size:16px; font-weight:900; letter-spacing:-0.01em;">Profile settings</div>
@@ -759,20 +728,6 @@
       </div>
 
       <div style="margin-top:16px; display:grid; grid-template-columns: 180px 1fr; gap:16px;">
-  <style>
-    @media (max-width: 640px) {
-      #profileSettingsModal > div > div > div:nth-child(2) {
-        grid-template-columns: 1fr !important;
-      }
-      #profileModalAvatar {
-        width: 120px !important;
-        height: 120px !important;
-      }
-      #profileModalAvatarFallback {
-        font-size: 32px !important;
-      }
-    }
-  </style>
         <div style="display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:flex-start;">
           <div id="profileModalAvatar" style="width: 160px; height: 160px; border-radius: 9999px; overflow:hidden; border: 2px solid rgba(255,255,255,0.10); background: rgba(30,33,57,0.75); display:flex; align-items:center; justify-content:center;">
             <div id="profileModalAvatarFallback" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:40px; color:#16172b; background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);">U</div>
@@ -845,7 +800,7 @@
   <main>
     <div class="hero animate-fade-in-up">
       <div style="margin-bottom: 16px; display: flex; justify-content: center;">
-        <button id="contactSupportBtn" type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9999px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); cursor: pointer; backdrop-filter: blur(10px); position: relative; z-index: 10;">
+        <button id="contactSupportBtn" type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9999px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); cursor: pointer; backdrop-filter: blur(10px);">
           <span class="material-symbols-outlined" style="font-size: 18px; color: rgba(255, 255, 255, 0.85);">support_agent</span>
           <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">Contact</span>
         </button>
@@ -865,6 +820,9 @@
         Connect with your<br>
         <span class="gradient-text">Vibe</span>
       </h1>
+      <div style="margin-top: 14px; width: 100%; max-width: 760px; margin-left: auto; margin-right: auto;">
+        <div id="socialClubMountMood"></div>
+      </div>
       <p>
         Choose your current mood to chat with people who feel the same way
       </p>
@@ -985,6 +943,7 @@
   <script src="/env-config.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
 
   <!-- Socket.IO Client -->
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
@@ -1022,6 +981,25 @@
   <script src="/pwa-install.js"></script>
   <script>
     try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+  </script>
+
+  <script src="/social-club.js"></script>
+  <script>
+    (function () {
+      const mount = () => {
+        try {
+          const el = document.getElementById('socialClubMountMood');
+          if (el && window.SocialClub && typeof window.SocialClub.mount === 'function') {
+            window.SocialClub.mount(el);
+          }
+        } catch { }
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mount);
+      } else {
+        mount();
+      }
+    })();
   </script>
 
   <!-- Page-specific script -->
