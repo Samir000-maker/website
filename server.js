@@ -28,7 +28,6 @@ console.log('');
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import 'dotenv/config';
 import cors from 'cors';
 import multer from 'multer';
 import { ObjectId } from 'mongodb';
@@ -36,6 +35,7 @@ import { v4 as uuidv4 } from 'uuid';
 import config from './config.js';
 import { connectDB, getDB } from './database.js';
 import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyToken } from './firebase-auth.js';
+import admin from 'firebase-admin';
 import {
   uploadProfilePicture,
   uploadChatAttachment,
@@ -90,9 +90,106 @@ const redlock = new Redlock(
 redlock.on('error', (error) => {
   // Ignore errors from resource not locked (expected)
   if (error.message && error.message.includes('exceeded')) {
-    console.error('❌ [Redlock] Lock acquisition exceeded retry limit:', error.message);
+    console.error(' [Redlock] Lock acquisition exceeded retry limit:', error.message);
   }
 });
+
+function requireSocialClubAdmin(req, res, next) {
+  const token = (req.get('x-admin-token') || '').trim();
+  const expected = (process.env.SOCIAL_CLUB_ADMIN_TOKEN || '').trim();
+  if (!expected) {
+    return res.status(503).json({ error: 'Admin not configured' });
+  }
+
+  const provided = String(req.headers['x-admin-token'] || '');
+  if (!provided || provided !== expected) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  return next();
+}
+
+async function notifySocialClubWaitlist(db, payload = {}) {
+  const title = payload.title || 'Social Club is Live';
+  const body = payload.body || 'Tap to enter Social Club now.';
+  const clickUrl = payload.clickUrl || '/chat.html?mode=social-club';
+
+  const cursor = db.collection('event_waitlist').find(
+    { notified: false, fcmToken: { $type: 'string', $ne: '' } },
+    { projection: { _id: 1, uid: 1, fcmToken: 1 }, maxTimeMS: 10000 }
+  );
+  const entries = await cursor.toArray();
+  if (!entries.length) return { sent: 0, failed: 0 };
+
+  const tokens = entries.map(e => e.fcmToken).filter(Boolean);
+  const tokenToId = new Map(entries.map(e => [e.fcmToken, e._id]));
+
+  let sent = 0;
+  let failed = 0;
+  const invalidTokens = new Set();
+
+  const chunkSize = 500;
+  for (let i = 0; i < tokens.length; i += chunkSize) {
+    const chunk = tokens.slice(i, i + chunkSize);
+
+    try {
+      const response = await admin.messaging().sendEachForMulticast({
+        tokens: chunk,
+        notification: { title, body },
+        data: {
+          type: 'social_club_open',
+          url: clickUrl
+        },
+        webpush: {
+          fcmOptions: { link: clickUrl },
+          notification: {
+            title,
+            body,
+            icon: '/favicon.ico'
+          }
+        }
+      });
+
+      sent += response.successCount || 0;
+      failed += response.failureCount || 0;
+
+      response.responses.forEach((r, idx) => {
+        if (r.success) return;
+        const t = chunk[idx];
+        const code = r.error?.code || '';
+        if (
+          code.includes('registration-token-not-registered') ||
+          code.includes('invalid-argument') ||
+          code.includes('invalid-registration-token')
+        ) {
+          invalidTokens.add(t);
+        }
+      });
+    } catch (error) {
+      console.error('❌ [SocialClub] Failed sending FCM batch:', error?.message || error);
+      failed += chunk.length;
+    }
+  }
+
+  const ids = entries.map(e => e._id);
+  await db.collection('event_waitlist').updateMany(
+    { _id: { $in: ids } },
+    { $set: { notified: true, notifiedAt: new Date() } }
+  );
+
+  if (invalidTokens.size) {
+    const invalidIds = [];
+    for (const t of invalidTokens) {
+      const id = tokenToId.get(t);
+      if (id) invalidIds.push(id);
+    }
+    if (invalidIds.length) {
+      await db.collection('event_waitlist').deleteMany({ _id: { $in: invalidIds } });
+    }
+  }
+
+  return { sent, failed };
+}
 
 console.log('✅ Redlock initialized for distributed locking');
 
@@ -913,8 +1010,8 @@ async function handleUserCleanup(userId) {
 }
 
 const ROOM_EXPIRY_TIME = (config.ROOM_DURATION_MINUTES || 10) * 60 * 1000;
-const ROOM_CLEANUP_GRACE = 30 * 1000; // 30 seconds
-const ROOM_WARNING_TIME = 60 * 1000; // 60 seconds warning before expiry
+const ROOM_CLEANUP_GRACE = 600000; // 30 seconds
+const ROOM_WARNING_TIME = 600000; // 60 seconds warning before expiry
 
 // ============================================
 // REAL-TIME MOOD USER COUNTERS (REDIS-BACKED)
@@ -1541,8 +1638,8 @@ function checkRoomMessageRateLimit(roomId) {
 // ============================================
 
 async function generateCloudTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || config.CLOUDFLARE_TURN_TOKEN_ID;
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || config.CLOUDFLARE_TURN_API_TOKEN;
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - operating with STUN only');
@@ -1583,12 +1680,7 @@ async function generateCloudTurnCredentials() {
     console.log('📦 Raw TURN response:', JSON.stringify(data, null, 2));
 
     if (data.iceServers) {
-      const turnConfig = Array.isArray(data.iceServers) ? data.iceServers[0] : data.iceServers;
-
-      if (!turnConfig) {
-        console.error('❌ Unexpected TURN response structure:', data);
-        return null;
-      }
+      const turnConfig = data.iceServers;
 
       const iceServer = {
         urls: Array.isArray(turnConfig.urls) ? turnConfig.urls : [turnConfig.urls],
@@ -1656,7 +1748,7 @@ async function getIceServers() {
 }
 
 const app = express();
-// app.use(express.static(__dirname + '/public'));
+app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
 const io = new Server(server, {
@@ -1683,11 +1775,56 @@ matchmaking.init(pubClient, io, redlock);
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
-// import path from "path";
 
-// app.use(express.static(path.join(process.cwd(), "build")));
 app.use(express.static(__dirname));
 
+app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res) => {
+  try {
+    const { isEventOpen } = req.body || {};
+    const nextOpen = !!isEventOpen;
+    const db = getDB();
+    const now = new Date();
+
+    const prev = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 0, isEventOpen: 1 }, maxTimeMS: 3000 }
+    );
+
+    await db.collection('event').updateOne(
+      { name: 'social_club' },
+      {
+        $set: {
+          name: 'social_club',
+          isEventOpen: nextOpen,
+          updatedAt: now
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true }
+    );
+
+    let notify = null;
+    if (!prev?.isEventOpen && nextOpen) {
+      try {
+        notify = await notifySocialClubWaitlist(db, {
+          title: 'Social Club is Live',
+          body: 'Tap to enter now.',
+          clickUrl: '/chat.html?mode=social-club'
+        });
+      } catch (e) {
+        console.error('❌ [SocialClub] notify waitlist failed:', e?.message || e);
+        notify = { error: e?.message || String(e) };
+      }
+    }
+
+    return res.json({ success: true, isEventOpen: nextOpen, notified: notify });
+  } catch (error) {
+    console.error('❌ [SocialClub] Admin event update failed:', error);
+    return res.status(500).json({ error: 'Failed to update event' });
+  }
+});
 
 app.get('/env-config.js', (req, res) => {
   try {
@@ -1701,70 +1838,28 @@ app.get('/env-config.js', (req, res) => {
       measurementId: process.env.measurementId || ''
     };
 
+    const vapidKey = process.env.FCM_VAPID_KEY || '';
+
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/javascript');
-    res.send(`window.__VIBE_FIREBASE_CONFIG__ = window.__VIBE_FIREBASE_CONFIG__ || ${JSON.stringify(firebaseConfig)};`);
+    res.send(
+      `(function(){\n` +
+      `  var root = (typeof self !== 'undefined') ? self : (typeof window !== 'undefined' ? window : {});\n` +
+      `  root.__VIBE_FIREBASE_CONFIG__ = root.__VIBE_FIREBASE_CONFIG__ || ${JSON.stringify(firebaseConfig)};\n` +
+      `  root.__VIBE_FCM_VAPID_KEY__ = root.__VIBE_FCM_VAPID_KEY__ || ${JSON.stringify(vapidKey)};\n` +
+      `})();`
+    );
   } catch {
-    res.status(500).type('application/javascript').send('window.__VIBE_FIREBASE_CONFIG__ = window.__VIBE_FIREBASE_CONFIG__ || {};');
+    res.status(500).type('application/javascript').send(
+      '(function(){\n' +
+      '  var root = (typeof self !== "undefined") ? self : (typeof window !== "undefined" ? window : {});\n' +
+      '  root.__VIBE_FIREBASE_CONFIG__ = root.__VIBE_FIREBASE_CONFIG__ || {};\n' +
+      '  root.__VIBE_FCM_VAPID_KEY__ = root.__VIBE_FCM_VAPID_KEY__ || "";\n' +
+      '})();'
+    );
   }
 });
 
-/**
- * Tab-close Beacon Endpoint (navigator.sendBeacon)
- * Uses token in request body because beacons cannot reliably set Authorization headers.
- */
-app.post('/api/beacon/leave', async (req, res) => {
-  try {
-    const { token, roomId, callId, reason, location, socketId } = req.body || {};
-
-    if (!token || typeof token !== 'string') {
-      return res.status(400).json({ error: 'token is required' });
-    }
-
-    const decodedToken = await verifyToken(token);
-    const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(decodedToken);
-
-    if (!userId) {
-      return res.status(401).json({ error: 'Unable to resolve authenticated user' });
-    }
-
-    console.log(`📡 [API] Beacon leave: user=${userId}, room=${roomId || '-'}, call=${callId || '-'}, socket=${socketId || '-'}, reason=${reason || '-'}`);
-
-    // Proactively unregister the socket that is closing.
-    // Without this, fetchSockets() can still see the soon-to-close socket and we incorrectly skip the leave.
-    if (socketId && typeof socketId === 'string') {
-      try {
-        await unregisterSocketForUser(socketId);
-        await unbindSocketSession(socketId);
-      } catch { }
-    }
-
-    // If user still has active sockets, do NOT auto-leave.
-    // This prevents closing one tab from kicking the user out while another tab/device is still active.
-    try {
-      const activeSockets = await io.in(`user:${userId}`).fetchSockets();
-      if (activeSockets.length > 0) {
-        return res.json({ success: true, skipped: 'active_sockets', activeSockets: activeSockets.length });
-      }
-    } catch { }
-
-    if (roomId && typeof roomId === 'string') {
-      await performUserLeaveChat(userId, roomId, 'beacon_close', firebaseUid);
-    }
-
-    if (callId && typeof callId === 'string') {
-      await handleCallLeaveInternal(userId, callId);
-    }
-
-    return res.json({ success: true, location: location || null, reason: reason || null });
-  } catch (error) {
-    console.error(`❌ [API] Error in beacon leave endpoint:`, error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// app.use(express.static(__dirname));
-// app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -1967,26 +2062,6 @@ async function applyPresenceContextForUser({
 
   // Leaving chat context for any non-call page is authoritative and server-driven.
   if (triggerLeaveOnExit && resolvedRoomId && hasChatContextHistory) {
-    try {
-      const activeSockets = await io.in(`user:${userId}`).fetchSockets();
-      if (activeSockets.length > 0) {
-        logLifecycle('presence_context_exit_deferred_active_sockets', {
-          userId,
-          firebaseUid,
-          location: normalizedLocation,
-          roomId: resolvedRoomId,
-          source,
-          activeSockets: activeSockets.length
-        });
-        return {
-          success: true,
-          location: normalizedLocation,
-          roomId: resolvedRoomId || null,
-          leftRoom: false
-        };
-      }
-    } catch { }
-
     if (currentPresence?.status === 'matchmaking') {
       logLifecycle('presence_context_exit_ignored_matchmaking', {
         userId,
@@ -2295,37 +2370,25 @@ app.post('/api/check-username', async (req, res) => {
     }
 
     console.error('Check username error:', error);
-    return res.status(500).json({
+    res.status(500).json({
       available: false,
       error: 'Internal server error'
     });
   }
 });
 
+
 app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    const firebaseUid = firebaseUser?.uid || null;
-    const email = firebaseUser?.email || null;
-
-    const query = email
-      ? { email }
-      : (firebaseUid ? { firebaseUid } : null);
-
-    if (!query) {
-      return res.json({
-        exists: false,
-        hasUsername: false
-      });
-    }
-
+    // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
-      query,
+      { email: firebaseUser.email },
       {
         projection: { username: 1, pfpUrl: 1, _id: 1 },
-        maxTimeMS: 3000
+        maxTimeMS: 3000 // ✅ 3-second timeout
       }
     );
 
@@ -2337,13 +2400,16 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
     }
 
     const hasUsername = !!(user.username && user.username.trim());
+
     return res.json({
       exists: true,
-      hasUsername,
+      hasUsername: hasUsername,
       username: user.username || null,
       userId: user._id.toString()
     });
+
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
     if (error.code === 50) {
       console.error('❌ Database timeout in check-profile:', error.message);
       return res.status(503).json({
@@ -2360,13 +2426,11 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   }
 });
 
+
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
     const firebaseUser = req.firebaseUser;
-
-    const firebaseUid = firebaseUser?.uid || null;
-    const email = firebaseUser?.email || null;
 
     if (!username) {
       return res.status(400).json({ error: 'Username is required' });
@@ -2374,7 +2438,9 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
 
     const trimmedUsername = username.trim().toLowerCase();
     if (trimmedUsername.length < 3 || trimmedUsername.length > 20) {
-      return res.status(400).json({ error: 'Username must be between 3 and 20 characters' });
+      return res.status(400).json({
+        error: 'Username must be between 3 and 20 characters'
+      });
     }
 
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUsername)) {
@@ -2384,67 +2450,71 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
-    const query = email
-      ? { email }
-      : (firebaseUid ? { firebaseUid } : null);
 
-    if (!query) {
-      return res.status(401).json({ error: 'Unable to resolve authenticated user' });
-    }
+    // ✅ FIX: Add maxTimeMS timeout
+    const existingUser = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      { maxTimeMS: 3000 }
+    );
 
-    const existingUser = await db.collection('users').findOne(query, { maxTimeMS: 3000 });
-
+    // Check if username is taken by someone else
     if (existingUser && existingUser.username !== trimmedUsername) {
+      // ✅ FIX: Add maxTimeMS timeout
       const usernameExists = await db.collection('users').findOne(
         { username: trimmedUsername },
         { maxTimeMS: 3000 }
       );
-      if (usernameExists) return res.status(400).json({ error: 'Username already taken' });
+      if (usernameExists) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
     } else if (!existingUser) {
+      // New user - check if username is available
+      // ✅ FIX: Add maxTimeMS timeout
       const usernameExists = await db.collection('users').findOne(
         { username: trimmedUsername },
         { maxTimeMS: 3000 }
       );
-      if (usernameExists) return res.status(400).json({ error: 'Username already taken' });
+      if (usernameExists) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
     }
-
-    const nextPfpUrl =
-      (typeof pfpUrl === 'string' && pfpUrl.trim())
-        ? pfpUrl.trim()
-        : (existingUser && existingUser.pfpUrl)
-          ? existingUser.pfpUrl
-          : getDefaultProfilePicture();
 
     const userData = {
-      email: email || null,
-      firebaseUid: firebaseUid,
+      email: firebaseUser.email,
+      firebaseUid: firebaseUser.uid,
       username: trimmedUsername,
-      pfpUrl: nextPfpUrl,
+      pfpUrl: pfpUrl || getDefaultProfilePicture(),
       updatedAt: new Date()
     };
 
     if (existingUser) {
+      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: existingUser._id },
         { $set: userData },
-        { maxTimeMS: 5000 }
+        { maxTimeMS: 5000 } // ✅ Write operations can take longer
       );
       await invalidateUserProfileCache(existingUser._id.toString());
-      return res.json({
+      res.json({
         success: true,
         userId: existingUser._id.toString(),
         message: 'Profile updated'
       });
+    } else {
+      // Create new user
+      userData.createdAt = new Date();
+      // ✅ FIX: Add maxTimeMS timeout
+      const result = await db.collection('users').insertOne(userData, {
+        maxTimeMS: 5000
+      });
+      res.json({
+        success: true,
+        userId: result.insertedId.toString(),
+        message: 'Profile created'
+      });
     }
-
-    userData.createdAt = new Date();
-    const result = await db.collection('users').insertOne(userData, { maxTimeMS: 5000 });
-    return res.json({
-      success: true,
-      userId: result.insertedId.toString(),
-      message: 'Profile created'
-    });
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
     if (error.code === 50) {
       console.error('❌ Database timeout in profile update:', error.message);
       return res.status(503).json({
@@ -2452,11 +2522,12 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
         retryable: true
       });
     }
+
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Username already taken' });
     }
     console.error('Create profile error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2472,22 +2543,18 @@ app.post('/api/users/upload-pfp',
       const firebaseUser = req.firebaseUser;
       const db = getDB();
 
-      const firebaseUid = firebaseUser?.uid || null;
-      const email = firebaseUser?.email || null;
-
-      const query = email
-        ? { email }
-        : (firebaseUid ? { firebaseUid } : null);
-
-      if (!query) {
-        return res.status(401).json({ error: 'Unable to resolve authenticated user' });
-      }
-
+      // ✅ FIX: Add maxTimeMS timeout
       const user = await db.collection('users').findOne(
-        query,
+        { email: firebaseUser.email },
         {
-          projection: { _id: 1, username: 1, pfpUrl: 1, email: 1, firebaseUid: 1 },
-          maxTimeMS: 3000
+          projection: {
+            _id: 1,
+            username: 1,
+            pfpUrl: 1,
+            email: 1,
+            firebaseUid: 1
+          },
+          maxTimeMS: 3000 // ✅ 3-second timeout
         }
       );
 
@@ -2495,31 +2562,25 @@ app.post('/api/users/upload-pfp',
         return res.status(404).json({ error: 'User not found' });
       }
 
-      const uploadedUrl = await uploadProfilePicture(
+      const pfpUrl = await uploadProfilePicture(
         req.file.buffer,
         req.file.mimetype,
         user._id.toString()
       );
 
+      // ✅ FIX: Add maxTimeMS timeout
       await db.collection('users').updateOne(
         { _id: user._id },
-        { $set: { pfpUrl: uploadedUrl, updatedAt: new Date() } },
+        { $set: { pfpUrl, updatedAt: new Date() } },
         { maxTimeMS: 5000 }
       );
 
-      const updatedUser = { ...user, pfpUrl: uploadedUrl };
+      const updatedUser = { ...user, pfpUrl };
       await updateUserProfileCache(user._id.toString(), updatedUser);
 
-      return res.json({ success: true, pfpUrl: uploadedUrl });
+      res.json({ success: true, pfpUrl });
     } catch (error) {
-      if (error && error.code === 'STORAGE_NOT_CONFIGURED') {
-        return res.status(503).json({
-          error: 'Profile picture storage is not configured. Please contact support.',
-          code: 'STORAGE_NOT_CONFIGURED',
-          retryable: false
-        });
-      }
-
+      // ✅ FIX: Handle timeout errors
       if (error.code === 50) {
         console.error('❌ Database timeout in upload-pfp:', error.message);
         return res.status(503).json({
@@ -2528,8 +2589,8 @@ app.post('/api/users/upload-pfp',
         });
       }
 
-      console.error('Upload PFP error:', error && (error.stack || error));
-      return res.status(500).json({ error: 'Failed to upload profile picture' });
+      console.error('Upload PFP error:', error);
+      res.status(500).json({ error: 'Failed to upload profile picture' });
     }
   }
 );
@@ -2539,28 +2600,22 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    const firebaseUid = firebaseUser?.uid || null;
-    const email = firebaseUser?.email || null;
-
-    const query = email
-      ? { email }
-      : (firebaseUid ? { firebaseUid } : null);
-
-    if (!query) {
-      return res.status(401).json({ error: 'User not found' });
-    }
-
-    const user = await db.collection('users').findOne(query, {
-      projection: { password: 0 },
-      maxTimeMS: 3000
-    });
+    // ✅ FIX: Add maxTimeMS timeout
+    const user = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      {
+        projection: { password: 0 },
+        maxTimeMS: 3000
+      }
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    return res.json(user);
+    res.json(user);
   } catch (error) {
+    // ✅ FIX: Handle timeout errors
     if (error.code === 50) {
       console.error('❌ Database timeout in get profile:', error.message);
       return res.status(503).json({
@@ -2570,129 +2625,12 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     }
 
     console.error('Get profile error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-function capitalizeWord(word) {
-  if (!word) return '';
-  const w = String(word);
-  return w.charAt(0).toUpperCase() + w.slice(1);
-}
 
-function generateRedditStyleUsername() {
-  const adjectives = [
-    'calm', 'silent', 'gentle', 'bright', 'kind', 'curious', 'cosmic', 'mellow',
-    'lucid', 'bold', 'swift', 'golden', 'crystal', 'happy', 'serene', 'shy',
-    'wild', 'brave', 'cool', 'sunny'
-  ];
-  const nouns = [
-    'river', 'moon', 'forest', 'ocean', 'breeze', 'comet', 'field', 'shadow',
-    'sparrow', 'phoenix', 'valley', 'mountain', 'garden', 'cascade', 'meadow',
-    'ember', 'nebula', 'harbor', 'aurora', 'stone'
-  ];
 
-  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const number = Math.floor(Math.random() * 900) + 10;
-  return `${capitalizeWord(adjective)}${capitalizeWord(noun)}${number}`;
-}
-
-function avatarUrlFromUsername(username) {
-  const u = String(username || '').trim();
-  const initial = u ? u.charAt(0).toUpperCase() : 'U';
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=367d7d&color=ffffff&size=200`;
-}
-
-async function ensureMongoUserForFirebaseUid(firebaseUid) {
-  const db = getDB();
-  const existing = await db.collection('users').findOne(
-    { firebaseUid },
-    { projection: { password: 0 }, maxTimeMS: 3000 }
-  );
-  if (existing) return existing;
-
-  const now = new Date();
-  const maxAttempts = 25;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const username = generateRedditStyleUsername();
-    const userDoc = {
-      email: null,
-      firebaseUid,
-      username: String(username).toLowerCase(),
-      pfpUrl: avatarUrlFromUsername(username),
-      createdAt: now,
-      updatedAt: now,
-      isGuest: true
-    };
-
-    try {
-      const result = await db.collection('users').insertOne(userDoc, { maxTimeMS: 5000 });
-      const inserted = await db.collection('users').findOne(
-        { _id: result.insertedId },
-        { projection: { password: 0 }, maxTimeMS: 3000 }
-      );
-      return inserted;
-    } catch (error) {
-      if (error && error.code === 11000) {
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw new Error('Failed to generate unique username');
-}
-
-app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
-  try {
-    const firebaseUid = req.firebaseUser?.uid || null;
-    if (!firebaseUid) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const mood = req.body?.mood ? String(req.body.mood).trim().toLowerCase() : null;
-    if (!mood) {
-      return res.status(400).json({ error: 'mood is required' });
-    }
-
-    const user = await ensureMongoUserForFirebaseUid(firebaseUid);
-
-    try {
-      const db = getDB();
-      await db.collection('users').updateOne(
-        { firebaseUid },
-        {
-          $set: {
-            lastMood: mood,
-            lastMoodAt: new Date(),
-            updatedAt: new Date()
-          }
-        },
-        { maxTimeMS: 5000 }
-      );
-    } catch (updateErr) {
-      console.error('❌ Failed to update guest mood in MongoDB:', updateErr);
-    }
-
-    return res.json({
-      success: true,
-      user
-    });
-  } catch (error) {
-    if (error.code === 50) {
-      console.error('❌ Database timeout in ensure-guest:', error.message);
-      return res.status(503).json({
-        error: 'Database temporarily slow. Please try again.',
-        retryable: true
-      });
-    }
-
-    console.error('❌ ensure-guest failed:', error);
-    return res.status(500).json({ error: 'Failed to ensure guest user' });
-  }
-});
 
 app.post('/api/chat/attachments',
   authenticateFirebase,
@@ -2936,26 +2874,11 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
 
     const db = getDB();
 
-    const { userId: resolvedUserId, firebaseUid } = await resolveAuthenticatedRequestUser(firebaseUser);
-
-    if (!resolvedUserId && firebaseUid) {
-      await ensureMongoUserForFirebaseUid(firebaseUid);
-    }
-
-    let user = null;
-    if (resolvedUserId) {
-      user = await db.collection('users').findOne(
-        { _id: new ObjectId(resolvedUserId) },
-        { maxTimeMS: 3000 }
-      );
-    }
-
-    if (!user && firebaseUid) {
-      user = await db.collection('users').findOne(
-        { firebaseUid },
-        { maxTimeMS: 3000 }
-      );
-    }
+    // ✅ FIX: Add maxTimeMS timeout
+    const user = await db.collection('users').findOne(
+      { email: firebaseUser.email },
+      { maxTimeMS: 3000 }
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -3094,6 +3017,67 @@ app.get('/api/notes', optionalFirebaseAuth, async (req, res) => {
 
 app.get('/api/moods', (req, res) => {
   res.json({ moods: config.MOODS });
+});
+
+app.get('/api/events/social_club', async (req, res) => {
+  try {
+    const db = getDB();
+    const doc = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 0, name: 1, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+    );
+
+    if (!doc) {
+      return res.json({ name: 'social_club', isEventOpen: false, updatedAt: null });
+    }
+
+    return res.json({
+      name: doc.name,
+      isEventOpen: !!doc.isEventOpen,
+      updatedAt: doc.updatedAt || null
+    });
+  } catch (error) {
+    console.error('❌ [SocialClub] Failed to fetch event status:', error);
+    return res.status(500).json({ error: 'Failed to fetch event status' });
+  }
+});
+
+app.post('/api/events/social_club/waitlist', authenticateFirebase, async (req, res) => {
+  try {
+    const { fcmToken } = req.body || {};
+    const firebaseUid = req.firebaseUser?.uid || null;
+
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Missing Firebase UID' });
+    }
+
+    if (!fcmToken || typeof fcmToken !== 'string' || fcmToken.length < 20) {
+      return res.status(400).json({ error: 'Invalid token', message: 'Missing or invalid FCM token' });
+    }
+
+    const db = getDB();
+    const now = new Date();
+
+    await db.collection('event_waitlist').updateOne(
+      { uid: firebaseUid },
+      {
+        $set: {
+          uid: firebaseUid,
+          fcmToken,
+          notified: false
+        },
+        $setOnInsert: {
+          joinedAt: now
+        }
+      },
+      { upsert: true }
+    );
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('❌ [SocialClub] Failed to join waitlist:', error);
+    return res.status(500).json({ error: 'Failed to join waitlist' });
+  }
 });
 
 async function resolveMongoUserIdFromFirebaseUid(firebaseUid) {
@@ -3292,7 +3276,8 @@ async function performUserLeaveChat(userId, roomId, reason = 'manual', providedF
 
     const bypassActiveSocketGuard = (
       reason === 'manual' ||
-      reason === 'api_beacon'
+      reason === 'api_beacon' ||
+      reason === 'location_change'
     );
 
     if (!bypassActiveSocketGuard) {
@@ -5056,21 +5041,10 @@ io.on('connection', (socket) => {
 
           } else {
             console.error(`❌ User ${roomUser.username} not connected (Presence Check Failed)`);
-
-            // IMPORTANT: Presence can be transiently missing during page transitions.
-            // Do NOT evict users here, because matchmaking.leaveRoom() can destroy the room
-            // (below_min_users) and cause ROOM_NOT_FOUND for users who are actively joining.
-            // Instead, allow a grace window; periodic cleanup / disconnect logic will handle
-            // truly stale users.
-            setTimeout(async () => {
-              try {
-                const recheck = await getUserPresence(roomUser.userId);
-                if (recheck) return;
-                console.warn(`⚠️ [Matchmaking] Presence still missing for ${roomUser.username} (${roomUser.userId}) after grace period; leaving to cleanup handlers.`);
-              } catch (e) {
-                console.warn(`⚠️ [Matchmaking] Presence recheck failed for ${roomUser.userId}:`, e?.message || e);
-              }
-            }, 8000);
+            // Check for active call before leaving matchmaking room
+            const activeCall = await findActiveCallForRoom(room.id);
+            const hasActiveCall = !!activeCall;
+            await matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
           }
         }
 
@@ -5140,6 +5114,67 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error('Join matchmaking error:', error);
       socket.emit('error', { message: 'Matchmaking failed' });
+    }
+  });
+
+  socket.on('join_social_club', async () => {
+    try {
+      const user = await getSocketUser(socket.id);
+
+      if (!user) {
+        console.error('❌ Unauthenticated socket tried to join social club:', socket.id);
+        socket.emit('error', { message: 'Not authenticated' });
+        return;
+      }
+
+      const roomSize = config.GLOBAL_SOCIAL_ROOM_SIZE || 2;
+      console.log(`🎭 [SocialClub] ${user.username} joining social club (roomSize=${roomSize})`);
+
+      await cancelUserCleanup(user.userId);
+
+      const room = await matchmaking.addToSocialQueue({
+        ...user,
+        mood: 'social_club',
+        socketId: socket.id
+      }, roomSize);
+
+      if (!room) {
+        const queueKey = `matchmaking:queue:social_club`;
+        const position = await pubClient.llen(queueKey);
+        socket.emit('queued', { mood: 'social_club', position });
+        return;
+      }
+
+      // Ensure sockets join the shared room cluster-wide.
+      for (const roomUser of room.users) {
+        io.in(`user:${roomUser.userId}`).socketsJoin(room.id);
+      }
+
+      // Emit match_found to all users in the room.
+      for (const roomUser of room.users) {
+        const matchData = {
+          roomId: room.id,
+          mood: 'social_club',
+          users: room.users.map(u => ({
+            userId: u.userId,
+            username: u.username,
+            pfpUrl: u.pfpUrl
+          })),
+          expiresAt: room.expiresAt,
+          activeCall: await findActiveCallForRoom(room.id)
+        };
+
+        io.to(`user:${roomUser.userId}`).emit('match_found', matchData);
+
+        // Track active room for disconnect resiliency.
+        await setUserActiveRoom(roomUser.userId, room.id, 'social_club');
+        if (roomUser.firebaseUid) {
+          await setUserActiveRoom(roomUser.firebaseUid, room.id, 'social_club');
+        }
+      }
+    } catch (error) {
+      console.error('❌ [SocialClub] join_social_club error:', error);
+      socket.emit('error', { message: 'Social Club matchmaking failed' });
     }
   });
 
@@ -6972,7 +7007,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('video_state_changed', async ({ callId, enabled, facingMode }) => {
+  socket.on('video_state_changed', async ({ callId, enabled }) => {
     try {
       const user = await getSocketUser(socket.id);
 
@@ -6998,19 +7033,15 @@ io.on('connection', (socket) => {
           audioEnabled: true
         };
 
-        const nextFacingMode = (typeof facingMode === 'string' && facingMode) ? facingMode : (currentState.facingMode || undefined);
-
         if (call.userMediaStates instanceof Map) {
           call.userMediaStates.set(user.userId, {
             ...currentState,
-            videoEnabled: enabled,
-            facingMode: nextFacingMode
+            videoEnabled: enabled
           });
         } else {
           call.userMediaStates[user.userId] = {
             ...currentState,
-            videoEnabled: enabled,
-            facingMode: nextFacingMode
+            videoEnabled: enabled
           };
         }
 
@@ -7021,8 +7052,7 @@ io.on('connection', (socket) => {
         // ✅ FIX: Broadcast to OTHER users only (exclude sender)
         socket.to(`call-${callId}`).emit('video_state_changed', {
           userId: user.userId,
-          enabled: enabled,
-          facingMode: nextFacingMode
+          enabled: enabled
         });
       } finally {
         await releaseCallLock();
@@ -7122,31 +7152,9 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // If this was the last socket, we can clean up immediately based on last known presence context.
-      // This avoids requiring the user to reopen the site to trigger leave.
-      const presence = await getUserPresence(userId);
-      const presenceLocation = normalizePresenceLocation(presence?.location);
-      const wasInChatContext = CHAT_CONTEXT_LOCATIONS.has(presenceLocation) || !!presence?.chatContextSeen;
-
-      if (wasInChatContext) {
-        const resolvedRoomId = await resolveRoomContextForUser(
-          userId,
-          firebaseUid,
-          presence?.roomId || presence?.activeRoomId || null,
-          { usePreferredFallback: true }
-        );
-
-        if (resolvedRoomId) {
-          console.log(`👤 [Presence] Last device disconnected for ${username}. Immediate leave for room ${resolvedRoomId}.`);
-          await performUserLeaveChat(userId, resolvedRoomId, 'socket_disconnect', firebaseUid);
-          await cancelUserCleanup(userId);
-          return;
-        }
-      }
-
       console.log(`👤 [Presence] Last device disconnected for ${username}. Scheduling distributed cleanup.`);
 
-      // Fallback: Use Redis TTL based cleanup instead of local setTimeout
+      // Use Redis TTL based cleanup instead of local setTimeout
       // Longer grace period to survive transient transport disconnects and reconnect races.
       await scheduleUserCleanup(userId, SOCKET_DISCONNECT_GRACE_MS, {
         reason: 'socket_disconnect',
@@ -7433,6 +7441,12 @@ async function startServer() {
       await db.collection('notes').createIndex({ createdAt: -1 }); // For pagination
       await db.collection('notes').createIndex({ userId: 1 }); // For user lookup
       await db.collection('notes').createIndex({ userId: 1, createdAt: -1 }); // Compound for user+pagination queries
+
+      await db.collection('event').createIndex({ name: 1 }, { unique: true });
+      await db.collection('event').createIndex({ updatedAt: -1 });
+
+      await db.collection('event_waitlist').createIndex({ uid: 1 }, { unique: true });
+      await db.collection('event_waitlist').createIndex({ notified: 1, joinedAt: 1 });
 
       console.log('✅ Database indexes created');
     } catch (indexError) {
