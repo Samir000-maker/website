@@ -1130,7 +1130,7 @@
         </button>
 
         <div class="min-w-0 flex-1">
-          <h2 class="text-base sm:text-lg font-bold truncate text-white">Mindful Space</h2>
+          <h2 id="chatHeaderTitle" class="text-base sm:text-lg font-bold truncate text-white">Mindful Space</h2>
           <div class="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-400">
             <span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span>
             <span id="onlineCount" class="truncate">Loading...</span>
@@ -1796,6 +1796,14 @@
       let timerInterval = null;
       let currentUser = null;
       let roomData = null;
+      const urlParams = new URLSearchParams(window.location.search);
+      const chatMode = urlParams.get('mode');
+      const isSocialClubMode = chatMode === 'social-club';
+
+      const chatHeaderTitleEl = document.getElementById('chatHeaderTitle');
+      if (chatHeaderTitleEl && isSocialClubMode) {
+        chatHeaderTitleEl.textContent = 'Social Club';
+      }
       let serverClockOffset = 0; // Milliseconds to add to client time to get server time
       let serverExpiresAt = null; // Absolute server timestamp for expiry
       let roomRecoveryInProgress = false;
@@ -5072,10 +5080,33 @@
           }
 
           startCachedCallMonitoring();
-          safeSocketEmit('join_room', { roomId: roomData.roomId });
+          if (roomData && roomData.roomId) {
+            safeSocketEmit('join_room', { roomId: roomData.roomId });
+          } else if (isSocialClubMode) {
+            safeSocketEmit('join_social_club', {});
+          }
           validateChatPresenceState('post_auth_join').catch(() => { });
 
           console.log('✅ ========================================\n');
+        });
+
+        socketInstance.on('match_found', async (data) => {
+          try {
+            if (!data || !data.roomId) return;
+
+            roomData = {
+              roomId: data.roomId,
+              mood: data.mood,
+              users: data.users,
+              expiresAt: data.expiresAt
+            };
+            currentRoomId = data.roomId;
+            localStorage.setItem('currentRoom', JSON.stringify(roomData));
+
+            safeSocketEmit('join_room', { roomId: data.roomId });
+          } catch (error) {
+            console.error('❌ Failed to handle match_found:', error);
+          }
         });
 
 
@@ -7366,27 +7397,35 @@
 
       const roomDataStr = localStorage.getItem('currentRoom');
       if (!roomDataStr) {
-        console.error('❌ No currentRoom in localStorage');
-        toast('No active room found', 'error');
-        setTimeout(() => window.location.href = '/mood.html', 1500);
-        return;
+        if (!isSocialClubMode) {
+          console.error('❌ No currentRoom in localStorage');
+          toast('No active room found', 'error');
+          setTimeout(() => window.location.href = '/mood.html', 1500);
+          return;
+        }
       }
 
       try {
-        roomData = JSON.parse(roomDataStr);
-        currentRoomId = roomData?.roomId || null;
-        console.log('📦 Loaded room data from localStorage:');
-        console.log(`   roomId: ${roomData.roomId}`);
+        if (roomDataStr) {
+          roomData = JSON.parse(roomDataStr);
+          currentRoomId = roomData?.roomId || null;
+          console.log('📦 Loaded room data from localStorage:');
+          console.log(`   roomId: ${roomData.roomId}`);
+        } else {
+          roomData = null;
+          currentRoomId = null;
+          console.log('🎭 Social Club mode - no currentRoom in localStorage, will join via matchmaking');
+        }
 
         // CRITICAL: Don't trust localStorage expiresAt - wait for server
-        if (roomData.expiresAt) {
+        if (roomData && roomData.expiresAt) {
           console.log(`   LocalStorage expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
           console.log(`   ⚠️ Will be replaced with server time after connection`);
         } else {
           console.log(`   No expiresAt in localStorage - will get from server`);
         }
 
-        if (!roomData.roomId) {
+        if (roomData && !roomData.roomId) {
           throw new Error('Invalid room data: missing roomId');
         }
         checkForBackgroundCall();
