@@ -1838,7 +1838,7 @@ app.get('/env-config.js', (req, res) => {
       measurementId: process.env.measurementId || ''
     };
 
-    const vapidKey = process.env.FCM_VAPID_KEY || '';
+    const vapidKey = process.env.FCM_VAPID_KEY || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec';
 
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/javascript');
