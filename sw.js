@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vibegra-pwa-v1';
+const CACHE_NAME = 'vibegra-pwa-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -86,6 +86,9 @@ self.addEventListener('fetch', (event) => {
 
   // Avoid caching API endpoints and sockets; keep SW minimal and non-breaking.
   if (url.pathname.startsWith('/api/')) return;
+
+  // Avoid caching frequently updated boot/config scripts.
+  if (url.pathname === '/social-club.js' || url.pathname === '/env-config.js') return;
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
