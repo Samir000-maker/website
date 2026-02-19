@@ -281,6 +281,7 @@
     const card = qs(wrap, '.social-club-card');
 
     let pollTimer = null;
+    let sse = null;
 
     async function refresh() {
       try {
@@ -291,6 +292,31 @@
         if (btn) {
           btn.disabled = false;
         }
+      }
+    }
+
+    function startRealtime() {
+      try {
+        if (typeof EventSource === 'undefined') return;
+        if (sse) return;
+
+        sse = new EventSource('/api/events/social_club/stream');
+        sse.onmessage = (ev) => {
+          try {
+            const data = ev?.data ? JSON.parse(ev.data) : null;
+            if (!data || data.type !== 'social_club_state') return;
+            const event = data.event || {};
+            setUiState(card, { isEventOpen: !!event.isEventOpen });
+          } catch { }
+        };
+        sse.onerror = () => {
+          try {
+            sse && sse.close && sse.close();
+          } catch { }
+          sse = null;
+        };
+      } catch {
+        sse = null;
       }
     }
 
@@ -329,6 +355,8 @@
 
     refresh();
 
+    startRealtime();
+
     const intervalMs = Math.max(4000, Number(options.pollIntervalMs || 8000));
     pollTimer = setInterval(refresh, intervalMs);
 
@@ -340,6 +368,9 @@
       refresh,
       destroy: () => {
         if (pollTimer) clearInterval(pollTimer);
+        try {
+          if (sse) sse.close();
+        } catch { }
         wrap.remove();
       }
     };
