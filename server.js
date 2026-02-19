@@ -171,17 +171,17 @@ async function notifySocialClubWaitlist(db, payload = {}) {
       console.log(`📣 [SocialClub] Sending FCM multicast chunk (${chunk.length})`);
       const response = await admin.messaging().sendEachForMulticast({
         tokens: chunk,
-        notification: { title, body },
         data: {
           type: 'social_club_open',
-          url: clickUrl
+          url: clickUrl,
+          title,
+          body
         },
         webpush: {
           fcmOptions: { link: clickUrl },
-          notification: {
-            title,
-            body,
-            icon: '/favicon.ico'
+          headers: {
+            TTL: '3600',
+            Urgency: 'high'
           }
         }
       });
@@ -308,9 +308,14 @@ function registerSocialClubSseRoutes(app) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('Content-Encoding', 'identity');
       res.flushHeaders?.();
 
       socialClubSseClients.add(res);
+      try {
+        console.log(`📡 [SocialClub] SSE client connected (clients=${socialClubSseClients.size})`);
+      } catch { }
 
       res.write('event: ready\n');
       res.write('data: {}\n\n');
@@ -342,6 +347,9 @@ function registerSocialClubSseRoutes(app) {
       req.on('close', () => {
         clearInterval(keepAlive);
         try { socialClubSseClients.delete(res); } catch { }
+        try {
+          console.log(`📡 [SocialClub] SSE client disconnected (clients=${socialClubSseClients.size})`);
+        } catch { }
       });
     } catch (e) {
       console.error('❌ [SocialClub] SSE stream failed:', e);
