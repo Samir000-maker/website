@@ -109,6 +109,37 @@ function requireSocialClubAdmin(req, res, next) {
   return next();
 }
 
+async function requireSocialClubOwner(req, res, next) {
+  try {
+    const db = getDB();
+    const firebaseUid = req.firebaseUser?.uid || null;
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Missing Firebase UID' });
+    }
+
+    const user = await db.collection('users').findOne(
+      {
+        $or: [
+          { firebaseUid },
+          ...(req.firebaseUser?.email ? [{ email: req.firebaseUser.email }] : [])
+        ]
+      },
+      { projection: { _id: 1, email: 1 }, maxTimeMS: 3000 }
+    );
+
+    const email = (user?.email || '').trim().toLowerCase();
+    if (email !== 'samirahmed1887@gmail.com') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    req.socialClubOwnerEmail = email;
+    return next();
+  } catch (e) {
+    console.error('❌ [SocialClub] Owner check failed:', e);
+    return res.status(500).json({ error: 'Owner check failed' });
+  }
+}
+
 async function notifySocialClubWaitlist(db, payload = {}) {
   const title = payload.title || 'Social Club is Live';
   const body = payload.body || 'Tap to enter Social Club now.';
@@ -1959,6 +1990,85 @@ app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res
     return res.json({ success: true, isEventOpen: nextOpen, notified: notify });
   } catch (error) {
     console.error('❌ [SocialClub] Admin event update failed:', error);
+    return res.status(500).json({ error: 'Failed to update event' });
+  }
+});
+
+app.get('/api/admin/social_club/event-owner', authenticateFirebase, requireSocialClubOwner, async (req, res) => {
+  try {
+    const db = getDB();
+    const doc = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 0, name: 1, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+    );
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      ownerEmail: req.socialClubOwnerEmail,
+      event: {
+        name: 'social_club',
+        isEventOpen: !!doc?.isEventOpen,
+        updatedAt: doc?.updatedAt || null
+      }
+    });
+  } catch (e) {
+    console.error('❌ [SocialClub] Owner event fetch failed:', e);
+    return res.status(500).json({ error: 'Failed to fetch event' });
+  }
+});
+
+app.post('/api/admin/social_club/event-owner', authenticateFirebase, requireSocialClubOwner, async (req, res) => {
+  try {
+    const { isEventOpen } = req.body || {};
+    const nextOpen = !!isEventOpen;
+    const db = getDB();
+    const now = new Date();
+
+    const prev = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 0, isEventOpen: 1 }, maxTimeMS: 3000 }
+    );
+
+    await db.collection('event').updateOne(
+      { name: 'social_club' },
+      {
+        $set: {
+          name: 'social_club',
+          isEventOpen: nextOpen,
+          updatedAt: now
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true }
+    );
+
+    await setSocialClubOpenState(nextOpen);
+    if (!nextOpen) {
+      await setSocialClubNotifyFlag(null);
+    }
+
+    let notify = null;
+    if (!prev?.isEventOpen && nextOpen) {
+      try {
+        notify = await notifySocialClubWaitlist(db, {
+          title: 'Social Club is Live',
+          body: 'Tap to enter now.',
+          clickUrl: '/chat.html?mode=social-club'
+        });
+        await setSocialClubNotifyFlag('1');
+      } catch (e) {
+        console.error('❌ [SocialClub] Owner notify waitlist failed:', e?.message || e);
+        notify = { error: e?.message || String(e) };
+      }
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, isEventOpen: nextOpen, notified: notify });
+  } catch (e) {
+    console.error('❌ [SocialClub] Owner event update failed:', e);
     return res.status(500).json({ error: 'Failed to update event' });
   }
 });
