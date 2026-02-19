@@ -171,13 +171,7 @@
         const title = payload?.notification?.title || 'Notification';
         const body = payload?.notification?.body || '';
         try { console.log('📩 [SocialClub] FCM foreground message:', payload); } catch { }
-        toast(body ? `${title}: ${body}` : title);
-
-        try {
-          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            new Notification(title, { body });
-          }
-        } catch { }
+        try { void title; void body; } catch { }
       });
     } catch { }
   }
