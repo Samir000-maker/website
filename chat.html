@@ -7508,8 +7508,9 @@
         setInitialCallButtonState();
       }
       // Render initial users
-      if (usersList && Array.isArray(roomData.users)) {
-        roomData.users.forEach(user => {
+      const initialUsers = (roomData && Array.isArray(roomData.users)) ? roomData.users : [];
+      if (usersList && initialUsers.length) {
+        initialUsers.forEach(user => {
           const userCard = document.createElement('div');
           userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
 
@@ -7537,7 +7538,7 @@
         setupUserCardClick();
 
         if (onlineCount) {
-          onlineCount.textContent = `${roomData.users.length} Online`;
+          onlineCount.textContent = `${initialUsers.length} Online`;
         }
       }
 
