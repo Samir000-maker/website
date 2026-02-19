@@ -191,6 +191,83 @@ async function notifySocialClubWaitlist(db, payload = {}) {
   return { sent, failed };
 }
 
+async function setSocialClubOpenState(nextOpen) {
+  try {
+    await pubClient.set('event:social_club:isOpen', nextOpen ? 'true' : 'false');
+  } catch (e) {
+    console.warn('⚠️ [SocialClub] Failed to set Redis open state:', e?.message || e);
+  }
+}
+
+async function getSocialClubOpenState() {
+  try {
+    const v = await pubClient.get('event:social_club:isOpen');
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function startSocialClubEventWatcher(db) {
+  if (startSocialClubEventWatcher._started) return;
+  startSocialClubEventWatcher._started = true;
+
+  const intervalMs = Math.max(5000, Number(process.env.SOCIAL_CLUB_WATCH_INTERVAL_MS || 10000));
+
+  setInterval(async () => {
+    let lock = null;
+    try {
+      lock = await redlock.acquire(['lock:event:social_club:watch'], Math.max(4000, intervalMs - 500));
+
+      const now = new Date();
+      const result = await db.collection('event').findOneAndUpdate(
+        { name: 'social_club' },
+        {
+          $setOnInsert: {
+            name: 'social_club',
+            isEventOpen: false,
+            createdAt: now
+          }
+        },
+        { upsert: true, returnDocument: 'after', projection: { _id: 0, isEventOpen: 1 } }
+      );
+
+      const isOpen = !!(result && result.value && result.value.isEventOpen);
+      const prev = await getSocialClubOpenState();
+
+      if (prev === null) {
+        await setSocialClubOpenState(isOpen);
+        return;
+      }
+
+      if (prev !== isOpen) {
+        await setSocialClubOpenState(isOpen);
+      }
+
+      if (!prev && isOpen) {
+        try {
+          await notifySocialClubWaitlist(db, {
+            title: 'Social Club is Live',
+            body: 'Tap to enter now.',
+            clickUrl: '/chat.html?mode=social-club'
+          });
+        } catch (e) {
+          console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
+        }
+      }
+    } catch (e) {
+      if (e && e.name === 'ExecutionError') return;
+      console.warn('⚠️ [SocialClub] Watcher tick failed:', e?.message || e);
+    } finally {
+      try {
+        if (lock) await lock.release();
+      } catch { }
+    }
+  }, intervalMs);
+}
+
 console.log('✅ Redlock initialized for distributed locking');
 
 function logLifecycle(event, data = {}) {
@@ -1805,6 +1882,8 @@ app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res
       { upsert: true }
     );
 
+    await setSocialClubOpenState(nextOpen);
+
     let notify = null;
     if (!prev?.isEventOpen && nextOpen) {
       try {
@@ -2427,6 +2506,89 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
 });
 
 
+app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
+  try {
+    const firebaseUser = req.firebaseUser;
+    const db = getDB();
+
+    if (!firebaseUser?.uid) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Missing Firebase UID' });
+    }
+
+    const mood = (req.body && typeof req.body.mood === 'string') ? req.body.mood.trim() : '';
+    if (!mood) {
+      return res.status(400).json({ error: 'Invalid mood', message: 'Mood is required' });
+    }
+
+    const existing = await db.collection('users').findOne(
+      { firebaseUid: firebaseUser.uid },
+      { projection: { username: 1, pfpUrl: 1, _id: 1 }, maxTimeMS: 3000 }
+    );
+
+    if (existing) {
+      return res.json({
+        success: true,
+        user: {
+          userId: existing._id.toString(),
+          username: existing.username || null,
+          pfpUrl: existing.pfpUrl || null
+        }
+      });
+    }
+
+    let username = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const suffix = Math.floor(Math.random() * 999999) + 1;
+      const candidate = `guest_${suffix}`;
+      const taken = await db.collection('users').findOne(
+        { username: candidate },
+        { projection: { _id: 1 }, maxTimeMS: 2000 }
+      );
+      if (!taken) {
+        username = candidate;
+        break;
+      }
+    }
+    if (!username) {
+      username = `guest_${uuidv4().slice(0, 8)}`;
+    }
+
+    const now = new Date();
+    const doc = {
+      email: firebaseUser.email || null,
+      firebaseUid: firebaseUser.uid,
+      username,
+      pfpUrl: getDefaultProfilePicture(),
+      createdAt: now,
+      updatedAt: now,
+      lastMood: mood
+    };
+
+    const result = await db.collection('users').insertOne(doc, { maxTimeMS: 5000 });
+
+    return res.json({
+      success: true,
+      user: {
+        userId: result.insertedId.toString(),
+        username: doc.username,
+        pfpUrl: doc.pfpUrl
+      }
+    });
+  } catch (error) {
+    if (error.code === 50) {
+      console.error('❌ Database timeout in ensure-guest:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
+
+    console.error('❌ Ensure guest error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
   try {
     const { username, pfpUrl } = req.body;
@@ -3022,14 +3184,24 @@ app.get('/api/moods', (req, res) => {
 app.get('/api/events/social_club', async (req, res) => {
   try {
     const db = getDB();
-    const doc = await db.collection('event').findOne(
+    const now = new Date();
+    const result = await db.collection('event').findOneAndUpdate(
       { name: 'social_club' },
-      { projection: { _id: 0, name: 1, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+      {
+        $setOnInsert: {
+          name: 'social_club',
+          isEventOpen: false,
+          createdAt: now
+        }
+      },
+      {
+        upsert: true,
+        returnDocument: 'after',
+        projection: { _id: 0, name: 1, isEventOpen: 1, updatedAt: 1 }
+      }
     );
 
-    if (!doc) {
-      return res.json({ name: 'social_club', isEventOpen: false, updatedAt: null });
-    }
+    const doc = result?.value || { name: 'social_club', isEventOpen: false, updatedAt: null };
 
     return res.json({
       name: doc.name,
@@ -7523,6 +7695,8 @@ async function startServer() {
     // FIREBASE INITIALIZATION
     // ============================================
     initializeFirebase();
+
+    startSocialClubEventWatcher(db);
 
     // ============================================
     // START HTTP SERVER
