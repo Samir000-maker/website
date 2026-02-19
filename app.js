@@ -762,21 +762,35 @@ const Presence = {
     if (!token) return null;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/presence/context`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          location,
-          path,
-          roomId: roomId || null,
-          source: options.source || 'client_lifecycle',
-          reason
-        }),
-        keepalive: options.keepalive !== false
-      });
+      const makeRequest = async (bearer) => {
+        return await fetch('/api/presence/context', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${bearer}`
+          },
+          body: JSON.stringify({
+            location,
+            path,
+            roomId: roomId || null,
+            source: options.source || 'client_lifecycle',
+            reason
+          }),
+          keepalive: options.keepalive !== false
+        });
+      };
+
+      let response = await makeRequest(token);
+      if (response.status === 401) {
+        try {
+          const refreshed = await user.getIdToken(true);
+          if (refreshed) {
+            this._tokenCache = refreshed;
+            response = await makeRequest(refreshed);
+          }
+        } catch { }
+      }
 
       if (!response.ok) return null;
       const payload = await response.json().catch(() => null);
