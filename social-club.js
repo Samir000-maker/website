@@ -122,25 +122,6 @@
   async function ensureFcmToken() {
     const { messaging, vapidKey } = await ensureMessaging();
 
-    if (!('serviceWorker' in navigator)) {
-      throw new Error('Service workers are not supported in this browser');
-    }
-
-    let registration = null;
-    try {
-      registration = await navigator.serviceWorker.getRegistration('/');
-    } catch { }
-
-    if (!registration) {
-      registration = await navigator.serviceWorker.register('/sw.js');
-    }
-
-    try {
-      if (typeof messaging.useServiceWorker === 'function') {
-        messaging.useServiceWorker(registration);
-      }
-    } catch { }
-
     let permission = Notification.permission;
     if (permission !== 'granted') {
       const ok = window.confirm(
@@ -166,6 +147,25 @@
     if (permission !== 'granted') {
       throw new Error('Notifications permission not granted. Please allow notifications to join the waitlist.');
     }
+
+    if (!('serviceWorker' in navigator)) {
+      throw new Error('Service workers are not supported in this browser');
+    }
+
+    let registration = null;
+    try {
+      registration = await navigator.serviceWorker.getRegistration('/');
+    } catch { }
+
+    if (!registration) {
+      registration = await navigator.serviceWorker.register('/sw.js');
+    }
+
+    try {
+      if (typeof messaging.useServiceWorker === 'function') {
+        messaging.useServiceWorker(registration);
+      }
+    } catch { }
 
     const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: registration });
     if (!token) {
