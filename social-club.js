@@ -6,7 +6,7 @@
   }
 
   function getVapidKey() {
-    return (window.__VIBE_FCM_VAPID_KEY__ || '').trim();
+    return (window.__VIBE_FCM_VAPID_KEY__ || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec').trim();
   }
 
   function qs(el, sel) {
