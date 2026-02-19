@@ -3412,6 +3412,10 @@ app.get('/api/moods', (req, res) => {
 
 app.get('/api/events/social_club', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     const db = getDB();
     const now = new Date();
     const result = await db.collection('event').findOneAndUpdate(
@@ -3438,6 +3442,13 @@ app.get('/api/events/social_club', async (req, res) => {
       updatedAt: doc.updatedAt || null
     });
   } catch (error) {
+    if (error?.code === 50) {
+      console.error('❌ [SocialClub] Event status DB timeout:', error.message);
+      return res.status(503).json({
+        error: 'Database temporarily slow. Please try again.',
+        retryable: true
+      });
+    }
     console.error('❌ [SocialClub] Failed to fetch event status:', error);
     return res.status(500).json({ error: 'Failed to fetch event status' });
   }
