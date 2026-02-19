@@ -32,6 +32,7 @@ import cors from 'cors';
 import multer from 'multer';
 import { ObjectId } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
+import 'dotenv/config';
 import config from './config.js';
 import { connectDB, getDB } from './database.js';
 import { initializeFirebase, authenticateFirebase, optionalFirebaseAuth, verifyToken } from './firebase-auth.js';
