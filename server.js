@@ -210,6 +210,26 @@ async function getSocialClubOpenState() {
   }
 }
 
+async function getSocialClubNotifyFlag() {
+  try {
+    return await pubClient.get('event:social_club:openNotified');
+  } catch {
+    return null;
+  }
+}
+
+async function setSocialClubNotifyFlag(value) {
+  try {
+    if (!value) {
+      await pubClient.del('event:social_club:openNotified');
+      return;
+    }
+    await pubClient.set('event:social_club:openNotified', String(value), 'EX', 7 * 24 * 60 * 60);
+  } catch (e) {
+    console.warn('⚠️ [SocialClub] Failed to set notify flag:', e?.message || e);
+  }
+}
+
 function startSocialClubEventWatcher(db) {
   if (startSocialClubEventWatcher._started) return;
   startSocialClubEventWatcher._started = true;
@@ -237,7 +257,30 @@ function startSocialClubEventWatcher(db) {
       const isOpen = !!(result && result.value && result.value.isEventOpen);
       const prev = await getSocialClubOpenState();
 
+      // Clear "already notified" marker when event is closed.
+      if (!isOpen) {
+        await setSocialClubNotifyFlag(null);
+      }
+
       if (prev === null) {
+        // First watcher tick after (re)start. If event is already open and we haven't notified yet,
+        // we still want to notify (manual DB flip might have happened while server was down).
+        if (isOpen) {
+          const notifiedFlag = await getSocialClubNotifyFlag();
+          if (!notifiedFlag) {
+            try {
+              await notifySocialClubWaitlist(db, {
+                title: 'Social Club is Live',
+                body: 'Tap to enter now.',
+                clickUrl: '/chat.html?mode=social-club'
+              });
+              await setSocialClubNotifyFlag('1');
+            } catch (e) {
+              console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
+            }
+          }
+        }
+
         await setSocialClubOpenState(isOpen);
         return;
       }
@@ -248,11 +291,15 @@ function startSocialClubEventWatcher(db) {
 
       if (!prev && isOpen) {
         try {
-          await notifySocialClubWaitlist(db, {
-            title: 'Social Club is Live',
-            body: 'Tap to enter now.',
-            clickUrl: '/chat.html?mode=social-club'
-          });
+          const notifiedFlag = await getSocialClubNotifyFlag();
+          if (!notifiedFlag) {
+            await notifySocialClubWaitlist(db, {
+              title: 'Social Club is Live',
+              body: 'Tap to enter now.',
+              clickUrl: '/chat.html?mode=social-club'
+            });
+            await setSocialClubNotifyFlag('1');
+          }
         } catch (e) {
           console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
         }
