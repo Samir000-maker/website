@@ -182,6 +182,11 @@ async function notifySocialClubWaitlist(db, payload = {}) {
           headers: {
             TTL: '3600',
             Urgency: 'high'
+          },
+          notification: {
+            title,
+            body,
+            icon: '/favicon.ico'
           }
         }
       });
@@ -5754,8 +5759,12 @@ io.on('connection', (socket) => {
         }
       }
     } catch (error) {
-      console.error('❌ [SocialClub] join_social_club error:', error);
-      socket.emit('error', { message: 'Social Club matchmaking failed' });
+      console.error('❌ [SocialClub] join_social_club error:', error?.stack || error);
+      socket.emit('error', {
+        code: 'SOCIAL_CLUB_MATCHMAKING_FAILED',
+        message: 'Social Club matchmaking failed',
+        detail: error?.message ? String(error.message).slice(0, 180) : ''
+      });
     }
   });
 
