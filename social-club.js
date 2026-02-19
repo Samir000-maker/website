@@ -6,7 +6,7 @@
   }
 
   function getVapidKey() {
-    return (window.__VIBE_FCM_VAPID_KEY__ || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec').trim();
+    return (window.__VIBE_FCM_VAPID_KEY__ || '').trim();
   }
 
   function qs(el, sel) {
@@ -170,7 +170,14 @@
       messaging.onMessage((payload) => {
         const title = payload?.notification?.title || 'Notification';
         const body = payload?.notification?.body || '';
+        try { console.log('📩 [SocialClub] FCM foreground message:', payload); } catch { }
         toast(body ? `${title}: ${body}` : title);
+
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            new Notification(title, { body });
+          }
+        } catch { }
       });
     } catch { }
   }
@@ -223,11 +230,21 @@
   }
 
   function setUiState(cardEl, state) {
+    const root = cardEl ? cardEl.closest('[data-social-club-root]') : null;
+    const kicker = qs(root, '.social-club-kicker');
     const dot = qs(cardEl, '[data-social-dot]');
     const statusText = qs(cardEl, '[data-social-status-text]');
     const btn = qs(cardEl, '[data-social-action]');
 
     const isOpen = !!state?.isEventOpen;
+
+    try {
+      console.log('🎭 [SocialClub] UI state update:', { isEventOpen: isOpen, updatedAt: state?.updatedAt || null });
+    } catch { }
+
+    if (kicker) {
+      kicker.textContent = isOpen ? 'Event is ongoing' : 'Event will start soon';
+    }
 
     if (dot) {
       dot.classList.toggle('live', isOpen);
@@ -286,9 +303,11 @@
     async function refresh() {
       try {
         const status = await getEventStatus();
+        try { console.log('🎭 [SocialClub] Poll status:', status); } catch { }
         setUiState(card, status);
         if (btn) btn.disabled = false;
       } catch (err) {
+        try { console.warn('⚠️ [SocialClub] Poll failed:', err?.message || err); } catch { }
         if (btn) {
           btn.disabled = false;
         }
@@ -301,15 +320,20 @@
         if (sse) return;
 
         sse = new EventSource('/api/events/social_club/stream');
+        sse.onopen = () => {
+          try { console.log('📡 [SocialClub] SSE connected'); } catch { }
+        };
         sse.onmessage = (ev) => {
           try {
             const data = ev?.data ? JSON.parse(ev.data) : null;
             if (!data || data.type !== 'social_club_state') return;
             const event = data.event || {};
+            try { console.log('📡 [SocialClub] SSE state:', event); } catch { }
             setUiState(card, { isEventOpen: !!event.isEventOpen });
           } catch { }
         };
         sse.onerror = () => {
+          try { console.warn('⚠️ [SocialClub] SSE error - reconnecting via poll'); } catch { }
           try {
             sse && sse.close && sse.close();
           } catch { }
