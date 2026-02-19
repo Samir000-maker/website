@@ -3645,10 +3645,25 @@ async function resolveMongoUserIdFromFirebaseUid(firebaseUid) {
 
 async function resolveAuthenticatedRequestUser(firebaseUser) {
   const firebaseUid = firebaseUser?.uid || null;
+  const email = (firebaseUser?.email || '').trim().toLowerCase() || null;
   let userId = firebaseUser?.userId || null;
 
   if (!userId && firebaseUid) {
     userId = await resolveMongoUserIdFromFirebaseUid(firebaseUid);
+  }
+
+  // Fallback for legacy users that might not have firebaseUid persisted.
+  if (!userId && email) {
+    try {
+      const db = getDB();
+      const userDoc = await db.collection('users').findOne(
+        { email },
+        { projection: { _id: 1 }, maxTimeMS: 3000 }
+      );
+      userId = userDoc?._id?.toString() || null;
+    } catch (error) {
+      console.error(`❌ Failed resolving Mongo user by email ${email}:`, error.message);
+    }
   }
 
   return { userId, firebaseUid };
