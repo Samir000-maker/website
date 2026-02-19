@@ -120,6 +120,39 @@ export async function authenticateFirebase(req, res, next) {
     next();
   } catch (error) {
     console.error('❌ Token verification failed');
+    try {
+      console.error('   Firebase projectId(config):', config.FIREBASE_PROJECT_ID || '(empty)');
+      console.error('   Service account configured:', !!config.FIREBASE_SERVICE_ACCOUNT_PATH);
+    } catch { }
+
+    try {
+      const authHeader = req.headers.authorization;
+      const idToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+      if (idToken) {
+        const parts = idToken.split('.');
+        if (parts.length === 3) {
+          const payloadRaw = Buffer.from(parts[1], 'base64').toString('utf8');
+          const payload = JSON.parse(payloadRaw);
+          console.error('   Token details:', {
+            aud: payload?.aud || null,
+            iss: payload?.iss || null,
+            sub: payload?.sub || null,
+            user_id: payload?.user_id || null,
+            email: payload?.email || null,
+            exp: payload?.exp || null,
+            iat: payload?.iat || null
+          });
+        }
+      }
+    } catch { }
+
+    try {
+      console.error('   Firebase verify error:', {
+        code: error?.code || null,
+        message: error?.message || null
+      });
+    } catch { }
+
     const message =
       error.message === 'TOKEN_EXPIRED'
         ? 'Authentication token expired'
