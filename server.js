@@ -159,6 +159,8 @@ async function notifySocialClubWaitlist(db, payload = {}) {
   let sent = 0;
   let failed = 0;
   const invalidTokens = new Set();
+  const successTokens = new Set();
+  const failureByToken = new Map();
 
   const chunkSize = 500;
   for (let i = 0; i < tokens.length; i += chunkSize) {
@@ -192,6 +194,8 @@ async function notifySocialClubWaitlist(db, payload = {}) {
         if (r.success) return;
         const t = chunk[idx];
         const code = r.error?.code || '';
+        const msg = r.error?.message || '';
+        if (t) failureByToken.set(t, { code, message: msg });
         if (
           code.includes('registration-token-not-registered') ||
           code.includes('invalid-argument') ||
@@ -200,17 +204,43 @@ async function notifySocialClubWaitlist(db, payload = {}) {
           invalidTokens.add(t);
         }
       });
+
+      response.responses.forEach((r, idx) => {
+        if (!r.success) return;
+        const t = chunk[idx];
+        if (t) successTokens.add(t);
+      });
     } catch (error) {
       console.error('❌ [SocialClub] Failed sending FCM batch:', error?.message || error);
       failed += chunk.length;
+      for (const t of chunk) {
+        if (t) failureByToken.set(t, { code: 'batch_error', message: error?.message || String(error) });
+      }
     }
   }
 
-  const ids = entries.map(e => e._id);
-  await db.collection('event_waitlist').updateMany(
-    { _id: { $in: ids } },
-    { $set: { notified: true, notifiedAt: new Date() } }
-  );
+  const now = new Date();
+  const successIds = [];
+  const failureIds = [];
+  for (const e of entries) {
+    if (!e?.fcmToken) continue;
+    if (successTokens.has(e.fcmToken)) successIds.push(e._id);
+    else failureIds.push(e._id);
+  }
+
+  if (successIds.length) {
+    await db.collection('event_waitlist').updateMany(
+      { _id: { $in: successIds } },
+      { $set: { notified: true, notifiedAt: now } }
+    );
+  }
+
+  if (failureIds.length) {
+    await db.collection('event_waitlist').updateMany(
+      { _id: { $in: failureIds } },
+      { $set: { lastNotifyFailedAt: now } }
+    );
+  }
 
   if (invalidTokens.size) {
     const invalidIds = [];
@@ -223,9 +253,96 @@ async function notifySocialClubWaitlist(db, payload = {}) {
     }
   }
 
+  if (failureByToken.size) {
+    const samples = [];
+    for (const [t, info] of failureByToken.entries()) {
+      samples.push({ tokenTail: String(t).slice(-10), code: info?.code || '', message: info?.message || '' });
+      if (samples.length >= 3) break;
+    }
+    console.log(`📣 [SocialClub] FCM failure samples: ${JSON.stringify(samples)}`);
+  }
+
   console.log(`📣 [SocialClub] notify done: sent=${sent} failed=${failed} invalidTokens=${invalidTokens.size}`);
   return { sent, failed };
 }
+
+let broadcastSocialClubState = async () => {};
+
+const socialClubSseClients = new Set();
+
+function encodeSseData(obj) {
+  try {
+    return `data: ${JSON.stringify(obj)}\n\n`;
+  } catch {
+    return 'data: {}\n\n';
+  }
+}
+
+broadcastSocialClubState = async (state) => {
+  if (!socialClubSseClients.size) return;
+  const payload = encodeSseData({
+    type: 'social_club_state',
+    event: {
+      name: 'social_club',
+      isEventOpen: !!state?.isEventOpen,
+      updatedAt: state?.updatedAt || null
+    }
+  });
+  for (const res of Array.from(socialClubSseClients)) {
+    try {
+      res.write(payload);
+    } catch {
+      try { socialClubSseClients.delete(res); } catch { }
+    }
+  }
+};
+
+app.get('/api/events/social_club/stream', async (req, res) => {
+  try {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    socialClubSseClients.add(res);
+
+    res.write('event: ready\n');
+    res.write('data: {}\n\n');
+
+    try {
+      const db = getDB();
+      const doc = await db.collection('event').findOne(
+        { name: 'social_club' },
+        { projection: { _id: 0, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+      );
+      res.write(
+        encodeSseData({
+          type: 'social_club_state',
+          event: {
+            name: 'social_club',
+            isEventOpen: !!doc?.isEventOpen,
+            updatedAt: doc?.updatedAt || null
+          }
+        })
+      );
+    } catch { }
+
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(': keep-alive\n\n');
+      } catch { }
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      try { socialClubSseClients.delete(res); } catch { }
+    });
+  } catch (e) {
+    console.error('❌ [SocialClub] SSE stream failed:', e);
+    try { res.end(); } catch { }
+  }
+});
 
 async function setSocialClubOpenState(nextOpen) {
   try {
@@ -360,7 +477,7 @@ function startSocialClubEventWatcher(db) {
 
     const rawValue = doc?.isEventOpen;
     const isOpen = !!rawValue;
-    return { isOpen, rawValue };
+    return { isOpen, rawValue, updatedAt: doc?.updatedAt || null };
   };
 
   const enableChangeStreams = String(process.env.SOCIAL_CLUB_USE_CHANGE_STREAMS || '1') === '1';
@@ -385,6 +502,9 @@ function startSocialClubEventWatcher(db) {
           const rawValue = ev?.fullDocument?.isEventOpen;
           const isOpen = !!rawValue;
           await handleState({ isOpen, rawValue, source: 'change' });
+          try {
+            await broadcastSocialClubState({ isEventOpen: isOpen, updatedAt: ev?.fullDocument?.updatedAt || null });
+          } catch { }
         } catch (e) {
           console.warn('⚠️ [SocialClub] ChangeStream handler failed:', e?.message || e);
         }
@@ -405,8 +525,12 @@ function startSocialClubEventWatcher(db) {
     try {
       lock = await redlock.acquire(['lock:event:social_club:watch'], Math.max(4000, intervalMs - 500));
 
-      const { isOpen, rawValue } = await readCurrentStateFromMongo();
+      const { isOpen, rawValue, updatedAt } = await readCurrentStateFromMongo();
       await handleState({ isOpen, rawValue, source: 'poll' });
+
+      try {
+        await broadcastSocialClubState({ isEventOpen: isOpen, updatedAt });
+      } catch { }
     } catch (e) {
       if (e && e.name === 'ExecutionError') return;
       console.warn('⚠️ [SocialClub] Watcher tick failed:', e?.message || e);
@@ -2033,6 +2157,9 @@ app.post('/api/admin/social_club/event', requireSocialClubAdmin, async (req, res
     );
 
     await setSocialClubOpenState(nextOpen);
+    try {
+      await broadcastSocialClubState({ isEventOpen: nextOpen, updatedAt: now });
+    } catch { }
 
     let notify = null;
     if (!prev?.isEventOpen && nextOpen) {
@@ -2107,6 +2234,9 @@ app.post('/api/admin/social_club/event-owner', authenticateFirebase, requireSoci
     );
 
     await setSocialClubOpenState(nextOpen);
+    try {
+      await broadcastSocialClubState({ isEventOpen: nextOpen, updatedAt: now });
+    } catch { }
     if (!nextOpen) {
       await setSocialClubNotifyFlag(null);
     }
