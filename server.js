@@ -4702,26 +4702,12 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (!userId || typeof userId !== 'string') {
-        console.error('❌ [authenticate] Missing or invalid userId');
-        socket.emit('auth_error', {
-          message: 'Invalid user ID',
-          code: 'INVALID_USER_ID'
-        });
-        return;
+      let requestedUserId = null;
+      if (userId && typeof userId === 'string' && /^[a-f\d]{24}$/i.test(userId)) {
+        requestedUserId = userId;
       }
 
-      // Validate userId format (MongoDB ObjectId)
-      if (!/^[a-f\d]{24}$/i.test(userId)) {
-        console.error(`❌ [authenticate] Invalid ObjectId format: ${userId}`);
-        socket.emit('auth_error', {
-          message: 'Invalid user ID format',
-          code: 'INVALID_USER_ID'
-        });
-        return;
-      }
-
-      console.log(`🔐 [Auth] Starting authentication for userId: ${userId} (Socket: ${socket.id})`);
+      console.log(`🔐 [Auth] Starting authentication (Socket: ${socket.id})${requestedUserId ? ` requestedUserId=${requestedUserId}` : ''}`);
 
       // ============================================
       // TOKEN VERIFICATION
@@ -4756,9 +4742,9 @@ io.on('connection', (socket) => {
 
       while (retryCount <= MAX_RETRIES) {
         try {
-          // ✅ FIX: Add maxTimeMS for query timeout
+          // Prefer resolving by Firebase UID to avoid stale client userId causing auth failures
           user = await db.collection('users').findOne(
-            { _id: new ObjectId(userId) },
+            { firebaseUid: decodedToken.uid },
             {
               projection: {
                 _id: 1,
@@ -4767,9 +4753,25 @@ io.on('connection', (socket) => {
                 email: 1,
                 firebaseUid: 1
               },
-              maxTimeMS: 5000 // ✅ FIX: 5-second timeout per query
+              maxTimeMS: 5000
             }
           );
+
+          if (!user && requestedUserId) {
+            user = await db.collection('users').findOne(
+              { _id: new ObjectId(requestedUserId) },
+              {
+                projection: {
+                  _id: 1,
+                  username: 1,
+                  pfpUrl: 1,
+                  email: 1,
+                  firebaseUid: 1
+                },
+                maxTimeMS: 5000
+              }
+            );
+          }
           break; // Success - exit retry loop
 
         } catch (dbError) {
@@ -4791,7 +4793,7 @@ io.on('connection', (socket) => {
       }
 
       if (!user) {
-        console.error(`❌ [Auth] User not found in database: ${userId}`);
+        console.error(`❌ [Auth] User not found in database for Firebase UID: ${decodedToken.uid}`);
         socket.emit('auth_error', {
           message: 'User not found',
           code: 'USER_NOT_FOUND'
@@ -4801,8 +4803,7 @@ io.on('connection', (socket) => {
 
       // CRITICAL: Verify Firebase UID matches (prevent token spoofing)
       if (user.firebaseUid !== decodedToken.uid) {
-        console.error(`❌ [Auth] Firebase UID mismatch for user ${userId}`);
-        console.error(`   Expected: ${user.firebaseUid}, Got: ${decodedToken.uid}`);
+        console.error(`❌ [Auth] Firebase UID mismatch (token=${decodedToken.uid}, user.firebaseUid=${user.firebaseUid})`);
         socket.emit('auth_error', {
           message: 'Authentication mismatch',
           code: 'UID_MISMATCH'
