@@ -18,6 +18,21 @@ export function init(redisClient, ioInstance, redlockInstance) {
   console.log('📡 [Matchmaking] Initialized with Redis, Socket.IO, and Redlock');
 }
 
+async function createRoomInternalWithSize(mood, users, maxUsers) {
+  const room = new Room(mood, users, null, maxUsers);
+  room.maxUsers = parseInt(maxUsers, 10) || room.maxUsers;
+  await saveRoomToRedis(room);
+
+  for (const user of users) {
+    await redis.set(`user:room:${user.userId}`, room.id, 'EX', 3600);
+  }
+
+  await redis.set(`room:expiry:${room.id}`, 'pending_first_join', 'PX', ROOM_LIFETIME * 3);
+
+  console.log(`🎉 [Cluster] Room ${room.id} created for mood ${mood} (maxUsers=${room.maxUsers})`);
+  return room;
+}
+
 /**
  * Acquire distributed lock for room operations
  */
@@ -137,7 +152,7 @@ async function getRoomFromRedis(roomId) {
  * Enhanced Room class (Stateless helper)
  */
 class Room {
-  constructor(mood, users, id = null) {
+  constructor(mood, users, id = null, maxUsersOverride = null) {
     this.id = id || uuidv4();
     this.mood = mood;
     this.users = users;
@@ -147,7 +162,8 @@ class Room {
     this.expiresAt = null;
     this.isExpired = false;
     this.hasActiveCall = false;
-    this.maxUsers = config.MAX_USERS_PER_ROOM;
+    const override = parseInt(maxUsersOverride, 10);
+    this.maxUsers = Number.isFinite(override) && override > 0 ? override : config.MAX_USERS_PER_ROOM;
     this.userJoinedRoom = false;
     this.timerStartedAt = null;
   }
@@ -378,8 +394,61 @@ async function createRoomInternal(mood, users) {
 export async function getRoom(roomId) {
   const data = await getRoomFromRedis(roomId);
   if (!data) return null;
-  const room = new Room(data.mood, data.users, data.id);
+  const room = new Room(data.mood, data.users, data.id, data.maxUsers);
   Object.assign(room, data);
+  return room;
+}
+
+export async function addToSocialQueue(userData, roomSize) {
+  const mood = 'social_club';
+  const maxUsers = parseInt(roomSize, 10) || 2;
+
+  const existingRoomId = await redis.get(`user:room:${userData.userId}`);
+  if (existingRoomId) {
+    const existingRoom = await getRoom(existingRoomId);
+    if (existingRoom && Array.isArray(existingRoom.users) && existingRoom.users.some(u => u.userId === userData.userId)) {
+      return existingRoom;
+    }
+    await redis.del(`user:room:${userData.userId}`);
+  }
+
+  const queueKey = `matchmaking:queue:${mood}`;
+  const allInQueue = await redis.lrange(queueKey, 0, -1);
+  for (const item of allInQueue) {
+    try {
+      const parsed = JSON.parse(item);
+      if (parsed.userId === userData.userId) {
+        await redis.lrem(queueKey, 1, item);
+      }
+    } catch { }
+  }
+
+  const availableRoom = await findRoomWithSpace(mood, userData.userId);
+  if (availableRoom) {
+    availableRoom.maxUsers = maxUsers;
+    const added = await availableRoom.addUser({
+      userId: userData.userId,
+      username: userData.username,
+      pfpUrl: userData.pfpUrl,
+      firebaseUid: userData.firebaseUid,
+      socketId: userData.socketId
+    });
+    if (!added) return null;
+    await redis.set(`user:room:${userData.userId}`, availableRoom.id, 'EX', 3600);
+    return availableRoom;
+  }
+
+  const room = await createRoomInternalWithSize(mood, [
+    {
+      userId: userData.userId,
+      username: userData.username,
+      pfpUrl: userData.pfpUrl,
+      firebaseUid: userData.firebaseUid,
+      socketId: userData.socketId
+    }
+  ], maxUsers);
+
+  await redis.set(`user:room:${userData.userId}`, room.id, 'EX', 3600);
   return room;
 }
 
@@ -535,6 +604,7 @@ export async function getRoomStats() {
 export default {
   init,
   addToQueue,
+  addToSocialQueue,
   getRoom,
   getRoomByUser,
   getRoomIdByUser,
