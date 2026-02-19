@@ -44,8 +44,8 @@ try {
     const messaging = firebase.messaging();
 
     messaging.onBackgroundMessage((payload) => {
-      const title = payload?.notification?.title || 'Notification';
-      const body = payload?.notification?.body || '';
+      const title = payload?.data?.title || payload?.notification?.title || 'Notification';
+      const body = payload?.data?.body || payload?.notification?.body || '';
       const url = payload?.data?.url || '/';
 
       self.registration.showNotification(title, {
