@@ -15,6 +15,8 @@ export function initializeFirebase() {
   }
 
   try {
+    const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+
     // ===============================
     // PRODUCTION (service account)
     // ===============================
@@ -45,6 +47,12 @@ export function initializeFirebase() {
     // DEVELOPMENT FALLBACK (NO AUTH)
     // ===============================
     else {
+      if (isProduction) {
+        throw new Error(
+          'Missing FIREBASE_SERVICE_ACCOUNT_PATH in production. Refusing to initialize Firebase Admin without credentials.'
+        );
+      }
+
       admin.initializeApp({
         projectId: config.FIREBASE_PROJECT_ID
       });
