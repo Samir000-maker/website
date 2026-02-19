@@ -297,52 +297,57 @@ broadcastSocialClubState = async (state) => {
   }
 };
 
-app.get('/api/events/social_club/stream', async (req, res) => {
-  try {
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
+function registerSocialClubSseRoutes(app) {
+  if (!app || registerSocialClubSseRoutes._registered) return;
+  registerSocialClubSseRoutes._registered = true;
 
-    socialClubSseClients.add(res);
-
-    res.write('event: ready\n');
-    res.write('data: {}\n\n');
-
+  app.get('/api/events/social_club/stream', async (req, res) => {
     try {
-      const db = getDB();
-      const doc = await db.collection('event').findOne(
-        { name: 'social_club' },
-        { projection: { _id: 0, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
-      );
-      res.write(
-        encodeSseData({
-          type: 'social_club_state',
-          event: {
-            name: 'social_club',
-            isEventOpen: !!doc?.isEventOpen,
-            updatedAt: doc?.updatedAt || null
-          }
-        })
-      );
-    } catch { }
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
 
-    const keepAlive = setInterval(() => {
+      socialClubSseClients.add(res);
+
+      res.write('event: ready\n');
+      res.write('data: {}\n\n');
+
       try {
-        res.write(': keep-alive\n\n');
+        const db = getDB();
+        const doc = await db.collection('event').findOne(
+          { name: 'social_club' },
+          { projection: { _id: 0, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+        );
+        res.write(
+          encodeSseData({
+            type: 'social_club_state',
+            event: {
+              name: 'social_club',
+              isEventOpen: !!doc?.isEventOpen,
+              updatedAt: doc?.updatedAt || null
+            }
+          })
+        );
       } catch { }
-    }, 25000);
 
-    req.on('close', () => {
-      clearInterval(keepAlive);
-      try { socialClubSseClients.delete(res); } catch { }
-    });
-  } catch (e) {
-    console.error('❌ [SocialClub] SSE stream failed:', e);
-    try { res.end(); } catch { }
-  }
-});
+      const keepAlive = setInterval(() => {
+        try {
+          res.write(': keep-alive\n\n');
+        } catch { }
+      }, 25000);
+
+      req.on('close', () => {
+        clearInterval(keepAlive);
+        try { socialClubSseClients.delete(res); } catch { }
+      });
+    } catch (e) {
+      console.error('❌ [SocialClub] SSE stream failed:', e);
+      try { res.end(); } catch { }
+    }
+  });
+}
 
 async function setSocialClubOpenState(nextOpen) {
   try {
@@ -2099,6 +2104,7 @@ async function getIceServers() {
 }
 
 const app = express();
+registerSocialClubSseRoutes(app);
 app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
 
