@@ -95,6 +95,49 @@ redlock.on('error', (error) => {
   }
 });
 
+app.post('/api/beacon/leave', async (req, res) => {
+  try {
+    const { token, roomId, callId } = req.body || {};
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'token is required' });
+    }
+
+    let decoded = null;
+    try {
+      decoded = await admin.auth().verifyIdToken(token);
+    } catch {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const firebaseUid = decoded?.uid || null;
+    if (!firebaseUid) {
+      return res.status(401).json({ error: 'Unable to resolve uid' });
+    }
+
+    const userId = await getMongoUserIdByFirebaseUid(firebaseUid);
+    if (!userId) {
+      return res.status(401).json({ error: 'Unable to resolve user' });
+    }
+
+    if (typeof callId === 'string' && callId) {
+      try {
+        await handleCallLeaveInternal(userId, callId);
+      } catch { }
+    }
+
+    if (typeof roomId === 'string' && roomId) {
+      try {
+        await performUserLeaveChat(userId, roomId, 'api_beacon', firebaseUid);
+      } catch { }
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('❌ [API] beacon leave failed:', error?.message || error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 function requireSocialClubAdmin(req, res, next) {
   const token = (req.get('x-admin-token') || '').trim();
   const expected = (process.env.SOCIAL_CLUB_ADMIN_TOKEN || '').trim();
