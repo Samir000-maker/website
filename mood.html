@@ -822,6 +822,18 @@
       </h1>
       <div style="margin-top: 14px; width: 100%; max-width: 760px; margin-left: auto; margin-right: auto;">
         <div id="socialClubMountMood"></div>
+        <div id="socialClubOwnerToggleMood" class="hidden" style="margin-top: 12px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; border-radius: 14px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.10); padding: 12px 14px;">
+            <div style="text-align:left;">
+              <div style="font-size: 13px; font-weight: 900;">Social Club Live</div>
+              <div id="socialClubOwnerToggleHintMood" style="margin-top:4px; font-size: 12px; color: var(--text-secondary);">Only visible to the owner account</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span id="socialClubOwnerToggleStateMood" style="font-size: 12px; font-weight: 900; color: rgba(255,255,255,0.75);">OFF</span>
+              <input id="socialClubOwnerToggleCheckboxMood" type="checkbox" style="width: 44px; height: 22px; cursor: pointer;" />
+            </div>
+          </div>
+        </div>
       </div>
       <p>
         Choose your current mood to chat with people who feel the same way
@@ -998,6 +1010,99 @@
         document.addEventListener('DOMContentLoaded', mount);
       } else {
         mount();
+      }
+    })();
+  </script>
+
+  <script>
+    (function () {
+      const root = document.getElementById('socialClubOwnerToggleMood');
+      const checkbox = document.getElementById('socialClubOwnerToggleCheckboxMood');
+      const stateEl = document.getElementById('socialClubOwnerToggleStateMood');
+      const hintEl = document.getElementById('socialClubOwnerToggleHintMood');
+      if (!root || !checkbox || !stateEl) return;
+
+      const OWNER_EMAIL = 'samirahmed1887@gmail.com';
+
+      async function authedHeaders() {
+        const u = firebase?.auth?.().currentUser;
+        if (!u) return null;
+        const token = await u.getIdToken();
+        return {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        };
+      }
+
+      async function isOwner() {
+        try {
+          const headers = await authedHeaders();
+          if (!headers) return false;
+          const res = await fetch('/api/users/me', { headers, credentials: 'same-origin' });
+          if (!res.ok) return false;
+          const me = await res.json();
+          const email = String(me?.email || '').trim().toLowerCase();
+          return email === OWNER_EMAIL;
+        } catch {
+          return false;
+        }
+      }
+
+      async function refresh() {
+        const headers = await authedHeaders();
+        if (!headers) return;
+        const res = await fetch('/api/admin/social_club/event-owner', { headers, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('Failed to fetch event state');
+        const payload = await res.json();
+        const open = !!payload?.event?.isEventOpen;
+        checkbox.checked = open;
+        stateEl.textContent = open ? 'ON' : 'OFF';
+      }
+
+      async function setOpen(nextOpen) {
+        const headers = await authedHeaders();
+        if (!headers) throw new Error('Not authenticated');
+        const res = await fetch('/api/admin/social_club/event-owner', {
+          method: 'POST',
+          headers,
+          credentials: 'same-origin',
+          body: JSON.stringify({ isEventOpen: !!nextOpen })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || 'Failed to update event');
+        }
+        await refresh();
+      }
+
+      checkbox.addEventListener('change', async () => {
+        const desired = checkbox.checked;
+        checkbox.disabled = true;
+        try {
+          await setOpen(desired);
+        } catch (e) {
+          checkbox.checked = !desired;
+          if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to update';
+        } finally {
+          checkbox.disabled = false;
+        }
+      });
+
+      async function boot() {
+        const ok = await isOwner();
+        if (!ok) return;
+        root.classList.remove('hidden');
+        try {
+          await refresh();
+        } catch (e) {
+          if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to load';
+        }
+      }
+
+      try {
+        firebase?.auth?.().onAuthStateChanged(() => { boot(); });
+      } catch {
+        boot();
       }
     })();
   </script>
