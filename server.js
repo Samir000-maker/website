@@ -119,6 +119,7 @@ async function notifySocialClubWaitlist(db, payload = {}) {
     { projection: { _id: 1, uid: 1, fcmToken: 1 }, maxTimeMS: 10000 }
   );
   const entries = await cursor.toArray();
+  console.log(`📣 [SocialClub] notify waitlist: ${entries.length} token(s) eligible`);
   if (!entries.length) return { sent: 0, failed: 0 };
 
   const tokens = entries.map(e => e.fcmToken).filter(Boolean);
@@ -133,6 +134,7 @@ async function notifySocialClubWaitlist(db, payload = {}) {
     const chunk = tokens.slice(i, i + chunkSize);
 
     try {
+      console.log(`📣 [SocialClub] Sending FCM multicast chunk (${chunk.length})`);
       const response = await admin.messaging().sendEachForMulticast({
         tokens: chunk,
         notification: { title, body },
@@ -152,6 +154,8 @@ async function notifySocialClubWaitlist(db, payload = {}) {
 
       sent += response.successCount || 0;
       failed += response.failureCount || 0;
+
+      console.log(`📣 [SocialClub] FCM chunk result: sent=${response.successCount || 0} failed=${response.failureCount || 0}`);
 
       response.responses.forEach((r, idx) => {
         if (r.success) return;
@@ -188,6 +192,7 @@ async function notifySocialClubWaitlist(db, payload = {}) {
     }
   }
 
+  console.log(`📣 [SocialClub] notify done: sent=${sent} failed=${failed} invalidTokens=${invalidTokens.size}`);
   return { sent, failed };
 }
 
@@ -257,6 +262,8 @@ function startSocialClubEventWatcher(db) {
       const isOpen = !!(result && result.value && result.value.isEventOpen);
       const prev = await getSocialClubOpenState();
 
+      console.log(`🎭 [SocialClub] Watcher tick: isOpen=${isOpen} prev=${prev === null ? 'null' : String(prev)}`);
+
       // Clear "already notified" marker when event is closed.
       if (!isOpen) {
         await setSocialClubNotifyFlag(null);
@@ -267,13 +274,15 @@ function startSocialClubEventWatcher(db) {
         // we still want to notify (manual DB flip might have happened while server was down).
         if (isOpen) {
           const notifiedFlag = await getSocialClubNotifyFlag();
+          console.log(`🎭 [SocialClub] Watcher baseline open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
           if (!notifiedFlag) {
             try {
-              await notifySocialClubWaitlist(db, {
+              const r = await notifySocialClubWaitlist(db, {
                 title: 'Social Club is Live',
                 body: 'Tap to enter now.',
                 clickUrl: '/chat.html?mode=social-club'
               });
+              console.log(`🎭 [SocialClub] Watcher notify result: sent=${r?.sent ?? 0} failed=${r?.failed ?? 0}`);
               await setSocialClubNotifyFlag('1');
             } catch (e) {
               console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
@@ -292,12 +301,14 @@ function startSocialClubEventWatcher(db) {
       if (!prev && isOpen) {
         try {
           const notifiedFlag = await getSocialClubNotifyFlag();
+          console.log(`🎭 [SocialClub] Watcher transition open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
           if (!notifiedFlag) {
-            await notifySocialClubWaitlist(db, {
+            const r = await notifySocialClubWaitlist(db, {
               title: 'Social Club is Live',
               body: 'Tap to enter now.',
               clickUrl: '/chat.html?mode=social-club'
             });
+            console.log(`🎭 [SocialClub] Watcher notify result: sent=${r?.sent ?? 0} failed=${r?.failed ?? 0}`);
             await setSocialClubNotifyFlag('1');
           }
         } catch (e) {
