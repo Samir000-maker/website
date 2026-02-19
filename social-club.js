@@ -142,12 +142,14 @@
     } catch { }
 
     let permission = Notification.permission;
+    if (permission === 'denied') {
+      throw new Error('Notifications are blocked in your browser settings. Enable notifications for this site, then try again.');
+    }
     if (permission === 'default') {
       permission = await Notification.requestPermission();
     }
-
     if (permission !== 'granted') {
-      throw new Error('Notifications permission not granted');
+      throw new Error('Notifications permission not granted. Please allow notifications to join the waitlist.');
     }
 
     const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: registration });
@@ -308,8 +310,14 @@
         await joinWaitlist();
         toast('You are on the waitlist. We’ll notify you when the event goes live.');
       } catch (err) {
-        const msg = err && err.message ? err.message : 'Failed to join waitlist';
-        toast(msg);
+        const raw = err && err.message ? err.message : 'Failed to join waitlist';
+        const msg = String(raw || 'Failed to join waitlist');
+        if (msg.toLowerCase().includes('blocked') || msg.toLowerCase().includes('denied')) {
+          toast(msg);
+          toast('Tip: Click the lock icon in the address bar → Site settings → Notifications → Allow. Then click Join Waitlist again.');
+        } else {
+          toast(msg);
+        }
       } finally {
         btn.disabled = false;
       }
