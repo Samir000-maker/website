@@ -36,10 +36,12 @@ export const config = {
   MAX_NOTE_LENGTH: 500,
 
   // Rate limiting
-  MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 100,
+  MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 10,
 
   // Firebase (you'll need to add your Firebase service account key)
-  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || 'projectt3-8c55e',
+
+  FIREBASE_SERVICE_ACCOUNT_PATH: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
 
   // Available moods
   MOODS: [
