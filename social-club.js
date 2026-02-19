@@ -6,7 +6,7 @@
   }
 
   function getVapidKey() {
-    return (window.__VIBE_FCM_VAPID_KEY__ || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec').trim();
+    return (window.__VIBE_FCM_VAPID_KEY__ || '').trim();
   }
 
   function qs(el, sel) {
@@ -142,12 +142,27 @@
     } catch { }
 
     let permission = Notification.permission;
-    if (permission === 'denied') {
-      throw new Error('Notifications are blocked in your browser settings. Enable notifications for this site, then try again.');
+    if (permission !== 'granted') {
+      const ok = window.confirm(
+        'Enable notifications so we can alert you when Social Club goes live.\n\nIf you don\'t allow notifications, you may miss the event.'
+      );
+      if (!ok) {
+        throw new Error('Notifications permission not granted. Please allow notifications to join the waitlist.');
+      }
     }
+
+    permission = Notification.permission;
     if (permission === 'default') {
       permission = await Notification.requestPermission();
     }
+
+    if (permission === 'denied') {
+      try {
+        window.open('chrome://settings/content/notifications');
+      } catch { }
+      throw new Error('Notifications are blocked in your browser settings. Click the lock icon in the address bar → Site settings → Notifications → Allow, then try again.');
+    }
+
     if (permission !== 'granted') {
       throw new Error('Notifications permission not granted. Please allow notifications to join the waitlist.');
     }
