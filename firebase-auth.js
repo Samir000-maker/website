@@ -102,6 +102,8 @@ export async function authenticateFirebase(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
 
+    console.log('🔎 Token received');
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         error: 'Unauthorized',
@@ -112,9 +114,12 @@ export async function authenticateFirebase(req, res, next) {
     const idToken = authHeader.substring(7);
     const decodedToken = await verifyToken(idToken);
 
+    console.log('✅ Firebase user verified:', decodedToken?.uid);
+
     req.firebaseUser = decodedToken;
     next();
   } catch (error) {
+    console.error('❌ Token verification failed');
     const message =
       error.message === 'TOKEN_EXPIRED'
         ? 'Authentication token expired'
