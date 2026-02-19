@@ -272,13 +272,14 @@ function startSocialClubEventWatcher(db) {
 
   const intervalMs = Math.max(5000, Number(process.env.SOCIAL_CLUB_WATCH_INTERVAL_MS || 10000));
 
-  setInterval(async () => {
-    let lock = null;
-    try {
-      lock = await redlock.acquire(['lock:event:social_club:watch'], Math.max(4000, intervalMs - 500));
+  // IMPORTANT: MongoDB is the source of truth for isEventOpen.
+  // We do NOT read the boolean from Redis.
+  let prevOpen = null;
 
-      const now = new Date();
-      const result = await db.collection('event').findOneAndUpdate(
+  const ensureEventDoc = async () => {
+    const now = new Date();
+    try {
+      await db.collection('event').updateOne(
         { name: 'social_club' },
         {
           $setOnInsert: {
@@ -287,53 +288,30 @@ function startSocialClubEventWatcher(db) {
             createdAt: now
           }
         },
-        { upsert: true, returnDocument: 'after', projection: { _id: 0, isEventOpen: 1 } }
+        { upsert: true }
       );
+    } catch (e) {
+      console.warn('⚠️ [SocialClub] Failed to ensure event doc:', e?.message || e);
+    }
+  };
 
-      const isOpen = !!(result && result.value && result.value.isEventOpen);
-      const prev = await getSocialClubOpenState();
+  const handleState = async ({ isOpen, rawValue, source }) => {
+    const dbName = db?.databaseName || process.env.DB_NAME || 'unknown';
 
-      console.log(`🎭 [SocialClub] Watcher tick: isOpen=${isOpen} prev=${prev === null ? 'null' : String(prev)}`);
+    console.log(
+      `🎭 [SocialClub] Watcher tick(${source}): db=${dbName} isOpen=${isOpen} raw=${String(rawValue)} prev=${prevOpen === null ? 'null' : String(prevOpen)}`
+    );
 
-      // Clear "already notified" marker when event is closed.
-      if (!isOpen) {
-        await setSocialClubNotifyFlag(null);
-      }
+    if (!isOpen) {
+      await setSocialClubNotifyFlag(null);
+    }
 
-      if (prev === null) {
-        // First watcher tick after (re)start. If event is already open and we haven't notified yet,
-        // we still want to notify (manual DB flip might have happened while server was down).
-        if (isOpen) {
-          const notifiedFlag = await getSocialClubNotifyFlag();
-          console.log(`🎭 [SocialClub] Watcher baseline open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
-          if (!notifiedFlag) {
-            try {
-              const r = await notifySocialClubWaitlist(db, {
-                title: 'Social Club is Live',
-                body: 'Tap to enter now.',
-                clickUrl: '/chat.html?mode=social-club'
-              });
-              console.log(`🎭 [SocialClub] Watcher notify result: sent=${r?.sent ?? 0} failed=${r?.failed ?? 0}`);
-              await setSocialClubNotifyFlag('1');
-            } catch (e) {
-              console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
-            }
-          }
-        }
-
-        await setSocialClubOpenState(isOpen);
-        return;
-      }
-
-      if (prev !== isOpen) {
-        await setSocialClubOpenState(isOpen);
-      }
-
-      if (!prev && isOpen) {
-        try {
-          const notifiedFlag = await getSocialClubNotifyFlag();
-          console.log(`🎭 [SocialClub] Watcher transition open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
-          if (!notifiedFlag) {
+    if (prevOpen === null) {
+      if (isOpen) {
+        const notifiedFlag = await getSocialClubNotifyFlag();
+        console.log(`🎭 [SocialClub] Watcher baseline open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
+        if (!notifiedFlag) {
+          try {
             const r = await notifySocialClubWaitlist(db, {
               title: 'Social Club is Live',
               body: 'Tap to enter now.',
@@ -341,11 +319,94 @@ function startSocialClubEventWatcher(db) {
             });
             console.log(`🎭 [SocialClub] Watcher notify result: sent=${r?.sent ?? 0} failed=${r?.failed ?? 0}`);
             await setSocialClubNotifyFlag('1');
+          } catch (e) {
+            console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
           }
-        } catch (e) {
-          console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
         }
       }
+
+      prevOpen = isOpen;
+      return;
+    }
+
+    const prev = prevOpen;
+    if (!prev && isOpen) {
+      try {
+        const notifiedFlag = await getSocialClubNotifyFlag();
+        console.log(`🎭 [SocialClub] Watcher transition open: notifiedFlag=${notifiedFlag ? '1' : '0'}`);
+        if (!notifiedFlag) {
+          const r = await notifySocialClubWaitlist(db, {
+            title: 'Social Club is Live',
+            body: 'Tap to enter now.',
+            clickUrl: '/chat.html?mode=social-club'
+          });
+          console.log(`🎭 [SocialClub] Watcher notify result: sent=${r?.sent ?? 0} failed=${r?.failed ?? 0}`);
+          await setSocialClubNotifyFlag('1');
+        }
+      } catch (e) {
+        console.error('❌ [SocialClub] Watcher notify failed:', e?.message || e);
+      }
+    }
+
+    prevOpen = isOpen;
+  };
+
+  const readCurrentStateFromMongo = async () => {
+    await ensureEventDoc();
+    const doc = await db.collection('event').findOne(
+      { name: 'social_club' },
+      { projection: { _id: 1, isEventOpen: 1, updatedAt: 1 }, maxTimeMS: 3000 }
+    );
+
+    const rawValue = doc?.isEventOpen;
+    const isOpen = !!rawValue;
+    return { isOpen, rawValue };
+  };
+
+  const enableChangeStreams = String(process.env.SOCIAL_CLUB_USE_CHANGE_STREAMS || '1') === '1';
+  if (enableChangeStreams) {
+    try {
+      const changeStream = db.collection('event').watch(
+        [
+          {
+            $match: {
+              $and: [
+                { 'fullDocument.name': 'social_club' },
+                { operationType: { $in: ['insert', 'update', 'replace'] } }
+              ]
+            }
+          }
+        ],
+        { fullDocument: 'updateLookup' }
+      );
+
+      changeStream.on('change', async (ev) => {
+        try {
+          const rawValue = ev?.fullDocument?.isEventOpen;
+          const isOpen = !!rawValue;
+          await handleState({ isOpen, rawValue, source: 'change' });
+        } catch (e) {
+          console.warn('⚠️ [SocialClub] ChangeStream handler failed:', e?.message || e);
+        }
+      });
+
+      changeStream.on('error', (e) => {
+        console.warn('⚠️ [SocialClub] ChangeStream error (will keep polling fallback):', e?.message || e);
+      });
+
+      console.log('✅ [SocialClub] ChangeStreams enabled for realtime event open/close detection');
+    } catch (e) {
+      console.warn('⚠️ [SocialClub] ChangeStreams not available (polling only):', e?.message || e);
+    }
+  }
+
+  setInterval(async () => {
+    let lock = null;
+    try {
+      lock = await redlock.acquire(['lock:event:social_club:watch'], Math.max(4000, intervalMs - 500));
+
+      const { isOpen, rawValue } = await readCurrentStateFromMongo();
+      await handleState({ isOpen, rawValue, source: 'poll' });
     } catch (e) {
       if (e && e.name === 'ExecutionError') return;
       console.warn('⚠️ [SocialClub] Watcher tick failed:', e?.message || e);
