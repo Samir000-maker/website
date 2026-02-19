@@ -491,6 +491,59 @@ const Auth = {
   }
 };
 
+async function authFetch(url, options = {}) {
+  try {
+    console.log('🔐 [Auth] Waiting for authenticated user...');
+    await FirebaseReady;
+
+    const auth = firebase.auth();
+    const user = auth.currentUser || await Auth.waitForAuth();
+
+    if (!user) {
+      console.warn('⚠️ [Auth] No authenticated user. Request blocked.');
+      throw new Error('User not authenticated');
+    }
+
+    console.log('✅ [Auth] User detected:', user.uid);
+    const token = await user.getIdToken();
+    console.log('🎫 [Auth] Token acquired');
+
+    const mergedHeaders = {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`
+    };
+
+    let body = options.body;
+    if (
+      body &&
+      typeof body === 'object' &&
+      !(body instanceof FormData) &&
+      !(body instanceof Blob) &&
+      !(body instanceof ArrayBuffer)
+    ) {
+      const hasContentType = Object.keys(mergedHeaders).some(
+        (k) => k.toLowerCase() === 'content-type'
+      );
+      if (!hasContentType) {
+        mergedHeaders['Content-Type'] = 'application/json';
+      }
+      body = JSON.stringify(body);
+    }
+
+    console.log('📡 [API] Sending authenticated request:', url);
+    const response = await fetch(url, {
+      ...options,
+      headers: mergedHeaders,
+      body
+    });
+    console.log('✅ [API] Response status:', response.status);
+    return response;
+  } catch (error) {
+    console.error('❌ [API] Request failed:', error);
+    throw error;
+  }
+}
+
 /* =========================================================
    API
    ========================================================= */
@@ -755,42 +808,19 @@ const Presence = {
       ? options.roomId
       : this.getContextRoomId(location);
 
-    const user = this.getCurrentUser();
-    if (!user) return null;
-
-    const token = await this.getAuthToken();
-    if (!token) return null;
-
     try {
-      const makeRequest = async (bearer) => {
-        return await fetch('/api/presence/context', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${bearer}`
-          },
-          body: JSON.stringify({
-            location,
-            path,
-            roomId: roomId || null,
-            source: options.source || 'client_lifecycle',
-            reason
-          }),
-          keepalive: options.keepalive !== false
-        });
-      };
-
-      let response = await makeRequest(token);
-      if (response.status === 401) {
-        try {
-          const refreshed = await user.getIdToken(true);
-          if (refreshed) {
-            this._tokenCache = refreshed;
-            response = await makeRequest(refreshed);
-          }
-        } catch { }
-      }
+      const response = await authFetch('/api/presence/context', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: {
+          location,
+          path,
+          roomId: roomId || null,
+          source: options.source || 'client_lifecycle',
+          reason
+        },
+        keepalive: options.keepalive !== false
+      });
 
       if (!response.ok) return null;
       const payload = await response.json().catch(() => null);
@@ -1055,6 +1085,7 @@ window.MoodApp = {
   Storage,
   Auth,
   API,
+  authFetch,
   Presence,
   Toast,
   Loading,
