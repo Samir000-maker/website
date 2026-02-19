@@ -238,9 +238,9 @@
             </div>
         </div>
     </main>
-    <script src="/env-config.js"></script>
+
     <script src="app.js"></script>
-    
+    <script src="/env-config.js"></script>
 
     <script>
         (function() {
@@ -406,13 +406,16 @@
                         const idToken = await result.user.getIdToken();
 
                         const apiBaseUrl = getApiBaseUrl();
-                        const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${idToken}`
-                            }
-                        });
+                        const authFetch = window.MoodApp?.authFetch;
+                        const checkResponse = authFetch
+                            ? await authFetch(`/api/users/check-profile`, { method: 'POST' })
+                            : await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${idToken}`
+                                }
+                            });
 
                         const checkData = await checkResponse.json();
                         
