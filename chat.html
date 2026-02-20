@@ -4848,6 +4848,13 @@
 
       const updateTimer = () => {
         if (!serverExpiresAt) {
+          if (isSocialClubMode) {
+            if (timeRemaining) {
+              timeRemaining.textContent = '';
+            }
+            return;
+          }
+
           console.warn('⚠️ No server expiresAt available');
           if (timeRemaining) {
             timeRemaining.textContent = '-- remaining';
@@ -5226,7 +5233,10 @@
               }
             }
           } else {
-            console.error('❌ No expiresAt in room_joined data!');
+            if (!isSocialClubMode) {
+              console.error('❌ No expiresAt in room_joined data!');
+            }
+            serverExpiresAt = null;
           }
 
           const cachedState = loadChatState();
@@ -6207,7 +6217,7 @@
 
           // 4. Room Destruction Logic
           // Trigger exit if server says destroyed OR users drop below 2
-          if (data.destroyed || data.remainingUsers < 2) {
+          if (data.destroyed || (!isSocialClubMode && data.remainingUsers < 2)) {
             console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
 
             // Partner left room - check call status
