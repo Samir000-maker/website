@@ -4781,7 +4781,7 @@
           reconnectSocketIfNeeded(event.persisted ? 'pageshow_bfcache' : 'pageshow');
           reportChatPresenceContext('pageshow', {
             source: event.persisted ? 'chat_pageshow_bfcache' : 'chat_pageshow',
-            allowRedirect: true
+            allowRedirect: !isSocialClubMode
           }).catch(() => { });
           validateChatPresenceState(event.persisted ? 'pageshow_bfcache' : 'pageshow').catch(() => { });
         });
@@ -5060,7 +5060,7 @@
           startHeartbeat();
 
           await reportChatPresenceContext('socket_authenticated', {
-            allowRedirect: true,
+            allowRedirect: !isSocialClubMode,
             keepalive: true,
             source: 'chat_authenticated'
           });
@@ -5188,7 +5188,7 @@
           roomRecoveryAttempts = 0;
           reportChatPresenceContext('room_joined', {
             roomId: currentRoomId,
-            allowRedirect: true,
+            allowRedirect: !isSocialClubMode,
             keepalive: true,
             source: 'chat_room_joined'
           }).catch(() => { });
@@ -5594,7 +5594,7 @@
           roomRecoveryAttempts = 0;
           reportChatPresenceContext('room_sync_data', {
             roomId: currentRoomId,
-            allowRedirect: true,
+            allowRedirect: !isSocialClubMode,
             keepalive: true,
             source: 'chat_room_sync'
           }).catch(() => { });
@@ -6732,7 +6732,7 @@
             const hiddenDuration = lastVisibilityHiddenAt ? (Date.now() - lastVisibilityHiddenAt) : 0;
             reconnectSocketIfNeeded(hiddenDuration > 60000 ? 'visibility_resume_long_idle' : 'visibility_resume');
             reportChatPresenceContext('visibility_visible', {
-              allowRedirect: true,
+              allowRedirect: !isSocialClubMode,
               keepalive: true,
               source: 'chat_visibility_visible'
             }).catch(() => { });
@@ -7268,7 +7268,7 @@
             const hiddenDuration = lastVisibilityHiddenAt ? (Date.now() - lastVisibilityHiddenAt) : 0;
             reconnectSocketIfNeeded(hiddenDuration > 60000 ? 'visibility_resume_save_long_idle' : 'visibility_resume_save');
             reportChatPresenceContext('visibility_visible_save', {
-              allowRedirect: true,
+              allowRedirect: !isSocialClubMode,
               keepalive: true,
               source: 'chat_visibility_visible_save'
             }).catch(() => { });
