@@ -1,139 +1,281 @@
 /**
- * Call Page Integration
- * Preserves state during calls and enables seamless return to chat
+ * Chat Page Integration
+ * Integrates StateManager and NavigationGuard with message preservation
  * 
  * Features:
- * - Call state preservation
- * - Return to chat with full message history
- * - No navigation guard (calls can be left freely)
- * - Automatic state sync
+ * - Full message history preservation
+ * - State restoration when returning from call
+ * - Android back button handling
+ * - 10-minute room expiration tracking
+ * - Seamless call transitions
  */
 
-// Load state manager
+// Load dependencies
 const stateManagerScript = document.createElement('script');
 stateManagerScript.src = '/state-manager.js';
 document.head.appendChild(stateManagerScript);
 
+const navGuardScript = document.createElement('script');
+navGuardScript.src = '/navigation-guard.js';
+document.head.appendChild(navGuardScript);
+
+// Wait for scripts to load
 stateManagerScript.onload = () => {
-  initializeCallPage();
+  navGuardScript.onload = () => {
+    initializeChatPage();
+  };
 };
 
-function initializeCallPage() {
+function initializeChatPage() {
   const StateManager = window.StateManager;
+  const NavigationGuard = window.NavigationGuard;
 
-  if (!StateManager) {
-    console.error('❌ StateManager not loaded');
+  if (!StateManager || !NavigationGuard) {
+    console.error('❌ Required managers not loaded');
     return;
   }
 
   // Set current page
-  StateManager.setPage('call');
+  StateManager.setPage('chat');
 
-  // Verify call and room data
+  // Check if room is expired
+  if (StateManager.isRoomExpired()) {
+    console.log('⏱️ Room expired - redirecting to mood page');
+    window.location.href = '/mood.html';
+    return;
+  }
+
+  // Restore messages from state
   const state = StateManager.getState();
-  
-  if (!state.call && !state.room) {
-    console.warn('⚠️ No active call or room found in state');
-    
-    // Check localStorage fallback
-    const callDataStr = localStorage.getItem('activeCall');
-    const roomDataStr = localStorage.getItem('currentRoom');
-    
-    if (callDataStr) {
-      try {
-        const callData = JSON.parse(callDataStr);
-        StateManager.setCall(callData);
-      } catch (e) {
-        console.error('❌ Invalid call data in localStorage');
-      }
-    }
-    
-    if (roomDataStr) {
-      try {
-        const roomData = JSON.parse(roomDataStr);
-        StateManager.setRoom(roomData);
-      } catch (e) {
-        console.error('❌ Invalid room data in localStorage');
-      }
-    }
+  if (state.messages && state.messages.length > 0) {
+    restoreMessages(state.messages);
   }
 
-  // Track call state changes
-  if (window.socketInstance) {
-    window.socketInstance.on('call_joined', (data) => {
-      StateManager.setCall(data);
-    });
-
-    window.socketInstance.on('user_joined_call', (data) => {
-      // Update call participants in state
-      const state = StateManager.getState();
-      if (state.call) {
-        // This would be handled by call.html logic
-        console.log('👤 User joined call:', data.user.username);
-      }
-    });
-
-    window.socketInstance.on('user_left_call', (data) => {
-      console.log('👤 User left call:', data.username);
-    });
-
-    window.socketInstance.on('call_ended', () => {
-      console.log('📵 Call ended');
-      StateManager.clearCall();
-    });
-  }
-
-  // Override leave call button
-  const leaveCallBtn = document.getElementById('leaveCallBtn');
-  if (leaveCallBtn) {
-    // Store original handler
-    const originalLeaveHandler = leaveCallBtn.onclick;
+  // Enable navigation guard
+  NavigationGuard.enable('chat', () => {
+    // On confirm leave
+    console.log('👋 User confirmed leaving chat');
     
-    leaveCallBtn.onclick = (e) => {
-      console.log('📵 Leaving call - preserving chat state');
-      
-      // Call original handler
-      if (originalLeaveHandler) {
-        originalLeaveHandler.call(leaveCallBtn, e);
-      }
-      
-      // Clear call state but preserve room
-      StateManager.clearCall();
-      
-      // Force save before navigation
-      StateManager.forceSave();
-      
-      // Navigate back to chat with state preserved
-      setTimeout(() => {
-        window.location.href = '/chat.html';
-      }, 100);
-    };
-  }
-
-  // Save state periodically during call
-  const callStateInterval = setInterval(() => {
-    if (!document.hidden) {
-      StateManager.forceSave();
+    // Leave room via socket
+    if (window.socketInstance && window.socketInstance.connected) {
+      window.socketInstance.emit('leave_room');
     }
-  }, 15000); // Every 15 seconds
-
-  // Clean up interval on page unload
-  window.addEventListener('beforeunload', () => {
-    clearInterval(callStateInterval);
-    StateManager.forceSave();
+    
+    // Clear room state
+    StateManager.clearRoom();
+    
+    // Navigate to mood page
+    NavigationGuard.navigateAway('/mood.html');
   });
+
+  // Intercept socket chat messages and save to state
+  if (window.socketInstance) {
+    const originalOnChatMessage = window.socketInstance._callbacks?.$chat_message;
+    
+    window.socketInstance.on('chat_message', (data) => {
+      // Add to state manager
+      StateManager.addMessage(data);
+      
+      // Call original handler if it exists
+      if (originalOnChatMessage) {
+        originalOnChatMessage.forEach(fn => fn(data));
+      }
+    });
+
+    // Track room state
+    window.socketInstance.on('room_joined', (data) => {
+      StateManager.setRoom(data);
+    });
+
+    window.socketInstance.on('user_left', (data) => {
+      // Update state if needed
+      const state = StateManager.getState();
+      if (state.room && data.remainingUsers !== undefined) {
+        state.room.remainingUsers = data.remainingUsers;
+        StateManager.setRoom(state.room);
+      }
+    });
+
+    window.socketInstance.on('left_room', () => {
+      StateManager.clearRoom();
+    });
+  }
+
+  // Setup room expiration timer
+  setupExpirationTimer();
 
   // Save state on visibility change
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      // Save current messages
+      const messagesList = document.getElementById('messagesList');
+      if (messagesList) {
+        const messages = extractMessagesFromDOM();
+        StateManager.setMessages(messages);
+      }
+      
       StateManager.forceSave();
+    } else {
+      const isSocialClubMode = new URLSearchParams(window.location.search).get('mode') === 'social-club';
+      // Check expiration on return
+      if (!isSocialClubMode && StateManager.isRoomExpired()) {
+        console.log('⏱️ Room expired while backgrounded');
+        window.location.href = '/mood.html';
+      }
     }
   });
 
-  console.log('✅ Call page integrated with StateManager');
+  // Handle call navigation
+  handleCallTransitions();
+
+  console.log('✅ Chat page integrated with StateManager and NavigationGuard');
 }
 
-// Alternative: If script is already loaded
-if (window.StateManager) {
-  initializeCallPage();
+/**
+ * Restore messages from state
+ */
+function restoreMessages(messages) {
+  const messagesList = document.getElementById('messagesList');
+  if (!messagesList) return;
+
+  console.log(`📨 Restoring ${messages.length} messages from state`);
+
+  messages.forEach(msgData => {
+    // Check if message already exists
+    const existingMsg = messagesList.querySelector(`[data-message-id="${msgData.messageId}"]`);
+    if (existingMsg) return;
+
+    // Create message element (reuse existing function)
+    if (typeof window.createMessageElement === 'function') {
+      const currentUser = window.currentUser || {};
+      const isCurrentUser = msgData.userId === currentUser.userId;
+      const msgEl = window.createMessageElement(msgData, isCurrentUser);
+      messagesList.appendChild(msgEl);
+    }
+  });
+
+  // Scroll to bottom
+  messagesList.scrollTop = messagesList.scrollHeight;
+}
+
+/**
+ * Extract messages from DOM
+ */
+function extractMessagesFromDOM() {
+  const messagesList = document.getElementById('messagesList');
+  if (!messagesList) return [];
+
+  const messages = [];
+  const messageElements = messagesList.querySelectorAll('.message-item');
+
+  messageElements.forEach(el => {
+    const messageId = el.dataset.messageId;
+    const usernameEl = el.querySelector('.font-semibold');
+    const messageTextEl = el.querySelector('.break-words');
+    
+    if (messageId && usernameEl && messageTextEl) {
+      messages.push({
+        messageId,
+        username: usernameEl.textContent,
+        message: messageTextEl.textContent,
+        timestamp: Date.now()
+      });
+    }
+  });
+
+  return messages;
+}
+
+/**
+ * Setup room expiration timer
+ */
+function setupExpirationTimer() {
+  const StateManager = window.StateManager;
+  
+  // Check every 30 seconds
+  const expirationCheck = setInterval(() => {
+    if (StateManager.isRoomExpired()) {
+      console.log('⏱️ Room expired - cleaning up');
+      
+      // Clear interval
+      clearInterval(expirationCheck);
+      
+      // Show notification
+      if (window.MoodApp && window.MoodApp.Toast) {
+        window.MoodApp.Toast.warning('Room has expired');
+      }
+      
+      // Clear state
+      StateManager.clearRoom();
+      
+      // Redirect
+      setTimeout(() => {
+        window.location.href = '/mood.html';
+      }, 2000);
+    }
+  }, 30000);
+
+  // Clear on page unload
+  window.addEventListener('beforeunload', () => {
+    clearInterval(expirationCheck);
+  });
+}
+
+/**
+ * Handle call transitions
+ */
+function handleCallTransitions() {
+  const StateManager = window.StateManager;
+
+  // Before navigating to call, save full chat state
+  const audioCallBtn = document.getElementById('audioCallBtn');
+  const videoCallBtn = document.getElementById('videoCallBtn');
+
+  if (audioCallBtn) {
+    audioCallBtn.addEventListener('click', () => {
+      console.log('📞 Navigating to call - saving chat state');
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+
+  if (videoCallBtn) {
+    videoCallBtn.addEventListener('click', () => {
+      console.log('📞 Navigating to call - saving chat state');
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+
+  // Listen for call acceptance
+  if (window.socketInstance) {
+    window.socketInstance.on('call_accepted', (data) => {
+      console.log('✅ Call accepted - saving state before navigation');
+      
+      // Save call data
+      StateManager.setCall(data);
+      
+      // Save messages
+      const messages = extractMessagesFromDOM();
+      StateManager.setMessages(messages);
+      
+      // Force save
+      StateManager.forceSave();
+    });
+  }
+}
+
+// Alternative: If scripts are already loaded
+if (window.StateManager && window.NavigationGuard) {
+  initializeChatPage();
 }
