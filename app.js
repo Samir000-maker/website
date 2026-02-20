@@ -767,6 +767,16 @@ const Presence = {
     }
   },
 
+  isCallContext() {
+    try {
+      if (!window?.location) return false;
+      const pathname = String(window.location.pathname || '');
+      return pathname === '/call.html' || pathname.endsWith('/call.html') || pathname.includes('call.html');
+    } catch {
+      return false;
+    }
+  },
+
   sendLeaveBeacon(reason = 'pagehide') {
     try {
       const location = this.classifyLocation();
@@ -925,7 +935,7 @@ const Presence = {
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (!this.isSocialClubChatContext()) {
+        if (!this.isSocialClubChatContext() && !this.isCallContext()) {
           try { this.sendLeaveBeacon('visibility_hidden'); } catch { }
         }
         this.reportContext('visibility_hidden', {
@@ -943,7 +953,7 @@ const Presence = {
     });
 
     window.addEventListener('pagehide', () => {
-      if (!this.isSocialClubChatContext()) {
+      if (!this.isSocialClubChatContext() && !this.isCallContext()) {
         try { this.sendLeaveBeacon('pagehide'); } catch { }
       }
       this.reportContext('pagehide', {
