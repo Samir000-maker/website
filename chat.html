@@ -6220,7 +6220,7 @@
 
           // 4. Room Destruction Logic
           // Trigger exit if server says destroyed OR users drop below 2
-          if (data.destroyed || (!isSocialClubMode && data.remainingUsers < 2)) {
+          if (!isSocialClubMode && (data.destroyed || data.remainingUsers < 2)) {
             console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
 
             // Partner left room - check call status
@@ -6279,6 +6279,7 @@
 
         socketInstance.on('room_expired', async (data) => {
           console.warn('⏰ Room expired - cleaning up attachments and redirecting');
+          if (isSocialClubMode) return;
           const expiredRoomId = data?.roomId || roomData?.roomId;
           if (expiredRoomId) {
             try {
@@ -6316,6 +6317,7 @@
           const target = data?.to || '/mood.html';
           const safeTarget = target === '/discovery.html' ? '/mood.html' : target;
           console.warn(`🚦 Server-authoritative navigation requested: ${safeTarget} (${data?.reason || 'unspecified'})`);
+          if (isSocialClubMode) return;
           clearChatState(true).catch(() => { });
           cleanupParentCallPage(safeTarget);
         });
