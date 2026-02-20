@@ -366,6 +366,7 @@ function registerSocialClubSseRoutes(app) {
 async function setSocialClubOpenState(nextOpen) {
   try {
     await pubClient.set('event:social_club:isOpen', nextOpen ? 'true' : 'false');
+    await pubClient.set('event:social_club:updatedAt', new Date().toISOString());
   } catch (e) {
     console.warn('⚠️ [SocialClub] Failed to set Redis open state:', e?.message || e);
   }
@@ -377,6 +378,15 @@ async function getSocialClubOpenState() {
     if (v === 'true') return true;
     if (v === 'false') return false;
     return null;
+  } catch {
+    return null;
+  }
+}
+
+async function getSocialClubUpdatedAt() {
+  try {
+    const v = await pubClient.get('event:social_club:updatedAt');
+    return v || null;
   } catch {
     return null;
   }
@@ -2174,7 +2184,7 @@ app.post('/api/beacon/leave', async (req, res) => {
       return res.status(401).json({ error: 'Unable to resolve uid' });
     }
 
-    const userId = await getMongoUserIdByFirebaseUid(firebaseUid);
+    const userId = await resolveMongoUserIdFromFirebaseUid(firebaseUid);
     if (!userId) {
       return res.status(401).json({ error: 'Unable to resolve user' });
     }
@@ -3616,6 +3626,17 @@ app.get('/api/events/social_club', async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
+
+    // Prefer Redis (same source used by watcher/SSE) to avoid poll/SSE inconsistencies.
+    const redisOpen = await getSocialClubOpenState();
+    if (redisOpen !== null) {
+      const redisUpdatedAt = await getSocialClubUpdatedAt();
+      return res.json({
+        name: 'social_club',
+        isEventOpen: !!redisOpen,
+        updatedAt: redisUpdatedAt
+      });
+    }
 
     const db = getDB();
     const now = new Date();
