@@ -817,6 +817,9 @@ const Presence = {
   async reportContext(reason = 'lifecycle', options = {}) {
     const location = options.location || this.classifyLocation(options.path);
     const path = options.path || window.location.pathname;
+    if (this.isSocialClubChatContext()) {
+      options.allowRedirect = false;
+    }
     const roomId = Object.prototype.hasOwnProperty.call(options, 'roomId')
       ? options.roomId
       : this.getContextRoomId(location);
