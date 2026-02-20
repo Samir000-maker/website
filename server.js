@@ -2172,8 +2172,8 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.post('/api/beacon/leave', async (req, res) => {
   try {
-    const { token, roomId, callId } = req.body || {};
-    console.log(`📡 [API][beacon_leave] request: hasToken=${!!token} roomId=${roomId || ''} callId=${callId || ''}`);
+    const { token, roomId, callId, location, reason, socketId } = req.body || {};
+    console.log(`📡 [API][beacon_leave] request: hasToken=${!!token} roomId=${roomId || ''} callId=${callId || ''} location=${location || ''} reason=${reason || ''} socketId=${socketId || ''}`);
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'token is required' });
     }
@@ -2196,6 +2196,13 @@ app.post('/api/beacon/leave', async (req, res) => {
     }
 
     console.log(`📡 [API][beacon_leave] resolved: userId=${userId} firebaseUid=${firebaseUid} roomId=${roomId || ''} callId=${callId || ''}`);
+
+    // Smart guard: only honor beacon leave for true unload/close.
+    const allowedReasons = new Set(['beforeunload', 'unload']);
+    if (reason && !allowedReasons.has(reason)) {
+      console.log(`🛡️ [API][beacon_leave] Ignoring beacon leave (non-close reason=${reason}) userId=${userId} roomId=${roomId || ''} location=${location || ''}`);
+      return res.json({ success: true, ignored: true });
+    }
 
     if (typeof callId === 'string' && callId) {
       try {
