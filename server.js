@@ -2173,6 +2173,7 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.post('/api/beacon/leave', async (req, res) => {
   try {
     const { token, roomId, callId } = req.body || {};
+    console.log(`📡 [API][beacon_leave] request: hasToken=${!!token} roomId=${roomId || ''} callId=${callId || ''}`);
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'token is required' });
     }
@@ -2194,6 +2195,8 @@ app.post('/api/beacon/leave', async (req, res) => {
       return res.status(401).json({ error: 'Unable to resolve user' });
     }
 
+    console.log(`📡 [API][beacon_leave] resolved: userId=${userId} firebaseUid=${firebaseUid} roomId=${roomId || ''} callId=${callId || ''}`);
+
     if (typeof callId === 'string' && callId) {
       try {
         await handleCallLeaveInternal(userId, callId);
@@ -2202,6 +2205,7 @@ app.post('/api/beacon/leave', async (req, res) => {
 
     if (typeof roomId === 'string' && roomId) {
       try {
+        console.log(`📡 [API][beacon_leave] performUserLeaveChat: userId=${userId} roomId=${roomId} reason=api_beacon`);
         await performUserLeaveChat(userId, roomId, 'api_beacon', firebaseUid);
       } catch { }
     }
@@ -2527,6 +2531,13 @@ async function applyPresenceContextForUser({
     { usePreferredFallback: inChatContext }
   );
 
+  console.log(
+    `📍 [Presence] applyContext: userId=${userId} firebaseUid=${firebaseUid || ''} source=${source || ''} ` +
+    `location=${String(location || '')} normalized=${normalizedLocation} path=${String(path || '')} ` +
+    `inChat=${inChatContext} prev=${previousLocation || ''} hadChat=${hasChatContextHistory} ` +
+    `requestedRoomId=${roomId || ''} resolvedRoomId=${resolvedRoomId || ''} triggerLeaveOnExit=${triggerLeaveOnExit}`
+  );
+
   const presencePatch = {
     location: normalizedLocation,
     roomId: inChatContext ? (resolvedRoomId || roomId || null) : (resolvedRoomId || null),
@@ -2610,6 +2621,8 @@ async function applyPresenceContextForUser({
       source
     });
 
+    console.log(`🚦 [Presence] leaving chat context -> performUserLeaveChat: userId=${userId} roomId=${resolvedRoomId} source=${source || ''}`);
+
     const leaveResult = await performUserLeaveChat(userId, resolvedRoomId, 'location_change', firebaseUid);
 
     const redirectPayload = {
@@ -2617,6 +2630,7 @@ async function applyPresenceContextForUser({
       reason: 'left_chat_context',
       source
     };
+    console.log(`🚦 [Presence] emitting force_navigation: userId=${userId} firebaseUid=${firebaseUid || ''} to=${redirectPayload.to} reason=${redirectPayload.reason} source=${redirectPayload.source || ''}`);
     if (firebaseUid) {
       emitToUserAllDevices(firebaseUid, 'force_navigation', redirectPayload);
     }
@@ -3764,6 +3778,9 @@ app.post('/api/presence/context', authenticateFirebase, async (req, res) => {
   const { location, path: clientPath, roomId, source } = req.body || {};
   const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
 
+  const presenceTraceId = uuidv4().substring(0, 8);
+  console.log(`📍 [API][presence_context][${presenceTraceId}] request: userId=${userId || ''} firebaseUid=${firebaseUid || ''} location=${location || ''} path=${clientPath || ''} roomId=${roomId || ''} source=${source || ''}`);
+
   if (!userId) {
     return res.status(401).json({ error: 'Unable to resolve authenticated user' });
   }
@@ -3778,6 +3795,8 @@ app.post('/api/presence/context', authenticateFirebase, async (req, res) => {
       source: source || 'api_presence_context',
       triggerLeaveOnExit: true
     });
+
+    console.log(`📍 [API][presence_context][${presenceTraceId}] response: leftRoom=${!!result.leftRoom} redirectTo=${result.redirectTo || ''} normalizedLocation=${result.location || ''} resolvedRoomId=${result.roomId || ''}`);
 
     return res.json({
       success: true,
@@ -3800,6 +3819,7 @@ app.post('/api/leave-room', authenticateFirebase, async (req, res) => {
   const { userId, firebaseUid } = await resolveAuthenticatedRequestUser(req.firebaseUser);
 
   console.log(`📡 [API] Leave request via Beacon/Fetch: user=${userId}, room=${roomId}`);
+  console.log(`📡 [API][leave_room] request: userId=${userId || ''} firebaseUid=${firebaseUid || ''} roomId=${roomId || ''}`);
 
   if (!roomId) {
     return res.status(400).json({ error: 'roomId is required' });
