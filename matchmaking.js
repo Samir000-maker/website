@@ -27,7 +27,9 @@ async function createRoomInternalWithSize(mood, users, maxUsers) {
     await redis.set(`user:room:${user.userId}`, room.id, 'EX', 3600);
   }
 
-  await redis.set(`room:expiry:${room.id}`, 'pending_first_join', 'PX', ROOM_LIFETIME * 3);
+  if (mood !== 'social_club') {
+    await redis.set(`room:expiry:${room.id}`, 'pending_first_join', 'PX', ROOM_LIFETIME * 3);
+  }
 
   console.log(`🎉 [Cluster] Room ${room.id} created for mood ${mood} (maxUsers=${room.maxUsers})`);
   return room;
