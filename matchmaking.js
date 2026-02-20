@@ -238,6 +238,13 @@ class Room {
 
       if (this.expiresAt) return false; // Already started by another instance
 
+      if (this.mood === 'social_club') {
+        this.userJoinedRoom = true;
+        if (!this.timerStartedAt) this.timerStartedAt = Date.now();
+        await this.save();
+        return true;
+      }
+
       this.userJoinedRoom = true;
       this.timerStartedAt = Date.now();
       this.expiresAt = this.timerStartedAt + (config.ROOM_DURATION_MINUTES * 60 * 1000);
@@ -483,6 +490,13 @@ export async function leaveRoom(userId) {
       const remainingUsers = updatedUsers.length;
 
       console.log(`🏠 [MMR] User filter for ${roomId}: ${initialCount} -> ${remainingUsers} users`);
+
+      if (roomData.mood === 'social_club') {
+        roomData.users = updatedUsers;
+        await saveRoomToRedis(roomData);
+        console.log(`🏠 [MMR] Social Club room ${roomId} persisted (remaining ${remainingUsers})`);
+        return { success: true, roomId, remainingUsers, destroyed: false, users: updatedUsers };
+      }
 
       // Authoritative lifecycle: social_club rooms can remain alive with a single user waiting.
       const baseMin = (roomData.mood === 'social_club') ? 1 : 2;
