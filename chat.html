@@ -4721,7 +4721,7 @@
                 resolve();
               }, 2000);
 
-              socketInstance.emit('leave_room', { roomId: roomData.roomId }, (response) => {
+              socketInstance.emit('leave_room', { roomId: roomData?.roomId || currentRoomId || null }, (response) => {
                 clearTimeout(timeout);
                 console.log('✅ leave_room acknowledgment received:', response);
                 resolve();
@@ -5066,17 +5066,9 @@
           }
 
           // Request room data from server for clock sync
-          const roomStr = localStorage.getItem('currentRoom');
-          if (roomStr) {
-            try {
-              const localRoomData = JSON.parse(roomStr);
-              console.log('📦 Requesting fresh room data for clock sync...');
-
-              safeSocketEmit('request_room_sync', { roomId: localRoomData.roomId });
-
-            } catch (e) {
-              console.error('❌ Failed to parse room data:', e);
-            }
+          if (roomData?.roomId) {
+            console.log('📦 Requesting fresh room data for clock sync...');
+            safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
           }
 
           startCachedCallMonitoring();
@@ -5879,6 +5871,13 @@
 
             toast('Room no longer available', 'error');
 
+            if (isSocialClubMode && !roomData?.roomId) {
+              console.warn('🎭 Social Club: no active room yet; retrying join_social_club');
+              safeSocketEmit('join_social_club', {});
+              console.error('❌ ========================================\n');
+              return;
+            }
+
             if (audioCallBtn) {
               audioCallBtn.classList.remove('call-btn-loading', 'calling', 'animate-pulse');
               const timeoutId = audioCallBtn.dataset.timeoutId;
@@ -5898,12 +5897,10 @@
 
             console.error('🗑️ Using unified exit sequence due to room error');
             exitRoomSequence().catch(console.error);
-
             console.error('❌ ========================================\n');
             return;
           }
 
-          // Handle room expiry errors
           if (data.code === 'ROOM_EXPIRED') {
             console.error('💥 ROOM EXPIRED ERROR');
             console.error('   Message:', data.message);
@@ -7410,6 +7407,7 @@
           roomData = null;
           currentRoomId = null;
           console.log('🎭 Social Club mode - ignoring cached currentRoom, will join via join_social_club');
+          try { localStorage.removeItem('currentRoom'); } catch { }
         } else if (roomDataStr) {
           roomData = JSON.parse(roomDataStr);
           currentRoomId = roomData?.roomId || null;
