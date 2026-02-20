@@ -789,6 +789,13 @@ const Presence = {
         return false;
       }
 
+      if (this.isCallContext()) {
+        try {
+          console.log(`[Presence] sendLeaveBeacon suppressed (call): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
+        } catch { }
+        return false;
+      }
+
       const token = this._tokenCache;
       if (!token) return false;
 
