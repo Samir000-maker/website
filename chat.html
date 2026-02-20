@@ -7406,7 +7406,11 @@
       }
 
       try {
-        if (roomDataStr) {
+        if (isSocialClubMode) {
+          roomData = null;
+          currentRoomId = null;
+          console.log('🎭 Social Club mode - ignoring cached currentRoom, will join via join_social_club');
+        } else if (roomDataStr) {
           roomData = JSON.parse(roomDataStr);
           currentRoomId = roomData?.roomId || null;
           console.log('📦 Loaded room data from localStorage:');
@@ -7414,7 +7418,6 @@
         } else {
           roomData = null;
           currentRoomId = null;
-          console.log('🎭 Social Club mode - no currentRoom in localStorage, will join via matchmaking');
         }
 
         // CRITICAL: Don't trust localStorage expiresAt - wait for server
@@ -7466,7 +7469,7 @@
 
       const cachedState = loadChatState();
 
-      if (cachedState && cachedState.roomId === roomData.roomId) {
+      if (cachedState && roomData && cachedState.roomId === roomData.roomId) {
         console.log('🎨 Restoring UI from cache IMMEDIATELY on page load');
         console.log(`   Cached button state: ${cachedState.callButtonState}`);
         console.log(`   Cached activeCallInRoom:`, cachedState.activeCallInRoom);
