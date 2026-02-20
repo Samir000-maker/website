@@ -1137,6 +1137,11 @@ async function handleRoomExpiry(roomId) {
       return;
     }
 
+    if (room.mood === 'social_club') {
+      console.log(`ℹ️ [Cleanup] Skipping expiry for Social Club room ${roomId}`);
+      return;
+    }
+
     // Mark room as expired
     room.isExpired = true;
 
@@ -5092,9 +5097,9 @@ io.on('connection', (socket) => {
 
       socket.emit('room_valid', {
         roomId: room.id,
-        expiresAt: room.expiresAt,
+        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
         serverTime: Date.now(),
-        timeRemaining: room.getTimeUntilExpiration()
+        timeRemaining: room.mood === 'social_club' ? 0 : room.getTimeUntilExpiration()
       });
 
     } catch (error) {
@@ -5141,10 +5146,10 @@ io.on('connection', (socket) => {
       // Send fresh server time and expiry
       const syncData = {
         roomId: room.id,
-        expiresAt: room.expiresAt,
+        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
         timerStartedAt: room.timerStartedAt,
         serverTime: Date.now(), // CRITICAL: Current server time for clock sync
-        timeRemaining: room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0
+        timeRemaining: (room.mood === 'social_club') ? 0 : (room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0)
       };
 
       console.log(`📤 Sending room sync to ${user.username}:`);
@@ -5953,7 +5958,11 @@ io.on('connection', (socket) => {
       if (timerStarted) {
         console.log(`⏱️ Room ${roomId} lifecycle timers STARTED by ${user.username}`);
         console.log(`   Timer started at: ${new Date(room.timerStartedAt).toISOString()}`);
-        console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
+        if (room.expiresAt) {
+          console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
+        } else {
+          console.log(`   Will expire at: null`);
+        }
         logLifecycle('room_timer_started', {
           roomId,
           startedBy: user.userId,
@@ -5995,7 +6004,7 @@ io.on('connection', (socket) => {
       const responseData = {
         roomId,
         chatHistory: chatHistory,
-        expiresAt: room.expiresAt,
+        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
         timerStartedAt: room.timerStartedAt,
         serverTime: Date.now()
       };
