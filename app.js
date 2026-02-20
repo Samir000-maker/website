@@ -782,14 +782,14 @@ const Presence = {
       const location = this.classifyLocation();
       if (!this.isChatContext(location)) return false;
 
-      if (this.isSocialClubChatContext()) {
+      if (this.isSocialClubChatContext() && reason !== 'beforeunload') {
         try {
           console.log(`[Presence] sendLeaveBeacon suppressed (social-club): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
         } catch { }
         return false;
       }
 
-      if (this.isCallContext()) {
+      if (this.isCallContext() && reason !== 'beforeunload') {
         try {
           console.log(`[Presence] sendLeaveBeacon suppressed (call): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
         } catch { }
@@ -942,9 +942,6 @@ const Presence = {
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (!this.isSocialClubChatContext() && !this.isCallContext()) {
-          try { this.sendLeaveBeacon('visibility_hidden'); } catch { }
-        }
         this.reportContext('visibility_hidden', {
           allowRedirect: false,
           keepalive: true
@@ -960,9 +957,6 @@ const Presence = {
     });
 
     window.addEventListener('pagehide', () => {
-      if (!this.isSocialClubChatContext() && !this.isCallContext()) {
-        try { this.sendLeaveBeacon('pagehide'); } catch { }
-      }
       this.reportContext('pagehide', {
         allowRedirect: false,
         keepalive: true
@@ -970,9 +964,7 @@ const Presence = {
     });
 
     window.addEventListener('beforeunload', () => {
-      if (!this.isSocialClubChatContext()) {
-        try { this.sendLeaveBeacon('beforeunload'); } catch { }
-      }
+      try { this.sendLeaveBeacon('beforeunload'); } catch { }
     });
 
     // Initial best-effort sync.
