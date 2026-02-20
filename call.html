@@ -451,9 +451,11 @@
       let localStream = null, peerConnections = new Map(), audioContexts = new Map(), socketInstance = null;
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
+      let explicitLeaveCall = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // ✅ Restore missing tracking set
-      let isNavigatingToChat = false; // ✅ Restore missing navigation flag
+      let isNavigatingToChat = false;
+      let returningToCallFromChat = false;
       let isInChatView = false; // ✅ Restore missing view flag
       let isControlsLocked = true; // ✅ Initial lockout
       let remoteMediaStates = new Map(); // ✅ userId -> { video: boolean, audio: boolean }
@@ -3977,6 +3979,7 @@
       function leaveCall() {
         if (isInitializing) return;
         isInitializing = true;
+        explicitLeaveCall = true;
         stopCallHeartbeat();
         audioContexts.forEach(ac => {
           try {
@@ -4717,6 +4720,10 @@
             const target = data?.to || '/mood.html';
             const safeTarget = target === '/discovery.html' ? '/mood.html' : target;
             console.warn(`🚦 Force navigation from server: ${safeTarget}`);
+            if (!explicitLeaveCall) {
+              console.warn('🛡️ Ignoring force_navigation during call (no explicit leave)');
+              return;
+            }
             localStorage.removeItem('activeCall');
             sessionStorage.removeItem('hasBackgroundCall');
             window.location.href = safeTarget;
@@ -4725,6 +4732,10 @@
           socketInstance.on('left_room', (data) => {
             if (!data?.forceRedirect) return;
             console.warn(`🚦 left_room with forced redirect (${data.reason || 'unspecified'})`);
+            if (!explicitLeaveCall) {
+              console.warn('🛡️ Ignoring left_room forced redirect during call (no explicit leave)');
+              return;
+            }
             localStorage.removeItem('activeCall');
             sessionStorage.removeItem('hasBackgroundCall');
             window.location.href = '/mood.html';
