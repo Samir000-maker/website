@@ -754,10 +754,23 @@ const Presence = {
     }
   },
 
+  isSocialClubChatContext() {
+    try {
+      if (!window?.location) return false;
+      if (!String(window.location.pathname || '').endsWith('/chat.html')) return false;
+      const params = new URLSearchParams(window.location.search || '');
+      return params.get('mode') === 'social-club';
+    } catch {
+      return false;
+    }
+  },
+
   sendLeaveBeacon(reason = 'pagehide') {
     try {
       const location = this.classifyLocation();
       if (!this.isChatContext(location)) return false;
+
+      if (this.isSocialClubChatContext()) return false;
 
       const token = this._tokenCache;
       if (!token) return false;
@@ -898,7 +911,9 @@ const Presence = {
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        try { this.sendLeaveBeacon('visibility_hidden'); } catch { }
+        if (!this.isSocialClubChatContext()) {
+          try { this.sendLeaveBeacon('visibility_hidden'); } catch { }
+        }
         this.reportContext('visibility_hidden', {
           allowRedirect: false,
           keepalive: true
@@ -914,7 +929,9 @@ const Presence = {
     });
 
     window.addEventListener('pagehide', () => {
-      try { this.sendLeaveBeacon('pagehide'); } catch { }
+      if (!this.isSocialClubChatContext()) {
+        try { this.sendLeaveBeacon('pagehide'); } catch { }
+      }
       this.reportContext('pagehide', {
         allowRedirect: false,
         keepalive: true
@@ -922,7 +939,9 @@ const Presence = {
     });
 
     window.addEventListener('beforeunload', () => {
-      try { this.sendLeaveBeacon('beforeunload'); } catch { }
+      if (!this.isSocialClubChatContext()) {
+        try { this.sendLeaveBeacon('beforeunload'); } catch { }
+      }
     });
 
     // Initial best-effort sync.
