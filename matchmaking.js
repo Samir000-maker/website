@@ -484,9 +484,17 @@ export async function leaveRoom(userId) {
 
       console.log(`🏠 [MMR] User filter for ${roomId}: ${initialCount} -> ${remainingUsers} users`);
 
-      // Authoritative lifecycle: room is not viable with fewer than 2 active users.
-      const minimumViableUsers = Math.max(2, config.MIN_USERS_FOR_ROOM || 2);
+      // Authoritative lifecycle: social_club rooms can remain alive with a single user waiting.
+      const baseMin = (roomData.mood === 'social_club') ? 1 : 2;
+      const minimumViableUsers = Math.max(baseMin, config.MIN_USERS_FOR_ROOM || baseMin);
       if (remainingUsers < minimumViableUsers) {
+        if (roomData.mood === 'social_club' && remainingUsers > 0) {
+          roomData.users = updatedUsers;
+          await saveRoomToRedis(roomData);
+          console.log(`🏠 [MMR] Social Club room ${roomId} kept alive with ${remainingUsers} user(s)`);
+          return { success: true, roomId, remainingUsers, destroyed: false, users: updatedUsers };
+        }
+
         // Strong re-check: roomData.users can be stale during reconnect/app reopen.
         // Validate remaining membership using the authoritative user:room:<userId> mappings.
         const stillMappedUsers = [];
