@@ -757,9 +757,11 @@ const Presence = {
   isSocialClubChatContext() {
     try {
       if (!window?.location) return false;
-      if (!String(window.location.pathname || '').endsWith('/chat.html')) return false;
       const params = new URLSearchParams(window.location.search || '');
-      return params.get('mode') === 'social-club';
+      const isSocialClubMode = params.get('mode') === 'social-club';
+      if (!isSocialClubMode) return false;
+      const pathname = String(window.location.pathname || '');
+      return pathname === '/chat.html' || pathname.endsWith('/chat.html') || pathname.includes('chat.html');
     } catch {
       return false;
     }
@@ -770,7 +772,12 @@ const Presence = {
       const location = this.classifyLocation();
       if (!this.isChatContext(location)) return false;
 
-      if (this.isSocialClubChatContext()) return false;
+      if (this.isSocialClubChatContext()) {
+        try {
+          console.log(`[Presence] sendLeaveBeacon suppressed (social-club): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
+        } catch { }
+        return false;
+      }
 
       const token = this._tokenCache;
       if (!token) return false;
@@ -793,6 +800,10 @@ const Presence = {
         location,
         reason
       };
+
+      try {
+        console.log(`[Presence] sendLeaveBeacon sending: reason=${reason} location=${location} roomId=${payload.roomId || ''} callId=${payload.callId || ''} path=${window.location.pathname}${window.location.search || ''}`);
+      } catch { }
 
       if (navigator.sendBeacon) {
         const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
