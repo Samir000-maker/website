@@ -4528,6 +4528,8 @@
           safeSocketEmitWithAck('page_context', payload, (response) => {
             if (!response) return;
             if (response.redirectTo && response.redirectTo !== window.location.pathname) {
+              const allowRedirect = options.allowRedirect !== false;
+              if (isSocialClubMode || !allowRedirect) return;
               cleanupParentCallPage('/mood.html');
               window.location.href = '/mood.html';
             }
@@ -4553,6 +4555,7 @@
           }
 
           console.warn('⚠️ Presence validation failed. Redirecting to mood.');
+          if (isSocialClubMode) return;
           try {
             await clearChatState(true);
           } catch { }
