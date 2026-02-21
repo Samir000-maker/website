@@ -1756,13 +1756,12 @@
           console.warn('LocalStorage not available:', e);
         }
 
-        console.log('🎮 Joining matchmaking with mood:', selectedMood);
+        console.log('🎮 Entering chat with mood:', selectedMood);
 
-        // Navigate to discovery page
         if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-          _PageTransition.navigateTo('/discovery.html');
+          _PageTransition.navigateTo('/chat.html');
         } else {
-          window.location.href = '/discovery.html';
+          window.location.href = '/chat.html';
         }
       }
 
