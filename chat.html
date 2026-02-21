@@ -1793,6 +1793,9 @@
       const chatMode = urlParams.get('mode');
       const isSocialClubMode = chatMode === 'social-club';
 
+      let hasJoinedRoom = false;
+      let pendingInitialRoomSync = false;
+
       const chatHeaderTitleEl = document.getElementById('chatHeaderTitle');
       if (chatHeaderTitleEl && isSocialClubMode) {
         chatHeaderTitleEl.textContent = 'Social Club';
@@ -4581,6 +4584,7 @@
 
       async function validateChatPresenceState(trigger = 'manual_validation') {
         if (!socketInstance?.connected || !roomData?.roomId) return;
+        if (!hasJoinedRoom) return;
 
         safeSocketEmitWithAck('validate_presence_state', {
           location: 'chat',
@@ -4592,6 +4596,14 @@
           if (response.valid) {
             if ((trigger.includes('pageshow') || trigger.includes('visibility')) && socketInstance?.connected) {
               safeSocketEmit('request_room_sync', { roomId: response.roomId || roomData.roomId });
+            }
+            return;
+          }
+
+          if (response.reason === 'NOT_IN_ROOM') {
+            if (socketInstance?.connected && roomData?.roomId) {
+              pendingInitialRoomSync = true;
+              safeSocketEmit('join_room', { roomId: roomData.roomId });
             }
             return;
           }
@@ -5076,14 +5088,9 @@
             }).catch(() => { });
           }
 
-          // Request room data from server for clock sync
-          if (roomData?.roomId) {
-            console.log('📦 Requesting fresh room data for clock sync...');
-            safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
-          }
-
           startCachedCallMonitoring();
           if (roomData && roomData.roomId) {
+            pendingInitialRoomSync = true;
             safeSocketEmit('join_room', { roomId: roomData.roomId });
           } else if (isSocialClubMode) {
             safeSocketEmit('join_social_club', {});
@@ -5096,7 +5103,6 @@
             showChatLoadingOverlay('Creating your room…', 'You can invite someone anytime.');
             safeSocketEmit('join_matchmaking', { mood: selectedMood });
           }
-          validateChatPresenceState('post_auth_join').catch(() => { });
 
           console.log('✅ ========================================\n');
         });
@@ -5111,11 +5117,12 @@
               roomId: data.roomId,
               mood: data.mood,
               users: data.users,
-              expiresAt: data.expiresAt
+              expiresAt: null
             };
             currentRoomId = data.roomId;
             localStorage.setItem('currentRoom', JSON.stringify(roomData));
 
+            pendingInitialRoomSync = true;
             safeSocketEmit('join_room', { roomId: data.roomId });
           } catch (error) {
             console.error('❌ Failed to handle match_found:', error);
@@ -5197,6 +5204,7 @@
           console.log('✅ ROOM_JOINED EVENT RECEIVED');
           console.log('✅ ========================================');
           console.log(`   roomId: ${data.roomId}`);
+          hasJoinedRoom = true;
           currentRoomId = data.roomId || currentRoomId;
           roomRecoveryInProgress = false;
           roomRecoveryAttempts = 0;
@@ -5207,6 +5215,11 @@
             source: 'chat_room_joined'
           }).catch(() => { });
           validateChatPresenceState('room_joined').catch(() => { });
+
+          if (pendingInitialRoomSync && roomData?.roomId) {
+            pendingInitialRoomSync = false;
+            safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
+          }
 
           // [Keep existing clock sync code...]
           const clientNow = Date.now();
@@ -5802,8 +5815,8 @@
               lastRoomRecoveryAttemptAt = now;
 
               toast('Connection hiccup detected. Resyncing room...', 'warning');
-              safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
               safeSocketEmit('join_room', { roomId: roomData.roomId });
+              pendingInitialRoomSync = true;
 
               setTimeout(() => {
                 roomRecoveryInProgress = false;
@@ -7486,10 +7499,7 @@
         }
       }
 
-      console.log('⏰ Starting timer interval (will update when server data arrives)');
-      // Start timer interval (will show "--" until server data arrives)
-      timerInterval = setInterval(updateTimer, 1000);
-      updateTimer();
+      if (timerInterval) clearInterval(timerInterval);
 
       // Initialize socket
       try {
