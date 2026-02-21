@@ -673,10 +673,12 @@
                         if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
                         localStorage.setItem('guest_mood', selectedMood);
                         localStorage.setItem('guest_timestamp', String(Date.now()));
+                        localStorage.setItem('selectedMood', selectedMood);
+                        localStorage.removeItem('currentRoom');
                     } catch { }
 
-                    showOverlay('Entering discovery…');
-                    window.location.href = '/discovery.html';
+                    showOverlay('Entering chat…');
+                    window.location.href = '/chat.html';
                 } catch (err) {
                     console.error('Guest connect failed:', err);
                     const msg = (err && err.message) ? String(err.message) : 'Connection failed';
