@@ -253,7 +253,6 @@
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
         </span>
-        <span class="text-[9px] sm:text-sm font-bold font-mono whitespace-nowrap" id="callDuration">00:00:00</span>
       </div>
     </div>
   </header>
@@ -3924,56 +3923,7 @@
       }
 
       function updateDuration() {
-        const roomStr = localStorage.getItem('currentRoom');
-        if (!roomStr) {
-          console.warn('⚠️ No room data - cannot sync timer');
-          return;
-        }
-
-        try {
-          const roomData = JSON.parse(roomStr);
-
-          if (!roomData.expiresAt) {
-            console.error('❌ No expiresAt in room data');
-            return;
-          }
-
-          // Use stored expiresAt if available, otherwise use from localStorage
-          const expiresAt = roomExpiresAt || roomData.expiresAt;
-
-          // CRITICAL FIX: Use server-adjusted time
-          const clientNow = Date.now();
-          const serverNow = clientNow + serverClockOffset; // Adjust for clock skew
-          const remaining = Math.max(0, expiresAt - serverNow);
-
-          const totalSeconds = Math.floor(remaining / 1000);
-          const h = Math.floor(totalSeconds / 3600);
-          const m = Math.floor((totalSeconds % 3600) / 60);
-          const s = totalSeconds % 60;
-
-          const el = document.getElementById('callDuration');
-          if (el) {
-            el.textContent = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-          }
-
-          // Log every 10 seconds for debugging
-          if (totalSeconds % 10 === 0) {
-            console.log(`⏰ Call timer: ${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')} remaining`);
-            console.log(`   Server expiresAt: ${new Date(expiresAt).toISOString()}`);
-            console.log(`   Client now: ${new Date(clientNow).toISOString()}`);
-            console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-            console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
-          }
-
-          if (remaining === 0) {
-            console.log('⏰ Room expired during call - ending call');
-            if (durationInterval) clearInterval(durationInterval);
-            toast('Room has expired', 'warning');
-            leaveCall();
-          }
-        } catch (e) {
-          console.error('❌ Timer sync error:', e);
-        }
+        return;
       }
 
       function leaveCall() {
@@ -4550,48 +4500,11 @@
 
 
           socketInstance.on('room_expired', (data) => {
-            console.error('💥 ========================================');
-            console.error('💥 ROOM_EXPIRED EVENT RECEIVED FROM SERVER');
-            console.error('💥 ========================================');
-            console.error(`   roomId: ${data.roomId}`);
-            console.error(`   message: ${data.message}`);
-            console.error(`   Server says room expired at: ${new Date().toISOString()}`);
-
-            if (roomExpiresAt) {
-              const serverExpiry = new Date(roomExpiresAt).toISOString();
-              const clientNow = new Date().toISOString();
-              const serverNow = new Date(Date.now() + serverClockOffset).toISOString();
-              console.error(`   expiresAt was: ${serverExpiry}`);
-              console.error(`   Client time now: ${clientNow}`);
-              console.error(`   Server time now (adjusted): ${serverNow}`);
-            }
-
-            console.error('💥 ========================================\n');
-
-            if (durationInterval) clearInterval(durationInterval);
-            toast(data.message || 'Room has expired', 'warning');
-
-            // Clean up and redirect
-            leaveCall();
+            return;
           });
 
           socketInstance.on('room_expiring_soon', (data) => {
-            console.warn('⚠️ ========================================');
-            console.warn('⚠️ ROOM EXPIRING SOON');
-            console.warn('⚠️ ========================================');
-            console.warn(`   Expires in: ${data.expiresIn / 1000} seconds`);
-            console.warn(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
-
-            const clientNow = Date.now();
-            const serverNow = clientNow + serverClockOffset;
-            const remaining = data.expiresAt - serverNow;
-
-            console.warn(`   Client now: ${new Date(clientNow).toISOString()}`);
-            console.warn(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-            console.warn(`   Remaining (adjusted): ${(remaining / 1000).toFixed(1)}s`);
-            console.warn('⚠️ ========================================\n');
-
-            toast(`Room expiring soon!`, 'warning');
+            return;
           });
 
           socketInstance.on('authenticated', async () => {
@@ -4766,35 +4679,12 @@
               console.warn(`   Timer will be adjusted to compensate`);
             }
 
-            if (data.expiresAt) {
-              roomExpiresAt = data.expiresAt;
-
-              // Calculate time remaining using server-adjusted time
-              const serverNow = clientNow + serverClockOffset;
-              const timeRemaining = data.expiresAt - serverNow;
-
-              console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
-              console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-              console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
-
-              // Update localStorage with synced data
-              const roomStr = localStorage.getItem('currentRoom');
-              if (roomStr) {
-                try {
-                  const roomData = JSON.parse(roomStr);
-                  roomData.expiresAt = data.expiresAt;
-                  localStorage.setItem('currentRoom', JSON.stringify(roomData));
-                  console.log('✅ Updated localStorage with server expiry time');
-                } catch (e) {
-                  console.error('❌ Failed to update localStorage:', e);
-                }
-              }
-            }
+            roomExpiresAt = null;
 
             console.log('⏰ ========================================\n');
 
             // Force timer update with new data
-            updateDuration();
+            // updateDuration();
           });
 
 
@@ -4982,12 +4872,12 @@
             console.log('⏰ Starting synced timer with room expiry and clock compensation');
             console.log(`   Clock offset: ${(serverClockOffset / 1000).toFixed(1)}s`);
 
-            durationInterval = setInterval(updateDuration, 1000);
-            updateDuration(); // Update immediately
+            // durationInterval = setInterval(updateDuration, 1000);
+            // updateDuration(); // Update immediately
 
             isInitializing = false;
             console.log('✅ ========================================');
-            console.log('✅ INIT COMPLETE');
+            console.log('✅ CALL INITIALIZED SUCCESSFULLY');
             console.log('✅ ========================================\n');
           });
 
