@@ -876,16 +876,7 @@ async function setupRedisExpiryNotifications() {
       console.log(`⏰ [Redis][EXPIRY] Event: ${key}`);
 
       // Handle room expiry
-      if (key.startsWith('room:expiry:')) {
-        const roomId = key.replace('room:expiry:', '');
-        console.log(`⏰ [Redis][ROOM-EXPIRY] ID: ${roomId}`);
-        handleRoomExpiry(roomId).catch(error => {
-          console.error(`❌ Failed to handle room expiry for ${roomId}:`, error);
-        });
-      }
-
-      // Handle user cleanup
-      else if (key.startsWith('user:cleanup:')) {
+      if (key.startsWith('user:cleanup:')) {
         const userId = key.replace('user:cleanup:', '');
         console.log(`⏰ [Redis][USER-CLEANUP] ID: ${userId}`);
         handleUserCleanup(userId).catch(error => {
@@ -932,38 +923,14 @@ setupRedisExpiryNotifications()
  * Schedule room cleanup using Redis TTL
  */
 async function scheduleRoomCleanup(roomId, expiryMs) {
-  try {
-    const expirySeconds = Math.ceil(expiryMs / 1000);
-    const expiryData = JSON.stringify({
-      roomId,
-      scheduledAt: Date.now(),
-      expiryMs
-    });
-
-    await pubClient.setex(`room:expiry:${roomId}`, expirySeconds, expiryData);
-    console.log(`⏰ [Redis] Scheduled room cleanup for ${roomId} in ${expirySeconds}s`);
-
-    return true;
-  } catch (error) {
-    console.error(`❌ [Redis] Failed to schedule room cleanup for ${roomId}:`, error);
-    return false;
-  }
+  return false;
 }
 
 /**
  * Cancel room cleanup
  */
 async function cancelRoomCleanup(roomId) {
-  try {
-    const deleted = await pubClient.del(`room:expiry:${roomId}`);
-    if (deleted > 0) {
-      console.log(`⏰ [Redis] Cancelled room cleanup for ${roomId}`);
-    }
-    return deleted > 0;
-  } catch (error) {
-    console.error(`❌ [Redis] Failed to cancel room cleanup for ${roomId}:`, error);
-    return false;
-  }
+  return false;
 }
 
 /**
@@ -1127,79 +1094,7 @@ async function acquireRoomInitLock(roomId) {
  * Handle room expiry event (called when Redis key expires)
  */
 async function handleRoomExpiry(roomId) {
-  console.log(`🧹 [Cleanup] Authoritative room expiry for ${roomId}`);
-  logLifecycle('room_expiry_triggered', { roomId, trigger: 'redis_expiry' });
-
-  try {
-    const room = await matchmaking.getRoom(roomId);
-    if (!room) {
-      console.log(`⚠️ [Cleanup] Room ${roomId} already removed from memory`);
-      return;
-    }
-
-    if (room.mood === 'social_club') {
-      console.log(`ℹ️ [Cleanup] Skipping expiry for Social Club room ${roomId}`);
-      return;
-    }
-
-    // Mark room as expired
-    room.isExpired = true;
-
-    // 1. Notify all users and clear their records
-    const userIds = room.users.map(u => u.userId);
-    for (const userId of userIds) {
-      const userData = room.users.find(u => u.userId === userId);
-
-      // Notify cluster-wide
-      io.to(`user:${userId}`).emit('room_expired', {
-        roomId,
-        message: 'Chat room has expired',
-        cleanupFiles: true
-      });
-
-      // Clear records in Redis
-      if (userData?.firebaseUid) {
-        await clearUserActiveRoom(userData.firebaseUid);
-      }
-      await removeUserFromAllMoods(userId);
-      await removeUserPresence(userId);
-    }
-
-    // 2. Clean up associated call
-    const callId = await pubClient.get(`room:${roomId}:call`);
-    if (callId) {
-      console.log(`🧹 Room expiry: Triggering cleanup for associated call ${callId}`);
-      await handleCallExpiry(callId);
-    }
-
-    // 3. Delete all attachments for this room (R2 + MongoDB)
-    try {
-      const db = getDB();
-      const attachments = await db.collection('attachments').find({ roomId }).toArray();
-      for (const att of attachments) {
-        if (att.storageKey) {
-          await deleteChatAttachmentByKey(att.storageKey);
-        }
-      }
-      if (attachments.length > 0) {
-        const delResult = await db.collection('attachments').deleteMany({ roomId });
-        console.log(`🧹 [Cleanup] Deleted ${delResult.deletedCount} attachment(s) for room ${roomId}`);
-      }
-    } catch (attErr) {
-      console.error(`❌ [Cleanup] Failed to delete room attachments for ${roomId}:`, attErr);
-    }
-
-    // 4. Remove room from matchmaking
-    await matchmaking.destroyRoom(roomId, 'timer_expired');
-
-    console.log(`✅ [Cleanup] Room ${roomId} fully purged across cluster`);
-    logLifecycle('room_destroyed', {
-      roomId,
-      reason: 'timer_expired'
-    });
-  } catch (error) {
-    console.error(`❌ [Cleanup] Room purge failure for ${roomId}:`, error);
-  }
+  return;
 }
 
 /**
@@ -5124,9 +5019,9 @@ io.on('connection', (socket) => {
 
       socket.emit('room_valid', {
         roomId: room.id,
-        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
+        expiresAt: null,
         serverTime: Date.now(),
-        timeRemaining: room.mood === 'social_club' ? 0 : room.getTimeUntilExpiration()
+        timeRemaining: 0
       });
 
     } catch (error) {
@@ -5173,10 +5068,10 @@ io.on('connection', (socket) => {
       // Send fresh server time and expiry
       const syncData = {
         roomId: room.id,
-        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
-        timerStartedAt: room.timerStartedAt,
+        expiresAt: null,
+        timerStartedAt: null,
         serverTime: Date.now(), // CRITICAL: Current server time for clock sync
-        timeRemaining: (room.mood === 'social_club') ? 0 : (room.expiresAt ? Math.max(0, room.expiresAt - Date.now()) : 0)
+        timeRemaining: 0
       };
 
       console.log(`📤 Sending room sync to ${user.username}:`);
@@ -5640,158 +5535,50 @@ io.on('connection', (socket) => {
         socketId: socket.id
       });
 
-      if (!room) {
-        const queueStatus = await matchmaking.getQueueStatus(mood);
-        if (queueStatus >= config.MAX_USERS_PER_ROOM) {
-          console.log(`🔄 Queue full detected (${queueStatus}/${config.MAX_USERS_PER_ROOM}), retrying match...`);
-          room = await matchmaking.addToQueue({
-            ...user,
-            mood,
-            socketId: socket.id
-          });
-        }
+      if (!room || room.error) {
+        socket.emit('error', { message: room?.error || 'Failed to create room' });
+        return;
       }
 
-      if (room) {
-        // Match found (either new room or joined existing)
-        clearMatchmakingTimeout(user.userId);
+      // Immediate room: emit match_found right away (no queue UI).
+      console.log(`🎉 Room ready! Room ${room.id} with ${room.users.length} user(s)`);
 
-        console.log(`🎉 Match found! Room ${room.id} with ${room.users.length} users`);
+      const uniqueUsers = new Map();
+      room.users.forEach(roomUser => {
+        uniqueUsers.set(roomUser.userId, roomUser);
+      });
+      room.users = Array.from(uniqueUsers.values());
 
-        const uniqueUsers = new Map();
-        room.users.forEach(roomUser => {
-          uniqueUsers.set(roomUser.userId, roomUser);
-        });
-        room.users = Array.from(uniqueUsers.values());
+      for (const roomUser of room.users) {
+        io.in(`user:${roomUser.userId}`).socketsJoin(room.id);
 
-        // Check if this is a new user joining existing room
-        const isJoiningExisting = room.users.length > config.MIN_USERS_FOR_ROOM || room.messages.length > 0;
+        const matchData = {
+          roomId: room.id,
+          mood: room.mood,
+          users: room.users.map(u => ({
+            userId: u.userId,
+            username: u.username,
+            pfpUrl: u.pfpUrl
+          })),
+          expiresAt: null,
+          activeCall: await findActiveCallForRoom(room.id)
+        };
 
-        for (const roomUser of room.users) {
-          // CLUSTER ADAPTATION: Check presence instead of local socket
-          const isConnected = await getUserPresence(roomUser.userId);
+        io.to(`user:${roomUser.userId}`).emit('match_found', matchData);
 
-          if (isConnected) {
-            console.log(`📤 [Cluster] Emitting match_found to ${roomUser.username} (${roomUser.userId})`);
-
-            // Force remote sockets to join the room
-            io.in(`user:${roomUser.userId}`).socketsJoin(room.id);
-            console.log(`✅ User ${roomUser.username} joined Socket.IO room ${room.id} (Cluster Op)`);
-
-            // Include previous messages for users joining existing room
-            const matchData = {
-              roomId: room.id,
-              mood: room.mood,
-              users: room.users.map(u => ({
-                userId: u.userId,
-                username: u.username,
-                pfpUrl: u.pfpUrl
-              })),
-              expiresAt: room.expiresAt,
-              activeCall: await findActiveCallForRoom(room.id) // ✅ Async call state
-            };
-
-            // If user is joining existing room, include previous messages
-            if (isJoiningExisting && roomUser.userId === user.userId) {
-              matchData.previousMessages = room.getMessages();
-              console.log(`📨 Sending ${matchData.previousMessages.length} previous messages to ${roomUser.username}`);
-            }
-
-            io.to(`user:${roomUser.userId}`).emit('match_found', matchData);
-
-            // ✅ CRITICAL FIX: Track active room for disconnect handler
-            if (roomUser.firebaseUid) {
-              await setUserActiveRoom(roomUser.firebaseUid, room.id, room.mood);
-            } else {
-              await setUserActiveRoom(roomUser.userId, room.id, room.mood);
-            }
-
-            await updateUserPresence(roomUser.userId, {
-              roomId: room.id,
-              activeRoomId: room.id,
-              location: 'mood',
-              status: 'matchmaking',
-              chatContextSeen: false,
-              firebaseUid: roomUser.firebaseUid
-            });
-
-            // ✅ Keep user in mood count when moved to room
-            addUserToMood(roomUser.userId, room.mood);
-
-            // Clear matchmaking timeout for this user
-            clearMatchmakingTimeout(roomUser.userId);
-
-          } else {
-            console.error(`❌ User ${roomUser.username} not connected (Presence Check Failed)`);
-            // Check for active call before leaving matchmaking room
-            const activeCall = await findActiveCallForRoom(room.id);
-            const hasActiveCall = !!activeCall;
-            await matchmaking.leaveRoom(roomUser.userId, hasActiveCall);
-          }
+        if (roomUser.firebaseUid) {
+          await setUserActiveRoom(roomUser.firebaseUid, room.id, room.mood);
         }
+        await setUserActiveRoom(roomUser.userId, room.id, room.mood);
 
-        // Notify existing room members about new user (if joining existing)
-        if (isJoiningExisting) {
-          io.to(room.id).emit('user_joined_room', {
-            userId: user.userId,
-            username: user.username,
-            pfpUrl: user.pfpUrl,
-            roomUserCount: room.users.length
-          });
-          console.log(`📢 Notified room ${room.id} about new user ${user.username}`);
-        }
-
-      } else {
-        // No match yet, user is in queue
-        const queuePosition = await matchmaking.getQueueStatus(mood);
-        socket.emit('queued', {
-          mood,
-          position: queuePosition
+        await updateUserPresence(roomUser.userId, {
+          roomId: room.id,
+          activeRoomId: room.id,
+          location: 'chat',
+          status: 'chat_active',
+          chatContextSeen: true,
+          firebaseUid: roomUser.firebaseUid
         });
-        console.log(`⏳ User ${user.username} queued (${queuePosition}/${config.MIN_USERS_FOR_ROOM})`);
-
-        // ✅ START MATCHMAKING TIMEOUT
-        const timeoutHandle = setTimeout(async () => {
-          const currentQueueStatus = await matchmaking.getQueueStatus(mood);
-
-          console.log(`⏰ Matchmaking timeout for ${user.username} in ${mood} queue`);
-          console.log(`   Queue status: ${currentQueueStatus} users`);
-
-          if (currentQueueStatus < config.MIN_USERS_FOR_ROOM) {
-            console.log(`❌ Insufficient users (${currentQueueStatus}/${config.MIN_USERS_FOR_ROOM}) - timing out`);
-
-            await matchmaking.cancelMatchmaking(user.userId, mood);
-            removeUserFromAllMoods(user.userId);
-            clearMatchmakingTimeout(user.userId);
-
-            io.to(`user:${user.userId}`).emit('matchmaking_timeout', {
-              message: 'No matches found. Please try again.',
-              mood: mood,
-              queueStatus: currentQueueStatus,
-              minRequired: config.MIN_USERS_FOR_ROOM,
-              redirectTo: '/mood.html'
-            });
-            console.log(`📤 Sent matchmaking_timeout with redirect to ${user.username}`);
-
-            console.log(`🔄 User ${user.username} timed out, should redirect to mood selection`);
-          } else {
-            console.log(`✅ Sufficient users found (${currentQueueStatus}), creating room`);
-            const room = await matchmaking.addToQueue({
-              ...user,
-              mood,
-              socketId: socket.id
-            });
-
-            if (room) {
-              console.log(`🎉 Room ${room.id} created after timeout check`);
-            }
-          }
-
-          matchmakingTimeouts.delete(user.userId);
-        }, config.MATCHMAKING_TIMEOUT);
-
-        matchmakingTimeouts.set(user.userId, timeoutHandle);
-        console.log(`⏰ Started ${config.MATCHMAKING_TIMEOUT / 1000}s timeout for ${user.username}`);
       }
     } catch (error) {
       console.error('Join matchmaking error:', error);
@@ -5983,30 +5770,7 @@ io.on('connection', (socket) => {
       // Start room lifecycle timers authoritatively on first actual room join.
       const timerStarted = await room.startLifecycleTimers();
       if (timerStarted) {
-        console.log(`⏱️ Room ${roomId} lifecycle timers STARTED by ${user.username}`);
-        console.log(`   Timer started at: ${new Date(room.timerStartedAt).toISOString()}`);
-        if (room.expiresAt) {
-          console.log(`   Will expire at: ${new Date(room.expiresAt).toISOString()}`);
-        } else {
-          console.log(`   Will expire at: null`);
-        }
-        logLifecycle('room_timer_started', {
-          roomId,
-          startedBy: user.userId,
-          timerStartedAt: room.timerStartedAt,
-          expiresAt: room.expiresAt
-        });
-      } else {
-        if (room.timerStartedAt && room.expiresAt) {
-          const timeElapsed = Date.now() - room.timerStartedAt;
-          const timeRemaining = room.getTimeUntilExpiration();
-          console.log(`ℹ️ User ${user.username} joining room ${roomId} (timer already running)`);
-          console.log(`   Time elapsed since first join: ${(timeElapsed / 1000).toFixed(1)}s`);
-          console.log(`   Time remaining: ${(timeRemaining / 1000).toFixed(1)}s`);
-          console.log(`   Expires at: ${new Date(room.expiresAt).toISOString()}`);
-        } else {
-          console.warn(`⚠️ Room ${roomId} timer state incomplete after join`);
-        }
+        console.log(`ℹ️ Room ${roomId} lifecycle marked started by ${user.username}`);
       }
 
       // Get chat history from the room, and attach any assembled file data for chunked attachments
@@ -6031,8 +5795,8 @@ io.on('connection', (socket) => {
       const responseData = {
         roomId,
         chatHistory: chatHistory,
-        expiresAt: room.mood === 'social_club' ? null : room.expiresAt,
-        timerStartedAt: room.timerStartedAt,
+        expiresAt: null,
+        timerStartedAt: null,
         serverTime: Date.now()
       };
 
