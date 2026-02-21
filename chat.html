@@ -1795,6 +1795,36 @@
 
       let hasJoinedRoom = false;
       let pendingInitialRoomSync = false;
+      let freshRoomCreationInProgress = false;
+
+      function clearStaleRoomAndCreateFresh(source = 'stale_room') {
+        if (freshRoomCreationInProgress) return;
+        if (isSocialClubMode) return;
+        if (!selectedMood) return;
+
+        freshRoomCreationInProgress = true;
+
+        try {
+          localStorage.removeItem('currentRoom');
+        } catch { }
+
+        roomData = null;
+        currentRoomId = null;
+        hasJoinedRoom = false;
+        pendingInitialRoomSync = false;
+
+        try {
+          showChatLoadingOverlay('Creating your room…', 'You can invite someone anytime.');
+        } catch { }
+
+        reportChatPresenceContext('stale_room_recreate', {
+          allowRedirect: false,
+          keepalive: true,
+          source
+        }).catch(() => { });
+
+        safeSocketEmit('join_matchmaking', { mood: selectedMood });
+      }
 
       const chatHeaderTitleEl = document.getElementById('chatHeaderTitle');
       if (chatHeaderTitleEl && isSocialClubMode) {
@@ -5112,6 +5142,7 @@
             if (!data || !data.roomId) return;
 
             hideChatLoadingOverlay();
+            freshRoomCreationInProgress = false;
 
             roomData = {
               roomId: data.roomId,
@@ -5204,6 +5235,7 @@
           console.log('✅ ROOM_JOINED EVENT RECEIVED');
           console.log('✅ ========================================');
           console.log(`   roomId: ${data.roomId}`);
+          freshRoomCreationInProgress = false;
           hasJoinedRoom = true;
           currentRoomId = data.roomId || currentRoomId;
           roomRecoveryInProgress = false;
@@ -5784,6 +5816,11 @@
 
           // Handle NOT_IN_ROOM as recoverable first (re-sync + rejoin).
           if (data.code === 'NOT_IN_ROOM') {
+            if (!isSocialClubMode && selectedMood) {
+              clearStaleRoomAndCreateFresh('socket_error_not_in_room');
+              console.error('❌ ========================================\n');
+              return;
+            }
             console.warn('⚠️ ROOM MEMBERSHIP DESYNC DETECTED');
             console.warn('   Attempting room recovery before exiting');
 
@@ -5840,6 +5877,12 @@
             console.error('   Current room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
 
+            if (!isSocialClubMode && selectedMood) {
+              clearStaleRoomAndCreateFresh('socket_error_room_not_found');
+              console.error('❌ ========================================\n');
+              return;
+            }
+
             toast('Room no longer available', 'error');
 
             if (isSocialClubMode && !roomData?.roomId) {
@@ -5877,6 +5920,12 @@
             console.error('   Message:', data.message);
             console.error('   Room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
+
+            if (!isSocialClubMode && selectedMood) {
+              clearStaleRoomAndCreateFresh('socket_error_room_expired');
+              console.error('❌ ========================================\n');
+              return;
+            }
 
             if (timerInterval) {
               clearInterval(timerInterval);
