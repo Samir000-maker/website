@@ -38,13 +38,6 @@ function initializeChatPage() {
   // Set current page
   StateManager.setPage('chat');
 
-  // Check if room is expired
-  if (StateManager.isRoomExpired()) {
-    console.log('⏱️ Room expired - redirecting to mood page');
-    window.location.href = '/mood.html';
-    return;
-  }
-
   // Restore messages from state
   const state = StateManager.getState();
   if (state.messages && state.messages.length > 0) {
@@ -101,9 +94,6 @@ function initializeChatPage() {
     });
   }
 
-  // Setup room expiration timer
-  setupExpirationTimer();
-
   // Save state on visibility change
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -116,11 +106,7 @@ function initializeChatPage() {
       
       StateManager.forceSave();
     } else {
-      // Check expiration on return
-      if (StateManager.isRoomExpired()) {
-        console.log('⏱️ Room expired while backgrounded');
-        window.location.href = '/mood.html';
-      }
+      return;
     }
   });
 
@@ -188,37 +174,7 @@ function extractMessagesFromDOM() {
 /**
  * Setup room expiration timer
  */
-function setupExpirationTimer() {
-  const StateManager = window.StateManager;
-  
-  // Check every 30 seconds
-  const expirationCheck = setInterval(() => {
-    if (StateManager.isRoomExpired()) {
-      console.log('⏱️ Room expired - cleaning up');
-      
-      // Clear interval
-      clearInterval(expirationCheck);
-      
-      // Show notification
-      if (window.MoodApp && window.MoodApp.Toast) {
-        window.MoodApp.Toast.warning('Room has expired');
-      }
-      
-      // Clear state
-      StateManager.clearRoom();
-      
-      // Redirect
-      setTimeout(() => {
-        window.location.href = '/mood.html';
-      }, 2000);
-    }
-  }, 30000);
-
-  // Clear on page unload
-  window.addEventListener('beforeunload', () => {
-    clearInterval(expirationCheck);
-  });
-}
+function setupExpirationTimer() { }
 
 /**
  * Handle call transitions
