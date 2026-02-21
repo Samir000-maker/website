@@ -6226,30 +6226,19 @@
           }
 
           // 4. Room Destruction Logic
-          // Trigger exit if server says destroyed OR users drop below 2
-          if (!isSocialClubMode && (data.destroyed || data.remainingUsers < 2)) {
+          // Rooms should persist as long as at least 1 user remains.
+          // Only trigger exit if the room is destroyed (empty) or if this event indicates the current user is no longer in the room.
+          const roomDestroyed = data && data.destroyed === true;
+          const remainingUsers = typeof data?.remainingUsers === 'number' ? data.remainingUsers : null;
+          const leftUserId = data?.userId || null;
+          const currentUserId = currentUser?.userId || null;
+          const selfLeft = !!(leftUserId && currentUserId && leftUserId === currentUserId);
+
+          if (!isSocialClubMode && (roomDestroyed || selfLeft)) {
             console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
-
-            // Partner left room - check call status
-            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-            let isInActiveCall = false;
-            if (activeCallStr) {
-              try {
-                const callData = JSON.parse(activeCallStr);
-                if (callData && callData.roomId === roomData?.roomId) {
-                  isInActiveCall = true;
-                }
-              } catch (e) { }
-            }
-
-            if (isInActiveCall) {
-              console.log(`🛡️ [${sequenceId}] Partner left room but call is active — PRESERVING UI`);
-              toast('Partner left chat, but call remains active', 'warning');
-            } else {
-              console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
-              toast('Room closing...', 'warning');
-              exitRoomSequence().catch(console.error);
-            }
+            console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
+            toast('Room closing...', 'warning');
+            exitRoomSequence().catch(console.error);
           }
         });
 
