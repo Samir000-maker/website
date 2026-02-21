@@ -35,7 +35,6 @@
         transform: translateY(10px);
         opacity: 0;
       }
-
       to {
         transform: translateY(0);
         opacity: 1;
@@ -1139,12 +1138,6 @@
       </div>
 
       <div class="flex items-center gap-3 flex-shrink-0">
-        <!-- Timer Display -->
-        <div class="flex items-center gap-2 px-2 sm:px-3 py-1.5 bg-[#2a2d33] rounded-lg border border-gray-700 min-w-0">
-          <span class="material-symbols-outlined text-gray-400 text-base flex-shrink-0">schedule</span>
-          <span id="timeRemaining" class="text-[11px] sm:text-xs text-gray-300 font-medium whitespace-nowrap">--:--</span>
-        </div>
-
         <!-- Call Buttons -->
         <div class="call-buttons-container flex-row">
           <button id="audioCallBtn"
@@ -1805,7 +1798,59 @@
         chatHeaderTitleEl.textContent = 'Social Club';
       }
       let serverClockOffset = 0; // Milliseconds to add to client time to get server time
-      let serverExpiresAt = null; // Absolute server timestamp for expiry
+      let serverExpiresAt = null; // Legacy (rooms no longer expire)
+
+      const selectedMood = (() => {
+        try {
+          const v = localStorage.getItem('selectedMood');
+          return (v && typeof v === 'string') ? v : null;
+        } catch {
+          return null;
+        }
+      })();
+
+      const showChatLoadingOverlay = (titleText = 'Preparing your room…', subtitleText = 'Connecting you now…') => {
+        try {
+          let overlay = document.getElementById('chatLoadingOverlay');
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'chatLoadingOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(11,12,16,0.92);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:24px;';
+            overlay.innerHTML = `
+              <div style="max-width:420px;width:100%;border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:22px 20px;background:linear-gradient(135deg, rgba(21,22,28,0.85) 0%, rgba(11,12,16,0.85) 100%);box-shadow:0 25px 70px rgba(0,0,0,0.45);">
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <div style="width:40px;height:40px;border-radius:12px;background:rgba(51,191,204,0.15);border:1px solid rgba(51,191,204,0.25);display:flex;align-items:center;justify-content:center;">
+                    <span class="material-symbols-outlined" style="color:#33bfcc;">forum</span>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div id="chatLoadingTitle" style="color:#f0f6fc;font-weight:800;font-size:1.05rem;line-height:1.2;">${titleText}</div>
+                    <div id="chatLoadingSubtitle" style="color:#8b949e;font-size:0.9rem;margin-top:4px;">${subtitleText}</div>
+                  </div>
+                </div>
+                <div style="margin-top:16px;height:10px;border-radius:999px;background:rgba(255,255,255,0.06);overflow:hidden;">
+                  <div style="height:100%;width:40%;background:linear-gradient(90deg,#33bfcc,#a855f7);border-radius:999px;animation:chat-loading-bar 1.2s ease-in-out infinite alternate;"></div>
+                </div>
+              </div>
+              <style>@keyframes chat-loading-bar{from{transform:translateX(-20%);}to{transform:translateX(150%);}}</style>
+            `;
+            document.body.appendChild(overlay);
+          } else {
+            const titleEl = document.getElementById('chatLoadingTitle');
+            const subEl = document.getElementById('chatLoadingSubtitle');
+            if (titleEl) titleEl.textContent = titleText;
+            if (subEl) subEl.textContent = subtitleText;
+            overlay.style.display = 'flex';
+          }
+        } catch { }
+      };
+
+      const hideChatLoadingOverlay = () => {
+        try {
+          const overlay = document.getElementById('chatLoadingOverlay');
+          if (overlay) overlay.style.display = 'none';
+        } catch { }
+      };
+
       let roomRecoveryInProgress = false;
       let roomRecoveryAttempts = 0;
       let lastRoomRecoveryAttemptAt = 0;
@@ -1838,7 +1883,6 @@
       const messageInput = document.getElementById('messageInput');
       const usersList = document.getElementById('usersList');
       const onlineCount = document.getElementById('onlineCount');
-      const timeRemaining = document.getElementById('timeRemaining');
       const leaveBtn = document.getElementById('leaveBtn');
       const cancelReplyBtn = document.getElementById('cancelReply');
       const audioCallBtn = document.getElementById('audioCallBtn');
@@ -2926,7 +2970,9 @@
 
             const progress = Math.round((acknowledgedCount / totalChunks) * 100);
             const progressText = document.getElementById('uploadProgressText');
-            if (progressText) progressText.textContent = `Uploading: ${progress}%`;
+            if (progressText && fileName === (pendingAttachment?.name || progressText.dataset.fileName)) {
+              progressText.textContent = `Uploading: ${progress}%`;
+            }
 
             if (acknowledgedCount >= totalChunks) {
               socketInstance.off('file_chunk_ack', ackHandler);
@@ -3635,22 +3681,19 @@
           // Determine call button state
           let callButtonState = 'none';
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-          const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomId;
 
-          if (userInCall) {
+          if (!activeCallStr) {
+            callButtonState = 'none';
+          } else {
             callButtonState = 'back';
-          } else if (activeCallInRoom) {
-            callButtonState = 'join';
           }
-
-          const callInRoomToSave = activeCallInRoom || null;
 
           const state = {
             roomId,
             messages: validMessages, // Use validated messages
             timestamp: Date.now(),
             callButtonState,
-            activeCallInRoom: callInRoomToSave,
+            activeCallInRoom: null,
             version: 2 // Add version for future migrations
           };
 
@@ -3662,7 +3705,6 @@
             console.log('✅ Chat state saved successfully:');
             console.log(`   Valid messages: ${validMessages.length}`);
             console.log(`   Button state: ${callButtonState}`);
-            console.log(`   Has active call: ${!!callInRoomToSave}`);
             console.log('💾 ========================================\n');
 
           } catch (storageError) {
@@ -4371,7 +4413,7 @@
               console.error(`❌ File ${fileId} still not found after retry`);
 
               imgElement.alt = 'Loading...';
-              imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="14"%3ERequesting file...%3C/text%3E%3C/svg%3E';
+              imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="14"%3ELoading image...%3C/text%3E%3C/svg%3E';
 
               return;
             }
@@ -4850,50 +4892,9 @@
       }
 
       const updateTimer = () => {
-        if (!serverExpiresAt) {
-          if (isSocialClubMode) {
-            if (timeRemaining) {
-              timeRemaining.textContent = '';
-            }
-            return;
-          }
-
-          console.warn('⚠️ No server expiresAt available');
-          if (timeRemaining) {
-            timeRemaining.textContent = '-- remaining';
-          }
-          return;
-        }
-
-        // CRITICAL: Always use server-adjusted time
-        const clientNow = Date.now();
-        const serverNow = clientNow + serverClockOffset;
-        const remaining = Math.max(0, serverExpiresAt - serverNow);
-
-        const minutes = Math.floor(remaining / 60000);
-        const seconds = Math.floor((remaining % 60000) / 1000);
-
-        if (timeRemaining) {
-          timeRemaining.textContent = `${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
-        }
-
-        // Debug log every 10 seconds
-        if (Math.floor(serverNow / 10000) !== Math.floor((serverNow - 1000) / 10000)) {
-          console.log(`⏰ Timer: ${minutes}:${seconds.toString().padStart(2, '0')} (offset: ${(serverClockOffset / 1000).toFixed(1)}s)`);
-        }
-
-        if (remaining === 0) {
-          console.error('❌ Room expired - initiating exit sequence');
-          toast('Room has expired', 'warning');
-
-          // CRITICAL: Use the same sequence as manual leave
-          exitRoomSequence().catch(e => {
-            console.error('❌ Error in periodic room exit sequence:', e);
-            // Fallback: emergency redirection
-            window.location.href = '/mood.html';
-          });
-        }
+        return;
       };
+
 
       // ============================================
       // SOCKET EVENT HANDLERS
@@ -5086,6 +5087,14 @@
             safeSocketEmit('join_room', { roomId: roomData.roomId });
           } else if (isSocialClubMode) {
             safeSocketEmit('join_social_club', {});
+          } else {
+            if (!selectedMood) {
+              toast('Please select a mood first', 'warning');
+              setTimeout(() => window.location.href = '/mood.html', 800);
+              return;
+            }
+            showChatLoadingOverlay('Creating your room…', 'You can invite someone anytime.');
+            safeSocketEmit('join_matchmaking', { mood: selectedMood });
           }
           validateChatPresenceState('post_auth_join').catch(() => { });
 
@@ -5095,6 +5104,8 @@
         socketInstance.on('match_found', async (data) => {
           try {
             if (!data || !data.roomId) return;
+
+            hideChatLoadingOverlay();
 
             roomData = {
               roomId: data.roomId,
@@ -5214,33 +5225,7 @@
             serverClockOffset = 0;
           }
 
-          if (data.expiresAt) {
-            serverExpiresAt = data.expiresAt;
-
-            const serverNow = clientNow + serverClockOffset;
-            const timeRemaining = data.expiresAt - serverNow;
-
-            console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
-            console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-            console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
-
-            const roomStr = localStorage.getItem('currentRoom');
-            if (roomStr) {
-              try {
-                const localRoomData = JSON.parse(roomStr);
-                localRoomData.expiresAt = data.expiresAt;
-                localStorage.setItem('currentRoom', JSON.stringify(localRoomData));
-                console.log('✅ Updated localStorage with server expiry time');
-              } catch (e) {
-                console.error('❌ Failed to update localStorage:', e);
-              }
-            }
-          } else {
-            if (!isSocialClubMode) {
-              console.error('❌ No expiresAt in room_joined data!');
-            }
-            serverExpiresAt = null;
-          }
+          serverExpiresAt = null;
 
           const cachedState = loadChatState();
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -5621,30 +5606,7 @@
             console.warn(`   Timer will be adjusted to compensate`);
           }
 
-          if (data.expiresAt) {
-            serverExpiresAt = data.expiresAt;
-
-            // Calculate time remaining using server-adjusted time
-            const serverNow = clientNow + serverClockOffset;
-            const timeRemaining = data.expiresAt - serverNow;
-
-            console.log(`   Expires at: ${new Date(data.expiresAt).toISOString()}`);
-            console.log(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-            console.log(`   Time remaining (adjusted): ${(timeRemaining / 1000).toFixed(1)}s`);
-
-            // Update localStorage with synced data
-            const roomStr = localStorage.getItem('currentRoom');
-            if (roomStr) {
-              try {
-                const localRoomData = JSON.parse(roomStr);
-                localRoomData.expiresAt = data.expiresAt;
-                localStorage.setItem('currentRoom', JSON.stringify(localRoomData));
-                console.log('✅ Updated localStorage with server expiry time');
-              } catch (e) {
-                console.error('❌ Failed to update localStorage:', e);
-              }
-            }
-          }
+          serverExpiresAt = null;
 
           console.log('⏰ ========================================\n');
 
@@ -5652,24 +5614,7 @@
           updateTimer();
         });
 
-        socketInstance.on('room_expiring_soon', (data) => {
-          console.warn('⚠️ ========================================');
-          console.warn('⚠️ ROOM EXPIRING SOON');
-          console.warn('⚠️ ========================================');
-          console.warn(`   Expires in: ${data.expiresIn / 1000} seconds`);
-          console.warn(`   expiresAt: ${new Date(data.expiresAt).toISOString()}`);
-
-          const clientNow = Date.now();
-          const serverNow = clientNow + serverClockOffset;
-          const remaining = data.expiresAt - serverNow;
-
-          console.warn(`   Client now: ${new Date(clientNow).toISOString()}`);
-          console.warn(`   Server now (adjusted): ${new Date(serverNow).toISOString()}`);
-          console.warn(`   Remaining (adjusted): ${(remaining / 1000).toFixed(1)}s`);
-          console.warn('⚠️ ========================================\n');
-
-          toast('Room expiring soon!', 'warning');
-        });
+        socketInstance.on('room_expiring_soon', () => { return; });
 
         socketInstance.on('error', (data) => {
           console.error('❌ ========================================');
@@ -6277,21 +6222,7 @@
           }
         });
 
-        socketInstance.on('room_expired', async (data) => {
-          console.warn('⏰ Room expired - cleaning up attachments and redirecting');
-          if (isSocialClubMode) return;
-          const expiredRoomId = data?.roomId || roomData?.roomId;
-          if (expiredRoomId) {
-            try {
-              await deleteRoomFiles(expiredRoomId);
-            } catch (e) {
-              console.error('❌ Failed to delete room files on expiry:', e);
-            }
-          }
-          await clearChatState(true).catch(() => { });
-          cleanupParentCallPage('/mood.html');
-          toast(data?.message || 'Chat room has expired', 'warning');
-        });
+        socketInstance.on('room_expired', () => { return; });
 
         socketInstance.on('left_room', (data) => {
           console.log('👋 Received left_room confirmation from server');
@@ -7410,10 +7341,7 @@
       const roomDataStr = localStorage.getItem('currentRoom');
       if (!roomDataStr) {
         if (!isSocialClubMode) {
-          console.error('❌ No currentRoom in localStorage');
-          toast('No active room found', 'error');
-          setTimeout(() => window.location.href = '/mood.html', 1500);
-          return;
+          console.warn('ℹ️ No currentRoom in localStorage - will create room immediately');
         }
       }
 
