@@ -256,22 +256,38 @@ class Room {
 async function findRoomWithSpace(mood, excludeUserId = null) {
   try {
     const keys = await redis.keys('room:data:*');
+    const candidates = [];
     for (const key of keys) {
       const roomId = key.replace('room:data:', '');
       const room = await getRoom(roomId);
       if (!room) continue;
 
-      // Must match mood, have space, and not be expired
-      if (room.mood === mood && room.hasSpace() && !room.isExpired) {
-        console.log(`🔍 [Matchmaking] Room ${room.id} users: ${JSON.stringify(room.users.map(u => u.userId))}`);
-        if (excludeUserId && room.users.some(u => u.userId === excludeUserId)) continue;
-        console.log(`🔍 [Matchmaking] Found room ${roomId} with space for mood ${mood} (${room.users.length}/${room.maxUsers || config.MAX_USERS_PER_ROOM})`);
-        return room;
-      }
+      // Must match mood, have space, not be expired, and have at least 1 user already.
+      if (room.mood !== mood) continue;
+      if (!room.hasSpace() || room.isExpired) continue;
+      if (!Array.isArray(room.users) || room.users.length < 1) continue;
+      if (excludeUserId && room.users.some(u => u.userId === excludeUserId)) continue;
+
+      candidates.push(room);
     }
-    return null;
+
+    if (!candidates.length) return null;
+
+    // Choose the oldest room (stable rule). This ensures we don't create new rooms while any old one has space.
+    candidates.sort((a, b) => {
+      const aCreated = Number.isFinite(a.createdAt) ? a.createdAt : 0;
+      const bCreated = Number.isFinite(b.createdAt) ? b.createdAt : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      const aUsers = Array.isArray(a.users) ? a.users.length : 0;
+      const bUsers = Array.isArray(b.users) ? b.users.length : 0;
+      return bUsers - aUsers;
+    });
+
+    const chosen = candidates[0];
+    console.log(`🔍 [Matchmaking] Found room ${chosen.id} with space for mood ${mood} (${chosen.users.length}/${chosen.maxUsers || config.MAX_USERS_PER_ROOM})`);
+    return chosen;
   } catch (error) {
-    console.error(`❌ [Matchmaking] Error finding room with space:`, error.message);
+    console.error('❌ [Matchmaking] Error finding room with space:', error);
     return null;
   }
 }
