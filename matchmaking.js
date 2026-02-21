@@ -5,9 +5,6 @@ let redis = null;
 let io = null;
 let redlock = null;
 
-const ROOM_LIFETIME = 30 * 60 * 1000; // 30 minutes
-const ROOM_WARNING_TIME = 60 * 1000; // 1 minute
-
 /**
  * Initialize matchmaking with Redis client, Socket.IO, and Redlock
  */
@@ -24,11 +21,7 @@ async function createRoomInternalWithSize(mood, users, maxUsers) {
   await saveRoomToRedis(room);
 
   for (const user of users) {
-    await redis.set(`user:room:${user.userId}`, room.id, 'EX', 3600);
-  }
-
-  if (mood !== 'social_club') {
-    await redis.set(`room:expiry:${room.id}`, 'pending_first_join', 'PX', ROOM_LIFETIME * 3);
+    await redis.set(`user:room:${user.userId}`, room.id);
   }
 
   console.log(`🎉 [Cluster] Room ${room.id} created for mood ${mood} (maxUsers=${room.maxUsers})`);
@@ -211,7 +204,7 @@ class Room {
       }
 
       this.users.push(userData);
-      await redis.set(`user:room:${userData.userId}`, this.id, 'EX', 3600);
+      await redis.set(`user:room:${userData.userId}`, this.id);
       await this.save();
       console.log(`✅ User ${userData.userId} added to room ${this.id}`);
       return true;
@@ -233,29 +226,15 @@ class Room {
   async startLifecycleTimers() {
     const releaseLock = await acquireRoomMutex(this.id);
     try {
-      // Re-fetch latest state so timer start is cluster-safe and idempotent
       const latestRoom = await getRoomFromRedis(this.id);
       if (!latestRoom) return false;
       Object.assign(this, latestRoom);
 
-      if (this.expiresAt) return false; // Already started by another instance
-
-      if (this.mood === 'social_club') {
-        this.userJoinedRoom = true;
-        if (!this.timerStartedAt) this.timerStartedAt = Date.now();
-        await this.save();
-        return true;
-      }
-
+      if (this.userJoinedRoom) return false;
       this.userJoinedRoom = true;
-      this.timerStartedAt = Date.now();
-      this.expiresAt = this.timerStartedAt + (config.ROOM_DURATION_MINUTES * 60 * 1000);
-      await this.save(); // Sync to Redis
-
-      // Authoritative room expiry starts when the first user actually joins.
-      const ttlMs = Math.max(1000, this.expiresAt - Date.now());
-      await redis.set(`room:expiry:${this.id}`, 'active', 'PX', ttlMs);
-
+      if (!this.timerStartedAt) this.timerStartedAt = Date.now();
+      this.expiresAt = null;
+      await this.save();
       return true;
     } finally {
       await releaseLock();
@@ -263,8 +242,7 @@ class Room {
   }
 
   getTimeUntilExpiration() {
-    if (!this.expiresAt) return 0;
-    return Math.max(0, this.expiresAt - Date.now());
+    return 0;
   }
 
   getMessages() {
@@ -324,19 +302,6 @@ export async function addToQueue(userData) {
     return { error: 'Server at capacity' };
   }
 
-  // 2. DEDUPLICATE QUEUE: Remove user from queue if already present
-  const queueKey = `matchmaking:queue:${mood}`;
-  const allInQueue = await redis.lrange(queueKey, 0, -1);
-  for (const item of allInQueue) {
-    try {
-      const parsed = JSON.parse(item);
-      if (parsed.userId === userId) {
-        await redis.lrem(queueKey, 1, item);
-        console.log(`🧹 [Matchmaking] Removed duplicate queue entry for ${username}`);
-      }
-    } catch (e) { /* ignore parse errors */ }
-  }
-
   const availableRoom = await findRoomWithSpace(mood, userId);
   if (availableRoom) {
     console.log(`🚪 [Matchmaking] Adding ${username} to existing room ${availableRoom.id}`);
@@ -351,34 +316,13 @@ export async function addToQueue(userData) {
       console.error(`❌ [Matchmaking] Failed to add ${username} to room ${availableRoom.id}`);
       return null;
     }
-    await redis.set(`user:room:${userId}`, availableRoom.id, 'EX', 3600);
+    await redis.set(`user:room:${userId}`, availableRoom.id);
     console.log(`✅ [Matchmaking] ${username} joined room ${availableRoom.id} (${availableRoom.users.length}/${availableRoom.maxUsers || config.MAX_USERS_PER_ROOM})`);
     return availableRoom;
   }
 
-  // 4. Add to Redis List (queue)
-  await redis.rpush(queueKey, JSON.stringify(userData));
-
-  const queueLength = await redis.llen(queueKey);
-  console.log(`🎮 [Cluster] User ${username} queued for ${mood} (${queueLength}/${config.MIN_USERS_FOR_ROOM})`);
-
-  // 5. Matchmaking Logic — create new room if enough users
-  if (queueLength >= config.MIN_USERS_FOR_ROOM) {
-    const roomUsers = [];
-    for (let i = 0; i < config.MIN_USERS_FOR_ROOM; i++) {
-      const u = await redis.lpop(queueKey);
-      if (u) roomUsers.push(JSON.parse(u));
-    }
-
-    if (roomUsers.length === config.MIN_USERS_FOR_ROOM) {
-      return await createRoomInternal(mood, roomUsers);
-    } else {
-      // Put back if race condition
-      for (const u of roomUsers) await redis.lpush(queueKey, JSON.stringify(u));
-    }
-  }
-
-  return null;
+  // No queue-based matchmaking: create a room immediately for a single user.
+  return await createRoomInternal(mood, [userData]);
 }
 
 /**
@@ -389,12 +333,8 @@ async function createRoomInternal(mood, users) {
   await saveRoomToRedis(room);
 
   for (const user of users) {
-    await redis.set(`user:room:${user.userId}`, room.id, 'EX', 3600);
+    await redis.set(`user:room:${user.userId}`, room.id);
   }
-
-  // Safety TTL for rooms created but never actually joined.
-  // startLifecycleTimers() will overwrite this with the official 10-minute timer.
-  await redis.set(`room:expiry:${room.id}`, 'pending_first_join', 'PX', ROOM_LIFETIME * 3);
 
   console.log(`🎉 [Cluster] Room ${room.id} created for mood ${mood}`);
   return room;
@@ -443,7 +383,7 @@ export async function addToSocialQueue(userData, roomSize) {
       socketId: userData.socketId
     });
     if (!added) return null;
-    await redis.set(`user:room:${userData.userId}`, availableRoom.id, 'EX', 3600);
+    await redis.set(`user:room:${userData.userId}`, availableRoom.id);
     return availableRoom;
   }
 
@@ -457,7 +397,7 @@ export async function addToSocialQueue(userData, roomSize) {
     }
   ], maxUsers);
 
-  await redis.set(`user:room:${userData.userId}`, room.id, 'EX', 3600);
+  await redis.set(`user:room:${userData.userId}`, room.id);
   return room;
 }
 
@@ -493,57 +433,14 @@ export async function leaveRoom(userId) {
 
       console.log(`🏠 [MMR] User filter for ${roomId}: ${initialCount} -> ${remainingUsers} users`);
 
-      if (roomData.mood === 'social_club') {
-        roomData.users = updatedUsers;
-        await saveRoomToRedis(roomData);
-        console.log(`🏠 [MMR] Social Club room ${roomId} persisted (remaining ${remainingUsers})`);
-        return { success: true, roomId, remainingUsers, destroyed: false, users: updatedUsers };
+      if (remainingUsers < 1) {
+        await destroyRoomInternal(roomId, 'empty_room');
+        return { success: true, roomId, remainingUsers: 0, destroyed: true, users: [] };
       }
 
-      // Authoritative lifecycle: social_club rooms can remain alive with a single user waiting.
-      const baseMin = (roomData.mood === 'social_club') ? 1 : 2;
-      const minimumViableUsers = Math.max(baseMin, config.MIN_USERS_FOR_ROOM || baseMin);
-      if (remainingUsers < minimumViableUsers) {
-        if (roomData.mood === 'social_club' && remainingUsers > 0) {
-          roomData.users = updatedUsers;
-          await saveRoomToRedis(roomData);
-          console.log(`🏠 [MMR] Social Club room ${roomId} kept alive with ${remainingUsers} user(s)`);
-          return { success: true, roomId, remainingUsers, destroyed: false, users: updatedUsers };
-        }
-
-        // Strong re-check: roomData.users can be stale during reconnect/app reopen.
-        // Validate remaining membership using the authoritative user:room:<userId> mappings.
-        const stillMappedUsers = [];
-        for (const u of updatedUsers) {
-          try {
-            const mappedRoomId = await redis.get(`user:room:${u.userId}`);
-            if (mappedRoomId === roomId) stillMappedUsers.push(u);
-          } catch { }
-        }
-
-        const authoritativeRemaining = stillMappedUsers.length;
-        console.log(
-          `🏠 [MMR] Viability re-check for ${roomId}: in-room-list=${remainingUsers}, mapped=${authoritativeRemaining} (min=${minimumViableUsers})`
-        );
-
-        if (authoritativeRemaining < minimumViableUsers) {
-          console.log(`💥 [MMR] Room ${roomId} below viable user threshold (${authoritativeRemaining}/${minimumViableUsers}). Auto-destroying...`);
-          await destroyRoomInternal(roomId, 'below_min_users');
-          return { success: true, roomId, remainingUsers: 0, destroyed: true, users: [] };
-        }
-
-        // Not actually below threshold; persist corrected room users and keep room alive.
-        roomData.users = stillMappedUsers;
-        await saveRoomToRedis(roomData);
-        console.log(`🏠 [MMR] Prevented false room destroy for ${roomId}. Remaining (authoritative): ${authoritativeRemaining}`);
-        return { success: true, roomId, remainingUsers: authoritativeRemaining, destroyed: false, users: stillMappedUsers };
-      }
-
-      // Save updated room state
       roomData.users = updatedUsers;
       await saveRoomToRedis(roomData);
-
-      console.log(`🏠 [Matchmaking] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
+      console.log(`🏠 [MMR] User ${userId} removed from room ${roomId}. Remaining: ${remainingUsers}`);
       return { success: true, roomId, remainingUsers, destroyed: false, users: updatedUsers };
     }
 
@@ -565,7 +462,6 @@ async function destroyRoomInternal(roomId, reason = 'manual') {
     }
   }
   await redis.del(`room:data:${roomId}`);
-  await redis.del(`room:expiry:${roomId}`);
   console.log(`💥 [Cluster] Room ${roomId} destroyed (reason: ${reason})`);
 }
 
