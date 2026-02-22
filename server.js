@@ -2877,16 +2877,74 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
     }
 
     const mood = (req.body && typeof req.body.mood === 'string') ? req.body.mood.trim() : '';
-    if (!mood) {
-      return res.status(400).json({ error: 'Invalid mood', message: 'Mood is required' });
-    }
+    const effectiveMood = mood || 'social_club';
 
     const existing = await db.collection('users').findOne(
       { firebaseUid: firebaseUser.uid },
       { projection: { username: 1, pfpUrl: 1, _id: 1 }, maxTimeMS: 3000 }
     );
 
+    function generateRedditStyleName() {
+      const adjectives = [
+        'happy', 'calm', 'brave', 'bright', 'gentle', 'kind', 'witty', 'curious', 'swift', 'silent',
+        'golden', 'mellow', 'lucky', 'quiet', 'wild', 'smooth', 'sunny', 'stellar', 'clever', 'chill'
+      ];
+      const nouns = [
+        'meadow', 'ocean', 'forest', 'river', 'comet', 'nebula', 'panda', 'tiger', 'otter', 'falcon',
+        'atlas', 'ember', 'echo', 'breeze', 'harbor', 'summit', 'prairie', 'aurora', 'voyager', 'canyon'
+      ];
+      const a = adjectives[Math.floor(Math.random() * adjectives.length)] || 'happy';
+      const n = nouns[Math.floor(Math.random() * nouns.length)] || 'meadow';
+      const num = Math.floor(Math.random() * 900) + 100;
+      return `${a}${n}${num}`;
+    }
+
+    async function pickUniqueGuestUsername() {
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const candidate = generateRedditStyleName();
+        const taken = await db.collection('users').findOne(
+          { username: candidate },
+          { projection: { _id: 1 }, maxTimeMS: 2000 }
+        );
+        if (!taken) return candidate;
+      }
+      return `guest_${uuidv4().slice(0, 8)}`;
+    }
+
     if (existing) {
+      const existingUsername = (existing.username || '').trim();
+      const shouldUpgrade = /^guest_\d+$/i.test(existingUsername) || /^guest_[a-f0-9]{8}$/i.test(existingUsername);
+
+      if (shouldUpgrade) {
+        const upgradedUsername = await pickUniqueGuestUsername();
+        try {
+          await db.collection('users').updateOne(
+            { _id: existing._id },
+            { $set: { username: upgradedUsername, lastMood: effectiveMood, updatedAt: new Date() } },
+            { maxTimeMS: 5000 }
+          );
+        } catch (e) {
+          console.warn('⚠️ Failed to upgrade guest username:', e?.message || e);
+        }
+
+        return res.json({
+          success: true,
+          user: {
+            userId: existing._id.toString(),
+            username: upgradedUsername,
+            pfpUrl: existing.pfpUrl || null
+          }
+        });
+      }
+
+      try {
+        await db.collection('users').updateOne(
+          { _id: existing._id },
+          { $set: { lastMood: effectiveMood, updatedAt: new Date() } },
+          { maxTimeMS: 5000 }
+        );
+      } catch { }
+
       return res.json({
         success: true,
         user: {
@@ -2897,22 +2955,7 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
       });
     }
 
-    let username = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const suffix = Math.floor(Math.random() * 999999) + 1;
-      const candidate = `guest_${suffix}`;
-      const taken = await db.collection('users').findOne(
-        { username: candidate },
-        { projection: { _id: 1 }, maxTimeMS: 2000 }
-      );
-      if (!taken) {
-        username = candidate;
-        break;
-      }
-    }
-    if (!username) {
-      username = `guest_${uuidv4().slice(0, 8)}`;
-    }
+    const username = await pickUniqueGuestUsername();
 
     const now = new Date();
     const doc = {
@@ -2922,7 +2965,7 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
       pfpUrl: getDefaultProfilePicture(),
       createdAt: now,
       updatedAt: now,
-      lastMood: mood
+      lastMood: effectiveMood
     };
 
     const result = await db.collection('users').insertOne(doc, { maxTimeMS: 5000 });
@@ -3123,9 +3166,13 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
+    const query = (firebaseUser && firebaseUser.email)
+      ? { email: firebaseUser.email }
+      : { firebaseUid: firebaseUser?.uid };
+
     // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
+      query,
       {
         projection: { password: 0 },
         maxTimeMS: 3000
