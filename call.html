@@ -1405,6 +1405,10 @@
       function setupCallCleanup() {
         window.addEventListener('pagehide', () => {
           console.log('🚪 Call pagehide detected - reporting lifecycle state');
+          if (explicitLeaveCall) {
+            console.log('🛡️ Suppressing call pagehide presence report (explicit leave)');
+            return;
+          }
           reportCallPresenceContext('call_pagehide', {
             keepalive: true,
             allowRedirect: false,
@@ -4124,6 +4128,8 @@
         try { clearCallSetupWatchdog(); } catch { }
         try { if (message) toast(message, 'warning'); } catch { }
         try { dismissCallLoadingOverlay(); } catch { }
+        try { localStorage.removeItem('activeCall'); } catch { }
+        try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
         setTimeout(() => { window.location.href = '/chat.html'; }, 900);
       }
 
