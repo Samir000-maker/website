@@ -2913,7 +2913,7 @@ app.post('/api/users/ensure-guest', authenticateFirebase, async (req, res) => {
 
     if (existing) {
       const existingUsername = (existing.username || '').trim();
-      const shouldUpgrade = /^guest_\d+$/i.test(existingUsername) || /^guest_[a-f0-9]{8}$/i.test(existingUsername);
+      const shouldUpgrade = /^guest_/i.test(existingUsername);
 
       if (shouldUpgrade) {
         const upgradedUsername = await pickUniqueGuestUsername();
