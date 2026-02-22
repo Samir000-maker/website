@@ -1544,10 +1544,18 @@
   </script>
 
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260222"></script>
 
-  <script>
-    (async () => {
+<script>
+  (async () => {
+    try {
+      try {
+        const _AuthEarly = window.MoodApp && window.MoodApp.Auth;
+        if (_AuthEarly && typeof _AuthEarly.requireAuth === 'function') {
+          await _AuthEarly.requireAuth();
+        }
+      } catch { }
+
       const MoodApp = window.MoodApp || {};
       const _Auth = MoodApp.Auth;
       const _API = MoodApp.API;
@@ -7609,6 +7617,11 @@
       setupBackButtonHandler();
 
       console.log('✅ Chat initialization complete');
+
+    } catch (err) {
+      console.error('❌ Chat bootstrap failed:', err);
+      try { toast('Failed to initialize chat', 'error'); } catch { }
+    }
 
     })();
   </script>
