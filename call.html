@@ -688,15 +688,10 @@
           videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
           videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         } else {
-          // Some devices deliver front/selfie camera already mirrored; un-mirror for receiver.
-          const id = videoEl.id || '';
-          const userId = id.startsWith('video-') ? id.slice('video-'.length) : null;
-          const facing = userId ? (remoteMediaStates.get(userId)?.facingMode || '') : '';
-          const m = String(facing).toLowerCase();
-          const shouldUnmirror = m === 'user' || m === 'front';
-          videoEl.style.setProperty('transform', shouldUnmirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-webkit-transform', shouldUnmirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-moz-transform', shouldUnmirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          // Remote streams must be displayed as-is. Never mirror/unmirror remote tiles.
+          videoEl.style.setProperty('transform', 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
         }
       }
 
