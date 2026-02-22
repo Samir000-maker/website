@@ -79,6 +79,43 @@
     setTimeout(() => node.remove(), 3800);
   }
 
+  function ensureEnterOverlay() {
+    let el = document.getElementById('socialClubEnterOverlay');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'socialClubEnterOverlay';
+    el.className = 'fixed inset-0 z-[99999] hidden items-center justify-center';
+    el.innerHTML = `
+      <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+      <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: breathe 1.2s ease-in-out infinite;"></div>
+          <div>
+            <div class="text-base font-bold text-white">Entering Social Club…</div>
+            <div id="socialClubEnterOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profile…</div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function showEnterOverlay(msg) {
+    const el = ensureEnterOverlay();
+    const t = el.querySelector('#socialClubEnterOverlayText');
+    if (t && msg) t.textContent = msg;
+    el.classList.remove('hidden');
+    el.classList.add('flex');
+  }
+
+  function hideEnterOverlay() {
+    const el = document.getElementById('socialClubEnterOverlay');
+    if (!el) return;
+    el.classList.add('hidden');
+    el.classList.remove('flex');
+  }
+
   async function ensureFirebase() {
     if (typeof firebase === 'undefined') {
       throw new Error('Firebase not loaded');
@@ -236,6 +273,31 @@
       },
       body: JSON.stringify({ fcmToken })
     });
+  }
+
+  async function ensureGuestProfile(contextMood = 'social_club') {
+    const user = await ensureSignedIn();
+    const token = await user.getIdToken();
+    const res = await fetch('/api/users/ensure-guest', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ mood: contextMood })
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+
+    try {
+      if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
+      if (user?.uid) localStorage.setItem('guest_uid', user.uid);
+      localStorage.setItem('guest_timestamp', String(Date.now()));
+    } catch { }
+
+    return payload;
   }
 
   function setUiState(cardEl, state) {
@@ -413,8 +475,22 @@
       const mode = btn.dataset.mode || 'waitlist';
 
       if (mode === 'enter') {
-        window.location.href = '/chat.html?mode=social-club';
-        return;
+        btn.disabled = true;
+        try {
+          showEnterOverlay('Signing you in anonymously…');
+          await ensureSignedIn();
+          showEnterOverlay('Creating your guest profile…');
+          await ensureGuestProfile('social_club');
+          showEnterOverlay('Entering chat…');
+          window.location.href = '/chat.html?mode=social-club';
+          return;
+        } catch (err) {
+          console.error('Social Club enter failed:', err);
+          toast(err?.message ? String(err.message) : 'Failed to enter Social Club');
+        } finally {
+          hideEnterOverlay();
+          btn.disabled = false;
+        }
       }
 
       btn.disabled = true;
