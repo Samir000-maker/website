@@ -6,7 +6,7 @@
   }
 
   function getVapidKey() {
-    return (window.__VIBE_FCM_VAPID_KEY__ || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec').trim();
+    return (window.__VIBE_FCM_VAPID_KEY__ || '').trim();
   }
 
   function qs(el, sel) {
@@ -309,11 +309,66 @@
     let pollTimer = null;
     let sse = null;
 
+    const latestState = {
+      isEventOpen: false,
+      updatedAtMs: -1
+    };
+
+    function parseUpdatedAtMs(updatedAt) {
+      if (!updatedAt) return null;
+      const ms = Date.parse(updatedAt);
+      return Number.isFinite(ms) ? ms : null;
+    }
+
+    function applyMergedState(nextState, source) {
+      const isEventOpen = !!nextState?.isEventOpen;
+      const updatedAtRaw = nextState?.updatedAt || null;
+      const updatedAtMs = parseUpdatedAtMs(updatedAtRaw);
+
+      // If the update does not include a valid timestamp, treat it as non-authoritative.
+      // This prevents SSE messages with null updatedAt from overriding accurate poll results.
+      if (updatedAtMs === null) {
+        if (latestState.updatedAtMs >= 0) {
+          try {
+            console.log('🎭 [SocialClub] Ignoring non-timestamped state update', {
+              source,
+              isEventOpen,
+              updatedAt: updatedAtRaw
+            });
+          } catch { }
+          return;
+        }
+
+        // Allow the first-ever state set even without a timestamp.
+        latestState.isEventOpen = isEventOpen;
+        latestState.updatedAtMs = -1;
+        setUiState(card, { isEventOpen, updatedAt: null });
+        return;
+      }
+
+      if (updatedAtMs < latestState.updatedAtMs) {
+        try {
+          console.log('🎭 [SocialClub] Ignoring older state update', {
+            source,
+            isEventOpen,
+            updatedAt: updatedAtRaw,
+            updatedAtMs,
+            currentUpdatedAtMs: latestState.updatedAtMs
+          });
+        } catch { }
+        return;
+      }
+
+      latestState.isEventOpen = isEventOpen;
+      latestState.updatedAtMs = updatedAtMs;
+      setUiState(card, { isEventOpen, updatedAt: updatedAtRaw });
+    }
+
     async function refresh() {
       try {
         const status = await getEventStatus();
         try { console.log('🎭 [SocialClub] Poll status:', status); } catch { }
-        setUiState(card, status);
+        applyMergedState(status, 'poll');
         if (btn) btn.disabled = false;
       } catch (err) {
         try { console.warn('⚠️ [SocialClub] Poll failed:', err?.message || err); } catch { }
@@ -338,7 +393,7 @@
             if (!data || data.type !== 'social_club_state') return;
             const event = data.event || {};
             try { console.log('📡 [SocialClub] SSE state:', event); } catch { }
-            setUiState(card, { isEventOpen: !!event.isEventOpen });
+            applyMergedState({ isEventOpen: !!event.isEventOpen, updatedAt: event.updatedAt || null }, 'sse');
           } catch { }
         };
         sse.onerror = () => {
