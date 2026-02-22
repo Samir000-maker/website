@@ -782,6 +782,24 @@ const Presence = {
       const location = this.classifyLocation();
       if (!this.isChatContext(location)) return false;
 
+      // If the call UI runs inside an iframe (chat embeds call.html), its teardown navigation
+      // must not trigger a server-side room leave via beacon.
+      try {
+        const isInIframe = window.parent && window.parent !== window;
+        if (isInIframe && this.isCallContext()) {
+          return false;
+        }
+      } catch { }
+
+      // Short-lived suppression used during explicit in-app navigation (e.g., leave call → hide iframe).
+      try {
+        const raw = sessionStorage.getItem('vibe_suppress_leave_beacon_until');
+        const until = raw ? Number(raw) : 0;
+        if (until && Number.isFinite(until) && Date.now() < until) {
+          return false;
+        }
+      } catch { }
+
       if (this.isSocialClubChatContext() && reason !== 'beforeunload') {
         try {
           console.log(`[Presence] sendLeaveBeacon suppressed (social-club): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
