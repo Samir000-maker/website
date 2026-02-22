@@ -461,16 +461,31 @@ const Auth = {
     });
   },
 
+  async ensureSignedIn() {
+    await FirebaseReady;
+    try {
+      const auth = firebase.auth();
+      try {
+        auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      } catch { }
+
+      let user = auth.currentUser || await this.waitForAuth();
+      if (user) return user;
+
+      const cred = await auth.signInAnonymously();
+      user = cred && cred.user;
+      if (!user) throw new Error('Anonymous sign-in failed');
+      return user;
+    } catch (e) {
+      throw e;
+    }
+  },
+
   /**
    * Require authentication and redirect safely (no false redirects)
    */
   async requireAuth() {
-    const user = await this.waitForAuth();
-    if (!user) {
-      PageTransition.navigateTo('/login.html');
-      throw new Error('Not authenticated');
-    }
-    return user;
+    return await this.ensureSignedIn();
   },
 
   getCurrentUser() {
@@ -480,8 +495,7 @@ const Auth = {
 
   async getToken() {
     await FirebaseReady;
-    const user = await this.waitForAuth();
-    if (!user) throw new Error('User not authenticated');
+    const user = await this.ensureSignedIn();
     return await user.getIdToken(true);
   },
 
@@ -497,7 +511,7 @@ async function authFetch(url, options = {}) {
     await FirebaseReady;
 
     const auth = firebase.auth();
-    const user = auth.currentUser || await Auth.waitForAuth();
+    const user = auth.currentUser || await Auth.ensureSignedIn();
 
     if (!user) {
       console.warn('⚠️ [Auth] No authenticated user. Request blocked.');
