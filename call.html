@@ -76,9 +76,9 @@
     }
 
     video.remote-view {
-      transform: scaleX(1) !important;
-      -webkit-transform: scaleX(1) !important;
-      -moz-transform: scaleX(1) !important;
+      transform: scaleX(-1) !important;
+      -webkit-transform: scaleX(-1) !important;
+      -moz-transform: scaleX(-1) !important;
     }
 
     .video-enhanced {
@@ -688,10 +688,10 @@
           videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
           videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         } else {
-          // Remote streams must be displayed as-is. Never mirror/unmirror remote tiles.
-          videoEl.style.setProperty('transform', 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-webkit-transform', 'scaleX(1)', 'important');
-          videoEl.style.setProperty('-moz-transform', 'scaleX(1)', 'important');
+          // Mirror remote streams horizontally.
+          videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
+          videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
         }
       }
 
