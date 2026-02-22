@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vibegra-pwa-v2';
+const CACHE_NAME = 'vibegra-pwa-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -77,6 +77,29 @@ self.addEventListener('notificationclick', (event) => {
   })());
 });
 
+// Fallback for cases where Firebase Messaging doesn't invoke onBackgroundMessage.
+// If a push arrives and contains displayable data, show an OS notification.
+self.addEventListener('push', (event) => {
+  try {
+    if (!event?.data) return;
+    const raw = event.data.json();
+
+    const title = raw?.data?.title || raw?.notification?.title || 'Notification';
+    const body = raw?.data?.body || raw?.notification?.body || '';
+    const url = raw?.data?.url || '/';
+
+    event.waitUntil(
+      self.registration.showNotification(title, {
+        body,
+        data: { url },
+        icon: '/favicon.ico'
+      })
+    );
+  } catch {
+    // ignore
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -88,7 +111,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   // Avoid caching frequently updated boot/config scripts.
-  if (url.pathname === '/social-club.js' || url.pathname === '/env-config.js') return;
+  if (url.pathname === '/social-club.js' || url.pathname === '/env-config.js' || url.pathname === '/app.js') return;
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
