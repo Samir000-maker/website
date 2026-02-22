@@ -7393,11 +7393,11 @@
           // Don't clear - we want to restore the previous state
         }
 
-        // Auth check
+        // Auth check (allow anonymous)
         await _Auth.requireAuth();
       } catch (err) {
         console.error('❌ Auth failed:', err);
-        window.location.href = '/login.html';
+        toast('Failed to sign in', 'error');
         return;
       }
 
@@ -7455,11 +7455,27 @@
         return;
       }
 
-      // Get Firebase user
+      // Get Firebase user (anonymous allowed)
       const firebaseUser = firebase.auth().currentUser;
       if (!firebaseUser) {
-        window.location.href = '/login.html';
+        toast('Sign-in required', 'error');
         return;
+      }
+
+      // Ensure a server-side guest profile exists for anonymous users (and upgrades guest_* usernames)
+      try {
+        const token = await firebaseUser.getIdToken();
+        const moodForGuest = isSocialClubMode ? 'social_club' : (selectedMood || 'social_club');
+        await fetch('/api/users/ensure-guest', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ mood: moodForGuest })
+        });
+      } catch (e) {
+        console.warn('⚠️ ensure-guest failed (continuing):', e?.message || e);
       }
 
       // Get current user data
@@ -7473,7 +7489,6 @@
       } catch (err) {
         console.error('❌ Failed to get user data:', err);
         toast('Failed to load user data', 'error');
-        setTimeout(() => window.location.href = '/login.html', 1500);
         return;
       }
 
