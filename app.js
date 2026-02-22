@@ -843,6 +843,15 @@ const Presence = {
   },
 
   async reportContext(reason = 'lifecycle', options = {}) {
+    try {
+      // Guard: about:blank is used as an internal teardown target (e.g., call iframe cleanup).
+      // It must not trigger server-side chat leave logic.
+      const href = String(window.location && window.location.href ? window.location.href : '');
+      if (href.startsWith('about:blank')) {
+        return null;
+      }
+    } catch { }
+
     const location = options.location || this.classifyLocation(options.path);
     const path = options.path || window.location.pathname;
     if (this.isSocialClubChatContext()) {
