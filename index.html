@@ -403,7 +403,7 @@
         try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
     </script>
 
-    <script src="/social-club.js"></script>
+    <script src="/social-club.js?v=20260222"></script>
     <script>
         (function () {
             const mount = () => {
@@ -414,6 +414,7 @@
                     }
                 } catch { }
             };
+
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', mount);
             } else {
