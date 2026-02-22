@@ -1599,6 +1599,15 @@
 
         try {
           const callData = JSON.parse(activeCallStr);
+          if (!callData?.callId || !callData?.roomId) {
+            console.warn('📞 Invalid activeCall payload - clearing');
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+            activeCallConnectionState = null;
+            activeCallInRoom = null;
+            updateCallButtonStates();
+            updateCallButtonState(false);
+            return;
+          }
           const newState = callData.connectionState || 'connecting';
 
           // Sync local state
@@ -1628,7 +1637,7 @@
                 activeCallInRoom = {
                   callId: callData.callId,
                   callType: callData.callType,
-                  participantCount: callData.participants?.length || activeCallInRoom?.participantCount || 0
+                  participantCount: Array.isArray(callData.participants) ? callData.participants.length : 0
                 };
               }
 
@@ -3958,7 +3967,17 @@
 
         // Check if user is already in the call
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-        const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
+        let userInCall = false;
+        if (activeCallStr) {
+          try {
+            const activeCallParsed = JSON.parse(activeCallStr);
+            userInCall = !!(
+              activeCallParsed?.callId &&
+              activeCallParsed?.roomId &&
+              activeCallParsed.roomId === roomData?.roomId
+            );
+          } catch { }
+        }
 
         if (userInCall) {
           console.log('📞 User is IN call - showing "Back to Call" button');
@@ -4003,7 +4022,7 @@
             activeCallInRoom = {
               callId: callData.callId,
               callType: callData.callType,
-              participantCount: callData.participantCount || 0
+              participantCount: typeof callData.participantCount === 'number' ? callData.participantCount : 0
             };
           }
 
@@ -5965,6 +5984,10 @@
             console.error('❌ CALL ERROR:', data.code);
             console.error('   Message:', data.message);
             console.error('   Was initiating:', wasInitiating);
+
+            try { localStorage.removeItem(ACTIVE_CALL_KEY); } catch { }
+            try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
+            activeCallConnectionState = null;
 
             // Clear loading states
             if (audioCallBtn) {
