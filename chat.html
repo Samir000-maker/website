@@ -7471,10 +7471,11 @@
       }
 
       // Ensure a server-side guest profile exists for anonymous users (and upgrades guest_* usernames)
+      let ensuredGuestUsername = null;
       try {
         const token = await firebaseUser.getIdToken();
         const moodForGuest = isSocialClubMode ? 'social_club' : (selectedMood || 'social_club');
-        await fetch('/api/users/ensure-guest', {
+        const ensureRes = await fetch('/api/users/ensure-guest', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -7482,13 +7483,32 @@
           },
           body: JSON.stringify({ mood: moodForGuest })
         });
+        if (ensureRes.ok) {
+          const ensurePayload = await ensureRes.json().catch(() => null);
+          ensuredGuestUsername = (ensurePayload?.user?.username || '').trim() || null;
+          try {
+            if (ensuredGuestUsername) localStorage.setItem('guest_username', ensuredGuestUsername);
+          } catch { }
+        }
       } catch (e) {
         console.warn('⚠️ ensure-guest failed (continuing):', e?.message || e);
       }
 
       // Get current user data
       try {
-        const userData = await _API.get('/api/users/me');
+        let userData = await _API.get('/api/users/me');
+        const boring = typeof userData?.username === 'string' && /^guest_/i.test(userData.username.trim());
+        if (boring && ensuredGuestUsername) {
+          userData = {
+            ...userData,
+            username: ensuredGuestUsername
+          };
+        } else if (boring && !ensuredGuestUsername) {
+          try {
+            userData = await _API.get('/api/users/me');
+          } catch { }
+        }
+
         currentUser = {
           userId: userData._id,
           username: userData.username,
