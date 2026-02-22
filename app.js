@@ -545,11 +545,29 @@ async function authFetch(url, options = {}) {
     }
 
     console.log('📡 [API] Sending authenticated request:', url);
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...options,
       headers: mergedHeaders,
       body
     });
+
+    if (response.status === 401) {
+      try {
+        console.warn('⚠️ [Auth] 401 received - retrying once after re-auth');
+        await Auth.ensureSignedIn();
+        const retryUser = firebase.auth().currentUser;
+        const retryToken = retryUser ? await retryUser.getIdToken(true) : null;
+        const retryHeaders = {
+          ...(options.headers || {}),
+          Authorization: retryToken ? `Bearer ${retryToken}` : (mergedHeaders.Authorization || '')
+        };
+        response = await fetch(url, {
+          ...options,
+          headers: retryHeaders,
+          body
+        });
+      } catch { }
+    }
     console.log('✅ [API] Response status:', response.status);
     return response;
   } catch (error) {
@@ -576,13 +594,15 @@ const API = {
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
 
-    const res = await fetch(url, { ...options, headers });
+    let res = await fetch(url, { ...options, headers });
 
     if (res.status === 401) {
-      Toast.error('Session expired');
-      Auth.clearAuth();
-      PageTransition.navigateTo('/login.html');
-      throw new Error('Unauthorized');
+      try {
+        await Auth.ensureSignedIn();
+        const retryToken = await Auth.getToken();
+        const retryHeaders = { ...headers, Authorization: `Bearer ${retryToken}` };
+        res = await fetch(url, { ...options, headers: retryHeaders });
+      } catch { }
     }
 
     const text = await res.text();
@@ -619,17 +639,23 @@ const API = {
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: 'POST',
       headers,
       body: formData
     });
 
     if (res.status === 401) {
-      Toast.error('Session expired');
-      Auth.clearAuth();
-      PageTransition.navigateTo('/login.html');
-      throw new Error('Unauthorized');
+      try {
+        await Auth.ensureSignedIn();
+        const retryToken = await Auth.getToken();
+        const retryHeaders = { Authorization: `Bearer ${retryToken}` };
+        res = await fetch(url, {
+          method: 'POST',
+          headers: retryHeaders,
+          body: formData
+        });
+      } catch { }
     }
 
     const text = await res.text();
