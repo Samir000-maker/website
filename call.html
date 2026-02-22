@@ -3934,6 +3934,12 @@
         if (isInitializing) return;
         isInitializing = true;
         explicitLeaveCall = true;
+
+        try {
+          // Prevent call iframe teardown navigation from triggering presence leave beacons.
+          sessionStorage.setItem('vibe_suppress_leave_beacon_until', String(Date.now() + 5000));
+        } catch { }
+
         stopCallHeartbeat();
         audioContexts.forEach(ac => {
           try {
