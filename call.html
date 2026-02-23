@@ -2867,6 +2867,8 @@
           iceRestartCount: 0,
           stunAttemptCount: stunAttemptTotals.get(userId) || 0, // ✅ Track STUN attempts (persisted across rebuilds)
           lastIceCandidateTime: 0,
+          hasRemoteTrack: false,
+          remoteTrackAt: 0,
           watchdogTimer: null, // ✅ For fast retry
           connectWatchdogTimer: null,
           turnRetryCount: 0
@@ -2879,9 +2881,37 @@
           console.log(`⏱️ [ICE] Starting 2.5s watchdog for ${userId}`);
           stats.watchdogTimer = setTimeout(() => {
             const pcCurrent = peerConnections.get(userId);
-            if (pcCurrent &&
-              pcCurrent.iceConnectionState !== 'connected' &&
-              pcCurrent.iceConnectionState !== 'completed') {
+            const s = connectionStats.get(userId);
+            if (!pcCurrent || !s) return;
+
+            // If we've already received remote media, never tear down the PC from watchdog timers.
+            if (s.hasRemoteTrack) return;
+
+            const state = pcCurrent.iceConnectionState;
+
+            // Don't treat "new" as failure (ICE may not have started yet).
+            // Wait until at least one local ICE candidate was gathered.
+            if (state === 'new' && (s.candidatesSent || 0) === 0) {
+              console.warn(`⏱️ [ICE] Watchdog saw state=new with 0 candidates for ${userId} - extending grace period`);
+              try {
+                if (s.watchdogTimer) clearTimeout(s.watchdogTimer);
+                s.watchdogTimer = setTimeout(() => {
+                  const pcRetry = peerConnections.get(userId);
+                  const sRetry = connectionStats.get(userId);
+                  if (!pcRetry || !sRetry) return;
+                  if (sRetry.hasRemoteTrack) return;
+                  const st = pcRetry.iceConnectionState;
+                  if (st === 'connected' || st === 'completed') return;
+                  handleIceFailure(userId);
+                }, 2500);
+              } catch { }
+              return;
+            }
+
+            if (
+              state !== 'connected' &&
+              state !== 'completed'
+            ) {
               console.warn(`⏱️ [ICE] Watchdog triggered for ${userId} (state: ${pcCurrent.iceConnectionState})`);
 
               // Simulate failure to trigger retry logic
@@ -2907,6 +2937,11 @@
               const pcCurrent = peerConnections.get(userId);
               if (!pcCurrent) return;
               const s = connectionStats.get(userId);
+              if (!s) return;
+
+              // If we've already received remote media, never tear down the PC from watchdog timers.
+              if (s.hasRemoteTrack) return;
+
               const state = pcCurrent.iceConnectionState;
               if (state === 'connected' || state === 'completed') return;
 
@@ -2984,6 +3019,24 @@
           console.log(`   Track ID: ${event.track.id.substring(0, 8)}...`);
           console.log(`   Track state: enabled=${event.track.enabled}, readyState=${event.track.readyState}, muted=${event.track.muted}`);
           console.log(`   Streams: ${event.streams.length}`);
+
+          // Receiving a remote track is strong evidence that signaling + ICE have progressed.
+          // Mark this so watchdog timers never tear down a potentially working connection.
+          try {
+            const s = connectionStats.get(userId);
+            if (s) {
+              s.hasRemoteTrack = true;
+              s.remoteTrackAt = Date.now();
+              if (s.watchdogTimer) {
+                clearTimeout(s.watchdogTimer);
+                s.watchdogTimer = null;
+              }
+              if (s.connectWatchdogTimer) {
+                clearTimeout(s.connectWatchdogTimer);
+                s.connectWatchdogTimer = null;
+              }
+            }
+          } catch { }
 
           if (event.streams && event.streams.length > 0) {
             const remoteStream = event.streams[0];
@@ -3392,6 +3445,17 @@
         const pc = peerConnections.get(userId);
         const stats = connectionStats.get(userId);
         if (!pc || !stats) return;
+
+        // If media has already started flowing, do NOT run the STUN/TURN teardown ladder.
+        // Let the existing connection stabilize instead of flapping.
+        if (stats.hasRemoteTrack) {
+          console.warn(`⚠️ [ICE] Suppressing failure ladder for ${userId} - remote media already received`);
+          return;
+        }
+
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          return;
+        }
 
         // Clear watchdog
         if (stats.watchdogTimer) {
