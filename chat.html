@@ -3562,6 +3562,25 @@
 
         const finalUrl = targetUrl || '/mood.html';
 
+        // In Social Club mode, never force the user out to /mood.html during call initiation/participation.
+        // Doing so triggers a page unload -> presence leave beacon -> server destroys the room.
+        try {
+          let hasActiveCallCached = false;
+          const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+          if (activeCallStr) {
+            try {
+              const parsed = JSON.parse(activeCallStr);
+              hasActiveCallCached = !!(parsed?.callId && parsed?.roomId);
+            } catch { }
+          }
+          const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
+          if (isSocialClubMode && finalUrl === '/mood.html' && (navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached)) {
+            console.warn('🛡️ Social Club: Suppressing forced navigation to /mood.html during call flow');
+            console.log('🧹 ========================================\n');
+            return;
+          }
+        } catch { }
+
         // ✅ CRITICAL: Clear any persistent matchmaking state from discovery.html
         // This prevents automatic re-match if the user lands on discovery.html via back-button
         try {
