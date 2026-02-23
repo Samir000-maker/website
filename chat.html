@@ -6306,6 +6306,23 @@
           const currentUserId = currentUser?.userId || null;
           const selfLeft = !!(leftUserId && currentUserId && leftUserId === currentUserId);
 
+          // If we are transitioning into a call (or already have an active call cached), do not
+          // run the destructive room exit sequence on a transient self-left/disconnect.
+          // The socket/session may be temporarily replaced/reconnected while call UI initializes.
+          let hasActiveCallCached = false;
+          try {
+            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+            if (activeCallStr) {
+              const parsed = JSON.parse(activeCallStr);
+              hasActiveCallCached = !!(parsed?.callId && parsed?.roomId);
+            }
+          } catch { }
+
+          if (selfLeft && (navigatingToCall || isInBackgroundCall || hasActiveCallCached)) {
+            console.warn(`🛡️ [${sequenceId}] Suppressing exit sequence on self-left during call flow`);
+            return;
+          }
+
           if (!isSocialClubMode && (roomDestroyed || selfLeft)) {
             console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
             console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
