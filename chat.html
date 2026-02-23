@@ -5149,6 +5149,39 @@
           console.warn('⚠️ Session replaced by newer socket:', data);
           setAuthenticationState(false);
           try { stopHeartbeat(); } catch { }
+
+          // In Social Club (and during call flows), do NOT redirect away.
+          // Redirecting triggers unload -> leave beacon -> room destruction.
+          // Instead: rotate socket session id and reconnect.
+          try {
+            let hasActiveCallCached = false;
+            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+            if (activeCallStr) {
+              try {
+                const parsed = JSON.parse(activeCallStr);
+                hasActiveCallCached = !!(parsed?.callId && parsed?.roomId);
+              } catch { }
+            }
+
+            const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
+            const shouldSelfHeal = isSocialClubMode || navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached;
+            if (shouldSelfHeal) {
+              console.warn('🛡️ Suppressing redirect on session_replaced; rotating session and reconnecting');
+              toast('Connection refreshed', 'warning');
+
+              // Rotate the *base* session id so subsequent getScopedSocketSessionId('chat') becomes unique.
+              try {
+                const newBase = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+                sessionStorage.setItem('vibe_socket_session_id', newBase);
+              } catch { }
+
+              try { socketInstance.disconnect(); } catch { }
+              try { socketInstance.connect(); } catch { }
+              return;
+            }
+          } catch { }
+
+          // Non-Social-Club fallback behavior
           try { socketInstance.disconnect(); } catch { }
           toast('This session was opened in another tab/device. Redirecting...', 'warning');
           setTimeout(() => {
@@ -7697,7 +7730,7 @@
       try {
         const idToken = await firebaseUser.getIdToken();
         const socketUrl = window.location.origin;
-        const sessionId = getStableSocketSessionId();
+        const sessionId = getScopedSocketSessionId('chat');
         const tabId = window.tabManager?.tabId || null;
 
         socketInstance = io(socketUrl, {
