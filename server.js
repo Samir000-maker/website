@@ -1886,6 +1886,53 @@ const roomMessageRateLimiter = new Map(); // roomId -> { count, resetTime, lastW
 const ROOM_MESSAGE_RATE_LIMIT = 30; // Max 30 messages per 10 seconds per room
 const ROOM_RATE_WINDOW = 10000; // 10 seconds
 
+// ============================================
+// CALL INITIATION RATE LIMITING
+// ============================================
+const callInitiationRateLimiter = new Map(); // userId -> { count, resetTime, lastWarning }
+const roomCallInitiationRateLimiter = new Map(); // roomId -> { count, resetTime, lastWarning }
+const CALL_INITIATION_RATE_LIMIT = 12; // Max 12 initiate_call per 10 seconds per user (very permissive)
+const ROOM_CALL_INITIATION_RATE_LIMIT = 30; // Max 30 initiate_call per 10 seconds per room (very permissive)
+const CALL_INITIATION_WINDOW = 10000; // 10 seconds
+
+function checkCallInitiationRateLimit(userId, roomId) {
+  const now = Date.now();
+
+  const userLimit = callInitiationRateLimiter.get(userId);
+  if (!userLimit || now > userLimit.resetTime) {
+    callInitiationRateLimiter.set(userId, { count: 1, resetTime: now + CALL_INITIATION_WINDOW, lastWarning: 0 });
+  } else {
+    userLimit.count++;
+  }
+
+  const roomLimit = roomCallInitiationRateLimiter.get(roomId);
+  if (!roomLimit || now > roomLimit.resetTime) {
+    roomCallInitiationRateLimiter.set(roomId, { count: 1, resetTime: now + CALL_INITIATION_WINDOW, lastWarning: 0 });
+  } else {
+    roomLimit.count++;
+  }
+
+  const currentUser = callInitiationRateLimiter.get(userId);
+  const currentRoom = roomCallInitiationRateLimiter.get(roomId);
+
+  const userExceeded = currentUser && currentUser.count > CALL_INITIATION_RATE_LIMIT;
+  const roomExceeded = currentRoom && currentRoom.count > ROOM_CALL_INITIATION_RATE_LIMIT;
+
+  if (userExceeded || roomExceeded) {
+    return {
+      ok: false,
+      userExceeded,
+      roomExceeded,
+      retryAfterMs: Math.max(
+        currentUser ? Math.max(0, currentUser.resetTime - now) : 0,
+        currentRoom ? Math.max(0, currentRoom.resetTime - now) : 0
+      )
+    };
+  }
+
+  return { ok: true };
+}
+
 function checkRoomMessageRateLimit(roomId) {
   const now = Date.now();
   const roomLimit = roomMessageRateLimiter.get(roomId);
@@ -6281,6 +6328,22 @@ io.on('connection', (socket) => {
       console.log(`   User: ${user.username} (${user.userId})`);
       console.log(`   Room: ${roomId}`);
       console.log(`   Type: ${callType}`);
+
+      // Rate limiting protects the room/call system from spam clicks and reduces lock contention under load.
+      const limit = checkCallInitiationRateLimit(user.userId, roomId);
+      if (!limit.ok) {
+        if (limit.userExceeded) {
+          console.warn(`⚠️ [RateLimit] initiate_call blocked for user ${user.userId} in room ${roomId} (retryAfter=${limit.retryAfterMs}ms)`);
+        } else {
+          console.warn(`⚠️ [RateLimit] initiate_call blocked for room ${roomId} (retryAfter=${limit.retryAfterMs}ms)`);
+        }
+        socket.emit('error', {
+          message: 'Too many call attempts. Please wait a moment and try again.',
+          code: 'RATE_LIMITED',
+          retryAfterMs: limit.retryAfterMs
+        });
+        return;
+      }
 
       const room = await matchmaking.getRoom(roomId);
 
