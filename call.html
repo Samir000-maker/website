@@ -449,6 +449,7 @@
       let callData = null, currentUser = null, isAudioEnabled = true, isVideoEnabled = false;
       let durationInterval = null, isInitializing = false, hasJoinedCall = false;
       let explicitLeaveCall = false;
+      let leaveCallInProgress = false;
       let pendingIceCandidates = new Map(), connectionStats = new Map();
       let renderedParticipants = new Set(); // ✅ Restore missing tracking set
       let isNavigatingToChat = false;
@@ -3987,8 +3988,12 @@
         return;
       }
 
-      function leaveCall() {
-        if (isInitializing) return;
+      function leaveCall(options = {}) {
+        const force = options?.force === true;
+        const reason = options?.reason || 'manual';
+        if (leaveCallInProgress) return;
+        if (isInitializing && !force) return;
+        leaveCallInProgress = true;
         isInitializing = true;
         explicitLeaveCall = true;
 
@@ -4013,14 +4018,16 @@
         peerConnections.forEach(pc => pc.close());
         peerConnections.clear();
         if (socketInstance && socketInstance.connected) {
-          socketInstance.emit('leave_call', { callId: callData.callId });
-          socketInstance.emit('exit_call_mode', { roomId: callData?.roomId || null });
-          socketInstance.emit('page_context', {
-            location: 'chat',
-            path: '/chat.html',
-            roomId: callData?.roomId || null,
-            source: 'leave_call_navigation'
-          });
+          try { socketInstance.emit('leave_call', { callId: callData?.callId || null, reason }); } catch { }
+          try { socketInstance.emit('exit_call_mode', { roomId: callData?.roomId || null }); } catch { }
+          try {
+            socketInstance.emit('page_context', {
+              location: 'chat',
+              path: '/chat.html',
+              roomId: callData?.roomId || null,
+              source: `leave_call_${reason}`
+            });
+          } catch { }
         }
         if (durationInterval) clearInterval(durationInterval);
         localStorage.removeItem('activeCall');
@@ -4257,7 +4264,7 @@
           if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
 
           const token = await firebaseUser.getIdToken();
-          const callSessionId = getScopedSocketSessionId('call');
+          let callSessionId = getScopedSocketSessionId('call');
           const tabId = window.tabManager?.tabId || null;
           socketInstance = io(window.location.origin, {
             transports: ['websocket', 'polling'],
@@ -4394,6 +4401,8 @@
               try { socketInstance.off(); } catch { }
               try { socketInstance.disconnect(); } catch { }
 
+              // If session base was rotated elsewhere, ensure call sessionId is refreshed too.
+              try { callSessionId = getScopedSocketSessionId('call'); } catch { }
               const newToken = (await refreshSocketAuthToken(true)) || token;
 
               // Recreate socket with fresh auth
@@ -4569,18 +4578,43 @@
           socketInstance.on('session_replaced', (data) => {
             console.warn('⚠️ Session replaced by newer socket:', data);
             try { stopCallHeartbeat(); } catch { }
-            try { localStorage.removeItem('activeCall'); } catch { }
-            try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
             try { socketInstance.disconnect(); } catch { }
             toast('This session was opened in another tab/device. Redirecting...', 'warning');
             // If embedded in chat, never redirect the whole app; ask parent to hide the call UI.
             try {
               if (window.parent && window.parent !== window) {
+                try { localStorage.removeItem('activeCall'); } catch { }
+                try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
                 window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*');
                 setTimeout(() => { window.location.href = 'about:blank'; }, 150);
                 return;
               }
             } catch { }
+
+            // Standalone call view: prefer self-heal over redirect to avoid forcing the user out.
+            // If this keeps happening, fall back to redirect.
+            try {
+              const raw = sessionStorage.getItem('vibe_call_session_replaced_retries');
+              const n = raw ? parseInt(raw, 10) : 0;
+              const retries = Number.isFinite(n) ? n : 0;
+              if (retries < 2) {
+                sessionStorage.setItem('vibe_call_session_replaced_retries', String(retries + 1));
+                console.warn('🛡️ Call: suppressing redirect on session_replaced; rotating session and reconnecting');
+                try {
+                  const newBase = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+                  sessionStorage.setItem('vibe_socket_session_id', newBase);
+                } catch { }
+                // Recompute scoped call session id so the next auth is truly distinct.
+                try { callSessionId = getScopedSocketSessionId('call'); } catch { }
+                try { hardResetSocketAndReconnect('session_replaced_self_heal'); } catch { }
+                return;
+              }
+            } catch { }
+
+            // Giving up after retries: clear call markers so chat can recover UI correctly.
+            try { localStorage.removeItem('activeCall'); } catch { }
+            try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
+
             setTimeout(() => {
               window.location.href = '/mood.html';
             }, 1200);
@@ -5139,7 +5173,7 @@
             try { clearCallSetupWatchdog(); } catch { }
             try { toast('Call ended', 'warning'); } catch { }
             try { dismissCallLoadingOverlay(); } catch { }
-            leaveCall();
+            leaveCall({ force: true, reason: 'call_ended' });
           });
 
           socketInstance.on('user_declined_call', () => {
@@ -5150,8 +5184,23 @@
             const rawCode = err && (err.code || err?.data?.code);
             const msg = (err && err.message) ? String(err.message) : '';
             const code = rawCode || ((/call not found/i.test(msg)) ? 'CALL_NOT_FOUND' : null);
+            if (code === 'RATE_LIMITED') {
+              // Never tear down the call UI on rate limiting; it's a protective server response.
+              try { toast(msg || 'Please wait a moment and try again', 'warning'); } catch { }
+              return;
+            }
+
             if (code === 'CALL_NOT_FOUND' || code === 'CALL_ENDED') {
               failCallSetupAndExit(msg || 'Call is no longer available');
+              return;
+            }
+
+            // For transient errors, prefer reconnect UI and let Socket.IO recovery paths work.
+            if (/timeout|transport|disconnect|connect/i.test(msg)) {
+              try { startReconnectGate('socket_error'); } catch { }
+              try { showReconnectUI('Reconnecting…', 'Temporary connection issue…'); } catch { }
+              try { startReconnectWatchdogs('socket_error'); } catch { }
+              return;
             }
           });
 
@@ -5201,8 +5250,9 @@
         } catch (e) {
           console.error('❌ Init error:', e);
           toast('Failed to initialize call', 'error');
-          isInitializing = false;
-          setTimeout(() => window.location.href = '/chat.html', 2000);
+          try { isInitializing = false; } catch { }
+          // Use the shared failure path so iframe mode never navigates the whole app.
+          failCallSetupAndExit('Failed to initialize call');
         }
       }
 
@@ -5227,7 +5277,8 @@
         } catch (e) {
           console.error('❌ Init error:', e);
           toast('Failed to initialize call', 'error');
-          setTimeout(() => window.location.href = '/chat.html', 2000);
+          // Use the shared failure path so iframe mode never navigates the whole app.
+          failCallSetupAndExit('Failed to initialize call');
         }
       })();
     })();
