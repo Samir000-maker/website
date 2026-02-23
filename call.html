@@ -4131,6 +4131,17 @@
         try { dismissCallLoadingOverlay(); } catch { }
         try { localStorage.removeItem('activeCall'); } catch { }
         try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
+
+        // In embedded (iframe) mode, never hard-navigate away (it effectively "leaves" the room).
+        // Instead ask the parent chat to hide the call UI and continue.
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*');
+            setTimeout(() => { window.location.href = 'about:blank'; }, 150);
+            return;
+          }
+        } catch { }
+
         setTimeout(() => { window.location.href = '/chat.html'; }, 900);
       }
 
@@ -5063,9 +5074,11 @@
           });
 
           socketInstance.on('error', (err) => {
-            const code = err && (err.code || err?.data?.code);
+            const rawCode = err && (err.code || err?.data?.code);
+            const msg = (err && err.message) ? String(err.message) : '';
+            const code = rawCode || ((/call not found/i.test(msg)) ? 'CALL_NOT_FOUND' : null);
             if (code === 'CALL_NOT_FOUND' || code === 'CALL_ENDED') {
-              failCallSetupAndExit(err.message || 'Call is no longer available');
+              failCallSetupAndExit(msg || 'Call is no longer available');
             }
           });
 
