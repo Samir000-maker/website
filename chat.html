@@ -1605,17 +1605,34 @@
           return;
         }
 
+        const clearStaleActiveCall = (reason) => {
+          try {
+            console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+          } catch { }
+          activeCallConnectionState = null;
+          activeCallInRoom = null;
+          updateCallButtonStates();
+          updateCallButtonState(false);
+        };
+
         try {
           const callData = JSON.parse(activeCallStr);
           if (!callData?.callId || !callData?.roomId) {
             console.warn('📞 Invalid activeCall payload - clearing');
-            localStorage.removeItem(ACTIVE_CALL_KEY);
-            activeCallConnectionState = null;
-            activeCallInRoom = null;
-            updateCallButtonStates();
-            updateCallButtonState(false);
+            clearStaleActiveCall('invalid payload');
             return;
           }
+
+          // Production hardening: don't trust very old or missing timestamps.
+          const storedAt = typeof callData?.storedAt === 'number' ? callData.storedAt : 0;
+          const ageMs = storedAt ? (Date.now() - storedAt) : Number.POSITIVE_INFINITY;
+          const MAX_STALE_MS = 2 * 60 * 1000; // 2 minutes
+          if (!storedAt || ageMs > MAX_STALE_MS) {
+            clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
+            return;
+          }
+
           const newState = callData.connectionState || 'connecting';
 
           // Sync local state
@@ -1660,9 +1677,7 @@
           }
         } catch (e) {
           console.error('❌ Failed to parse active call data:', e);
-          activeCallConnectionState = null;
-          updateCallButtonStates();
-          updateCallButtonState(false);
+          clearStaleActiveCall('parse error');
         }
       }
 
@@ -3882,9 +3897,35 @@
 
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
 
+        const clearStaleActiveCall = (reason) => {
+          try {
+            console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
+            localStorage.removeItem(ACTIVE_CALL_KEY);
+          } catch { }
+          activeCallConnectionState = null;
+          activeCallInRoom = null;
+          updateCallButtonStates();
+          updateCallButtonState(false);
+        };
+
         if (activeCallStr) {
           try {
             const activeCallData = JSON.parse(activeCallStr);
+
+            // Production hardening: don't trust very old or missing timestamps.
+            const storedAt = typeof activeCallData?.storedAt === 'number' ? activeCallData.storedAt : 0;
+            const ageMs = storedAt ? (Date.now() - storedAt) : Number.POSITIVE_INFINITY;
+            const MAX_STALE_MS = 2 * 60 * 1000; // 2 minutes
+
+            if (!activeCallData?.callId || !activeCallData?.roomId) {
+              clearStaleActiveCall('invalid payload');
+              return false;
+            }
+
+            if (!storedAt || ageMs > MAX_STALE_MS) {
+              clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
+              return false;
+            }
 
             if (activeCallData.roomId === roomData?.roomId) {
               console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
@@ -3926,7 +3967,7 @@
             }
           } catch (e) {
             console.error('❌ Failed to parse activeCall:', e);
-            localStorage.removeItem(ACTIVE_CALL_KEY);
+            clearStaleActiveCall('parse error');
           }
         }
 
@@ -6955,7 +6996,16 @@
 
             // Check if this is "Back to Call" or "Join Call"
             const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-            const userInCall = activeCallStr && JSON.parse(activeCallStr).roomId === roomData?.roomId;
+            let userInCall = false;
+            if (activeCallStr) {
+              try {
+                const parsed = JSON.parse(activeCallStr);
+                userInCall = parsed?.roomId === roomData?.roomId && !!parsed?.callId;
+              } catch {
+                try { localStorage.removeItem(ACTIVE_CALL_KEY); } catch { }
+                userInCall = false;
+              }
+            }
 
             console.log(`   activeCallStr exists: ${!!activeCallStr}`);
             console.log(`   userInCall: ${userInCall}`);
@@ -7009,6 +7059,7 @@
                 callId: activeCallInRoom.callId,
                 roomId: roomData.roomId,
                 callType: activeCallInRoom.callType,
+                storedAt: Date.now(),
                 users: []
               };
 
@@ -7070,11 +7121,12 @@
               saveChatState(roomData.roomId, messagesCache);
               sessionStorage.setItem('returningFromCall', 'true');
 
-              // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
+              // ✅ CRITICAL FIX: Store call data BEFORE emitting join_existing_call
               localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
                 callId: callToAccept.callId,
                 roomId: roomData.roomId,
                 callType: callToAccept.callType,
+                storedAt: Date.now(),
                 users: []
               }));
               console.log('💾 Stored call data to localStorage (pre-join)');
