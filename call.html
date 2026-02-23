@@ -4256,14 +4256,14 @@
           if (title) title.textContent = `${callData.callType === 'video' ? 'Video' : 'Audio'} Call`;
 
           const token = await firebaseUser.getIdToken();
-          const sessionId = getScopedSocketSessionId('call');
+          const callSessionId = getScopedSocketSessionId('call');
           const tabId = window.tabManager?.tabId || null;
           socketInstance = io(window.location.origin, {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
-            auth: { token, sessionId, tabId }
+            auth: { token, sessionId: callSessionId, tabId }
           });
 
           const reconnectOverlay = document.getElementById('callReconnectOverlay');
@@ -4351,7 +4351,7 @@
               if (!u) return null;
               const newToken = await u.getIdToken(!!forceRefresh);
               if (socketInstance) {
-                socketInstance.auth = { ...(socketInstance.auth || {}), token: newToken, sessionId, tabId };
+                socketInstance.auth = { ...(socketInstance.auth || {}), token: newToken, sessionId: callSessionId, tabId };
               }
               return newToken;
             } catch {
@@ -4401,7 +4401,7 @@
                 reconnection: true,
                 reconnectionAttempts: 10,
                 reconnectionDelay: 500,
-                auth: { token: newToken, sessionId, tabId }
+                auth: { token: newToken, sessionId: callSessionId, tabId }
               });
 
               // Rebind minimal critical handlers for reconnection path
@@ -4411,7 +4411,7 @@
                 socketInstance.emit('authenticate', {
                   token: socketInstance.auth?.token || newToken,
                   userId: currentUser.userId,
-                  sessionId,
+                  sessionId: callSessionId,
                   tabId
                 });
               });
@@ -4497,7 +4497,7 @@
             socketInstance.emit('authenticate', {
               token: socketInstance.auth?.token || token,
               userId: currentUser.userId,
-              sessionId,
+              sessionId: callSessionId,
               tabId
             });
             loadSignalingQueue();
@@ -4572,6 +4572,14 @@
             try { sessionStorage.removeItem('hasBackgroundCall'); } catch { }
             try { socketInstance.disconnect(); } catch { }
             toast('This session was opened in another tab/device. Redirecting...', 'warning');
+            // If embedded in chat, never redirect the whole app; ask parent to hide the call UI.
+            try {
+              if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*');
+                setTimeout(() => { window.location.href = 'about:blank'; }, 150);
+                return;
+              }
+            } catch { }
             setTimeout(() => {
               window.location.href = '/mood.html';
             }, 1200);
