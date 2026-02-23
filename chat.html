@@ -1830,6 +1830,8 @@
       let messagesCache = [];
       let activeCallInRoom = null;
       let backButtonHandled = false;
+      let presenceInvalidCount = 0;
+      let lastPresenceInvalidAt = 0;
       let timerInterval = null;
       let currentUser = null;
       let roomData = null;
@@ -4732,6 +4734,8 @@
         }, async (response) => {
           if (!response) return;
           if (response.valid) {
+            presenceInvalidCount = 0;
+            lastPresenceInvalidAt = 0;
             if ((trigger.includes('pageshow') || trigger.includes('visibility')) && socketInstance?.connected) {
               safeSocketEmit('request_room_sync', { roomId: response.roomId || roomData.roomId });
             }
@@ -4746,12 +4750,54 @@
             return;
           }
 
-          console.warn('⚠️ Presence validation failed. Redirecting to mood.');
-          if (isSocialClubMode) return;
+          // Recovery-first strategy: transient socket races and server lag should not force-leave users.
+          // Only redirect after repeated failures, and never during call flow.
+          const now = Date.now();
+          if (!lastPresenceInvalidAt || (now - lastPresenceInvalidAt) > 15000) {
+            presenceInvalidCount = 0;
+          }
+          lastPresenceInvalidAt = now;
+          presenceInvalidCount++;
+
+          let hasActiveCallCached = false;
           try {
-            await clearChatState(true);
+            const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
+            if (activeCallStr) {
+              try {
+                const parsed = JSON.parse(activeCallStr);
+                hasActiveCallCached = !!(parsed?.callId && parsed?.roomId);
+              } catch { }
+            }
           } catch { }
-          cleanupParentCallPage('/mood.html');
+          const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
+          const shouldSuppressRedirect = isSocialClubMode || navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached;
+
+          console.warn('⚠️ Presence validation failed:', response.reason, 'count=', presenceInvalidCount, 'suppressRedirect=', shouldSuppressRedirect);
+
+          // Always attempt a re-join + sync first.
+          try {
+            if (socketInstance?.connected && roomData?.roomId) {
+              pendingInitialRoomSync = true;
+              safeSocketEmit('join_room', { roomId: roomData.roomId });
+              safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
+            }
+          } catch { }
+
+          if (shouldSuppressRedirect) return;
+
+          if (presenceInvalidCount < 2) {
+            return;
+          }
+
+          console.warn('⚠️ Presence validation repeatedly failed. Exiting to mood.');
+          try {
+            await exitRoomSequence('/mood.html', { reason: 'presence_invalid' });
+          } catch {
+            try {
+              await clearChatState(true);
+            } catch { }
+            cleanupParentCallPage('/mood.html');
+          }
         });
       }
 
@@ -4876,12 +4922,13 @@
       // ============================================
       // BACK BUTTON HANDLER
       // ============================================
-      async function exitRoomSequence(targetUrl = null) {
+      async function exitRoomSequence(targetUrl = null, options = {}) {
         if (leaveSequenceInProgress) {
           console.log('⚠️ Leave sequence already in progress, ignoring duplicate trigger');
           return;
         }
         leaveSequenceInProgress = true;
+        const reason = options?.reason || 'manual';
         console.log('🚪 ========================================');
         console.log('🚪 STARTING EXIT ROOM SEQUENCE (Server-Authoritative)');
         console.log('🚪 ========================================');
@@ -4891,9 +4938,11 @@
           stopHeartbeat(); // ✅ Stop heartbeat IMMEDIATELY
           if (timerInterval) clearInterval(timerInterval);
 
-          // 2. Logic to handle active call if user is leaving
+          // 2. Logic to handle active call if user is leaving.
+          // Only tear down the call on explicit/manual exits; avoid destructive cleanup for automated recovery flows.
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
-          if (activeCallStr) {
+          const shouldTearDownCall = (reason === 'manual' || reason === 'location_change' || reason === 'api_beacon');
+          if (activeCallStr && shouldTearDownCall) {
             console.log('📞 Active call detected - ensuring server cleanup...');
             try {
               const callData = JSON.parse(activeCallStr);
@@ -4910,19 +4959,23 @@
           if (socketInstance && socketInstance.connected) {
             console.log('📤 Emitting leave_room via socket...');
             // Wrap in promise to allow sequence to continue after acknowledgment
-            const leavePromise = new Promise((resolve) => {
+            const emitLeaveOnce = () => new Promise((resolve) => {
               const timeout = setTimeout(() => {
                 console.warn('⚠️ leave_room acknowledgment timed out');
-                resolve();
-              }, 2000);
-
+                resolve({ ok: false });
+              }, 8000);
               socketInstance.emit('leave_room', { roomId: roomData?.roomId || currentRoomId || null }, (response) => {
                 clearTimeout(timeout);
                 console.log('✅ leave_room acknowledgment received:', response);
-                resolve();
+                resolve({ ok: true, response });
               });
             });
-            await leavePromise;
+
+            const r1 = await emitLeaveOnce();
+            if (!r1.ok) {
+              console.warn('⚠️ Retrying leave_room once...');
+              await emitLeaveOnce();
+            }
           } else {
             const token = sessionStorage.getItem('vibe_auth_token');
             if (token && roomData?.roomId) {
