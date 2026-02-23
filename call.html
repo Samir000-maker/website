@@ -4047,6 +4047,9 @@
         try {
           const activeCallData = JSON.parse(localStorage.getItem('activeCall') || '{}');
           activeCallData.connectionState = callConnectionState;
+          if (typeof activeCallData.storedAt !== 'number' || !activeCallData.storedAt) {
+            activeCallData.storedAt = Date.now();
+          }
           localStorage.setItem('activeCall', JSON.stringify(activeCallData));
 
           // Trigger storage event for other windows/tabs
