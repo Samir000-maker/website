@@ -1629,8 +1629,19 @@
           const ageMs = storedAt ? (Date.now() - storedAt) : Number.POSITIVE_INFINITY;
           const MAX_STALE_MS = 2 * 60 * 1000; // 2 minutes
           if (!storedAt || ageMs > MAX_STALE_MS) {
-            clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
-            return;
+            // If the call is actively initializing/connecting/connected, prefer self-repair
+            // over clearing (missing storedAt is a known transient during fast call start).
+            const state = callData.connectionState || 'connecting';
+            const isActiveState = (state === 'initializing' || state === 'connecting' || state === 'connected');
+            if (isActiveState && !storedAt) {
+              try {
+                callData.storedAt = Date.now();
+                localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(callData));
+              } catch { }
+            } else {
+              clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
+              return;
+            }
           }
 
           const newState = callData.connectionState || 'connecting';
@@ -1813,6 +1824,7 @@
       // ============================================
       let replyingTo = null;
       let isInitiatingCall = false;
+      let callInitiationTimeoutId = null;
       let pendingCallData = null;
       let navigatingToCall = false;
       let messagesCache = [];
@@ -3942,8 +3954,17 @@
             }
 
             if (!storedAt || ageMs > MAX_STALE_MS) {
-              clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
-              return false;
+              const state = activeCallData.connectionState || 'connecting';
+              const isActiveState = (state === 'initializing' || state === 'connecting' || state === 'connected');
+              if (isActiveState && !storedAt) {
+                try {
+                  activeCallData.storedAt = Date.now();
+                  localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(activeCallData));
+                } catch { }
+              } else {
+                clearStaleActiveCall(`stale (${Math.round(ageMs / 1000)}s)`);
+                return false;
+              }
             }
 
             if (activeCallData.roomId === roomData?.roomId) {
@@ -5293,6 +5314,13 @@
           if (data.isInitiator) {
             console.log('✅ We initiated this call - loading in iframe');
 
+            // Mark initiation complete so the button timeout doesn't revert UI after call_created.
+            isInitiatingCall = false;
+            try {
+              if (callInitiationTimeoutId) clearTimeout(callInitiationTimeoutId);
+            } catch { }
+            callInitiationTimeoutId = null;
+
             // Clear loading states
             if (audioCallBtn) {
               audioCallBtn.classList.remove('call-btn-loading');
@@ -5309,7 +5337,8 @@
               roomId: roomData.roomId,
               callType: data.callType,
               users: data.participants || [],
-              connectionState: 'initializing' // Set initial state
+              connectionState: 'initializing', // Set initial state
+              storedAt: Date.now()
             }));
 
             console.log(`✅ Stored call data with initializing state`);
@@ -6923,6 +6952,11 @@
             console.log('✅ All checks passed - initiating audio call');
             isInitiatingCall = true;
 
+            try {
+              if (callInitiationTimeoutId) clearTimeout(callInitiationTimeoutId);
+            } catch { }
+            callInitiationTimeoutId = null;
+
             // Add loading state
             audioCallBtn.classList.add('call-btn-loading', 'animate-pulse');
             audioCallBtn.disabled = true;
@@ -6939,27 +6973,28 @@
             console.log('📤 Audio call initiation sent to server');
             toast('Calling...', 'success');
 
-            // Timeout after 2 seconds with recovery
-            const timeoutId = setTimeout(() => {
-              if (isInitiatingCall) {
-                console.log('⏰ Call initiation timeout (2s)');
-                isInitiatingCall = false;
-                audioCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
-                if (videoCallBtn) {
-                  videoCallBtn.classList.remove('calling');
-                }
+            // Timeout with recovery (iframe + auth + signaling can easily take >2s)
+            callInitiationTimeoutId = setTimeout(() => {
+              if (!isInitiatingCall) return;
+              let hasActiveCall = false;
+              try { hasActiveCall = !!localStorage.getItem(ACTIVE_CALL_KEY); } catch { }
+              if (hasActiveCall) return;
 
-                // CRITICAL: Re-enable buttons after timeout
-                if (isSocketAuthenticated) {
-                  enableCallButtons();
-                }
-
-                toast('Call timeout - no response', 'warning');
+              console.log('⏰ Call initiation timeout (12s)');
+              isInitiatingCall = false;
+              callInitiationTimeoutId = null;
+              audioCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
+              if (videoCallBtn) {
+                videoCallBtn.classList.remove('calling');
               }
-            }, 2000);
 
-            // Store timeout for cleanup
-            audioCallBtn.dataset.timeoutId = timeoutId;
+              // CRITICAL: Re-enable buttons after timeout
+              if (isSocketAuthenticated) {
+                enableCallButtons();
+              }
+
+              toast('Call timeout - no response', 'warning');
+            }, 12000);
 
             console.log('📞 ========================================\n');
 
@@ -7012,6 +7047,11 @@
             console.log('✅ All checks passed - initiating video call');
             isInitiatingCall = true;
 
+            try {
+              if (callInitiationTimeoutId) clearTimeout(callInitiationTimeoutId);
+            } catch { }
+            callInitiationTimeoutId = null;
+
             // Add loading state
             videoCallBtn.classList.add('call-btn-loading', 'animate-pulse');
             videoCallBtn.disabled = true;
@@ -7028,27 +7068,28 @@
             console.log('📤 Video call initiation sent to server');
             toast('Calling...', 'success');
 
-            // Timeout after 2 seconds with recovery
-            const timeoutId = setTimeout(() => {
-              if (isInitiatingCall) {
-                console.log('⏰ Call initiation timeout (2s)');
-                isInitiatingCall = false;
-                videoCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
-                if (audioCallBtn) {
-                  audioCallBtn.classList.remove('calling');
-                }
+            // Timeout with recovery (iframe + auth + signaling can easily take >2s)
+            callInitiationTimeoutId = setTimeout(() => {
+              if (!isInitiatingCall) return;
+              let hasActiveCall = false;
+              try { hasActiveCall = !!localStorage.getItem(ACTIVE_CALL_KEY); } catch { }
+              if (hasActiveCall) return;
 
-                // CRITICAL: Re-enable buttons after timeout
-                if (isSocketAuthenticated) {
-                  enableCallButtons();
-                }
-
-                toast('Call timeout - no response', 'warning');
+              console.log('⏰ Call initiation timeout (12s)');
+              isInitiatingCall = false;
+              callInitiationTimeoutId = null;
+              videoCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
+              if (audioCallBtn) {
+                audioCallBtn.classList.remove('calling');
               }
-            }, 2000);
 
-            // Store timeout for cleanup
-            videoCallBtn.dataset.timeoutId = timeoutId;
+              // CRITICAL: Re-enable buttons after timeout
+              if (isSocketAuthenticated) {
+                enableCallButtons();
+              }
+
+              toast('Call timeout - no response', 'warning');
+            }, 12000);
 
             console.log('📞 ========================================\n');
 
