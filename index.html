@@ -14,8 +14,6 @@
 <!-- Android / PWA -->
 <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/favicon.png">
-<meta name="google-site-verification" content="Q7u3JpvCbH9Xg73IfmUpMWjS1aAOXMAk44itfwQqYYQ" />
-<meta name="msvalidate.01" content="56FBCD512CAE60FA89AAD6C582BEDF28" />
 
 <!-- Theme color for mobile browser UI -->
 <meta name="theme-color" content="#0f172a">
@@ -32,6 +30,20 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        (function () {
+            try {
+                if (window.__VIBE_SILENCE_CONSOLE__) return;
+                window.__VIBE_SILENCE_CONSOLE__ = true;
+                const noop = function () { };
+                console.log = noop;
+                console.info = noop;
+                console.warn = noop;
+                console.error = noop;
+                console.debug = noop;
+            } catch { }
+        })();
+    </script>
     <script src="/env-config.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
