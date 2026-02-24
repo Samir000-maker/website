@@ -499,9 +499,17 @@
                             }
                         });
 
-                        const data = await response.json();
+                        const text = await response.text();
+                        let data = null;
+                        try { data = text ? JSON.parse(text) : null; } catch { }
 
-                        if (data.exists && data.hasUsername) {
+                        if (!response.ok || (data && (data.error === 'User not found' || data.message === 'User not found'))) {
+                            Toast.error('Account not found. Please sign up or continue as guest.');
+                            try { await firebase.auth().signOut(); } catch { }
+                            return;
+                        }
+
+                        if (data && data.exists && data.hasUsername) {
                             if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
                                 _PageTransition.navigateTo('/mood.html');
                             } else {
@@ -558,6 +566,26 @@
                         const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
                         const idToken = await userCredential.user.getIdToken();
 
+                        const apiBaseUrl = getApiBaseUrl();
+                        const checkRes = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${idToken}`
+                            }
+                        });
+
+                        const checkText = await checkRes.text();
+                        let checkData = null;
+                        try { checkData = checkText ? JSON.parse(checkText) : null; } catch { }
+
+                        if (!checkRes.ok || (checkData && (checkData.error === 'User not found' || checkData.message === 'User not found'))) {
+                            Loading.hide();
+                            Toast.error('Account not found. Please sign up or continue as guest.');
+                            try { await firebase.auth().signOut(); } catch { }
+                            return;
+                        }
+
                         // Set auth if function exists
                         if (typeof _Auth !== 'undefined' && typeof _Auth.setAuth === 'function') {
                             _Auth.setAuth(idToken, { email, uid: userCredential.user.uid });
@@ -566,14 +594,18 @@
                         Loading.hide();
                         Toast.success('Welcome back!');
 
-                        // Navigate to mood page
+                        // Navigate based on profile state
                         setTimeout(() => {
+                            const hasProfile = !!(checkData && checkData.exists);
+                            const hasUsername = !!(checkData && checkData.hasUsername);
+                            const target = (hasProfile && hasUsername) ? '/mood.html' : '/username.html';
+
                             if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
-                                _PageTransition.navigateTo('/mood.html');
+                                _PageTransition.navigateTo(target);
                             } else {
-                                window.location.href = '/mood.html';
+                                window.location.href = target;
                             }
-                        }, 1000);
+                        }, 900);
                     } catch (error) {
                         Loading.hide();
                         console.error('Login error:', error);
