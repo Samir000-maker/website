@@ -2316,6 +2316,7 @@ app.get('/env-config.js', (req, res) => {
     };
 
     const vapidKey = process.env.FCM_VAPID_KEY || 'BL-9MFwZP_dnUxzFT-YHzQqVAFxykQDPtKNP9Y9pOfb7KNaLby0v2j3ykPuQCSM-2XGXooecNEp8pYrMIyKr1Ec';
+    const allowMultipleTabs = (typeof config?.allow_multiple_tabs === 'boolean') ? !config.allow_multiple_tabs : true;
 
     res.setHeader('Cache-Control', 'no-store');
     res.type('application/javascript');
@@ -2324,6 +2325,7 @@ app.get('/env-config.js', (req, res) => {
       `  var root = (typeof self !== 'undefined') ? self : (typeof window !== 'undefined' ? window : {});\n` +
       `  root.__VIBE_FIREBASE_CONFIG__ = root.__VIBE_FIREBASE_CONFIG__ || ${JSON.stringify(firebaseConfig)};\n` +
       `  root.__VIBE_FCM_VAPID_KEY__ = root.__VIBE_FCM_VAPID_KEY__ || ${JSON.stringify(vapidKey)};\n` +
+      `  root.__VIBE_ALLOW_MULTIPLE_TABS__ = (typeof root.__VIBE_ALLOW_MULTIPLE_TABS__ === 'boolean') ? root.__VIBE_ALLOW_MULTIPLE_TABS__ : ${JSON.stringify(allowMultipleTabs)};\n` +
       `})();`
     );
   } catch {
@@ -2332,6 +2334,7 @@ app.get('/env-config.js', (req, res) => {
       '  var root = (typeof self !== "undefined") ? self : (typeof window !== "undefined" ? window : {});\n' +
       '  root.__VIBE_FIREBASE_CONFIG__ = root.__VIBE_FIREBASE_CONFIG__ || {};\n' +
       '  root.__VIBE_FCM_VAPID_KEY__ = root.__VIBE_FCM_VAPID_KEY__ || "";\n' +
+      '  root.__VIBE_ALLOW_MULTIPLE_TABS__ = (typeof root.__VIBE_ALLOW_MULTIPLE_TABS__ === "boolean") ? root.__VIBE_ALLOW_MULTIPLE_TABS__ : true;\n' +
       '})();'
     );
   }
