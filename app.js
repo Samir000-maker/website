@@ -24,6 +24,10 @@
 
 const TabManager = window.TabManager || class TabManager {
   constructor() {
+    const allowMultipleTabs = (typeof window.__VIBE_ALLOW_MULTIPLE_TABS__ === 'boolean')
+      ? window.__VIBE_ALLOW_MULTIPLE_TABS__
+      : true;
+
     // ✅ CRITICAL FIX: Use sessionStorage to persist tab ID across page navigation
     // sessionStorage persists within the SAME browser tab/window, but is unique per tab
     let existingTabId = sessionStorage.getItem('vibe_tab_id');
@@ -46,6 +50,13 @@ const TabManager = window.TabManager || class TabManager {
     this.heartbeatInterval = null;
     this.initPromise = null;
     this.isChannelClosed = false; // ✅ Track closure state
+
+    // ✅ Configurable: allow multiple tabs by skipping restriction logic
+    if (allowMultipleTabs) {
+      this.isActive = true;
+      this.initPromise = Promise.resolve(true);
+      return;
+    }
 
     // ✅ CRITICAL: Synchronous check FIRST before anything else
     this.initPromise = this.immediateBlockCheck();
