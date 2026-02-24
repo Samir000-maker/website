@@ -6491,11 +6491,50 @@
           }
         });
 
+        const joinRoomSound = new Audio('/public/join_room_sound.mp3');
+        joinRoomSound.preload = 'auto';
+        const joinSoundRecentlyPlayedForUser = new Map();
+        const JOIN_SOUND_DEDUPE_WINDOW_MS = 3000;
+
+        const unlockJoinSoundOnce = () => {
+          try {
+            const prevMuted = joinRoomSound.muted;
+            joinRoomSound.muted = true;
+            const p = joinRoomSound.play();
+            if (p && typeof p.then === 'function') {
+              p.then(() => {
+                joinRoomSound.pause();
+                joinRoomSound.currentTime = 0;
+                joinRoomSound.muted = prevMuted;
+              }).catch(() => {
+                joinRoomSound.muted = prevMuted;
+              });
+            } else {
+              joinRoomSound.pause();
+              joinRoomSound.currentTime = 0;
+              joinRoomSound.muted = prevMuted;
+            }
+          } catch (e) { }
+        };
+
+        document.addEventListener('click', unlockJoinSoundOnce, { once: true, passive: true });
+        document.addEventListener('touchstart', unlockJoinSoundOnce, { once: true, passive: true });
+
         socketInstance.on('user_joined', (data) => {
           console.log(`👤 User joined: ${data.username} (${data.userId})`);
 
           // Display join message in chat (skip if it's the current user)
           if (data.userId !== currentUser?.userId) {
+            const now = Date.now();
+            const lastPlayedAt = joinSoundRecentlyPlayedForUser.get(data.userId) || 0;
+            if (now - lastPlayedAt > JOIN_SOUND_DEDUPE_WINDOW_MS) {
+              joinSoundRecentlyPlayedForUser.set(data.userId, now);
+              try {
+                joinRoomSound.currentTime = 0;
+                joinRoomSound.play().catch(() => { });
+              } catch (e) { }
+            }
+
             const msgEl = document.createElement('div');
             msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
             msgEl.textContent = `${data.username || 'A user'} joined the room`;
