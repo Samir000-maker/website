@@ -5591,7 +5591,20 @@
             console.log('ℹ️ No server history and no cache - starting fresh');
           }
 
-          messagesCache = mergedMessages;
+          const seenMessageKeys = new Set();
+          const dedupedMessages = [];
+          for (const msg of mergedMessages) {
+            const key = msg?.messageId || `${msg?.userId || 'u'}-${msg?.timestamp || 0}-${String(msg?.message || '').slice(0, 64)}`;
+            if (seenMessageKeys.has(key)) continue;
+            seenMessageKeys.add(key);
+            dedupedMessages.push(msg);
+          }
+
+          messagesCache = dedupedMessages;
+
+          if (messagesList) {
+            messagesList.innerHTML = '';
+          }
 
           console.log(`🎨 Rendering ${messagesCache.length} total messages`);
           messagesCache.forEach(msg => {
