@@ -3,6 +3,11 @@ export const config = {
   // Server configuration
   PORT: process.env.PORT || 3000,
 
+  // Multiple tab control
+  // false => allow multiple tabs (default)
+  // true  => restrict to a single active tab
+  allow_multiple_tabs: false,
+
   CLOUDFLARE_TURN_TOKEN_ID: process.env.CLOUDFLARE_TURN_TOKEN_ID || '',
   CLOUDFLARE_TURN_API_TOKEN: process.env.CLOUDFLARE_TURN_API_TOKEN || '',
 
