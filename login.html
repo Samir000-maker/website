@@ -214,6 +214,15 @@
                     <span>Sign in with Google</span>
                 </button>
 
+                <button
+                    type="button"
+                    id="guestSignIn"
+                    class="mt-3 w-full h-12 rounded-xl glass-card hover:bg-slate-800/50 border-white/20 flex items-center justify-center gap-3 text-sm font-semibold text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-primary/10 relative z-10 group/guest"
+                >
+                    <span class="material-symbols-outlined text-[22px] text-primary group-hover/guest:scale-110 transition-transform duration-300">person</span>
+                    <span>Continue as Guest</span>
+                </button>
+
                 <!-- Sign Up Link -->
                 <p class="mt-8 text-center text-sm text-slate-400 relative z-10">
                     Don't have an account? 
@@ -389,6 +398,7 @@
 
         // Global variables
         let isGoogleSignInInProgress = false;
+        let isGuestSignInInProgress = false;
         const _Toast = Toast;
         const _Loading = Loading;
         const _Validator = Validator;
@@ -475,7 +485,7 @@
         (function() {
             // Check if user is already signed in
             firebase.auth().onAuthStateChanged(async (user) => {
-                if (user && !isGoogleSignInInProgress) {
+                if (user && !isGoogleSignInInProgress && !isGuestSignInInProgress) {
                     try {
                         const idToken = await user.getIdToken();
                         
@@ -633,6 +643,74 @@
                         console.error('Google sign in error:', error);
                         const errorMessage = getFirebaseErrorMessage(error.code);
                         Toast.error(errorMessage);
+                    }
+                });
+            }
+
+            // Guest Sign In
+            const guestBtn = document.getElementById('guestSignIn');
+            if (guestBtn) {
+                guestBtn.addEventListener('click', async () => {
+                    isGuestSignInInProgress = true;
+                    Loading.show('Signing you in as a guest...');
+
+                    try {
+                        let user = firebase.auth().currentUser;
+                        if (!user) {
+                            const credential = await firebase.auth().signInAnonymously();
+                            user = credential?.user || null;
+                        }
+
+                        if (!user) throw new Error('Guest sign-in failed');
+
+                        Loading.show('Creating your guest profile...');
+                        const token = await user.getIdToken();
+
+                        const apiBaseUrl = getApiBaseUrl();
+                        const res = await fetch(`${apiBaseUrl}/api/users/ensure-guest`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({})
+                        });
+
+                        const text = await res.text();
+                        if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+
+                        let payload = null;
+                        try { payload = JSON.parse(text); } catch { }
+
+                        try {
+                            localStorage.setItem('guest_uid', user.uid);
+                            if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
+                            localStorage.setItem('guest_timestamp', String(Date.now()));
+                            localStorage.removeItem('currentRoom');
+                        } catch { }
+
+                        if (typeof _Auth !== 'undefined' && typeof _Auth.setAuth === 'function') {
+                            _Auth.setAuth(token, { uid: user.uid, isGuest: true });
+                        }
+
+                        Loading.hide();
+                        Toast.success('Welcome!');
+
+                        setTimeout(() => {
+                            if (typeof _PageTransition !== 'undefined' && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/mood.html');
+                            } else {
+                                window.location.href = '/mood.html';
+                            }
+                        }, 700);
+                    } catch (error) {
+                        Loading.hide();
+                        console.error('Guest sign-in error:', error);
+                        const msg = (error && error.message) ? String(error.message) : 'Failed to continue as guest';
+                        Toast.error(msg);
+                        try { await firebase.auth().signOut(); } catch { }
+                    } finally {
+                        isGuestSignInInProgress = false;
                     }
                 });
             }
