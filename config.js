@@ -24,7 +24,7 @@ export const config = {
 
   // App-level variables
   ROOM_DURATION_MINUTES: 30,
-  MAX_USERS_PER_ROOM: 4, 
+  MAX_USERS_PER_ROOM: 6, 
   GLOBAL_SOCIAL_ROOM_SIZE: parseInt(process.env.GLOBAL_SOCIAL_ROOM_SIZE || '10', 10),
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
