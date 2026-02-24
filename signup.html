@@ -290,7 +290,15 @@
                             }
                         });
 
-                        const checkData = await checkResponse.json();
+                        const text = await checkResponse.text();
+                        let checkData = null;
+                        try { checkData = text ? JSON.parse(text) : null; } catch { }
+
+                        if (!checkResponse.ok || (checkData && (checkData.error === 'User not found' || checkData.message === 'User not found'))) {
+                            toastError('Account not found. Please sign up or continue as guest.');
+                            try { await firebase.auth().signOut(); } catch { }
+                            return;
+                        }
                         
                         if (checkData.exists && checkData.hasUsername) {
                             console.log('User has profile, redirecting to mood...');
