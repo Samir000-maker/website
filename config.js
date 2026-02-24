@@ -19,8 +19,8 @@ export const config = {
 
   // App-level variables
   ROOM_DURATION_MINUTES: 30,
-  MAX_USERS_PER_ROOM: 4, // Changed from 4 to 2 for easier testing
-  GLOBAL_SOCIAL_ROOM_SIZE: parseInt(process.env.GLOBAL_SOCIAL_ROOM_SIZE || '2', 10),
+  MAX_USERS_PER_ROOM: 4, 
+  GLOBAL_SOCIAL_ROOM_SIZE: parseInt(process.env.GLOBAL_SOCIAL_ROOM_SIZE || '10', 10),
   NOTES_PAGE_SIZE: 25,
   PROFILE_CACHE_TTL_SECONDS: 86400, // 24 hours
 
@@ -39,7 +39,7 @@ export const config = {
   MAX_MATCHMAKING_REQUESTS_PER_MINUTE: 10,
 
   // Firebase (you'll need to add your Firebase service account key)
-  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || 'projectt3-8c55e',
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
 
   FIREBASE_SERVICE_ACCOUNT_PATH: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
 
