@@ -2103,6 +2103,13 @@ matchmaking.init(pubClient, io, redlock);
 app.use(cors());
 
 app.use((req, res, next) => {
+  if (req.headers.host === 'www.vibegra.com') {
+    return res.redirect(301, 'https://vibegra.com' + req.url);
+  }
+  next();
+});
+
+app.use((req, res, next) => {
   try {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   } catch { }
