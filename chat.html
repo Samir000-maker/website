@@ -1206,8 +1206,8 @@
         </div>
       </div>
 
-      <div class="border-t border-gray-800 bg-[#1f2228] flex-shrink-0 sticky bottom-0 left-0 right-0 z-10"
-        style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+      <div id="composerBar" class="border-t border-gray-800 bg-[#1f2228] flex-shrink-0 sticky bottom-0 left-0 right-0 z-10"
+        style="padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--vibe-kb-offset, 0px));">
         <div id="replyPreview" class="reply-preview hidden border-b border-gray-800 px-3 py-2 bg-[#22252a]">
           <div class="flex items-start justify-between gap-2">
             <div class="flex-1 min-w-0">
@@ -1973,9 +1973,57 @@
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
       const messageInput = document.getElementById('messageInput');
+      const composerBar = document.getElementById('composerBar');
       const usersList = document.getElementById('usersList');
       const onlineCount = document.getElementById('onlineCount');
       const leaveBtn = document.getElementById('leaveBtn');
+
+      const updateKeyboardOffset = () => {
+        try {
+          const vv = window.visualViewport;
+          if (!vv) {
+            document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+            return;
+          }
+
+          const raw = window.innerHeight - vv.height - vv.offsetTop;
+          const offset = Math.max(0, Math.round(raw));
+          document.documentElement.style.setProperty('--vibe-kb-offset', offset + 'px');
+
+          if (document.activeElement === messageInput) {
+            if (composerBar && typeof composerBar.scrollIntoView === 'function') {
+              composerBar.scrollIntoView({ block: 'end' });
+            }
+            if (messagesList) {
+              messagesList.scrollTop = messagesList.scrollHeight;
+            }
+          }
+        } catch (e) {
+          document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+        }
+      };
+
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateKeyboardOffset);
+        window.visualViewport.addEventListener('scroll', updateKeyboardOffset);
+      }
+
+      window.addEventListener('resize', updateKeyboardOffset);
+      window.addEventListener('orientationchange', updateKeyboardOffset);
+
+      if (messageInput) {
+        messageInput.addEventListener('focus', () => {
+          updateKeyboardOffset();
+          setTimeout(updateKeyboardOffset, 50);
+          setTimeout(updateKeyboardOffset, 250);
+        });
+        messageInput.addEventListener('blur', () => {
+          document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+          setTimeout(updateKeyboardOffset, 50);
+        });
+      }
+
+      updateKeyboardOffset();
       const cancelReplyBtn = document.getElementById('cancelReply');
       const audioCallBtn = document.getElementById('audioCallBtn');
       const videoCallBtn = document.getElementById('videoCallBtn');
