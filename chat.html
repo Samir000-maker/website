@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
   <title>Chat Room - MoodLog</title>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
@@ -1207,7 +1207,7 @@
       </div>
 
       <div id="composerBar" class="border-t border-gray-800 bg-[#1f2228] flex-shrink-0 sticky bottom-0 left-0 right-0 z-10"
-        style="padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--vibe-kb-offset, 0px));">
+        style="padding-bottom: env(safe-area-inset-bottom, 0px);">
         <div id="replyPreview" class="reply-preview hidden border-b border-gray-800 px-3 py-2 bg-[#22252a]">
           <div class="flex items-start justify-between gap-2">
             <div class="flex-1 min-w-0">
@@ -1254,14 +1254,14 @@
         </div>
 
         <div class="p-3 pb-4">
-          <form id="messageForm" class="flex gap-2 items-end">
+          <form id="messageForm" class="flex gap-2 items-end" autocomplete="off">
             <button type="button" class="emoji-btn flex-shrink-0" title="Add emoji">
               <span class="material-symbols-outlined text-xl">sentiment_satisfied</span>
             </button>
             <button type="button" class="attachment-btn flex-shrink-0" title="Attach file">
               <span class="material-symbols-outlined text-xl">attach_file</span>
             </button>
-            <input type="text" id="messageInput" maxlength="500"
+            <input type="text" id="messageInput" name="vibe_message" maxlength="500" autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" enterkeyhint="send"
               class="flex-1 px-4 py-3 text-sm border border-gray-700 rounded-xl focus:border-[#33bfcc] focus:outline-none bg-[#2a2d33] text-gray-200"
               placeholder="Type a message..." style="min-width: 0; appearance: none; -webkit-appearance: none;">
             <button type="submit"
@@ -1978,46 +1978,83 @@
       const onlineCount = document.getElementById('onlineCount');
       const leaveBtn = document.getElementById('leaveBtn');
 
+      const chatMainEl = document.querySelector('.chat-main');
+      const headerEl = document.querySelector('header');
+      const initialViewportHeight = (window.visualViewport && window.visualViewport.height) ? window.visualViewport.height : window.innerHeight;
+
       const updateKeyboardOffset = () => {
         try {
           const vv = window.visualViewport;
           if (!vv) {
-            document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+            if (chatMainEl) {
+              chatMainEl.style.height = '';
+              chatMainEl.style.maxHeight = '';
+              chatMainEl.style.flex = '';
+            }
+            document.body.style.height = '';
+            document.body.style.overflow = '';
+            document.documentElement.style.overflow = '';
             return;
           }
 
-          const raw = window.innerHeight - vv.height;
-          const offset = Math.max(0, Math.round(raw));
-          document.documentElement.style.setProperty('--vibe-kb-offset', offset + 'px');
-
-          if (composerBar) {
-            composerBar.style.transform = offset > 0 ? `translateY(${-offset}px)` : '';
+          const headerH = headerEl ? Math.ceil(headerEl.getBoundingClientRect().height) : 0;
+          const targetH = Math.max(0, Math.floor(vv.height - headerH));
+          if (chatMainEl) {
+            chatMainEl.style.height = targetH + 'px';
+            chatMainEl.style.maxHeight = targetH + 'px';
           }
 
-          if (messagesList) {
-            const composerH = composerBar ? composerBar.getBoundingClientRect().height : 0;
-            const extra = Math.ceil(composerH + offset);
-            const currentPad = parseInt(getComputedStyle(messagesList).paddingBottom || '0', 10) || 0;
-            if (Math.abs(currentPad - extra) > 4) {
-              messagesList.style.paddingBottom = extra + 'px';
+          const keyboardOpen = vv.height < (initialViewportHeight - 80);
+          if (keyboardOpen) {
+            document.body.style.height = vv.height + 'px';
+            document.body.style.overflow = 'hidden';
+            document.documentElement.style.overflow = 'hidden';
+            if (chatMainEl) {
+              chatMainEl.style.flex = '0 0 auto';
+            }
+          } else {
+            document.body.style.height = '';
+            document.body.style.overflow = '';
+            document.documentElement.style.overflow = '';
+            if (chatMainEl) {
+              chatMainEl.style.flex = '';
             }
           }
 
           if (document.activeElement === messageInput) {
             try {
               if (typeof messageInput.scrollIntoView === 'function') {
-                messageInput.scrollIntoView({ block: 'center' });
+                messageInput.scrollIntoView({ block: 'end' });
               }
             } catch (e) { }
 
-            if (messagesList) {
-              messagesList.scrollTop = messagesList.scrollHeight;
-            } else {
-              window.scrollTo(0, document.body.scrollHeight);
+            const scrollToBottom = () => {
+              if (messagesList) {
+                messagesList.scrollTop = messagesList.scrollHeight;
+              } else {
+                window.scrollTo(0, document.body.scrollHeight);
+              }
+            };
+
+            try {
+              requestAnimationFrame(() => {
+                scrollToBottom();
+                setTimeout(scrollToBottom, 50);
+                setTimeout(scrollToBottom, 250);
+              });
+            } catch (e) {
+              scrollToBottom();
             }
           }
         } catch (e) {
-          document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+          if (chatMainEl) {
+            chatMainEl.style.height = '';
+            chatMainEl.style.maxHeight = '';
+            chatMainEl.style.flex = '';
+          }
+          document.body.style.height = '';
+          document.body.style.overflow = '';
+          document.documentElement.style.overflow = '';
         }
       };
 
@@ -2036,7 +2073,9 @@
           setTimeout(updateKeyboardOffset, 250);
         });
         messageInput.addEventListener('blur', () => {
-          document.documentElement.style.setProperty('--vibe-kb-offset', '0px');
+          if (chatMainEl) {
+            chatMainEl.style.height = '';
+          }
           setTimeout(updateKeyboardOffset, 50);
         });
       }
