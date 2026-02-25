@@ -1990,12 +1990,42 @@
           const offset = Math.max(0, Math.round(raw));
           document.documentElement.style.setProperty('--vibe-kb-offset', offset + 'px');
 
-          if (document.activeElement === messageInput) {
-            if (composerBar && typeof composerBar.scrollIntoView === 'function') {
-              composerBar.scrollIntoView({ block: 'end' });
+          if (composerBar) {
+            if (offset > 0) {
+              composerBar.style.position = 'fixed';
+              composerBar.style.left = '0';
+              composerBar.style.right = '0';
+              composerBar.style.bottom = offset + 'px';
+              composerBar.style.width = '100%';
+            } else {
+              composerBar.style.position = '';
+              composerBar.style.left = '';
+              composerBar.style.right = '';
+              composerBar.style.bottom = '';
+              composerBar.style.width = '';
             }
+          }
+
+          if (messagesList) {
+            const composerH = composerBar ? composerBar.getBoundingClientRect().height : 0;
+            const extra = Math.ceil(composerH + offset);
+            const currentPad = parseInt(getComputedStyle(messagesList).paddingBottom || '0', 10) || 0;
+            if (Math.abs(currentPad - extra) > 4) {
+              messagesList.style.paddingBottom = extra + 'px';
+            }
+          }
+
+          if (document.activeElement === messageInput) {
+            try {
+              if (typeof messageInput.scrollIntoView === 'function') {
+                messageInput.scrollIntoView({ block: 'center' });
+              }
+            } catch (e) { }
+
             if (messagesList) {
               messagesList.scrollTop = messagesList.scrollHeight;
+            } else {
+              window.scrollTo(0, document.body.scrollHeight);
             }
           }
         } catch (e) {
