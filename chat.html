@@ -1986,24 +1986,12 @@
             return;
           }
 
-          const raw = window.innerHeight - vv.height - vv.offsetTop;
+          const raw = window.innerHeight - vv.height;
           const offset = Math.max(0, Math.round(raw));
           document.documentElement.style.setProperty('--vibe-kb-offset', offset + 'px');
 
           if (composerBar) {
-            if (offset > 0) {
-              composerBar.style.position = 'fixed';
-              composerBar.style.left = '0';
-              composerBar.style.right = '0';
-              composerBar.style.bottom = offset + 'px';
-              composerBar.style.width = '100%';
-            } else {
-              composerBar.style.position = '';
-              composerBar.style.left = '';
-              composerBar.style.right = '';
-              composerBar.style.bottom = '';
-              composerBar.style.width = '';
-            }
+            composerBar.style.transform = offset > 0 ? `translateY(${-offset}px)` : '';
           }
 
           if (messagesList) {
