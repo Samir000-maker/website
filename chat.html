@@ -1264,7 +1264,7 @@
             <input type="text" id="messageInput" name="vibe_message" maxlength="500" autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" inputmode="text" enterkeyhint="send"
               class="flex-1 px-4 py-3 text-sm border border-gray-700 rounded-xl focus:border-[#33bfcc] focus:outline-none bg-[#2a2d33] text-gray-200"
               placeholder="Type a message..." style="min-width: 0; appearance: none; -webkit-appearance: none;">
-            <button type="submit"
+            <button type="submit" id="sendMessageBtn"
               class="w-11 h-11 flex-shrink-0 flex items-center justify-center bg-[#33bfcc] text-white rounded-xl hover:bg-[#2aa5b0] active:scale-95 transition-transform">
               <span class="material-symbols-outlined">send</span>
             </button>
@@ -1973,6 +1973,7 @@
       const messagesList = document.getElementById('messagesList');
       const messageForm = document.getElementById('messageForm');
       const messageInput = document.getElementById('messageInput');
+      const sendMessageBtn = document.getElementById('sendMessageBtn');
       const composerBar = document.getElementById('composerBar');
       const usersList = document.getElementById('usersList');
       const onlineCount = document.getElementById('onlineCount');
@@ -2078,6 +2079,24 @@
           }
           setTimeout(updateKeyboardOffset, 50);
         });
+      }
+
+      if (sendMessageBtn && messageForm) {
+        const fastSubmit = (e) => {
+          try {
+            e.preventDefault();
+            e.stopPropagation();
+          } catch { }
+          try {
+            if (typeof messageForm.requestSubmit === 'function') {
+              messageForm.requestSubmit();
+            } else {
+              messageForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+            }
+          } catch { }
+        };
+        sendMessageBtn.addEventListener('pointerdown', fastSubmit, { passive: false });
+        sendMessageBtn.addEventListener('touchstart', fastSubmit, { passive: false });
       }
 
       updateKeyboardOffset();
