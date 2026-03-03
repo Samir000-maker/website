@@ -18,14 +18,7 @@
   <script>
     (function () {
       try {
-        if (window.__VIBE_SILENCE_CONSOLE__) return;
-        window.__VIBE_SILENCE_CONSOLE__ = true;
-        const noop = function () { };
-        console.log = noop;
-        console.info = noop;
-        console.warn = noop;
-        console.error = noop;
-        console.debug = noop;
+        window.__VIBE_SILENCE_CONSOLE__ = false;
       } catch { }
     })();
   </script>
