@@ -12,14 +12,7 @@
   <script>
     (function () {
       try {
-        if (window.__VIBE_SILENCE_CONSOLE__) return;
-        window.__VIBE_SILENCE_CONSOLE__ = true;
-        const noop = function () { };
-        console.log = noop;
-        console.info = noop;
-        console.warn = noop;
-        console.error = noop;
-        console.debug = noop;
+        window.__VIBE_SILENCE_CONSOLE__ = false;
       } catch { }
     })();
   </script>
@@ -7341,10 +7334,31 @@
 
 
         if (joinCallBtn) {
+          let joinClickInFlight = false;
+          let lastJoinClickAt = 0;
+
           joinCallBtn.addEventListener('click', () => {
             console.log('🔘 ========================================');
             console.log('🔘 JOIN CALL BUTTON CLICKED');
             console.log('🔘 ========================================');
+
+            const now = Date.now();
+            if (joinClickInFlight) {
+              console.warn('⚠️ Join call click ignored: already in-flight');
+              return;
+            }
+            if (now - lastJoinClickAt < 800) {
+              console.warn('⚠️ Join call click throttled');
+              return;
+            }
+            lastJoinClickAt = now;
+            joinClickInFlight = true;
+
+            const resetJoinBtnState = () => {
+              joinClickInFlight = false;
+              try { joinCallBtn.classList.remove('join-btn-loading'); } catch { }
+              try { joinCallBtn.disabled = false; } catch { }
+            };
 
             // Check if this is "Back to Call" or "Join Call"
             const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -7395,10 +7409,14 @@
               activeCallConnectionState = 'connected';
               updateCallButtonStates();
 
+              // Back-to-call is synchronous UI show; allow next click.
+              resetJoinBtnState();
+
             } else {
               if (!activeCallInRoom) {
                 console.error('❌ Cannot join call: activeCallInRoom is null');
                 toast('Failed to join call data. Please refresh.', 'error');
+                resetJoinBtnState();
                 return;
               }
 
@@ -7430,8 +7448,7 @@
               if (!socketInstance || !socketInstance.connected) {
                 console.error('❌ Socket not connected!');
                 toast('Connection lost. Please refresh the page.', 'error');
-                joinCallBtn.classList.remove('join-btn-loading');
-                joinCallBtn.disabled = false;
+                resetJoinBtnState();
                 console.log('🔘 ========================================\n');
                 return;
               }
@@ -7441,6 +7458,14 @@
               toast('Joining call...', 'success');
               console.log('✅ Event emitted successfully');
               console.log('🔘 ========================================\n');
+
+              // If we never navigate / never get server response, don't keep the button locked forever.
+              setTimeout(() => {
+                if (joinClickInFlight) {
+                  console.warn('⏱️ Join click watchdog releasing button (no navigation yet)');
+                  resetJoinBtnState();
+                }
+              }, 6000);
             }
           }, { passive: true });
         }
