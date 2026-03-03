@@ -5580,6 +5580,8 @@
           }).catch(() => { });
           validateChatPresenceState('room_joined').catch(() => { });
 
+          playJoinRoomSound(currentUser?.userId || 'self');
+
           if (pendingInitialRoomSync && roomData?.roomId) {
             pendingInitialRoomSync = false;
             safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
@@ -6222,6 +6224,14 @@
             console.error('   Current room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
 
+            try {
+              localStorage.removeItem('currentRoom');
+            } catch { }
+            roomData = null;
+            currentRoomId = null;
+            hasJoinedRoom = false;
+            pendingInitialRoomSync = false;
+
             if (!isSocialClubMode && selectedMood) {
               clearStaleRoomAndCreateFresh('socket_error_room_not_found');
               console.error('❌ ========================================\n');
@@ -6608,11 +6618,22 @@
           }
         });
 
-        // const joinRoomSound = new Audio('/public/join_room_sound.mp3');
         const joinRoomSound = new Audio('/join_room_sound.mp3');
         joinRoomSound.preload = 'auto';
         const joinSoundRecentlyPlayedForUser = new Map();
         const JOIN_SOUND_DEDUPE_WINDOW_MS = 3000;
+
+        function playJoinRoomSound(sourceUserId = 'unknown') {
+          try {
+            const now = Date.now();
+            const lastPlayedAt = joinSoundRecentlyPlayedForUser.get(sourceUserId) || 0;
+            if (now - lastPlayedAt <= JOIN_SOUND_DEDUPE_WINDOW_MS) return;
+            joinSoundRecentlyPlayedForUser.set(sourceUserId, now);
+
+            joinRoomSound.currentTime = 0;
+            joinRoomSound.play().catch(() => { });
+          } catch { }
+        }
 
         const unlockJoinSoundOnce = () => {
           try {
@@ -6643,15 +6664,7 @@
 
           // Display join message in chat (skip if it's the current user)
           if (data.userId !== currentUser?.userId) {
-            const now = Date.now();
-            const lastPlayedAt = joinSoundRecentlyPlayedForUser.get(data.userId) || 0;
-            if (now - lastPlayedAt > JOIN_SOUND_DEDUPE_WINDOW_MS) {
-              joinSoundRecentlyPlayedForUser.set(data.userId, now);
-              try {
-                joinRoomSound.currentTime = 0;
-                joinRoomSound.play().catch(() => { });
-              } catch (e) { }
-            }
+            playJoinRoomSound(data.userId);
 
             const msgEl = document.createElement('div');
             msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
