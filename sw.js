@@ -116,11 +116,29 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
 
+    const canCacheResponse = (request, response) => {
+      try {
+        if (!request || !response) return false;
+        if ((request.method || 'GET') !== 'GET') return false;
+        // Range requests often return 206 Partial Content, which Cache.put does not support.
+        if (request.headers && request.headers.has('range')) return false;
+        // Only cache full successful responses.
+        if (response.status !== 200) return false;
+        // Avoid caching opaque responses.
+        if (response.type === 'opaque') return false;
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     // Network-first for HTML navigations so updates deploy quickly.
     if (req.mode === 'navigate' || (req.destination === 'document')) {
       try {
         const fresh = await fetch(req);
-        cache.put(req, fresh.clone());
+        if (canCacheResponse(req, fresh)) {
+          cache.put(req, fresh.clone());
+        }
         return fresh;
       } catch {
         const cached = await cache.match(req);
@@ -135,7 +153,7 @@ self.addEventListener('fetch', (event) => {
 
     const fresh = await fetch(req);
     // Cache same-origin assets with ok responses.
-    if (fresh && fresh.ok) {
+    if (fresh && canCacheResponse(req, fresh)) {
       cache.put(req, fresh.clone());
     }
     return fresh;
