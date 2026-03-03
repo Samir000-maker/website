@@ -6608,7 +6608,8 @@
           }
         });
 
-        const joinRoomSound = new Audio('/public/join_room_sound.mp3');
+        // const joinRoomSound = new Audio('/public/join_room_sound.mp3');
+        const joinRoomSound = new Audio('/join_room_sound.mp3');
         joinRoomSound.preload = 'auto';
         const joinSoundRecentlyPlayedForUser = new Map();
         const JOIN_SOUND_DEDUPE_WINDOW_MS = 3000;
