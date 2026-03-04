@@ -6742,6 +6742,13 @@
               });
             }
             console.error('🔊 [JoinSound] Audio element src:', joinRoomSound.currentSrc || joinRoomSound.src);
+
+            try {
+              if (typeof playJoinBeep === 'function') {
+                console.warn('🔊 [JoinSound] Falling back to WebAudio beep due to audio element error');
+                playJoinBeep();
+              }
+            } catch { }
           });
         } catch (e) {
           console.warn('🔊 [JoinSound] Failed to attach audio event listeners:', e);
@@ -6749,6 +6756,51 @@
 
         const joinSoundRecentlyPlayedForUser = new Map();
         const JOIN_SOUND_DEDUPE_WINDOW_MS = 3000;
+
+        let joinBeepAudioContext = null;
+        let joinBeepUnlocked = false;
+
+        function getJoinBeepContext() {
+          try {
+            if (joinBeepAudioContext) return joinBeepAudioContext;
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            joinBeepAudioContext = new Ctx();
+            return joinBeepAudioContext;
+          } catch {
+            return null;
+          }
+        }
+
+        function playJoinBeep() {
+          try {
+            const ctx = getJoinBeepContext();
+            if (!ctx) return;
+
+            // If locked, the gesture unlock handler will handle it.
+            if (ctx.state === 'suspended') {
+              void ctx.resume().catch(() => { });
+            }
+
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.value = 0.0001;
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+            gain.gain.setValueAtTime(0.0001, now);
+            gain.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+            osc.start(now);
+            osc.stop(now + 0.13);
+          } catch { }
+        }
 
         function playJoinRoomSound(sourceUserId = 'unknown') {
           try {
@@ -6763,6 +6815,13 @@
               p.catch((err) => {
                 console.warn('🔊 [JoinSound] play() rejected:', err);
                 // Common cause: autoplay policy. This will work after the unlock click/touch happens.
+
+                try {
+                  if (joinBeepUnlocked) {
+                    console.warn('🔊 [JoinSound] Falling back to WebAudio beep due to play() rejection');
+                    playJoinBeep();
+                  }
+                } catch { }
               });
             }
           } catch { }
@@ -6773,6 +6832,15 @@
             console.log('🔊 [JoinSound] User gesture detected; attempting to unlock audio...');
             const prevMuted = joinRoomSound.muted;
             joinRoomSound.muted = true;
+
+            try {
+              const ctx = getJoinBeepContext();
+              if (ctx && ctx.state === 'suspended') {
+                void ctx.resume().catch(() => { });
+              }
+              joinBeepUnlocked = true;
+            } catch { }
+
             const p = joinRoomSound.play();
             if (p && typeof p.then === 'function') {
               p.then(() => {
