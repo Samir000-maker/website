@@ -2162,7 +2162,7 @@
     });
   } catch { }
 
-  safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: true, facingMode: activeFacingMode || 'user' });
+  safeSocketEmit('video_state_changed', { callId: callData.callId, userId: currentUser.userId, enabled: true, facingMode: activeFacingMode || 'user' });
 
         })().finally(() => {
           try { window.hideReconnectUI?.(); } catch { }
@@ -2328,7 +2328,7 @@
           updateVideoButton();
           scheduleVideoVisibilityUpdate(currentUser.userId, desired, true);
 
-          safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
+          safeSocketEmit('video_state_changed', { callId: callData.callId, userId: currentUser.userId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
         } catch (err) {
           console.warn(`⚠️ Pending video toggle failed:`, err.message);
         } finally {
@@ -2822,7 +2822,7 @@
 
             if (socketInstance?.connected) {
               safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
-              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, userId: currentUser.userId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
             }
 
             refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
@@ -2835,7 +2835,7 @@
               updateVideoButton();
               scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
               if (socketInstance?.connected) {
-                safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
+                safeSocketEmit('video_state_changed', { callId: callData.callId, userId: currentUser.userId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
               }
             }
 
@@ -4148,6 +4148,7 @@
           // Notify server
           safeSocketEmit('video_state_changed', {
             callId: callData.callId,
+            userId: currentUser.userId,
             enabled: isVideoEnabled,
             facingMode: activeFacingMode || 'user'
           });
@@ -5248,7 +5249,7 @@
             // ✅ Force local UI sync after join to avoid mismatched toggles
             scheduleVideoVisibilityUpdate(currentUser.userId, isVideoEnabled, true);
             if (socketInstance?.connected) {
-              safeSocketEmit('video_state_changed', { callId: callData.callId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
+              safeSocketEmit('video_state_changed', { callId: callData.callId, userId: currentUser.userId, enabled: isVideoEnabled, facingMode: activeFacingMode || 'user' });
               safeSocketEmit('audio_state_changed', { callId: callData.callId, enabled: isAudioEnabled });
             }
 
