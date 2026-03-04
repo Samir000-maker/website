@@ -6658,17 +6658,42 @@
                 if (cl) console.log(`🔊 [JoinSound] content-length=${cl}`);
               } catch { }
 
-              // If we did a GET (or the server still provided a body), sample the first bytes.
-              // This helps detect "HTML error page served instead of MP3" instantly.
+              // Sample the first bytes using a small Range GET.
+              // This avoids the "HEAD has no body" issue and helps detect invalid audio payloads.
               try {
-                if (res.bodyUsed !== true && res.headers?.get?.('content-type') && String(res.headers.get('content-type')).toLowerCase().includes('audio')) {
-                  // likely an actual audio body, but still sample
+                let sampleRes = null;
+                try {
+                  sampleRes = await fetch(JOIN_ROOM_SOUND_URL, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    headers: {
+                      Range: 'bytes=0-1023'
+                    }
+                  });
+                } catch (e) {
+                  console.warn('🔊 [JoinSound] Range GET sample failed:', e);
                 }
 
-                // Clone so we don't consume the original response.
-                const clone = res.clone();
-                const buf = await clone.arrayBuffer();
+                if (!sampleRes) {
+                  console.warn('🔊 [JoinSound] No sample response available for header check');
+                  return;
+                }
+
+                console.log(`🔊 [JoinSound] Sample response: status=${sampleRes.status} ok=${sampleRes.ok} type=${sampleRes.type}`);
+                try {
+                  const acceptRanges = sampleRes.headers?.get?.('accept-ranges');
+                  if (acceptRanges) console.log(`🔊 [JoinSound] accept-ranges=${acceptRanges}`);
+                  const contentRange = sampleRes.headers?.get?.('content-range');
+                  if (contentRange) console.log(`🔊 [JoinSound] content-range=${contentRange}`);
+                } catch { }
+
+                const buf = await sampleRes.arrayBuffer();
                 const bytes = new Uint8Array(buf.slice(0, 24));
+
+                if (!bytes.length) {
+                  console.warn('🔊 [JoinSound] Sample returned 0 bytes; cannot detect header');
+                  return;
+                }
 
                 let ascii = '';
                 for (const b of bytes) {
