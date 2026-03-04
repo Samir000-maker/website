@@ -6646,9 +6646,52 @@
             if (res) {
               console.log(`🔊 [JoinSound] Asset check response: status=${res.status} ok=${res.ok} type=${res.type}`);
               try {
+                console.log(`🔊 [JoinSound] Final URL: ${res.url || JOIN_ROOM_SOUND_URL} (redirected=${!!res.redirected})`);
+              } catch { }
+              try {
                 const ct = res.headers?.get?.('content-type');
                 if (ct) console.log(`🔊 [JoinSound] content-type=${ct}`);
               } catch { }
+
+              try {
+                const cl = res.headers?.get?.('content-length');
+                if (cl) console.log(`🔊 [JoinSound] content-length=${cl}`);
+              } catch { }
+
+              // If we did a GET (or the server still provided a body), sample the first bytes.
+              // This helps detect "HTML error page served instead of MP3" instantly.
+              try {
+                if (res.bodyUsed !== true && res.headers?.get?.('content-type') && String(res.headers.get('content-type')).toLowerCase().includes('audio')) {
+                  // likely an actual audio body, but still sample
+                }
+
+                // Clone so we don't consume the original response.
+                const clone = res.clone();
+                const buf = await clone.arrayBuffer();
+                const bytes = new Uint8Array(buf.slice(0, 24));
+
+                let ascii = '';
+                for (const b of bytes) {
+                  ascii += (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+                }
+
+                const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                console.log(`🔊 [JoinSound] First bytes (ascii): ${ascii}`);
+                console.log(`🔊 [JoinSound] First bytes (hex): ${hex}`);
+
+                // Helpful hint: MP3 often starts with "ID3" or 0xFF 0xFB (frame sync)
+                if (ascii.startsWith('<!DOCTYPE') || ascii.startsWith('<html') || ascii.includes('<html')) {
+                  console.warn('🔊 [JoinSound] WARNING: Response looks like HTML (likely an error page), not an MP3');
+                } else if (ascii.startsWith('ID3')) {
+                  console.log('🔊 [JoinSound] Detected ID3 tag header (looks like a real MP3 file)');
+                } else if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) {
+                  console.log('🔊 [JoinSound] Detected MP3 frame sync (looks like a real MP3 stream)');
+                } else {
+                  console.warn('🔊 [JoinSound] Header does not look like common MP3 signatures; decoding may fail');
+                }
+              } catch (e) {
+                console.warn('🔊 [JoinSound] Failed to sample first bytes:', e);
+              }
             } else {
               console.warn('🔊 [JoinSound] Asset check produced no response object');
             }
