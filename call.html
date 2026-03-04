@@ -9,14 +9,7 @@
   <script>
     (function () {
       try {
-        if (window.__VIBE_SILENCE_CONSOLE__) return;
-        window.__VIBE_SILENCE_CONSOLE__ = true;
-        const noop = function () { };
-        console.log = noop;
-        console.info = noop;
-        console.warn = noop;
-        console.error = noop;
-        console.debug = noop;
+        window.__VIBE_SILENCE_CONSOLE__ = false;
       } catch { }
     })();
   </script>
@@ -563,6 +556,77 @@
       const JOIN_RETRY_KEY_PREFIX = 'vibe_call_join_retry_v1:';
       let signalingQueue = [];
 
+      const CALL_STATUS = Object.freeze({
+        idle: 'idle',
+        joining: 'joining',
+        joined: 'joined',
+        leaving: 'leaving',
+        ended: 'ended'
+      });
+
+      let callStatus = CALL_STATUS.idle;
+      let joinAttemptController = null;
+      let joinAttemptId = 0;
+
+      const __disposables = {
+        timeouts: new Set(),
+        intervals: new Set(),
+        listeners: []
+      };
+
+      function trackTimeout(id) {
+        if (id) __disposables.timeouts.add(id);
+        return id;
+      }
+
+      function trackInterval(id) {
+        if (id) __disposables.intervals.add(id);
+        return id;
+      }
+
+      function addListener(target, event, handler, options) {
+        try {
+          target.addEventListener(event, handler, options);
+          __disposables.listeners.push({ target, event, handler, options });
+        } catch { }
+      }
+
+      function cleanupDisposables() {
+        try {
+          __disposables.timeouts.forEach((id) => { try { clearTimeout(id); } catch { } });
+          __disposables.timeouts.clear();
+        } catch { }
+        try {
+          __disposables.intervals.forEach((id) => { try { clearInterval(id); } catch { } });
+          __disposables.intervals.clear();
+        } catch { }
+        try {
+          for (const l of __disposables.listeners.splice(0)) {
+            try { l.target.removeEventListener(l.event, l.handler, l.options); } catch { }
+          }
+        } catch { }
+      }
+
+      function safeNoThrow(fn, label = 'op') {
+        try {
+          const r = fn();
+          if (r && typeof r.then === 'function') return r.catch((e) => console.warn(`⚠️ ${label} failed:`, e?.message || e));
+          return r;
+        } catch (e) {
+          console.warn(`⚠️ ${label} threw:`, e?.message || e);
+        }
+      }
+
+      // Last-resort crash guards (prevents rare unhandled errors from breaking the call UI).
+      // We still log + recover, but never allow the page to enter a broken state.
+      addListener(window, 'unhandledrejection', (event) => {
+        try { console.warn('⚠️ Unhandled promise rejection:', event?.reason); } catch { }
+        try { event?.preventDefault?.(); } catch { }
+      });
+      addListener(window, 'error', (event) => {
+        try { console.warn('⚠️ Window error:', event?.message || event); } catch { }
+      });
+
       function loadSignalingQueue() {
         try {
           const raw = sessionStorage.getItem(SIGNALING_QUEUE_KEY);
@@ -683,7 +747,7 @@
       function startMediaHealthMonitor(userId, pc) {
         stopMediaHealthMonitor(userId);
 
-        const intervalId = setInterval(async () => {
+        const intervalId = trackInterval(setInterval(async () => {
           const currentPc = peerConnections.get(userId);
           if (!currentPc || currentPc !== pc || currentPc.connectionState === 'closed') {
             stopMediaHealthMonitor(userId);
@@ -762,7 +826,7 @@
           } catch {
             // getStats can fail transiently; ignore.
           }
-        }, 2000);
+        }, 2000));
 
         mediaHealthMonitors.set(userId, intervalId);
       }
@@ -782,10 +846,23 @@
           videoEl.style.setProperty('-webkit-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
           videoEl.style.setProperty('-moz-transform', shouldMirror ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         } else {
-          // Mirror remote streams horizontally.
-          videoEl.style.setProperty('transform', 'scaleX(-1)', 'important');
-          videoEl.style.setProperty('-webkit-transform', 'scaleX(-1)', 'important');
-          videoEl.style.setProperty('-moz-transform', 'scaleX(-1)', 'important');
+          // Remote view should NOT always be mirrored.
+          // Mirror only when the remote user is on the front camera (user-facing).
+          // When the remote switches to the back camera (environment), re-invert to natural orientation.
+          let remoteFacingMode = null;
+          try {
+            const id = String(videoEl.id || '');
+            if (id.startsWith('video-')) {
+              const remoteUserId = id.slice('video-'.length);
+              remoteFacingMode = remoteMediaStates.get(remoteUserId)?.facingMode || null;
+            }
+          } catch { }
+
+          const fm = String(remoteFacingMode || 'user').toLowerCase();
+          const shouldMirrorRemote = fm !== 'environment';
+          videoEl.style.setProperty('transform', shouldMirrorRemote ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-webkit-transform', shouldMirrorRemote ? 'scaleX(-1)' : 'scaleX(1)', 'important');
+          videoEl.style.setProperty('-moz-transform', shouldMirrorRemote ? 'scaleX(-1)' : 'scaleX(1)', 'important');
         }
       }
 
@@ -831,14 +908,14 @@
           path: window.location.pathname
         });
 
-        callHeartbeatInterval = setInterval(() => {
+        callHeartbeatInterval = trackInterval(setInterval(() => {
           if (!socketInstance?.connected) return;
           socketInstance.emit('heartbeat', {
             roomId,
             location: 'call',
             path: window.location.pathname
           });
-        }, 10000);
+        }, 10000));
       }
 
       function stopCallHeartbeat() {
@@ -909,7 +986,7 @@
           // On mobile, the mic track can become "muted" after backgrounding even though it still exists.
           // If it stays muted briefly after resume, force a reacquire so upstream audio resumes.
           if (track.muted) {
-            setTimeout(() => {
+            trackTimeout(setTimeout(() => {
               try {
                 const t2 = localStream?.getAudioTracks?.()[0] || null;
                 if (!t2 || t2.readyState === 'ended') return;
@@ -924,7 +1001,7 @@
                   acquireLocalAudioTrack().catch(() => { });
                 }
               } catch { }
-            }, 1500);
+            }, 1500));
           }
         } catch { }
       }
@@ -1028,7 +1105,7 @@
       function startBackgroundAudioWatchdog() {
         try {
           if (backgroundAudioWatchdog) return;
-          backgroundAudioWatchdog = setInterval(() => {
+          backgroundAudioWatchdog = trackInterval(setInterval(() => {
             try {
               const audios = document.querySelectorAll('audio');
               for (const a of audios) {
@@ -1037,7 +1114,7 @@
                 }
               }
             } catch { }
-          }, 2000);
+          }, 2000));
         } catch { }
       }
 
@@ -1049,7 +1126,7 @@
       }
 
       // Listen for visibility and focus
-      document.addEventListener('visibilitychange', () => {
+      addListener(document, 'visibilitychange', () => {
         if (!document.hidden) {
           console.log('👀 Page became VISIBLE - initiating recovery');
           stopBackgroundKeepAlive();
@@ -1077,7 +1154,7 @@
         }
       });
 
-      window.addEventListener('focus', () => {
+      addListener(window, 'focus', () => {
         console.log('✨ Window gained FOCUS - checking media');
         resumeAllMedia();
         ensureLocalMicHealthy('focus').catch(() => { });
@@ -1096,7 +1173,7 @@
 
       // Page Lifecycle API events (supported on modern mobile browsers)
       try {
-        document.addEventListener('freeze', () => {
+        addListener(document, 'freeze', () => {
           try {
             ensureBackgroundKeepAlivePlaying().catch(() => { });
             startBackgroundAudioWatchdog();
@@ -1105,7 +1182,7 @@
       } catch { }
 
       try {
-        document.addEventListener('resume', () => {
+        addListener(document, 'resume', () => {
           try {
             stopBackgroundKeepAlive();
             stopBackgroundAudioWatchdog();
@@ -1121,7 +1198,7 @@
         });
       } catch { }
 
-      window.addEventListener('online', () => {
+      addListener(window, 'online', () => {
         try {
           if (!document.hidden) {
             if (socketInstance && !socketInstance.connected) {
@@ -1141,7 +1218,7 @@
 
 
         // Listen for messages from chat iframe
-        window.addEventListener('message', (event) => {
+        addListener(window, 'message', (event) => {
           console.log('📨 ========================================');
           console.log('📨 MESSAGE RECEIVED FROM IFRAME');
           console.log('📨 ========================================');
@@ -1161,7 +1238,7 @@
 
         console.log('✅ Message listener added for iframe communication');
 
-        window.addEventListener('popstate', (event) => {
+        addListener(window, 'popstate', (event) => {
           console.log('⬅️ ========================================');
           console.log('⬅️ BACK BUTTON PRESSED');
           console.log('⬅️ ========================================');
@@ -1423,14 +1500,14 @@
         }
 
         // Update duration periodically
-        setInterval(() => {
+        trackInterval(setInterval(() => {
           const miniDuration = document.getElementById('miniCallDuration');
           const mainDuration = document.getElementById('callDuration');
 
           if (miniDuration && mainDuration) {
             miniDuration.textContent = mainDuration.textContent;
           }
-        }, 1000);
+        }, 1000));
       }
 
       // Fallback: Create iframe overlay for chat
@@ -1460,7 +1537,21 @@
   `;
 
         // Create close button
-        //       const closeBtn = document.createElement('button');
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '← Back to Call';
+        closeBtn.style.cssText = `
+          position: absolute;
+          top: 1rem;
+          left: 1rem;
+          z-index: 10000;
+          background: #367d7d;
+          color: white;
+          padding: 0.5rem 1rem;
+          border-radius: 0.5rem;
+          border: none;
+          font-weight: 600;
+          cursor: pointer;
+        `;
         //       closeBtn.innerHTML = '← Back to Call';
         //       closeBtn.style.cssText = `
         //   position: absolute;
@@ -1492,7 +1583,7 @@
       }
 
       function setupCallCleanup() {
-        window.addEventListener('pagehide', () => {
+        addListener(window, 'pagehide', () => {
           console.log('🚪 Call pagehide detected - reporting lifecycle state');
           if (explicitLeaveCall) {
             console.log('🛡️ Suppressing call pagehide presence report (explicit leave)');
@@ -1505,7 +1596,7 @@
           }).catch(() => { });
         });
 
-        window.addEventListener('pageshow', (event) => {
+        addListener(window, 'pageshow', (event) => {
           console.log(`📱 Call pageshow (persisted=${event.persisted})`);
           reportCallPresenceContext('call_pageshow', {
             keepalive: true,
@@ -1588,20 +1679,20 @@
 
           // ✅ Start Watchdog if NOT already running
           if (enabled && !loadingWatchdogs.has(userId)) {
-            const watchdogId = setTimeout(() => {
+            const watchdogId = trackTimeout(setTimeout(() => {
               console.error(`❌ [WATCHDOG] Video stuck in LOADING for ${userId}. Triggering recovery...`);
               handleStuckVideo(userId);
-            }, 2500);
+            }, 2500));
             loadingWatchdogs.set(userId, watchdogId);
           }
 
           // ✅ Fast retry for missing tracks
           if (enabled && !hasVideoTrack) {
-            setTimeout(() => {
+            trackTimeout(setTimeout(() => {
               if (videoRenderState.get(userId) === 'loading') {
                 handleStuckVideo(userId);
               }
-            }, 400);
+            }, 400));
           }
         } else {
           vid.classList.add('hidden');
@@ -1639,7 +1730,7 @@
         if (localStream) return localStream;
         return new Promise((resolve, reject) => {
           const start = Date.now();
-          const timer = setInterval(() => {
+          const timer = trackInterval(setInterval(() => {
             if (localStream) {
               clearInterval(timer);
               resolve(localStream);
@@ -1650,7 +1741,7 @@
               clearInterval(timer);
               reject(new Error('Local stream not ready'));
             }
-          }, 50);
+          }, 50));
         });
       }
 
@@ -1806,7 +1897,7 @@
 
               // Force offer if stable; otherwise mark pending
               if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
-                setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+                trackTimeout(setTimeout(() => createOffer(peerId).catch(() => { }), 0));
               } else {
                 pendingNegotiation.set(peerId, true);
               }
@@ -2055,7 +2146,7 @@
         pc.addTrack(nextTrack, localStream);
       }
       if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
-        setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+        trackTimeout(setTimeout(() => createOffer(peerId).catch(() => { }), 0));
       } else {
         pendingNegotiation.set(peerId, true);
       }
@@ -2202,7 +2293,7 @@
             }
 
             if (pc.signalingState === 'stable' && !makingOffer.get(peerId) && !negotiationMutex.has(peerId)) {
-              setTimeout(() => createOffer(peerId).catch(() => { }), 0);
+              trackTimeout(setTimeout(() => createOffer(peerId).catch(() => { }), 0));
             } else {
               pendingNegotiation.set(peerId, true);
             }
@@ -2268,12 +2359,12 @@
         videoRecoveryAttempts.set(userId, attempts + 1);
 
         const scheduleImmediateRetry = (delayMs = 300) => {
-          setTimeout(() => {
+          trackTimeout(setTimeout(() => {
             if (videoRenderState.get(userId) === 'loading') {
               console.warn(`🛠️ Immediate retry ${videoRecoveryAttempts.get(userId) || 0}/${MAX_VIDEO_RECOVERY_ATTEMPTS} for ${userId}`);
               handleStuckVideo(userId);
             }
-          }, delayMs);
+          }, delayMs));
         };
 
         // 1. Check if we have remote tracks in the PC
@@ -2444,7 +2535,7 @@
 
       // Add after createPC function to monitor connection quality
       function monitorConnectionQuality(userId, pc) {
-        const monitorInterval = setInterval(async () => {
+        const monitorInterval = trackInterval(setInterval(async () => {
           if (!pc || pc.connectionState === 'closed') {
             clearInterval(monitorInterval);
             return;
@@ -2495,7 +2586,7 @@
           } catch (e) {
             console.warn(`⚠️ Failed to get stats for ${userId}:`, e.message);
           }
-        }, 5000); // Check every 5 seconds
+        }, 5000)); // Check every 5 seconds
 
         // Helper for adaptive quality
         this.applyAdaptiveQuality = async (userId, pc, quality) => {
@@ -2621,7 +2712,7 @@
 
       // Resume on first interaction
       ['click', 'touchstart', 'keydown'].forEach(evt => {
-        window.addEventListener(evt, () => {
+        addListener(window, evt, () => {
           resumeAllAudioContexts();
         }, { once: true, passive: true });
       });
@@ -2826,7 +2917,7 @@
                   console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
                   resolve();
                 } else {
-                  localVid.addEventListener('loadedmetadata', () => {
+                  addListener(localVid, 'loadedmetadata', () => {
                     console.log(`📹 Metadata loaded: ${localVid.videoWidth}x${localVid.videoHeight}`);
                     resolve();
                   }, { once: true });
@@ -2892,14 +2983,14 @@
         console.log(`✅ Video button updated: ${isVideoEnabled ? 'ON' : 'OFF'}`);
 
         // ✅ Force sync retry to keep icon consistent after rapid state changes
-        setTimeout(() => {
+        trackTimeout(setTimeout(() => {
           if (btn && icon) {
             const expected = isVideoEnabled ? 'videocam' : 'videocam_off';
             if (icon.textContent !== expected) {
               icon.textContent = expected;
             }
           }
-        }, 200);
+        }, 200));
       }
 
 
@@ -2973,7 +3064,7 @@
         // ✅ START RETRY WATCHDOG (STUN ONLY)
         if (!useTurnFallback) {
           console.log(`⏱️ [ICE] Starting 2.5s watchdog for ${userId}`);
-          stats.watchdogTimer = setTimeout(() => {
+          stats.watchdogTimer = trackTimeout(setTimeout(() => {
             const pcCurrent = peerConnections.get(userId);
             const s = connectionStats.get(userId);
             if (!pcCurrent || !s) return;
@@ -2989,7 +3080,7 @@
               console.warn(`⏱️ [ICE] Watchdog saw state=new with 0 candidates for ${userId} - extending grace period`);
               try {
                 if (s.watchdogTimer) clearTimeout(s.watchdogTimer);
-                s.watchdogTimer = setTimeout(() => {
+                s.watchdogTimer = trackTimeout(setTimeout(() => {
                   const pcRetry = peerConnections.get(userId);
                   const sRetry = connectionStats.get(userId);
                   if (!pcRetry || !sRetry) return;
@@ -2997,7 +3088,7 @@
                   const st = pcRetry.iceConnectionState;
                   if (st === 'connected' || st === 'completed') return;
                   handleIceFailure(userId);
-                }, 2500);
+                }, 2500));
               } catch { }
               return;
             }
@@ -3018,7 +3109,7 @@
                 handleIceFailure(userId);
               }
             }
-          }, 2500); // fast timeout for STUN (WhatsApp-like)
+          }, 2500)); // fast timeout for STUN (WhatsApp-like)
         }
 
         // Connection watchdog (covers the common "stuck on checking" case, including TURN relay connects).
@@ -3026,7 +3117,7 @@
         try {
           const timeoutMs = useTurnFallback ? 12000 : 8000;
           if (stats.connectWatchdogTimer) clearTimeout(stats.connectWatchdogTimer);
-          stats.connectWatchdogTimer = setTimeout(() => {
+          stats.connectWatchdogTimer = trackTimeout(setTimeout(() => {
             try {
               const pcCurrent = peerConnections.get(userId);
               if (!pcCurrent) return;
@@ -3053,7 +3144,7 @@
                   try { pcCurrent.close(); } catch { }
                   try { peerConnections.delete(userId); } catch { }
 
-                  setTimeout(() => createOffer(userId).catch(() => { }), 150);
+                  trackTimeout(setTimeout(() => createOffer(userId).catch(() => { }), 150));
                   return;
                 }
               }
@@ -3061,7 +3152,7 @@
               // Default path: treat as failure to trigger your existing ladder (STUN retries -> TURN fallback).
               handleIceFailure(userId);
             } catch { }
-          }, timeoutMs);
+          }, timeoutMs));
         } catch { }
 
         const tracks = localStream.getTracks();
@@ -3209,8 +3300,8 @@
                   };
 
                   tryPlay();
-                  setTimeout(tryPlay, 250);
-                  setTimeout(tryPlay, 1000);
+                  trackTimeout(setTimeout(tryPlay, 250));
+                  trackTimeout(setTimeout(tryPlay, 1000));
                 } catch { }
               }
 
@@ -3433,13 +3524,13 @@
             // ✅ Proactive Retry: if still disconnected after 3 seconds, fire recovery
             if (stats) {
               if (stats.disconnectTimer) clearTimeout(stats.disconnectTimer);
-              stats.disconnectTimer = setTimeout(() => {
+              stats.disconnectTimer = trackTimeout(setTimeout(() => {
                 const currentPC = peerConnections.get(userId);
                 if (currentPC && (currentPC.iceConnectionState === 'disconnected' || currentPC.iceConnectionState === 'failed')) {
                   console.error(`❌ [ICE] Restoration failed for ${userId}. Triggering ICE restart/fallback...`);
                   handleIceFailure(userId);
                 }
-              }, 3000);
+              }, 3000));
             }
           }
           else if (state === 'closed') {
@@ -3800,9 +3891,9 @@
             console.error(`   Error message: ${e.message}`);
           } finally {
             // Remove mutex after 100ms to allow for any in-flight duplicates to be caught
-            setTimeout(() => {
+            trackTimeout(setTimeout(() => {
               negotiationMutex.delete(fromUserId);
-            }, 100);
+            }, 100));
           }
         })();
 
@@ -3883,9 +3974,9 @@
             console.error(`   Error message: ${e.message}`);
           } finally {
             // Release mutex
-            setTimeout(() => {
+            trackTimeout(setTimeout(() => {
               negotiationMutex.delete(fromUserId);
-            }, 100);
+            }, 100));
           }
         })();
 
@@ -3930,7 +4021,7 @@
             console.log(`🧊 [ICE] Queued candidate from ${fromUserId} (pending: ${queue.length})`);
 
             // Auto-cleanup old candidates after 30 seconds
-            setTimeout(() => {
+            trackTimeout(setTimeout(() => {
               const currentQueue = pendingIceCandidates.get(fromUserId);
               if (currentQueue) {
                 const filtered = currentQueue.filter(item => Date.now() - item.timestamp < 30000);
@@ -3939,7 +4030,7 @@
                   pendingIceCandidates.set(fromUserId, filtered);
                 }
               }
-            }, 30000);
+            }, 30000));
 
             return;
           }
@@ -4062,9 +4153,9 @@
           });
 
           // Set debounce timer
-          videoToggleDebounceTimer = setTimeout(() => {
+          videoToggleDebounceTimer = trackTimeout(setTimeout(() => {
             videoToggleDebounceTimer = null;
-          }, 800);
+          }, 800));
 
         } catch (error) {
           console.error('❌ Error in toggleVideo:', error);
@@ -4092,12 +4183,39 @@
         isInitializing = true;
         explicitLeaveCall = true;
 
+        callStatus = CALL_STATUS.leaving;
+        joinAttemptId++;
+        try { joinAttemptController?.abort(); } catch { }
+        joinAttemptController = null;
+
         try {
           // Prevent call iframe teardown navigation from triggering presence leave beacons.
           sessionStorage.setItem('vibe_suppress_leave_beacon_until', String(Date.now() + 5000));
         } catch { }
 
         stopCallHeartbeat();
+        clearCallSetupWatchdog();
+        cleanupDisposables();
+
+        // Stop background keepalive and watchdogs immediately
+        try { stopBackgroundKeepAlive(); } catch { }
+        try { stopBackgroundAudioWatchdog(); } catch { }
+
+        // Stop media health monitors
+        try {
+          for (const [userId] of mediaHealthMonitors) {
+            stopMediaHealthMonitor(userId);
+          }
+        } catch { }
+
+        // Stop any loading watchdogs
+        try {
+          for (const [userId, id] of loadingWatchdogs) {
+            try { clearTimeout(id); } catch { }
+            loadingWatchdogs.delete(userId);
+          }
+        } catch { }
+
         audioContexts.forEach(ac => {
           try {
             if (ac.stop) ac.stop();
@@ -4109,8 +4227,23 @@
           }
         });
         audioContexts.clear();
-        if (localStream) localStream.getTracks().forEach(t => t.stop());
-        peerConnections.forEach(pc => pc.close());
+
+        try {
+          if (localStream) {
+            localStream.getTracks().forEach(t => {
+              try { t.stop(); } catch { }
+            });
+          }
+        } catch { }
+
+        peerConnections.forEach(pc => {
+          try { pc.ontrack = null; } catch { }
+          try { pc.onicecandidate = null; } catch { }
+          try { pc.onnegotiationneeded = null; } catch { }
+          try { pc.oniceconnectionstatechange = null; } catch { }
+          try { pc.onconnectionstatechange = null; } catch { }
+          try { pc.close(); } catch { }
+        });
         peerConnections.clear();
         if (socketInstance && socketInstance.connected) {
           try { socketInstance.emit('leave_call', { callId: callData?.callId || null, reason }); } catch { }
@@ -4124,6 +4257,15 @@
             });
           } catch { }
         }
+
+        try {
+          if (socketInstance) {
+            try { socketInstance.off(); } catch { }
+            try { socketInstance.disconnect(); } catch { }
+          }
+        } catch { }
+        socketInstance = null;
+
         if (durationInterval) clearInterval(durationInterval);
         localStorage.removeItem('activeCall');
 
@@ -4137,6 +4279,8 @@
           // Normal navigation for standalone window
           setTimeout(() => { window.location.href = '/chat.html'; }, 500);
         }
+
+        callStatus = CALL_STATUS.ended;
       }
 
 
@@ -4201,28 +4345,52 @@
       const MAX_JOIN_RETRIES = 3;
 
       async function attemptJoinCall(callId, retryDelay = 1000) {
+        const controller = joinAttemptController;
+        const myAttemptId = joinAttemptId;
         return new Promise((resolve, reject) => {
+          if (!socketInstance) {
+            reject(new Error('Socket not initialized'));
+            return;
+          }
+          if (controller?.signal?.aborted) {
+            reject(new Error('Join attempt aborted'));
+            return;
+          }
           joinCallRetryCount = loadJoinRetryCount(callId);
           const attemptNumber = joinCallRetryCount + 1;
           console.log(`🔄 Attempting to join call (attempt ${attemptNumber}/${MAX_JOIN_RETRIES})`);
 
+          // Idempotency: if a newer join attempt started, this attempt is stale.
+          if (myAttemptId !== joinAttemptId) {
+            reject(new Error('Stale join attempt'));
+            return;
+          }
+
           safeSocketEmit('join_call', { callId }, { queueWhenDisconnected: false });
 
           // Set timeout for response
-          const timeout = setTimeout(() => {
+          const timeout = trackTimeout(setTimeout(() => {
+            if (controller?.signal?.aborted) {
+              reject(new Error('Join attempt aborted'));
+              return;
+            }
+            if (myAttemptId !== joinAttemptId) {
+              reject(new Error('Stale join attempt'));
+              return;
+            }
             joinCallRetryCount = attemptNumber;
             saveJoinRetryCount(callId, joinCallRetryCount);
 
             if (joinCallRetryCount < MAX_JOIN_RETRIES) {
               const backoff = computeBackoffDelayMs(joinCallRetryCount + 1);
               console.warn(`⚠️ Join call timeout, retrying in ${backoff}ms...`);
-              setTimeout(() => {
+              trackTimeout(setTimeout(() => {
                 attemptJoinCall(callId, backoff).then(resolve).catch(reject);
-              }, backoff);
+              }, backoff));
             } else {
               reject(new Error('Failed to join call after maximum retries'));
             }
-          }, 5000); // 5 second timeout per attempt
+          }, 5000)); // 5 second timeout per attempt
 
           // Listen for successful join (one-time)
           const handleJoined = (data) => {
@@ -4245,6 +4413,13 @@
           socketInstance.once('call_joined', handleJoined);
           socketInstance.once('error', handleError);
         });
+      }
+
+      function beginJoinAttempt() {
+        joinAttemptId++;
+        try { joinAttemptController?.abort(); } catch { }
+        joinAttemptController = new AbortController();
+        return joinAttemptController;
       }
 
 
@@ -4574,18 +4749,18 @@
             clearReconnectWatchdogs();
 
             // Soft kick loop (fast)
-            reconnectWatchdogTimer = setInterval(() => {
+            reconnectWatchdogTimer = trackInterval(setInterval(() => {
               if (!socketInstance) return;
               if (socketInstance.connected) return;
               softKickReconnect(source).catch(() => { });
-            }, 1200);
+            }, 1200));
 
             // Hard reset if we remain disconnected for too long
-            reconnectHardResetTimer = setTimeout(() => {
+            reconnectHardResetTimer = trackTimeout(setTimeout(() => {
               if (!socketInstance) return;
               if (socketInstance.connected) return;
               hardResetSocketAndReconnect('watchdog_timeout').catch(() => { });
-            }, 9000);
+            }, 9000));
           }
 
           socketInstance.on('connect', () => {
@@ -4765,8 +4940,8 @@
               }
             }
 
-            // CRITICAL FIX: Prevent duplicate join attempts
-            if (isJoiningCall) {
+            // CRITICAL: Prevent duplicate join attempts (idempotent join state machine)
+            if (callStatus === CALL_STATUS.joining || isJoiningCall) {
               console.warn(`⚠️ Already joining call, ignoring duplicate authenticated event`);
               return;
             }
@@ -4775,6 +4950,8 @@
             // we must re-join to resync participants + signaling.
             if (needsRejoinAfterReconnect) {
               isJoiningCall = true;
+              callStatus = CALL_STATUS.joining;
+              beginJoinAttempt();
               try {
                 console.log(`📞 Re-joining call ${callData.callId} after reconnect...`);
                 showReconnectUI('Reconnecting…', 'Rejoining call…');
@@ -4792,6 +4969,9 @@
                 startReconnectWatchdogs('rejoin_failed');
               } finally {
                 isJoiningCall = false;
+                if (callStatus !== CALL_STATUS.ended && callStatus !== CALL_STATUS.leaving) {
+                  callStatus = CALL_STATUS.joined;
+                }
               }
               return;
             }
@@ -4799,6 +4979,8 @@
             if (!hasJoinedCall) {
               isJoiningCall = true;
               hasJoinedCall = true;
+              callStatus = CALL_STATUS.joining;
+              beginJoinAttempt();
 
               try {
                 console.log(`📞 Attempting to join call ${callData.callId}...`);
@@ -4816,11 +4998,14 @@
               } catch (error) {
                 console.error('❌ Failed to join call:', error);
                 toast('Failed to join call. Returning to chat...', 'error');
-                setTimeout(() => {
+                trackTimeout(setTimeout(() => {
                   window.location.href = '/chat.html';
-                }, 2000);
+                }, 2000));
               } finally {
                 isJoiningCall = false;
+                if (callStatus !== CALL_STATUS.ended && callStatus !== CALL_STATUS.leaving) {
+                  callStatus = CALL_STATUS.joined;
+                }
               }
             }
           });
@@ -4845,9 +5030,9 @@
             } catch { }
           };
 
-          try { document.addEventListener('visibilitychange', onVisibilityOrNetworkChange); } catch { }
-          try { window.addEventListener('focus', onVisibilityOrNetworkChange); } catch { }
-          try { window.addEventListener('online', onVisibilityOrNetworkChange); } catch { }
+          try { addListener(document, 'visibilitychange', onVisibilityOrNetworkChange); } catch { }
+          try { addListener(window, 'focus', onVisibilityOrNetworkChange); } catch { }
+          try { addListener(window, 'online', onVisibilityOrNetworkChange); } catch { }
 
           socketInstance.on('force_navigation', (data) => {
             const target = data?.to || '/mood.html';
@@ -4910,17 +5095,17 @@
 
           socketInstance.on('webrtc_offer', (d) => {
             console.log(`🔔 [SOCKET] webrtc_offer event received from ${d.fromUserId}`);
-            handleOffer(d.fromUserId, d.offer);
+            safeNoThrow(() => handleOffer(d.fromUserId, d.offer), 'handleOffer');
           });
 
           socketInstance.on('webrtc_answer', (d) => {
             console.log(`🔔 [SOCKET] webrtc_answer event received from ${d.fromUserId}`);
-            handleAnswer(d.fromUserId, d.answer);
+            safeNoThrow(() => handleAnswer(d.fromUserId, d.answer), 'handleAnswer');
           });
 
           socketInstance.on('ice_candidate', (d) => {
             console.log(`🔔 [SOCKET] ice_candidate event received from ${d.fromUserId}`);
-            handleIceCandidate(d.fromUserId, d.candidate);
+            safeNoThrow(() => handleIceCandidate(d.fromUserId, d.candidate), 'handleIceCandidate');
           });
 
 
@@ -5080,10 +5265,10 @@
               if (shouldInitiateOffer) {
                 const delay = 1000 + (i * 500);
                 console.log(`   ⏱️ Will create offer in ${delay}ms`);
-                setTimeout(() => {
+                trackTimeout(setTimeout(() => {
                   console.log(`📤 [${i}] Creating offer to ${p.username}`);
-                  createOffer(p.userId);
-                }, delay);
+                  safeNoThrow(() => createOffer(p.userId), 'createOffer');
+                }, delay));
               } else {
                 console.log(`   ⏳ Will wait for offer from ${p.username}`);
               }
@@ -5152,10 +5337,10 @@
                   // For remote users, initiate connection with delay to avoid race
                   const shouldInitiateOffer = currentUser.userId < data.user.userId;
                   if (shouldInitiateOffer) {
-                    setTimeout(() => {
+                    trackTimeout(setTimeout(() => {
                       console.log(`📤 Creating offer to late joiner ${data.user.username}`);
-                      createOffer(data.user.userId);
-                    }, 2000); // Increased delay to 2s
+                      safeNoThrow(() => createOffer(data.user.userId), 'createOffer');
+                    }, 2000)); // Increased delay to 2s
                   }
                 }
 
@@ -5208,9 +5393,7 @@
             console.log(`✅ Fully cleaned up resources for ${data.userId}`);
           });
 
-          socketInstance.on('webrtc_offer', (d) => handleOffer(d.fromUserId, d.offer));
-          socketInstance.on('webrtc_answer', (d) => handleAnswer(d.fromUserId, d.answer));
-          socketInstance.on('ice_candidate', (d) => handleIceCandidate(d.fromUserId, d.candidate));
+          // (Removed duplicate webrtc_offer/webrtc_answer/ice_candidate registrations; they are already registered above.)
 
           socketInstance.on('speaking_state', (d) => {
             const s = document.getElementById(`speaking-${d.userId}`);
@@ -5304,16 +5487,16 @@
           const flip = document.getElementById('flipCamBtn');
           const leave = document.getElementById('leaveCallBtn');
 
-          if (mic) mic.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleMic());
-          if (vid) vid.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : toggleVideo());
-          if (flip) flip.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : switchToNextCamera());
-          if (leave) leave.addEventListener('click', (e) => isControlsLocked ? e.preventDefault() : leaveCall());
+          if (mic) addListener(mic, 'click', (e) => isControlsLocked ? e.preventDefault() : toggleMic());
+          if (vid) addListener(vid, 'click', (e) => isControlsLocked ? e.preventDefault() : toggleVideo());
+          if (flip) addListener(flip, 'click', (e) => isControlsLocked ? e.preventDefault() : switchToNextCamera());
+          if (leave) addListener(leave, 'click', (e) => isControlsLocked ? e.preventDefault() : leaveCall());
 
           // ✅ Apply initial visual lockout
           [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.add('controls-locked'); });
 
           // ✅ Set 3-second unlock timer
-          setTimeout(() => {
+          trackTimeout(setTimeout(() => {
             isControlsLocked = false;
             [mic, vid, flip, leave].forEach(btn => { if (btn) btn.classList.remove('controls-locked'); });
             console.log('🔓 Controls unlocked (3s grace period complete)');
@@ -5322,7 +5505,7 @@
             try {
               refreshAvailableCameras().then(() => updateFlipButtonState()).catch(() => updateFlipButtonState());
             } catch { }
-          }, 3000);
+          }, 3000));
 
           // Setup back button handler for background call
           setupCallBackButtonHandler();
@@ -5332,7 +5515,7 @@
 
           console.log('✅ Call page event handlers initialized');
 
-          setInterval(() => {
+          trackInterval(setInterval(() => {
             document.querySelectorAll('video').forEach(vid => {
               const computed = window.getComputedStyle(vid).transform || '';
               // Only fix transforms for remote videos, preserve mirror for self-view
@@ -5340,7 +5523,7 @@
                 enforceNaturalVideoRendering(vid);
               }
             });
-          }, 3000);
+          }, 3000));
 
         } catch (e) {
           console.error('❌ Init error:', e);
