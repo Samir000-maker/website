@@ -6618,8 +6618,67 @@
           }
         });
 
-        const joinRoomSound = new Audio('/join_room_sound.mp3');
+        const JOIN_ROOM_SOUND_URL = '/join_room_sound.mp3';
+        console.log(`🔊 [JoinSound] Initializing join-room sound: ${JOIN_ROOM_SOUND_URL}`);
+
+        const joinRoomSound = new Audio(JOIN_ROOM_SOUND_URL);
         joinRoomSound.preload = 'auto';
+        joinRoomSound.crossOrigin = 'anonymous';
+
+        (async () => {
+          try {
+            console.log('🔊 [JoinSound] Checking sound asset availability...');
+            let res = null;
+            try {
+              res = await fetch(JOIN_ROOM_SOUND_URL, { method: 'HEAD', cache: 'no-store' });
+            } catch (e) {
+              console.warn('🔊 [JoinSound] HEAD check failed (will try GET):', e);
+            }
+
+            if (!res) {
+              try {
+                res = await fetch(JOIN_ROOM_SOUND_URL, { method: 'GET', cache: 'no-store' });
+              } catch (e) {
+                console.error('🔊 [JoinSound] GET check failed:', e);
+              }
+            }
+
+            if (res) {
+              console.log(`🔊 [JoinSound] Asset check response: status=${res.status} ok=${res.ok} type=${res.type}`);
+              try {
+                const ct = res.headers?.get?.('content-type');
+                if (ct) console.log(`🔊 [JoinSound] content-type=${ct}`);
+              } catch { }
+            } else {
+              console.warn('🔊 [JoinSound] Asset check produced no response object');
+            }
+          } catch (e) {
+            console.error('🔊 [JoinSound] Unexpected error during asset check:', e);
+          }
+        })();
+
+        try {
+          joinRoomSound.addEventListener('loadeddata', () => {
+            console.log('🔊 [JoinSound] loadeddata fired (some data available)');
+          });
+          joinRoomSound.addEventListener('canplaythrough', () => {
+            console.log('🔊 [JoinSound] canplaythrough fired (likely buffered enough)');
+          });
+          joinRoomSound.addEventListener('error', () => {
+            const mediaErr = joinRoomSound.error;
+            console.error('🔊 [JoinSound] Audio element error event fired');
+            if (mediaErr) {
+              console.error('🔊 [JoinSound] MediaError:', {
+                code: mediaErr.code,
+                message: mediaErr.message
+              });
+            }
+            console.error('🔊 [JoinSound] Audio element src:', joinRoomSound.currentSrc || joinRoomSound.src);
+          });
+        } catch (e) {
+          console.warn('🔊 [JoinSound] Failed to attach audio event listeners:', e);
+        }
+
         const joinSoundRecentlyPlayedForUser = new Map();
         const JOIN_SOUND_DEDUPE_WINDOW_MS = 3000;
 
@@ -6631,12 +6690,19 @@
             joinSoundRecentlyPlayedForUser.set(sourceUserId, now);
 
             joinRoomSound.currentTime = 0;
-            joinRoomSound.play().catch(() => { });
+            const p = joinRoomSound.play();
+            if (p && typeof p.catch === 'function') {
+              p.catch((err) => {
+                console.warn('🔊 [JoinSound] play() rejected:', err);
+                // Common cause: autoplay policy. This will work after the unlock click/touch happens.
+              });
+            }
           } catch { }
         }
 
         const unlockJoinSoundOnce = () => {
           try {
+            console.log('🔊 [JoinSound] User gesture detected; attempting to unlock audio...');
             const prevMuted = joinRoomSound.muted;
             joinRoomSound.muted = true;
             const p = joinRoomSound.play();
@@ -6645,15 +6711,20 @@
                 joinRoomSound.pause();
                 joinRoomSound.currentTime = 0;
                 joinRoomSound.muted = prevMuted;
+                console.log('🔊 [JoinSound] Audio unlock succeeded');
               }).catch(() => {
                 joinRoomSound.muted = prevMuted;
+                console.warn('🔊 [JoinSound] Audio unlock failed (play rejected)');
               });
             } else {
               joinRoomSound.pause();
               joinRoomSound.currentTime = 0;
               joinRoomSound.muted = prevMuted;
+              console.log('🔊 [JoinSound] Audio unlock attempted (non-promise play())');
             }
-          } catch (e) { }
+          } catch (e) {
+            console.warn('🔊 [JoinSound] Audio unlock threw:', e);
+          }
         };
 
         document.addEventListener('click', unlockJoinSoundOnce, { once: true, passive: true });
