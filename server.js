@@ -63,7 +63,8 @@ const __dirname = path.dirname(__filename);
 const redisHost = config.REDIS_HOST || 'redis-16396.c80.us-east-1-2.ec2.cloud.redislabs.com'; // Use your Nube VM public IP
 // const redisPort = config.REDIS_PORT || 6379;
 const redisPort = config.REDIS_PORT || 16396;
-const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
+// const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
+const redisPassword = config.REDIS_PASSWORD || 'uSwjFF7U0DPoQL6o7OqlafrM0zwNpPAm?';
 
 // Redis connection URL
 const redisUrl = `redis://:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
