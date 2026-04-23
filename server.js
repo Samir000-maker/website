@@ -59,8 +59,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Redis Clients
-const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
-const redisPort = config.REDIS_PORT || 6379;
+// const redisHost = config.REDIS_HOST || '205.198.72.90'; // Use your Nube VM public IP
+const redisHost = config.REDIS_HOST || 'redis-16396.c80.us-east-1-2.ec2.cloud.redislabs.com'; // Use your Nube VM public IP
+// const redisPort = config.REDIS_PORT || 6379;
+const redisPort = config.REDIS_PORT || 16396;
 const redisPassword = config.REDIS_PASSWORD || 'samir16121?';
 
 // Redis connection URL
