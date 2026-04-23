@@ -2,8 +2,10 @@
 import Redis from 'ioredis';
 
 // Self-contained recovery script
-const redisHost = '205.198.72.90';
-const redisPort = 6379;
+// const redisHost = '205.198.72.90';
+// const redisPort = 6379;
+const redisHost = 'redis-16396.c80.us-east-1-2.ec2.cloud.redislabs.com';
+const redisPort = 16396;
 const redisPassword = 'samir16121?';
 const redisUrl = `redis://:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
 
