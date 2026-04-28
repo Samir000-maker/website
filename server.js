@@ -65,7 +65,7 @@ const redisPassword = config.REDIS_PASSWORD || 'uSwjFF7U0DPoQL6o7OqlafrM0zwNpPAm
 
 // Redis connection URL
 // const redisUrl = `redis://:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
-const redisUrl = `rediss://default:${encodeURIComponent(redisPassword)}@${redisHost}:${redisPort}`;
+const redisUrl = `rediss://default:${encodeURIComponent(redisPassword)}@TLS_HOST:TLS_PORT`;
 
 
 const pubClient = new Redis(redisUrl);
