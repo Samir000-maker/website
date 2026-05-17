@@ -1,24 +1,14 @@
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
-        <!-- Favicon -->
     <link rel="icon" href="/favicon.ico">
-
-<!-- PNG favicon fallback -->
-<link rel="icon" type="image/png" sizes="48x48" href="/favicon.png">
-<link rel="icon" type="image/png" sizes="48x48" href="/public/favicon.png">
-
-<!-- Apple / iOS home screen icon -->
-<link rel="apple-touch-icon" href="/favicon.png">
-
-<!-- Android / PWA -->
-<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
-<link rel="icon" type="image/png" sizes="512x512" href="/favicon.png">
-
-<link rel="canonical" href="https://vibegra.com/">
-        
-<!-- Theme color for mobile browser UI -->
-<meta name="theme-color" content="#0f172a">
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="/public/favicon.png">
+    <link rel="apple-touch-icon" href="/favicon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/favicon.png">
+    <link rel="canonical" href="https://vibegra.com/">
+    <meta name="theme-color" content="#0f172a">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#6320e9">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -66,9 +56,9 @@
                         "display": ["Plus Jakarta Sans", "sans-serif"]
                     },
                     borderRadius: {
-                        "DEFAULT": "0.5rem", 
-                        "lg": "1rem", 
-                        "xl": "1.5rem", 
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
                         "full": "9999px"
                     },
                     backgroundImage: {
@@ -83,23 +73,17 @@
     <style>
         .premium-bg {
             background-color: #161121;
-            background-image: 
+            background-image:
                 radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.08) 0%, transparent 40%),
                 radial-gradient(circle at 85% 30%, rgba(245, 158, 11, 0.06) 0%, transparent 40%),
                 radial-gradient(circle at 50% 80%, rgba(99, 32, 233, 0.15) 0%, transparent 50%);
         }
-        
+
         @keyframes breathe {
-            0%, 100% {
-                transform: scale(1);
-                opacity: 1;
-            }
-            50% {
-                transform: scale(1.02);
-                opacity: 0.95;
-            }
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.02); opacity: 0.95; }
         }
-        
+
         .glass-card {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
             backdrop-filter: blur(20px);
@@ -114,19 +98,18 @@
             border-color: rgba(99, 32, 233, 0.5);
             background: linear-gradient(135deg, rgba(99, 32, 233, 0.1), rgba(255, 255, 255, 0.01));
             transform: translateY(-8px);
-            box-shadow: 0 16px 48px 0 rgba(99, 32, 233, 0.3),
-                        0 0 40px rgba(99, 32, 233, 0.2);
+            box-shadow: 0 16px 48px 0 rgba(99, 32, 233, 0.3), 0 0 40px rgba(99, 32, 233, 0.2);
             animation: none;
         }
-        
+
         .emoji-wrapper {
             transform-style: preserve-3d;
             transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        
         .glass-card:hover .emoji-wrapper {
             transform: perspective(1000px) rotateY(5deg);
         }
+
         .glow-button {
             box-shadow: 0 0 20px rgba(99, 32, 233, 0.3);
             transition: all 0.3s ease;
@@ -135,9 +118,8 @@
             box-shadow: 0 0 30px rgba(99, 32, 233, 0.6);
             transform: scale(1.02);
         }
-        .nav-link {
-            position: relative;
-        }
+
+        .nav-link { position: relative; }
         .nav-link::after {
             content: '';
             position: absolute;
@@ -149,9 +131,8 @@
             transition: all 0.3s ease;
             transform: translateX(-50%);
         }
-        .nav-link:hover::after {
-            width: 100%;
-        }
+        .nav-link:hover::after { width: 100%; }
+
         .emoji-3d {
             filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
             transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -161,71 +142,37 @@
             animation: float 3s ease-in-out infinite;
             transform-style: preserve-3d;
         }
-        
+
         @keyframes float {
-            0%, 100% {
-                transform: translateY(0px) rotate(0deg);
-            }
-            50% {
-                transform: translateY(-10px) rotate(2deg);
-            }
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-10px) rotate(2deg); }
         }
-        
+
         @keyframes pulse-glow {
-            0%, 100% {
-                filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
-            }
-            50% {
-                filter: drop-shadow(0 8px 24px rgba(99,32,233,0.6));
-            }
+            0%, 100% { filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4)); }
+            50% { filter: drop-shadow(0 8px 24px rgba(99,32,233,0.6)); }
         }
-        
-        .emoji-3d:nth-child(1) {
-            animation: float 3s ease-in-out infinite;
-        }
-        
-        .emoji-3d:nth-child(2) {
-            animation: float 3.5s ease-in-out infinite;
-            animation-delay: 0.2s;
-        }
-        
-        .emoji-3d:nth-child(3) {
-            animation: float 2.8s ease-in-out infinite;
-            animation-delay: 0.4s;
-        }
-        
-        .emoji-3d:nth-child(4) {
-            animation: float 3.2s ease-in-out infinite;
-            animation-delay: 0.6s;
-        }
-        
+
+        .emoji-3d:nth-child(1) { animation: float 3s ease-in-out infinite; }
+        .emoji-3d:nth-child(2) { animation: float 3.5s ease-in-out infinite; animation-delay: 0.2s; }
+        .emoji-3d:nth-child(3) { animation: float 2.8s ease-in-out infinite; animation-delay: 0.4s; }
+        .emoji-3d:nth-child(4) { animation: float 3.2s ease-in-out infinite; animation-delay: 0.6s; }
+
         .group:hover .emoji-3d {
             animation: none;
             transform: scale(1.25) translateY(-8px) rotateZ(8deg) rotateY(10deg);
-            filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) 
-                    drop-shadow(0 0 20px rgba(99,32,233,0.5));
+            filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) drop-shadow(0 0 20px rgba(99,32,233,0.5));
         }
-        
-        .glass-card:hover .emoji-3d {
-            animation-play-state: paused;
-        }
-        
-        /* Special animation for selected card */
-        .ring-2 .emoji-3d {
-            animation: float 2.5s ease-in-out infinite, pulse-glow 2s ease-in-out infinite;
-        }
-        
-        /* Link styling */
-        a {
-            text-decoration: none;
-        }
-        
-        a.glow-button {
-            display: inline-flex;
-        }
+        .glass-card:hover .emoji-3d { animation-play-state: paused; }
+        .ring-2 .emoji-3d { animation: float 2.5s ease-in-out infinite, pulse-glow 2s ease-in-out infinite; }
+
+        a { text-decoration: none; }
+        a.glow-button { display: inline-flex; }
     </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display text-slate-800 dark:text-white premium-bg min-h-screen flex flex-col overflow-x-hidden selection:bg-primary selection:text-white">
+
+    <!-- Contact Support Modal -->
     <div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-close="1"></div>
         <div class="relative w-[92vw] max-w-md rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
@@ -238,7 +185,6 @@
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
-
             <div class="mt-5 flex items-center gap-2 rounded-xl bg-black/30 border border-white/10 px-4 py-3">
                 <span class="text-sm font-semibold text-white select-all" id="contactSupportEmail">contact@vibegra.com</span>
                 <button id="contactSupportCopyBtn" type="button" class="ml-auto inline-flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 transition-colors">
@@ -248,6 +194,7 @@
             <p id="contactSupportCopyHint" class="mt-2 text-xs text-slate-500 hidden">Copied</p>
         </div>
     </div>
+
     <!-- Navigation -->
     <nav class="fixed w-full z-50 top-0 left-0 transition-all duration-300 backdrop-blur-md bg-background-dark/30 border-b border-white/5">
         <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
@@ -257,8 +204,7 @@
                 </div>
                 <span class="text-xl font-bold tracking-tight">Vibegra</span>
             </div>
-            <div class="hidden md:flex items-center gap-10">
-            </div>
+            <div class="hidden md:flex items-center gap-10"></div>
             <div class="flex items-center gap-4">
                 <a href="login.html" class="hidden md:flex text-sm font-medium text-white/70 hover:text-white transition-colors cursor-pointer">Sign In</a>
                 <a href="signup.html" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10 backdrop-blur-sm cursor-pointer">
@@ -269,53 +215,32 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="flex-grow flex flex-col justify-center relative pt-20">
+    <main class="flex-grow flex flex-col justify-center relative pt-16">
         <!-- Ambient Blur Effects -->
         <div class="absolute top-1/4 left-10 w-64 h-64 bg-accent-teal/10 rounded-full blur-[100px] pointer-events-none"></div>
         <div class="absolute bottom-1/4 right-10 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
-        
-        <div class="max-w-7xl mx-auto w-full px-6 py-12 lg:py-20 z-10 flex flex-col items-center text-center">
-            <!-- Contact Support Button -->
-            <div class="mb-4">
-                <button id="contactSupportBtn" type="button" class="group inline-flex items-center gap-2 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 backdrop-blur-md transition-colors">
-                    <span class="material-symbols-outlined text-[18px] text-white/80">support_agent</span>
-                    <span>Contact</span>
-                </button>
-            </div>
-            
+
+        <div class="max-w-7xl mx-auto w-full px-6 py-8 lg:py-14 z-10 flex flex-col items-center text-center">
+
             <!-- Hero Section -->
-            <div class="max-w-3xl mx-auto mb-16 space-y-6 animate-fade-in-up">
-                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm mb-4">
-                    <span class="w-2 h-2 rounded-full bg-accent-teal shadow-[0_0_10px_rgba(45,212,191,0.5)]"></span>
-                    <span class="text-xs font-medium text-white/70 uppercase tracking-wider">Safe Space Verified</span>
-                </div>
-                <div class="mb-4">
-                    <button type="button" class="hidden" data-pwa-install="1">
-                        <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
-                        <span>Install App</span>
-                    </button>
-                </div>
-                <h1 class="text-5xl md:text-7xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
-                    Connect on a <br/><span class="text-white">Deeper Level.</span>
-                </h1>
-                <p class="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-light leading-relaxed">
-                    A premium sanctuary to share your vibe and find people who resonate with you right now. No noise, just connection.
-                </p>
-                <div class="w-full pt-4">
-                    <div id="socialClubMountIndex"></div>
-                    <div id="socialClubOwnerToggleIndex" class="hidden mt-3 w-full max-w-3xl mx-auto">
-                        <div class="flex items-center justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-sm">
-                            <div class="text-left">
-                                <div class="text-sm font-semibold text-white">Social Club Live</div>
-                                <div id="socialClubOwnerToggleHintIndex" class="text-xs text-slate-400">Only visible to the owner account</div>
-                            </div>
-                            <label class="inline-flex items-center gap-2 select-none">
-                                <span id="socialClubOwnerToggleStateIndex" class="text-xs font-semibold text-white/70">OFF</span>
-                                <input id="socialClubOwnerToggleCheckboxIndex" type="checkbox" class="h-5 w-10 rounded-full accent-primary cursor-pointer" />
-                            </label>
+            <div class="max-w-2xl mx-auto mb-14 space-y-8">
+                <div id="socialClubMountIndex"></div>
+                <div id="socialClubOwnerToggleIndex" class="hidden w-full max-w-3xl mx-auto">
+                    <div class="flex items-center justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-sm">
+                        <div class="text-left">
+                            <div class="text-sm font-semibold text-white">Social Club Live</div>
+                            <div id="socialClubOwnerToggleHintIndex" class="text-xs text-slate-400">Only visible to the owner account</div>
                         </div>
+                        <label class="inline-flex items-center gap-2 select-none">
+                            <span id="socialClubOwnerToggleStateIndex" class="text-xs font-semibold text-white/70">OFF</span>
+                            <input id="socialClubOwnerToggleCheckboxIndex" type="checkbox" class="h-5 w-10 rounded-full accent-primary cursor-pointer" />
+                        </label>
                     </div>
                 </div>
+
+                <h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
+                    Connect on how<br/><span class="text-white">you feel.</span>
+                </h1>
             </div>
 
             <!-- CTA Section -->
@@ -346,8 +271,8 @@
 
         <!-- Decorative Background Elements -->
         <div class="absolute top-0 w-full h-full overflow-hidden pointer-events-none z-0">
-            <div class="absolute top-[15%] right-[10%] w-32 h-32 opacity-20" data-alt="Abstract purple glow orb" style="background-image: radial-gradient(circle, rgba(99,32,233,0.4) 0%, transparent 70%);"></div>
-            <div class="absolute bottom-[20%] left-[5%] w-48 h-48 opacity-10" data-alt="Abstract teal glow orb" style="background-image: radial-gradient(circle, rgba(45,212,191,0.4) 0%, transparent 70%);"></div>
+            <div class="absolute top-[15%] right-[10%] w-32 h-32 opacity-20" style="background-image: radial-gradient(circle, rgba(99,32,233,0.4) 0%, transparent 70%);"></div>
+            <div class="absolute bottom-[20%] left-[5%] w-48 h-48 opacity-10" style="background-image: radial-gradient(circle, rgba(45,212,191,0.4) 0%, transparent 70%);"></div>
         </div>
     </main>
 
@@ -357,7 +282,10 @@
             <div class="text-slate-500 text-sm">
                 &copy; 2026 Vibegra. All rights reserved.
             </div>
-            <div class="flex gap-6">
+            <div class="flex items-center gap-6">
+                <button id="contactSupportBtn" type="button" class="text-slate-500 hover:text-white text-sm transition-colors bg-transparent border-none cursor-pointer p-0">
+                    Contact
+                </button>
                 <a class="text-slate-500 hover:text-white text-sm transition-colors" href="vibegra-privacy-policy.html">Privacy Policy</a>
             </div>
         </div>
@@ -372,24 +300,15 @@
             const hint = document.getElementById('contactSupportCopyHint');
             if (!btn || !modal || !copyBtn || !emailEl) return;
 
-            const open = () => {
-                modal.classList.remove('hidden');
-                modal.classList.add('flex');
-            };
-            const close = () => {
-                modal.classList.add('hidden');
-                modal.classList.remove('flex');
-                if (hint) hint.classList.add('hidden');
-            };
+            const open = () => { modal.classList.remove('hidden'); modal.classList.add('flex'); };
+            const close = () => { modal.classList.add('hidden'); modal.classList.remove('flex'); if (hint) hint.classList.add('hidden'); };
 
             btn.addEventListener('click', open);
             modal.addEventListener('click', (e) => {
                 const t = e.target;
                 if (t && t.closest && t.closest('[data-close="1"]')) close();
             });
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') close();
-            });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
             copyBtn.addEventListener('click', async () => {
                 const text = emailEl.textContent || 'contact@vibegra.com';
@@ -406,10 +325,7 @@
                         document.execCommand('copy');
                         ta.remove();
                     }
-                    if (hint) {
-                        hint.classList.remove('hidden');
-                        setTimeout(() => hint.classList.add('hidden'), 1200);
-                    }
+                    if (hint) { hint.classList.remove('hidden'); setTimeout(() => hint.classList.add('hidden'), 1200); }
                 } catch { }
             });
         })();
@@ -430,7 +346,6 @@
                     }
                 } catch { }
             };
-
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', mount);
             } else {
@@ -452,16 +367,10 @@
             function ensureFirebaseReady() {
                 try {
                     if (typeof firebase === 'undefined') return false;
-                    if (!firebase.apps?.length) {
-                        firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-                    }
-                    try {
-                        firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-                    } catch { }
+                    if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
+                    try { firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch { }
                     return true;
-                } catch {
-                    return false;
-                }
+                } catch { return false; }
             }
 
             async function authedHeaders() {
@@ -469,10 +378,7 @@
                 const u = firebase?.auth?.().currentUser;
                 if (!u) return null;
                 const token = await u.getIdToken();
-                return {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                };
+                return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
             }
 
             async function isOwner() {
@@ -482,11 +388,8 @@
                     const res = await fetch('/api/users/me', { headers, credentials: 'same-origin' });
                     if (!res.ok) return false;
                     const me = await res.json();
-                    const email = String(me?.email || '').trim().toLowerCase();
-                    return email === OWNER_EMAIL;
-                } catch {
-                    return false;
-                }
+                    return String(me?.email || '').trim().toLowerCase() === OWNER_EMAIL;
+                } catch { return false; }
             }
 
             async function refresh() {
@@ -509,24 +412,18 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({ isEventOpen: !!nextOpen })
                 });
-                if (!res.ok) {
-                    const t = await res.text();
-                    throw new Error(t || 'Failed to update event');
-                }
+                if (!res.ok) { const t = await res.text(); throw new Error(t || 'Failed to update event'); }
                 await refresh();
             }
 
             checkbox.addEventListener('change', async () => {
                 const desired = checkbox.checked;
                 checkbox.disabled = true;
-                try {
-                    await setOpen(desired);
-                } catch (e) {
+                try { await setOpen(desired); }
+                catch (e) {
                     checkbox.checked = !desired;
                     if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to update';
-                } finally {
-                    checkbox.disabled = false;
-                }
+                } finally { checkbox.disabled = false; }
             });
 
             async function boot() {
@@ -534,18 +431,11 @@
                 const ok = await isOwner();
                 if (!ok) return;
                 root.classList.remove('hidden');
-                try {
-                    await refresh();
-                } catch (e) {
-                    if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to load';
-                }
+                try { await refresh(); }
+                catch (e) { if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to load'; }
             }
 
-            try {
-                firebase?.auth?.().onAuthStateChanged(() => { boot(); });
-            } catch {
-                boot();
-            }
+            try { firebase?.auth?.().onAuthStateChanged(() => { boot(); }); } catch { boot(); }
         })();
     </script>
 
@@ -555,15 +445,15 @@
             const grid = document.getElementById('moodCardsGrid');
 
             const moods = [
-                { id: 'happy', name: 'Happy', emoji: '😊', hint: 'Feeling good', tint: 'from-emerald-400/10' },
-                { id: 'sad', name: 'Sad', emoji: '😭', hint: 'Feeling down', tint: 'from-indigo-500/10' },
-                { id: 'angry', name: 'Angry', emoji: '😠', hint: 'Frustrated', tint: 'from-orange-500/10' },
-                { id: 'lonely', name: 'Lonely', emoji: '😔', hint: 'Seeking connection', tint: 'from-blue-400/10' },
-                { id: 'calm', name: 'Calm', emoji: '😌', hint: 'Peaceful', tint: 'from-teal-400/10' },
-                { id: 'excited', name: 'Excited', emoji: '🤩', hint: 'High energy', tint: 'from-pink-500/10' },
-                { id: 'tired', name: 'Tired', emoji: '😴', hint: 'Low energy', tint: 'from-primary/15' },
-                { id: 'stressed', name: 'Stressed', emoji: '😣', hint: 'Overwhelmed', tint: 'from-red-400/10' },
-                { id: 'confused', name: 'Confused', emoji: '😕', hint: 'Uncertain', tint: 'from-purple-400/10' },
+                { id: 'happy',   name: 'Happy',   emoji: '😊', hint: 'Feeling good',       tint: 'from-emerald-400/10' },
+                { id: 'sad',     name: 'Sad',     emoji: '😭', hint: 'Feeling down',       tint: 'from-indigo-500/10'  },
+                { id: 'angry',   name: 'Angry',   emoji: '😠', hint: 'Frustrated',         tint: 'from-orange-500/10'  },
+                { id: 'lonely',  name: 'Lonely',  emoji: '😔', hint: 'Seeking connection', tint: 'from-blue-400/10'    },
+                { id: 'calm',    name: 'Calm',    emoji: '😌', hint: 'Peaceful',           tint: 'from-teal-400/10'    },
+                { id: 'excited', name: 'Excited', emoji: '🤩', hint: 'High energy',        tint: 'from-pink-500/10'    },
+                { id: 'tired',   name: 'Tired',   emoji: '😴', hint: 'Low energy',         tint: 'from-primary/15'     },
+                { id: 'stressed',name: 'Stressed',emoji: '😣', hint: 'Overwhelmed',        tint: 'from-red-400/10'     },
+                { id: 'confused',name: 'Confused',emoji: '😕', hint: 'Uncertain',          tint: 'from-purple-400/10'  },
             ];
 
             let selectedMood = null;
@@ -601,7 +491,6 @@
             function render() {
                 if (!grid) return;
                 grid.innerHTML = '';
-
                 moods.forEach((m) => {
                     const btn = document.createElement('button');
                     btn.type = 'button';
@@ -624,7 +513,6 @@
                     });
                     grid.appendChild(btn);
                 });
-
                 updateSelection();
             }
 
@@ -643,48 +531,34 @@
 
             async function initFirebase() {
                 if (typeof firebase === 'undefined') throw new Error('Firebase not loaded');
-                if (!firebase.apps?.length) {
-                    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-                }
+                if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
                 firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
             }
 
             async function connectNow() {
                 if (!selectedMood) return;
                 if (!connectBtn || connectBtn.disabled) return;
-
                 connectBtn.disabled = true;
                 showOverlay('Signing you in anonymously…');
-
                 try {
                     await initFirebase();
-
                     let user = firebase.auth().currentUser;
                     if (!user) {
                         const credential = await firebase.auth().signInAnonymously();
                         user = credential.user;
                     }
-
                     if (!user) throw new Error('Anonymous auth failed');
-
                     showOverlay('Creating your guest profile…');
                     const token = await user.getIdToken();
-
                     const res = await fetch('/api/users/ensure-guest', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                        },
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                         body: JSON.stringify({ mood: selectedMood })
                     });
-
                     const text = await res.text();
                     if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-
                     let payload = null;
                     try { payload = JSON.parse(text); } catch { }
-
                     try {
                         localStorage.setItem('guest_uid', user.uid);
                         if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
@@ -693,18 +567,13 @@
                         localStorage.setItem('selectedMood', selectedMood);
                         localStorage.removeItem('currentRoom');
                     } catch { }
-
                     showOverlay('Entering chat…');
                     window.location.href = '/chat.html';
                 } catch (err) {
-                    console.error('Guest connect failed:', err);
                     const msg = (err && err.message) ? String(err.message) : 'Connection failed';
                     alert(msg);
                     const overlay = document.getElementById('guestConnectOverlay');
-                    if (overlay) {
-                        overlay.classList.add('hidden');
-                        overlay.classList.remove('flex');
-                    }
+                    if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
                     connectBtn.disabled = !selectedMood;
                 }
             }
@@ -714,10 +583,7 @@
 
             try {
                 const persisted = localStorage.getItem('selectedMood');
-                if (persisted) {
-                    selectedMood = persisted;
-                    updateSelection();
-                }
+                if (persisted) { selectedMood = persisted; updateSelection(); }
             } catch { }
         })();
     </script>
