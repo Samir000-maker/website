@@ -488,12 +488,12 @@
 
       async function fetchIceServers() {
         try {
-          // ✅ Request STUN-only by default, TURN only if fallback enabled
-          const endpoint = useTurnFallback
-            ? '/api/ice-servers?includeTurn=true'
-            : '/api/ice-servers';
+          // Always request TURN-capable ICE servers. The browser will still prefer
+          // direct/STUN paths first when iceTransportPolicy is "all", but relay
+          // candidates are available immediately if the network needs them.
+          const endpoint = '/api/ice-servers?includeTurn=true';
 
-          console.log(`📡 Fetching ICE servers: ${useTurnFallback ? 'TURN fallback mode' : 'STUN-only mode'}`);
+          console.log(`📡 Fetching ICE servers: TURN-capable mode`);
 
           const response = await _API.get(endpoint);
 
@@ -516,16 +516,11 @@
           console.log(`   - ${turnServers.length} TURN server group(s)`);
 
           if (turnServers.length === 0) {
-            if (useTurnFallback) {
-              console.warn(`   ⚠️ TURN fallback requested but no usable TURN credentials were returned`);
-              console.warn(`   ⚠️ Staying on STUN mode to avoid relay-only connections with no relay server`);
-              useTurnFallback = false;
-            } else {
-              console.log(`   💰 Zero TURN usage - pure peer-to-peer mode`);
-              console.log(`   📊 Cloudflare analytics should show 0 KB`);
-            }
+            console.warn(`   ⚠️ TURN requested but no usable TURN credentials were returned`);
+            console.warn(`   ⚠️ Calls may fail on restrictive NAT/firewall networks`);
+            useTurnFallback = false;
           } else {
-            console.warn(`   ⚠️ TURN enabled (fallback mode after connection failure)`);
+            console.warn(`   ⚠️ TURN candidates available for restrictive networks`);
           }
 
           return ICE_SERVERS;
@@ -3645,6 +3640,11 @@
               state: 'failed',
               userId: userId
             });
+
+            // RTCPeerConnection.connectionState can fail before the ICE-specific
+            // handler runs on some browsers. Trigger the same recovery ladder here
+            // so TURN-capable rebuilds are not delayed or skipped.
+            handleIceFailure(userId);
           }
         };
 
