@@ -475,6 +475,7 @@
 
       let ICE_SERVERS = null;
       let useTurnFallback = false; // Global flag for TURN fallback
+      let turnFallbackAvailable = false;
 
       // Persist STUN retry attempts across PC rebuilds (otherwise it resets to 0 every createPC())
       const stunAttemptTotals = new Map(); // userId -> number
@@ -496,23 +497,33 @@
 
           const response = await _API.get(endpoint);
 
-          const stunServers = response.iceServers.filter(server =>
-            server.urls.some(url => url.startsWith('stun:'))
+          const iceServerList = Array.isArray(response?.iceServers) ? response.iceServers : [];
+          const stunServers = iceServerList.filter(server =>
+            (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => typeof url === 'string' && url.startsWith('stun:'))
           );
 
-          const turnServers = response.iceServers.filter(server =>
-            server.urls.some(url => url.startsWith('turn:') || url.startsWith('turns:'))
+          const turnServers = iceServerList.filter(server =>
+            (Array.isArray(server.urls) ? server.urls : [server.urls]).some(url => typeof url === 'string' && (url.startsWith('turn:') || url.startsWith('turns:'))) &&
+            server.username &&
+            server.credential
           );
 
-          ICE_SERVERS = response.iceServers;
+          ICE_SERVERS = iceServerList.length ? iceServerList : [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+          turnFallbackAvailable = turnServers.length > 0;
 
           console.log(`✅ ICE servers loaded:`);
           console.log(`   - ${stunServers.length} STUN server group(s)`);
           console.log(`   - ${turnServers.length} TURN server group(s)`);
 
           if (turnServers.length === 0) {
-            console.log(`   💰 Zero TURN usage - pure peer-to-peer mode`);
-            console.log(`   📊 Cloudflare analytics should show 0 KB`);
+            if (useTurnFallback) {
+              console.warn(`   ⚠️ TURN fallback requested but no usable TURN credentials were returned`);
+              console.warn(`   ⚠️ Staying on STUN mode to avoid relay-only connections with no relay server`);
+              useTurnFallback = false;
+            } else {
+              console.log(`   💰 Zero TURN usage - pure peer-to-peer mode`);
+              console.log(`   📊 Cloudflare analytics should show 0 KB`);
+            }
           } else {
             console.warn(`   ⚠️ TURN enabled (fallback mode after connection failure)`);
           }
@@ -521,6 +532,8 @@
         } catch (error) {
           console.error('❌ ICE servers failed:', error);
           ICE_SERVERS = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+          turnFallbackAvailable = false;
+          useTurnFallback = false;
           return ICE_SERVERS;
         }
       }
@@ -3054,7 +3067,7 @@
         const pc = new RTCPeerConnection({
           ...PEER_CONNECTION_CONFIG,
           // Once we fall back to TURN, force relay-only to avoid wasting time on dead STUN paths.
-          iceTransportPolicy: useTurnFallback ? 'relay' : PEER_CONNECTION_CONFIG.iceTransportPolicy,
+          iceTransportPolicy: (useTurnFallback && turnFallbackAvailable) ? 'relay' : PEER_CONNECTION_CONFIG.iceTransportPolicy,
           iceServers: ICE_SERVERS
         });
 
@@ -3700,13 +3713,19 @@
           toast('Switching to alternative connection path...', 'warning');
 
           fetchIceServers().then(() => {
-            console.log(`✅ TURN configuration loaded`);
-            if (subtitle) subtitle.textContent = `Connecting via Relay...`;
+            if (!turnFallbackAvailable) {
+              console.warn(`⚠️ TURN fallback unavailable. Retrying with STUN instead of forcing relay-only mode.`);
+              if (subtitle) subtitle.textContent = `Reconnecting...`;
+              toast('Relay connection is unavailable. Retrying direct connection...', 'warning');
+            } else {
+              console.log(`✅ TURN configuration loaded`);
+              if (subtitle) subtitle.textContent = `Connecting via Relay...`;
+            }
             const currentPC = peerConnections.get(userId);
             if (currentPC) currentPC.close();
             peerConnections.delete(userId);
 
-            // Re-init with TURN
+            // Re-init with TURN if available, otherwise keep normal STUN mode.
             setTimeout(() => createOffer(userId), 250);
           });
         } else if (useTurnFallback) {
