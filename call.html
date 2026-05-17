@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" class="dark">
 
@@ -2723,6 +2724,7 @@
 
         const MAX_RETRIES = 3;
         let attempt = 0;
+        let acquiredMedia = false;
 
         if (loadingText) loadingText.textContent = "Accessing Camera & Mic";
 
@@ -2752,7 +2754,7 @@
               hasVideo = localStream.getVideoTracks().length > 0;
               hasAudio = localStream.getAudioTracks().length > 0;
               console.log(`✅ [Attempt ${attempt}] SUCCESS: video=${hasVideo}, audio=${hasAudio}`);
-              break;
+              acquiredMedia = true;
             } catch (videoError) {
               console.warn(`⚠️ [Attempt ${attempt}] Video failed: ${videoError.name}`);
 
@@ -2768,18 +2770,23 @@
                 if (attempt === 1) {
                   toast('Camera not available, using audio only', 'warning');
                 }
-                break;
+                acquiredMedia = true;
               } catch (audioError) {
                 console.error(`❌ [Attempt ${attempt}] Both failed: ${audioError.name}`);
 
                 if (attempt === MAX_RETRIES) {
                   localStream = new MediaStream();
                   toast('No media devices available. You can still join the call.', 'error');
+                  acquiredMedia = true;
                 } else {
                   await new Promise(resolve => setTimeout(resolve, 500));
                   continue;
                 }
               }
+            }
+
+            if (!acquiredMedia) {
+              continue;
             }
 
             // ✅ FIX: Set states AFTER actual media acquisition
@@ -2880,9 +2887,9 @@
           console.log(`🔧 ========================================`);
           console.log(`🔧 SETUP LOCAL VIDEO`);
           console.log(`🔧 ========================================`);
-          console.log(`   User: ${currentUser.username}`);
+          console.log(`   User: ${currentUser?.username || 'unknown'}`);
           console.log(`   isVideoEnabled: ${isVideoEnabled}`);
-          console.log(`   Video tracks: ${localStream.getVideoTracks().length}`);
+          console.log(`   Video tracks: ${localStream ? localStream.getVideoTracks().length : 0}`);
 
           const localTile = document.getElementById(`participant-${currentUser.userId}`);
           if (!localTile) {
@@ -2912,18 +2919,28 @@
             console.log(`📹 Waiting for local video to be ready...`);
 
             await new Promise((resolve) => {
+              let resolved = false;
+              const finish = () => {
+                if (resolved) return;
+                resolved = true;
+                resolve();
+              };
               const checkReady = () => {
                 if (localVid.readyState >= 2) {
                   console.log(`📹 Local video ready: ${localVid.videoWidth}x${localVid.videoHeight}`);
-                  resolve();
+                  finish();
                 } else {
                   addListener(localVid, 'loadedmetadata', () => {
                     console.log(`📹 Metadata loaded: ${localVid.videoWidth}x${localVid.videoHeight}`);
-                    resolve();
+                    finish();
                   }, { once: true });
                 }
               };
               checkReady();
+              trackTimeout(setTimeout(() => {
+                console.warn('⚠️ Local video metadata wait timed out; attempting playback anyway');
+                finish();
+              }, 1500));
             });
 
             try {
@@ -5111,14 +5128,15 @@
 
 
           socketInstance.on('call_joined', async (data) => {
+            const participants = Array.isArray(data?.participants) ? data.participants : [];
             console.log(`✅ ========================================`);
             console.log(`✅ CALL_JOINED EVENT RECEIVED`);
             console.log(`✅ ========================================`);
-            console.log(`📊 Participants: ${data.participants.length}`);
+            console.log(`📊 Participants: ${participants.length}`);
 
             if (reconnectGate.inProgress) {
               reconnectGate.callJoined = true;
-              reconnectGate.participantsCount = Array.isArray(data.participants) ? data.participants.length : 0;
+              reconnectGate.participantsCount = participants.length;
               maybeResolveReconnectGate('call_joined');
             }
 
@@ -5129,7 +5147,7 @@
 
 
             // Log all participants and store their initial media states
-            data.participants.forEach((p, i) => {
+            participants.forEach((p, i) => {
               console.log(`   [${i}] ${p.username} (${p.userId}) video:${p.videoEnabled} audio:${p.audioEnabled}`);
 
               // ✅ Authoritative initial state from server
@@ -5147,7 +5165,7 @@
               }
             });
 
-            if (!data.participants || data.participants.length === 0) {
+            if (participants.length === 0) {
               console.error('❌ Received call_joined with 0 participants!');
               toast('Call state error. Please try again.', 'error');
               setTimeout(() => {
@@ -5157,7 +5175,7 @@
             }
 
             const subtitle = document.getElementById('callSubtitle');
-            if (subtitle) subtitle.textContent = `${data.participants.length} participant${data.participants.length > 1 ? 's' : ''}`;
+            if (subtitle) subtitle.textContent = `${participants.length} participant${participants.length > 1 ? 's' : ''}`;
 
             console.log(`🎬 Initializing local media...`);
             try {
@@ -5190,9 +5208,9 @@
             grid.innerHTML = '';
             renderedParticipants.clear();
 
-            console.log(`📋 Rendering ${data.participants.length} tiles`);
+            console.log(`📋 Rendering ${participants.length} tiles`);
 
-            const sortedParticipants = [...data.participants].sort((a, b) =>
+            const sortedParticipants = [...participants].sort((a, b) =>
               a.userId.localeCompare(b.userId)
             );
 
@@ -5289,41 +5307,50 @@
 
           // Replace the entire user_joined_call handler
           socketInstance.on('user_joined_call', (data) => {
-            const videoState = data.user.videoEnabled !== undefined ? data.user.videoEnabled : (callData.callType === 'video');
-            const audioState = data.user.audioEnabled !== undefined ? data.user.audioEnabled : true;
+            const joinedUser = data?.user || {};
+            const joinedMediaState = data?.mediaState || {};
+            const videoState = joinedUser.videoEnabled !== undefined
+              ? joinedUser.videoEnabled
+              : (joinedMediaState.videoEnabled !== undefined ? joinedMediaState.videoEnabled : (callData.callType === 'video'));
+            const audioState = joinedUser.audioEnabled !== undefined
+              ? joinedUser.audioEnabled
+              : (joinedMediaState.audioEnabled !== undefined ? joinedMediaState.audioEnabled : true);
 
-            console.log(`👋 User joined event: ${data.user.username} (${data.user.userId}) video:${videoState} audio:${audioState}`);
+            joinedUser.videoEnabled = videoState;
+            joinedUser.audioEnabled = audioState;
+
+            console.log(`👋 User joined event: ${joinedUser.username} (${joinedUser.userId}) video:${videoState} audio:${audioState}`);
 
             // ✅ Store intended media state immediately
-            remoteMediaStates.set(data.user.userId, { video: videoState, audio: audioState });
+            remoteMediaStates.set(joinedUser.userId, { video: videoState, audio: audioState });
 
             // CRITICAL FIX: Check if this is a duplicate event for already-rendered participant
-            if (renderedParticipants.has(data.user.userId)) {
-              console.warn(`⚠️ Participant ${data.user.username} already rendered, ignoring duplicate user_joined_call`);
+            if (renderedParticipants.has(joinedUser.userId)) {
+              console.warn(`⚠️ Participant ${joinedUser.username} already rendered, ignoring duplicate user_joined_call`);
               return;
             }
 
             const grid = document.getElementById('participantGrid');
-            const existingTile = document.getElementById(`participant-${data.user.userId}`);
+            const existingTile = document.getElementById(`participant-${joinedUser.userId}`);
 
             if (existingTile) {
-              console.warn(`⚠️ Tile already exists in DOM for ${data.user.username}, removing old tile`);
+              console.warn(`⚠️ Tile already exists in DOM for ${joinedUser.username}, removing old tile`);
               existingTile.remove();
-              renderedParticipants.delete(data.user.userId);
+              renderedParticipants.delete(joinedUser.userId);
             }
 
-            console.log(`➕ Adding NEW participant ${data.user.username}`);
+            console.log(`➕ Adding NEW participant ${joinedUser.username}`);
 
             if (grid) {
-              const isSelf = data.user.userId === currentUser.userId;
-              const tile = createParticipantTile(data.user, isSelf);
+              const isSelf = joinedUser.userId === currentUser.userId;
+              const tile = createParticipantTile(joinedUser, isSelf);
 
               if (tile) {
                 grid.appendChild(tile);
 
                 syncGridCount();
 
-                const micIndicator = document.getElementById(`mic-${data.user.userId}`);
+                const micIndicator = document.getElementById(`mic-${joinedUser.userId}`);
                 if (micIndicator && audioState === false) {
                   micIndicator.classList.remove('hidden');
                 }
@@ -5336,16 +5363,16 @@
                   });
                 } else {
                   // For remote users, initiate connection with delay to avoid race
-                  const shouldInitiateOffer = currentUser.userId < data.user.userId;
+                  const shouldInitiateOffer = currentUser.userId < joinedUser.userId;
                   if (shouldInitiateOffer) {
                     trackTimeout(setTimeout(() => {
-                      console.log(`📤 Creating offer to late joiner ${data.user.username}`);
-                      safeNoThrow(() => createOffer(data.user.userId), 'createOffer');
+                      console.log(`📤 Creating offer to late joiner ${joinedUser.username}`);
+                      safeNoThrow(() => createOffer(joinedUser.userId), 'createOffer');
                     }, 2000)); // Increased delay to 2s
                   }
                 }
 
-                console.log(`✅ Tile rendered for ${data.user.username}, tracking set updated`);
+                console.log(`✅ Tile rendered for ${joinedUser.username}, tracking set updated`);
               }
             }
           });
