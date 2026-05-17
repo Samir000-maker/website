@@ -2828,6 +2828,16 @@ app.get('/favicon.ico', (req, res) => {
   res.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0d1117"/><circle cx="32" cy="32" r="20" fill="#06b6d4"/><path d="M22 31c3 8 17 8 20 0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/><circle cx="25" cy="25" r="3" fill="#fff"/><circle cx="39" cy="25" r="3" fill="#fff"/></svg>`);
 });
 
+app.get(['/favicon.png', '/public/favicon.png'], (req, res) => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABg3Am1AAAACXBIWXMAAAsTAAALEwEAmpwYAAABuUlEQVR4nO2ZzUoDMRSGv0RR6K5E8Bau9Aau3Ih4B3EheAMfwI2uBNd6B0VxI+IiuBBxI7jxF7QTBVW6dQ8tM5mQtHSSdJqZpM0P4WHIkPycJOfMmQwAAAAAAAAAgJ9oWwDrAFuS9bW5dmI3wA7AS7LuH5J0AnwE7JIsSc4MAM4A5yQbSdLGMYBfkqSUZC+8DnAZ4CMkqY0gGrgGcDrgA8n6a21gDfAecDXkjWgCPgTuBa4m2wWz1RxdqJ4BHgLeS3V3aDQDfA56QrIFJZx4BHktyW7IHxgCeTc7xTA1wNeAl4AvJzq7tBfAl4BnJFn8BvCjZOHG6Anj9LwDFkl1d2xcANwDtkuyWbEiwVP3FhaW5nS4CxySrSWYDZ0l2Ae4E+GUTRhxH8TDAZMk6kqXXIbpM2x7nFd8A3t0EZwI8kWwR7gT4FAAAAABgLmVdCvDJTSa7gN8DPgc8ACyRtAB4XbLujiQ/LcCjkkvJypb1RzQN8GCS3dX9B7gK+I1sI8r2P1ySLMnOzB3gQeC85BXgdcAHwM3A48l6nWoDnADcA9ySLAUck2xNtgfsBDyZbC/Jaoo5wLckq7q2bUIRJEkV8Jsk6wPXANck25NsDrAu2Zlk4xjA59YBAAAAAAAAAF4sH9mLU/TtKwPRAAAAAElFTkSuQmCC',
+    'base64'
+  );
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.type('image/png');
+  res.send(png);
+});
+
 
 // [api/leave-chat route moved to top]
 
@@ -5871,13 +5881,36 @@ io.on('connection', (socket) => {
             return;
           }
         } else {
-          // User genuinely not in this room
-          console.error(`❌ User ${user.username} (${user.userId}) not authorized for room ${roomId}`);
-          socket.emit('error', {
-            message: 'You are not a member of this room',
-            code: 'NOT_IN_ROOM'
-          });
-          return;
+          // Last-chance recovery for stale client/server membership drift.
+          // If the room still has space, re-add the authenticated user instead of
+          // leaving the browser stuck in a cached room that cannot signal calls.
+          try {
+            const added = await room.addUser({
+              userId: user.userId,
+              username: user.username,
+              pfpUrl: user.pfpUrl,
+              firebaseUid: user.firebaseUid
+            });
+
+            if (!added) {
+              throw new Error('Room is full or unavailable for membership recovery');
+            }
+
+            console.warn(`⚠️ Recovered ${user.username} into room ${roomId} from stale client room cache`);
+            logLifecycle('join_room_membership_recovered', {
+              userId: user.userId,
+              roomId,
+              source: 'stale_client_cache'
+            });
+          } catch (error) {
+            // User genuinely not in this room
+            console.error(`❌ User ${user.username} (${user.userId}) not authorized for room ${roomId}`);
+            socket.emit('error', {
+              message: 'You are not a member of this room',
+              code: 'NOT_IN_ROOM'
+            });
+            return;
+          }
         }
       }
 
