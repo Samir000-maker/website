@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -1730,13 +1731,22 @@
           }
 
         } else {
-          // No active call - enable call buttons
-          audioCallBtn.disabled = false;
-          videoCallBtn.disabled = false;
-          audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-          videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-          audioCallBtn.title = 'Start audio call';
-          videoCallBtn.title = 'Start video call';
+          if (isSocketAuthenticated && hasJoinedRoom && roomData?.roomId && !isInitiatingCall) {
+            // No active call - enable call buttons
+            audioCallBtn.disabled = false;
+            videoCallBtn.disabled = false;
+            audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            audioCallBtn.title = 'Start audio call';
+            videoCallBtn.title = 'Start video call';
+          } else {
+            audioCallBtn.disabled = true;
+            videoCallBtn.disabled = true;
+            audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            audioCallBtn.title = isInitiatingCall ? 'Calling...' : 'Preparing chat...';
+            videoCallBtn.title = isInitiatingCall ? 'Calling...' : 'Preparing chat...';
+          }
         }
       }
 
@@ -2507,8 +2517,12 @@
         isSocketAuthenticated = authenticated;
 
         if (authenticated) {
-          console.log(`✅ Socket fully authenticated - enabling call features`);
-          enableCallButtons();
+          console.log(`✅ Socket fully authenticated - call features will enable after room join`);
+          if (hasJoinedRoom && roomData?.roomId && !isInitiatingCall) {
+            enableCallButtons();
+          } else {
+            disableCallButtons(false);
+          }
         } else {
           console.log(`🔒 Socket not authenticated - disabling call features`);
           disableCallButtons(true); // true = show loading state
@@ -3376,6 +3390,12 @@
 
       function enableCallButtons() {
         console.log(`🎚️ Enabling call buttons`);
+
+        if (!isSocketAuthenticated || !hasJoinedRoom || !roomData?.roomId || isInitiatingCall) {
+          console.log(`   ⏳ Call buttons stay disabled until chat room is ready`);
+          disableCallButtons(false);
+          return;
+        }
 
         if (audioCallBtn) {
           audioCallBtn.disabled = false;
@@ -7042,13 +7062,6 @@
           }
         });
 
-        socketInstance.on('call_declined', (data) => {
-          toast('Call was declined', 'warning');
-          isInitiatingCall = false;
-          audioCallBtn?.classList.remove('calling');
-          videoCallBtn?.classList.remove('calling');
-        });
-
         socketInstance.on('call_state_update', (data) => {
           console.log('📞 Call state update:', data);
 
@@ -7405,6 +7418,16 @@
               return;
             }
 
+            if (!hasJoinedRoom || !roomData?.roomId) {
+              console.warn('⚠️ Chat room is not ready for call initiation yet');
+              toast('Chat is still connecting. Please try again in a moment.', 'warning');
+              audioCallBtn.disabled = true;
+              audioCallBtn.classList.remove('animate-pulse');
+              updateCallButtonStates();
+              console.log('📞 ========================================\n');
+              return;
+            }
+
             console.log('✅ All checks passed - initiating audio call');
             isInitiatingCall = true;
 
@@ -7496,6 +7519,16 @@
             if (!socketInstance || !socketInstance.connected) {
               console.error('❌ Socket disconnected during call initiation');
               toast('Connection lost. Please refresh.', 'error');
+              console.log('📞 ========================================\n');
+              return;
+            }
+
+            if (!hasJoinedRoom || !roomData?.roomId) {
+              console.warn('⚠️ Chat room is not ready for call initiation yet');
+              toast('Chat is still connecting. Please try again in a moment.', 'warning');
+              videoCallBtn.disabled = true;
+              videoCallBtn.classList.remove('animate-pulse');
+              updateCallButtonStates();
               console.log('📞 ========================================\n');
               return;
             }
