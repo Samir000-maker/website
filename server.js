@@ -6765,44 +6765,6 @@ io.on('connection', (socket) => {
     }
   });
 
-
-  socket.on('ice_candidate', async ({ callId, targetUserId, candidate }) => {
-    try {
-      const user = await getSocketUser(socket.id);
-
-      if (!user) return;
-
-      if (!checkSignalingRateLimit(user.userId)) {
-        console.warn(`⚠️ Signaling rate limit exceeded for ${user.username}`);
-        return;
-      }
-
-      const validation = validateICECandidate(candidate);
-      if (!validation.valid) {
-        console.error(`❌ Invalid ICE candidate from ${user.username}: ${validation.error}`);
-        return;
-      }
-
-      if (candidate) {
-        const candidateType = candidate.type || 'unknown';
-        console.log(`🧊 [ICE] Candidate from ${user.username} to ${targetUserId}: type=${candidateType}`);
-      } else {
-        console.log(`🧊 [ICE] End-of-candidates from ${user.username} to ${targetUserId}`);
-      }
-
-      // Forward to target user via Redis
-      io.to(`user:${targetUserId}`).emit('ice_candidate', {
-        fromUserId: user.userId,
-        candidate: candidate
-      });
-      console.log(`✅ [ICE] Candidate forwarded to ${targetUserId} via Redis`);
-
-    } catch (error) {
-      console.error('❌ [ICE] Candidate error:', error);
-    }
-  });
-
-
   socket.on('join_call', async ({ callId }) => {
     try {
       const user = await getSocketUser(socket.id);
