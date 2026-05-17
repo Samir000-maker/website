@@ -143,6 +143,21 @@ async function getRoomFromRedis(roomId) {
   }
 }
 
+async function scanRoomDataKeys() {
+  const keys = [];
+  let cursor = '0';
+
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', 'room:data:*', 'COUNT', 100);
+    cursor = nextCursor;
+    if (Array.isArray(batch) && batch.length) {
+      keys.push(...batch);
+    }
+  } while (cursor !== '0');
+
+  return keys;
+}
+
 /**
  * Enhanced Room class (Stateless helper)
  */
@@ -255,7 +270,7 @@ class Room {
  */
 async function findRoomWithSpace(mood, excludeUserId = null) {
   try {
-    const keys = await redis.keys('room:data:*');
+    const keys = await scanRoomDataKeys();
     const candidates = [];
     for (const key of keys) {
       const roomId = key.replace('room:data:', '');
@@ -313,7 +328,7 @@ export async function addToQueue(userData) {
   }
 
   // 1. Initial capacity check
-  const keys = await redis.keys('room:data:*');
+  const keys = await scanRoomDataKeys();
   if (keys.length >= config.MAX_ROOMS) {
     return { error: 'Server at capacity' };
   }
@@ -519,7 +534,7 @@ export async function getQueueStatus(mood) {
 }
 
 export async function getActiveRooms() {
-  const keys = await redis.keys('room:data:*');
+  const keys = await scanRoomDataKeys();
   const rooms = [];
   for (const key of keys) {
     const roomId = key.replace('room:data:', '');
@@ -530,7 +545,7 @@ export async function getActiveRooms() {
 }
 
 export async function getRoomStats() {
-  const keys = await redis.keys('room:data:*');
+  const keys = await scanRoomDataKeys();
   return {
     totalRooms: keys.length,
     // Detailed stats could be pulled via HGETALL on all keys but that's expensive
