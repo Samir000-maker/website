@@ -1964,10 +1964,27 @@ function checkRoomMessageRateLimit(roomId) {
 // ============================================
 // CLOUDFLARE TURN SERVER CONFIGURATION
 // ============================================
+const HARDCODED_CLOUDFLARE_TURN_TOKEN_ID = '3a48c3a17cac325a12005dfa5f8922d1';
+const HARDCODED_CLOUDFLARE_TURN_API_TOKEN = '8887406762edbf2734e867d66e82c6222cfeb2af48404bcef665a16404b0f4d3';
 
 async function generateCloudTurnCredentials() {
-  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID;
-  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN;
+  const TURN_TOKEN_ID = process.env.CLOUDFLARE_TURN_TOKEN_ID || HARDCODED_CLOUDFLARE_TURN_TOKEN_ID;
+  const TURN_API_TOKEN = process.env.CLOUDFLARE_TURN_API_TOKEN || HARDCODED_CLOUDFLARE_TURN_API_TOKEN;
+  const STATIC_TURN_URLS = process.env.TURN_URLS || process.env.TURN_URL || '';
+  const STATIC_TURN_USERNAME = process.env.TURN_USERNAME || '';
+  const STATIC_TURN_CREDENTIAL = process.env.TURN_CREDENTIAL || '';
+
+  if (STATIC_TURN_URLS && STATIC_TURN_USERNAME && STATIC_TURN_CREDENTIAL) {
+    const urls = STATIC_TURN_URLS.split(',').map(url => url.trim()).filter(Boolean);
+    if (urls.length) {
+      console.log('✅ Using static TURN configuration from environment');
+      return [{
+        urls,
+        username: STATIC_TURN_USERNAME,
+        credential: STATIC_TURN_CREDENTIAL
+      }];
+    }
+  }
 
   if (!TURN_TOKEN_ID || !TURN_API_TOKEN) {
     console.warn('⚠️ TURN credentials not configured - operating with STUN only');
@@ -1981,7 +1998,7 @@ async function generateCloudTurnCredentials() {
   try {
     console.log('🔄 Generating Cloudflare TURN credentials...');
     const response = await fetch(
-      `https://rtc.live.cloudflare.com/v1/turn/keys/${TURN_TOKEN_ID}/credentials/generate`,
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${TURN_TOKEN_ID}/credentials/generate-ice-servers`,
       {
         method: 'POST',
         headers: {
@@ -2007,22 +2024,29 @@ async function generateCloudTurnCredentials() {
 
     console.log('📦 Raw TURN response:', JSON.stringify(data, null, 2));
 
-    if (data.iceServers) {
-      const turnConfig = data.iceServers;
-
-      const iceServer = {
+    const rawIceServers = Array.isArray(data.iceServers) ? data.iceServers : (data.iceServers ? [data.iceServers] : []);
+    const turnServers = rawIceServers
+      .map(turnConfig => ({
         urls: Array.isArray(turnConfig.urls) ? turnConfig.urls : [turnConfig.urls],
         username: turnConfig.username,
         credential: turnConfig.credential
-      };
+      }))
+      .map(server => ({
+        ...server,
+        urls: server.urls.filter(url => typeof url === 'string' && /^(turn|turns):/i.test(url))
+      }))
+      .filter(server => server.urls.length > 0 && server.username && server.credential);
 
+    if (turnServers.length > 0) {
       console.log('✅ Cloudflare TURN credentials generated successfully');
-      console.log(`   URLs: ${iceServer.urls.length} endpoints`);
-      iceServer.urls.forEach(url => console.log(`      - ${url}`));
-      console.log(`   Username: ${iceServer.username?.substring(0, 20)}...`);
-      console.log(`   Credential: ${iceServer.credential ? '[present]' : '[missing]'}`);
+      turnServers.forEach(iceServer => {
+        console.log(`   URLs: ${iceServer.urls.length} endpoints`);
+        iceServer.urls.forEach(url => console.log(`      - ${url}`));
+        console.log(`   Username: ${iceServer.username?.substring(0, 20)}...`);
+        console.log(`   Credential: ${iceServer.credential ? '[present]' : '[missing]'}`);
+      });
 
-      return [iceServer];
+      return turnServers;
     } else {
       console.error('❌ Unexpected TURN response structure:', data);
       return null;
@@ -2736,14 +2760,18 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    activeRooms: matchmaking.getActiveRooms().length,
-    webrtcMetrics: webrtcMetrics.getAll(),
-    turnConfigured: !!(process.env.CLOUDFLARE_TURN_TOKEN_ID && process.env.CLOUDFLARE_TURN_API_TOKEN),
-    server: 'running'
-  });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      activeRooms: matchmaking.getActiveRooms().length,
+      webrtcMetrics: webrtcMetrics.getAll(),
+      turnConfigured: !!(
+        ((process.env.CLOUDFLARE_TURN_TOKEN_ID || HARDCODED_CLOUDFLARE_TURN_TOKEN_ID) &&
+          (process.env.CLOUDFLARE_TURN_API_TOKEN || HARDCODED_CLOUDFLARE_TURN_API_TOKEN)) ||
+        ((process.env.TURN_URLS || process.env.TURN_URL) && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL)
+      ),
+      server: 'running'
+    });
 });
 
 app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
@@ -2792,6 +2820,12 @@ app.get('/api/ice-servers', authenticateFirebase, async (req, res) => {
     console.error('❌ Error getting ICE servers:', error);
     res.status(500).json({ error: 'Failed to get ICE servers' });
   }
+});
+
+app.get('/favicon.ico', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.type('image/svg+xml');
+  res.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0d1117"/><circle cx="32" cy="32" r="20" fill="#06b6d4"/><path d="M22 31c3 8 17 8 20 0" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/><circle cx="25" cy="25" r="3" fill="#fff"/><circle cx="39" cy="25" r="3" fill="#fff"/></svg>`);
 });
 
 
