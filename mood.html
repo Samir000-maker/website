@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
-
+ 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>How are you feeling? - MoodJournal</title>
-
+ 
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#8b5cf6">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
+ 
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
     rel="stylesheet">
@@ -35,13 +35,13 @@
       --accent-purple-light: #a78bfa;
       --accent-blue: #6366f1;
     }
-
+ 
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
-
+ 
     body {
       font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg-dark);
@@ -52,14 +52,14 @@
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-
+ 
     .gradient-text {
       background: linear-gradient(135deg, #a78bfa 0%, #d946ef 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-
+ 
     .header {
       border-bottom: 1px solid var(--border-dark);
       background: rgba(22, 23, 43, 0.8);
@@ -68,23 +68,23 @@
       top: 0;
       z-index: 90;
     }
-
+ 
     .header-content {
       max-width: 1200px;
       margin: 0 auto;
       display: flex;
       height: 78px;
-      align-items: flex-end;
+      align-items: center;
       justify-content: space-between;
-      padding: 0 24px 10px;
+      padding: 0 24px;
     }
-
+ 
     .logo {
       display: flex;
       align-items: center;
       gap: 8px;
     }
-
+ 
     .logo-icon {
       width: 32px;
       height: 32px;
@@ -95,19 +95,13 @@
       justify-content: center;
       font-size: 18px;
     }
-
-    .logo-text {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
+ 
     .nav {
       display: flex;
       gap: 32px;
       align-items: center;
     }
-
+ 
     .nav a {
       color: var(--text-secondary);
       text-decoration: none;
@@ -115,39 +109,26 @@
       font-weight: 500;
       transition: color 0.2s;
     }
-
+ 
     .nav a:hover {
       color: var(--text-primary);
     }
-
+ 
     .user-actions {
       display: flex;
       align-items: center;
       gap: 16px;
     }
-
+ 
+    /* ── Profile / user-menu ── */
     .user-menu {
       position: relative;
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
+      align-items: center;
       gap: 10px;
       z-index: 200;
     }
-
-    .logout-text {
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      user-select: none;
-      transition: color 0.2s;
-    }
-
-    .logout-text:hover {
-      color: var(--text-primary);
-    }
-
+ 
     .profile-icon-btn {
       width: 40px;
       height: 40px;
@@ -161,21 +142,22 @@
       justify-content: center;
       padding: 0;
       transition: transform 0.15s, border-color 0.2s, background 0.2s;
+      flex-shrink: 0;
     }
-
+ 
     .profile-icon-btn:hover {
       transform: translateY(-1px);
       border-color: rgba(167, 139, 250, 0.55);
       background: rgba(30, 33, 57, 0.9);
     }
-
+ 
     .profile-icon-img {
       width: 100%;
       height: 100%;
       object-fit: cover;
       display: block;
     }
-
+ 
     .profile-icon-fallback {
       width: 100%;
       height: 100%;
@@ -188,7 +170,8 @@
       font-size: 14px;
       letter-spacing: 0.5px;
     }
-
+ 
+    /* ── Profile dropdown menu ── */
     .profile-menu {
       position: absolute;
       top: calc(100% + 10px);
@@ -201,8 +184,20 @@
       padding: 8px;
       z-index: 300;
       backdrop-filter: blur(10px);
+      /* animation */
+      opacity: 0;
+      transform: translateY(6px) scale(0.97);
+      pointer-events: none;
+      transition: opacity 0.18s cubic-bezier(0.4,0,0.2,1),
+                  transform 0.18s cubic-bezier(0.4,0,0.2,1);
     }
-
+ 
+    .profile-menu.open {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+ 
     .profile-menu button {
       width: 100%;
       display: flex;
@@ -218,17 +213,38 @@
       font-weight: 700;
       text-align: left;
       transition: background 0.15s;
+      font-family: inherit;
     }
-
+ 
     .profile-menu button:hover {
       background: rgba(255, 255, 255, 0.06);
     }
-
+ 
     .profile-menu .material-symbols-outlined {
       font-size: 18px;
       color: rgba(167, 139, 250, 0.95);
     }
-
+ 
+    /* logout button icon in menu — red tint */
+    .profile-menu .menu-logout .material-symbols-outlined {
+      color: rgba(248, 113, 113, 0.9);
+    }
+ 
+    .profile-menu .menu-logout {
+      color: rgba(248, 113, 113, 0.92);
+    }
+ 
+    .profile-menu .menu-logout:hover {
+      background: rgba(239, 68, 68, 0.08);
+    }
+ 
+    /* Thin divider between menu items */
+    .profile-menu .menu-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.07);
+      margin: 6px 4px;
+    }
+ 
     .notification-btn {
       width: 40px;
       height: 40px;
@@ -243,26 +259,12 @@
       font-size: 20px;
       transition: all 0.2s;
     }
-
+ 
     .notification-btn:hover {
       background: var(--bg-card);
       color: var(--text-primary);
     }
-
-    .user-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
-      cursor: pointer;
-      border: 2px solid transparent;
-      transition: border-color 0.2s;
-    }
-
-    .user-avatar:hover {
-      border-color: var(--accent-purple);
-    }
-
+ 
     main {
       flex: 1;
       width: 100%;
@@ -270,7 +272,7 @@
       margin: 0 auto;
       padding: 48px 24px;
     }
-
+ 
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -284,27 +286,27 @@
       letter-spacing: 0.5px;
       margin-bottom: 24px;
     }
-
+ 
     .status-indicator {
       width: 6px;
       height: 6px;
       background: var(--accent-purple-light);
       border-radius: 50%;
     }
-
+ 
     .hero {
       text-align: center;
       margin-bottom: 48px;
     }
-
+ 
     .hero h1 {
-      font-size: 56px;
+      font-size: 46px;
       font-weight: 800;
       line-height: 1.1;
       margin-bottom: 16px;
       letter-spacing: -0.02em;
     }
-
+ 
     .hero p {
       font-size: 16px;
       color: var(--text-secondary);
@@ -312,7 +314,7 @@
       margin: 0 auto 40px;
       line-height: 1.6;
     }
-
+ 
     .primary-btn {
       background: white;
       color: #16172b;
@@ -327,19 +329,20 @@
       gap: 8px;
       transition: all 0.2s;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      font-family: inherit;
     }
-
+ 
     .primary-btn:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
     }
-
+ 
     .primary-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
       transform: none;
     }
-
+ 
     .helper-text {
       text-align: center;
       color: var(--text-muted);
@@ -347,7 +350,7 @@
       margin-bottom: 32px;
       margin-top: 12px;
     }
-
+ 
     .moods-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -355,7 +358,7 @@
       max-width: 800px;
       margin: 0 auto 40px;
     }
-
+ 
     .mood-card {
       background: var(--bg-card);
       border: 2px solid var(--border-dark);
@@ -369,18 +372,18 @@
       transition: all 0.2s;
       position: relative;
     }
-
+ 
     .mood-card:hover {
       background: var(--bg-card-hover);
       border-color: #3d4062;
     }
-
+ 
     .mood-card.selected {
       background: rgba(99, 102, 241, 0.1);
       border-color: #6366f1;
       box-shadow: 0 0 0 1px #6366f1;
     }
-
+ 
     .mood-card.selected::after {
       content: '✓';
       position: absolute;
@@ -397,19 +400,19 @@
       font-weight: 700;
       color: white;
     }
-
+ 
     .mood-emoji {
       font-size: 56px;
       line-height: 1;
     }
-
+ 
     .mood-label {
       font-size: 14px;
       font-weight: 600;
       color: var(--text-primary);
       text-transform: capitalize;
     }
-
+ 
     .context-section {
       max-width: 700px;
       margin: 0 auto 48px;
@@ -418,18 +421,16 @@
       border-radius: 16px;
       padding: 24px;
     }
-
+ 
     .context-header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 16px;
     }
-
-    .context-icon {
-      font-size: 18px;
-    }
-
+ 
+    .context-icon { font-size: 18px; }
+ 
     .context-label {
       font-size: 12px;
       font-weight: 700;
@@ -437,7 +438,7 @@
       letter-spacing: 0.5px;
       text-transform: uppercase;
     }
-
+ 
     .context-textarea {
       width: 100%;
       background: rgba(0, 0, 0, 0.2);
@@ -452,16 +453,14 @@
       transition: all 0.2s;
       line-height: 1.6;
     }
-
-    .context-textarea::placeholder {
-      color: var(--text-muted);
-    }
-
+ 
+    .context-textarea::placeholder { color: var(--text-muted); }
+ 
     .context-textarea:focus {
       border-color: var(--accent-blue);
       background: rgba(0, 0, 0, 0.3);
     }
-
+ 
     .context-footer {
       display: flex;
       align-items: center;
@@ -469,7 +468,7 @@
       margin-top: 12px;
       gap: 8px;
     }
-
+ 
     .privacy-badge {
       display: flex;
       align-items: center;
@@ -477,7 +476,7 @@
       font-size: 11px;
       color: var(--text-muted);
     }
-
+ 
     .secondary-btn {
       background: rgba(139, 92, 246, 0.15);
       color: var(--accent-purple-light);
@@ -491,38 +490,32 @@
       align-items: center;
       gap: 6px;
       transition: all 0.2s;
+      font-family: inherit;
     }
-
+ 
     .secondary-btn:hover:not(:disabled) {
       background: rgba(139, 92, 246, 0.25);
       border-color: rgba(139, 92, 246, 0.5);
     }
-
+ 
     .secondary-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
-
-    .secondary-btn .material-symbols-outlined {
-      font-size: 18px;
-    }
-
-    .sessions-section {
-      margin-top: 64px;
-    }
-
+ 
+    .secondary-btn .material-symbols-outlined { font-size: 18px; }
+ 
+    .sessions-section { margin-top: 64px; }
+ 
     .sessions-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 24px;
     }
-
-    .sessions-title {
-      font-size: 20px;
-      font-weight: 700;
-    }
-
+ 
+    .sessions-title { font-size: 20px; font-weight: 700; }
+ 
     .view-all-link {
       color: var(--accent-purple-light);
       text-decoration: none;
@@ -533,17 +526,15 @@
       gap: 4px;
       transition: color 0.2s;
     }
-
-    .view-all-link:hover {
-      color: var(--accent-purple);
-    }
-
+ 
+    .view-all-link:hover { color: var(--accent-purple); }
+ 
     .sessions-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 16px;
     }
-
+ 
     .session-card {
       background: var(--bg-card);
       border: 1px solid var(--border-dark);
@@ -552,20 +543,20 @@
       transition: all 0.2s;
       cursor: pointer;
     }
-
+ 
     .session-card:hover {
       background: var(--bg-card-hover);
       border-color: #3d4062;
       transform: translateY(-2px);
     }
-
+ 
     .session-header {
       display: flex;
       align-items: center;
       gap: 12px;
       margin-bottom: 12px;
     }
-
+ 
     .session-emoji {
       width: 40px;
       height: 40px;
@@ -576,35 +567,33 @@
       justify-content: center;
       font-size: 20px;
     }
-
-    .session-info {
-      flex: 1;
-    }
-
+ 
+    .session-info { flex: 1; }
+ 
     .session-mood {
       font-size: 14px;
       font-weight: 600;
       color: var(--text-primary);
     }
-
+ 
     .session-time {
       font-size: 12px;
       color: var(--text-muted);
       margin-top: 2px;
     }
-
+ 
     .session-text {
       font-size: 13px;
       color: var(--text-secondary);
       line-height: 1.5;
     }
-
+ 
     footer {
       border-top: 1px solid var(--border-dark);
       padding: 24px;
       margin-top: 64px;
     }
-
+ 
     .footer-content {
       max-width: 1200px;
       margin: 0 auto;
@@ -612,7 +601,7 @@
       align-items: center;
       justify-content: space-between;
     }
-
+ 
     .footer-brand {
       display: flex;
       align-items: center;
@@ -620,39 +609,38 @@
       color: var(--text-muted);
       font-size: 13px;
     }
-
+ 
     .footer-links {
       display: flex;
+      align-items: center;
       gap: 24px;
     }
-
-    .footer-links a {
+ 
+    .footer-links a,
+    .footer-links button {
       color: var(--text-muted);
       text-decoration: none;
       font-size: 13px;
       transition: color 0.2s;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 0;
     }
-
-    .footer-links a:hover {
+ 
+    .footer-links a:hover,
+    .footer-links button:hover {
       color: var(--text-primary);
     }
-
+ 
     @keyframes fadeInUp {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-
-    .animate-fade-in-up {
-      animation: fadeInUp 0.5s ease-out;
-    }
-
+ 
+    .animate-fade-in-up { animation: fadeInUp 0.5s ease-out; }
+ 
     .loading-spinner {
       width: 40px;
       height: 40px;
@@ -661,60 +649,41 @@
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    .hidden {
-      display: none !important;
-    }
-
+ 
+    @keyframes spin { to { transform: rotate(360deg); } }
+ 
+    .hidden { display: none !important; }
+ 
     @media (max-width: 768px) {
-      .hero h1 {
-        font-size: 40px;
-      }
-
+      .hero h1 { font-size: 34px; }
+ 
       .moods-grid {
         grid-template-columns: repeat(3, 1fr);
         gap: 12px;
       }
-
-      .mood-card {
-        padding: 24px 16px;
-      }
-
-      .mood-emoji {
-        font-size: 40px;
-      }
-
-      .nav {
-        display: none;
-      }
-
-      .sessions-grid {
-        grid-template-columns: 1fr;
-      }
+ 
+      .mood-card { padding: 24px 16px; }
+      .mood-emoji { font-size: 40px; }
+      .nav { display: none; }
+      .sessions-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
-
+ 
 <body>
+  <!-- Contact Support Modal -->
   <div id="contactSupportModal" class="hidden" style="position: fixed; inset: 0; z-index: 70; align-items: center; justify-content: center;">
     <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"></div>
     <div style="position: relative; width: 92vw; max-width: 420px; border-radius: 16px; background: rgba(30, 33, 57, 0.95); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 20px 60px rgba(0,0,0,0.45); padding: 20px;">
       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
         <div>
           <div style="font-size: 16px; font-weight: 800;">Contact support</div>
-          <div style="margin-top: 4px; font-size: 13px; color: var(--text-secondary);">Email us and we’ll get back to you.</div>
+          <div style="margin-top: 4px; font-size: 13px; color: var(--text-secondary);">Email us and we'll get back to you.</div>
         </div>
         <button type="button" data-close="1" style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer;">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-
       <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; border-radius: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); padding: 12px 12px;">
         <span id="contactSupportEmail" style="font-size: 14px; font-weight: 700; user-select: all;">contact@vibegra.com</span>
         <button id="contactSupportCopyBtn" type="button" style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); padding: 8px 10px; cursor: pointer; color: rgba(255,255,255,0.9);">
@@ -724,7 +693,8 @@
       <div id="contactSupportCopyHint" class="hidden" style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Copied</div>
     </div>
   </div>
-
+ 
+  <!-- Profile Settings Modal -->
   <div id="profileSettingsModal" class="hidden" style="position: fixed; inset: 0; z-index: 80; align-items: center; justify-content: center;">
     <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);"></div>
     <div style="position: relative; width: 92vw; max-width: 560px; border-radius: 18px; background: rgba(15, 17, 21, 0.96); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 22px 70px rgba(0,0,0,0.55); padding: 20px;">
@@ -737,7 +707,7 @@
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-
+ 
       <div style="margin-top:16px; display:grid; grid-template-columns: 180px 1fr; gap:16px;">
         <div style="display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:flex-start;">
           <div id="profileModalAvatar" style="width: 160px; height: 160px; border-radius: 9999px; overflow:hidden; border: 2px solid rgba(255,255,255,0.10); background: rgba(30,33,57,0.75); display:flex; align-items:center; justify-content:center;">
@@ -751,48 +721,54 @@
           <input id="profileModalFileInput" type="file" accept="image/*" class="hidden" />
           <div style="font-size:12px; color: var(--text-muted); text-align:center;">PNG/JPG, max 5MB</div>
         </div>
-
+ 
         <div style="display:flex; flex-direction:column; gap:12px;">
           <div>
             <div style="font-size:12px; font-weight:900; letter-spacing:0.12em; text-transform:uppercase; color: var(--text-muted); margin-left:4px;">Username</div>
             <div style="margin-top:8px; display:flex; align-items:center; gap:10px; border-radius: 14px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.10); padding: 12px 12px;">
               <span style="color: rgba(255,255,255,0.45); font-weight:900;">@</span>
-              <input id="profileModalUsername" type="text" maxlength="20" style="flex:1; background: transparent; border: none; outline: none; color: rgba(255,255,255,0.92); font-weight:800;" placeholder="your_username" />
+              <input id="profileModalUsername" type="text" maxlength="20" style="flex:1; background: transparent; border: none; outline: none; color: rgba(255,255,255,0.92); font-weight:800; font-family: inherit;" placeholder="your_username" />
               <span id="profileModalUsernameStatus" style="font-size:12px; color: rgba(255,255,255,0.55);"></span>
             </div>
             <div id="profileModalUsernameHint" style="margin-top:8px; font-size:12px; color: var(--text-secondary);"></div>
           </div>
-
+ 
           <div style="display:flex; gap:10px; margin-top:4px;">
-            <button type="button" id="profileModalCancelBtn" style="flex:1; padding:12px 12px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10); color: rgba(255,255,255,0.9); font-weight:900; cursor:pointer;">Cancel</button>
-            <button type="button" id="profileModalSaveBtn" style="flex:1; padding:12px 12px; border-radius: 14px; background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 100%); border: none; color: #04120e; font-weight:900; cursor:pointer;">Save</button>
+            <button type="button" id="profileModalCancelBtn" style="flex:1; padding:12px 12px; border-radius: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10); color: rgba(255,255,255,0.9); font-weight:900; cursor:pointer; font-family: inherit;">Cancel</button>
+            <button type="button" id="profileModalSaveBtn" style="flex:1; padding:12px 12px; border-radius: 14px; background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 100%); border: none; color: #04120e; font-weight:900; cursor:pointer; font-family: inherit;">Save</button>
           </div>
-
+ 
           <div id="profileModalError" class="hidden" style="margin-top:4px; padding: 10px 12px; border-radius: 14px; background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.25); color: rgba(239,68,68,0.92); font-weight:800; font-size:12px;"></div>
         </div>
       </div>
     </div>
   </div>
+ 
+  <!-- Header -->
   <header class="header">
     <div class="header-content">
+      <!-- Logo only (no brand text) -->
       <div class="logo">
         <div class="logo-icon">✦</div>
-        <span class="logo-text">Vibegra</span>
       </div>
+ 
       <nav class="nav">
         <a href="#"></a>
-        <a href="#"></a><!-- discover -->
+        <a href="#"></a>
         <a href="#"></a>
       </nav>
+ 
       <div class="user-actions">
         <button class="notification-btn"></button>
         <div class="user-menu" id="userMenu">
-          <span class="logout-text" id="logoutBtn">Logout</span>
+          <!-- Profile avatar button — clicking opens dropdown -->
           <button type="button" class="profile-icon-btn" id="profileIconBtn" aria-haspopup="menu" aria-expanded="false">
             <div class="profile-icon-fallback" id="profileIconFallback">U</div>
             <img class="profile-icon-img hidden" id="profileIconImg" alt="Profile" />
           </button>
-          <div class="profile-menu hidden" id="profileMenu" role="menu" aria-label="Profile menu">
+ 
+          <!-- Dropdown menu -->
+          <div class="profile-menu" id="profileMenu" role="menu" aria-label="Profile menu">
             <button type="button" id="menuChangePfp" role="menuitem">
               <span class="material-symbols-outlined" aria-hidden="true">photo_camera</span>
               <span>Change profile picture</span>
@@ -801,37 +777,26 @@
               <span class="material-symbols-outlined" aria-hidden="true">badge</span>
               <span>Change username</span>
             </button>
+            <div class="menu-divider"></div>
+            <button type="button" id="logoutBtn" role="menuitem" class="menu-logout">
+              <span class="material-symbols-outlined" aria-hidden="true">logout</span>
+              <span>Logout</span>
+            </button>
           </div>
         </div>
       </div>
     </div>
-    </div>
   </header>
-
+ 
   <main>
     <div class="hero animate-fade-in-up">
-      <div style="margin-bottom: 16px; display: flex; justify-content: center;">
-        <button id="contactSupportBtn" type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 9999px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); cursor: pointer; backdrop-filter: blur(10px);">
-          <span class="material-symbols-outlined" style="font-size: 18px; color: rgba(255, 255, 255, 0.85);">support_agent</span>
-          <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.4px;">Contact</span>
-        </button>
-      </div>
-      <div class="status-badge">
-        <span class="status-indicator"></span>
-        <!-- 4,281 USERS ONLINE -->
-        <span>Welcome to Vibegra</span>
-      </div>
       <div style="margin-top: 12px; display: flex; justify-content: center;">
         <button type="button" class="hidden" data-pwa-install="1">
           <span class="vibe-pwa-icon" aria-hidden="true">↓</span>
           <span>Install App</span>
         </button>
       </div>
-      <h1>
-        Connect with your<br>
-        <span class="gradient-text">Vibe</span>
-      </h1>
-      <div style="margin-top: 14px; width: 100%; max-width: 760px; margin-left: auto; margin-right: auto;">
+      <div style="margin-top: 12px; width: 100%; max-width: 760px; margin-left: auto; margin-right: auto;">
         <div id="socialClubMountMood"></div>
         <div id="socialClubOwnerToggleMood" class="hidden" style="margin-top: 12px;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; border-radius: 14px; background: rgba(30, 33, 57, 0.75); border: 1px solid rgba(255, 255, 255, 0.10); padding: 12px 14px;">
@@ -846,6 +811,10 @@
           </div>
         </div>
       </div>
+      <h1>
+        Connect with your<br>
+        <span class="gradient-text">Vibe</span>
+      </h1>
       <p>
         Choose your current mood to chat with people who feel the same way
       </p>
@@ -855,11 +824,11 @@
       </button>
       <div class="helper-text">Select a mood card below first</div>
     </div>
-
+ 
     <div id="moodsGrid" class="moods-grid animate-fade-in-up" style="animation-delay: 0.1s">
       <!-- Moods will be loaded here -->
     </div>
-
+ 
     <div class="context-section">
       <div class="context-header">
         <span class="context-icon">✍️</span>
@@ -870,7 +839,6 @@
       <div class="context-footer">
         <span class="privacy-badge">
           <span>🌐 Global</span>
-          <span></span>
         </span>
         <button id="logMoodBtn" disabled class="secondary-btn">
           <span class="material-symbols-outlined">edit</span>
@@ -878,7 +846,7 @@
         </button>
       </div>
     </div>
-
+ 
     <div class="sessions-section">
       <div class="sessions-header">
         <h2 class="sessions-title">Public Notes</h2>
@@ -887,17 +855,13 @@
           <span>↓</span>
         </span>
       </div>
-
-      <div id="notesList" class="sessions-grid">
-        <!-- Sessions will be loaded here -->
-      </div>
-
+      <div id="notesList" class="sessions-grid"></div>
       <div id="loading" class="hidden" style="text-align: center; padding: 32px;">
         <div class="loading-spinner" style="margin: 0 auto;"></div>
       </div>
     </div>
   </main>
-
+ 
   <footer>
     <div class="footer-content">
       <div class="footer-brand">
@@ -905,6 +869,7 @@
         <span>© 2026 Vibegra</span>
       </div>
       <div class="footer-links">
+        <button type="button" id="contactSupportBtn">Contact</button>
         <a href="vibegra-privacy-policy.html">Privacy</a>
       </div>
     </div>
