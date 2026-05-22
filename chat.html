@@ -1735,8 +1735,8 @@
             // No active call - enable call buttons
             audioCallBtn.disabled = false;
             videoCallBtn.disabled = false;
-            audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
+            videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
             audioCallBtn.title = 'Start audio call';
             videoCallBtn.title = 'Start video call';
           } else {
@@ -1949,6 +1949,8 @@
       let roomRecoveryInProgress = false;
       let roomRecoveryAttempts = 0;
       let lastRoomRecoveryAttemptAt = 0;
+      const recentLifecycleMessages = new Map();
+      const LIFECYCLE_MESSAGE_DEDUPE_MS = 8000;
       let isConfirmationDialogOpen = false;
       let confirmationDialogResolve = null;
       let leaveSequenceInProgress = false;
@@ -1960,6 +1962,23 @@
       let currentEmojiCategory = 'all'; // Currently selected category
       let emojiSearchTerm = ''; // Current search query
       let isEmojiPickerOpen = false; // Picker open state
+
+      function shouldShowLifecycleMessage(kind, userId) {
+        const key = `${kind}:${userId || 'unknown'}`;
+        const now = Date.now();
+        const lastAt = recentLifecycleMessages.get(key) || 0;
+        if (now - lastAt < LIFECYCLE_MESSAGE_DEDUPE_MS) {
+          return false;
+        }
+        recentLifecycleMessages.set(key, now);
+
+        for (const [k, t] of recentLifecycleMessages.entries()) {
+          if (now - t > LIFECYCLE_MESSAGE_DEDUPE_MS * 4) {
+            recentLifecycleMessages.delete(k);
+          }
+        }
+        return true;
+      }
 
       let floatingCallPopup = null;
       let floatingCallSocket = null;
@@ -3399,14 +3418,14 @@
 
         if (audioCallBtn) {
           audioCallBtn.disabled = false;
-          audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse');
+          audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
           audioCallBtn.title = 'Start Audio Call';
           console.log(`   ✅ Audio button enabled`);
         }
 
         if (videoCallBtn) {
           videoCallBtn.disabled = false;
-          videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse');
+          videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
           videoCallBtn.title = 'Start Video Call';
           console.log(`   ✅ Video button enabled`);
         }
@@ -6580,11 +6599,15 @@
           console.log(`👤 [${sequenceId}] User left: ${data.username} (${data.userId}). Remaining: ${data.remainingUsers}`);
 
           // 1. Show message
-          const msgEl = document.createElement('div');
-          msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
-          msgEl.textContent = `${data.username || 'A user'} left the room`;
-          messagesList?.appendChild(msgEl);
-          if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
+          if (shouldShowLifecycleMessage('left', data.userId)) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'text-center text-xs sm:text-sm text-gray-400 my-2';
+            msgEl.textContent = `${data.username || 'A user'} left the room`;
+            messagesList?.appendChild(msgEl);
+            if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
+          } else {
+            console.log(`ℹ️ [${sequenceId}] Suppressed duplicate left message for ${data.userId}`);
+          }
 
           // 2. Authoritative User List Update (mirroring user_joined)
           if (data.users && Array.isArray(data.users)) {
@@ -6890,7 +6913,7 @@
           console.log(`👤 User joined: ${data.username} (${data.userId})`);
 
           // Display join message in chat (skip if it's the current user)
-          if (data.userId !== currentUser?.userId) {
+          if (data.userId !== currentUser?.userId && shouldShowLifecycleMessage('joined', data.userId)) {
             playJoinRoomSound(data.userId);
 
             const msgEl = document.createElement('div');
@@ -6902,6 +6925,8 @@
             if (messagesList) {
               messagesList.scrollTop = messagesList.scrollHeight;
             }
+          } else if (data.userId !== currentUser?.userId) {
+            console.log(`ℹ️ Suppressed duplicate joined message for ${data.userId}`);
           }
 
           // Update online count
@@ -7345,6 +7370,9 @@
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'hidden') {
             lastVisibilityHiddenAt = Date.now();
+            try {
+              if (roomData?.roomId) saveChatState(roomData.roomId, messagesCache);
+            } catch { }
             const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
             if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
               console.log('📱 Tab hidden - user might be leaving chat');
@@ -7953,29 +7981,6 @@
           await exitRoomSequence();
         });
 
-        // Visibility change
-        document.addEventListener('visibilitychange', () => {
-          if (document.hidden) {
-            console.log('📱 Page hidden');
-            lastVisibilityHiddenAt = Date.now();
-            saveChatState(roomData.roomId, messagesCache);
-            reportChatPresenceContext('visibility_hidden_save', {
-              allowRedirect: false,
-              keepalive: true,
-              source: 'chat_visibility_hidden_save'
-            }).catch(() => { });
-          } else {
-            console.log('📱 Page visible');
-            const hiddenDuration = lastVisibilityHiddenAt ? (Date.now() - lastVisibilityHiddenAt) : 0;
-            reconnectSocketIfNeeded(hiddenDuration > 60000 ? 'visibility_resume_save_long_idle' : 'visibility_resume_save');
-            reportChatPresenceContext('visibility_visible_save', {
-              allowRedirect: !isSocialClubMode,
-              keepalive: true,
-              source: 'chat_visibility_visible_save'
-            }).catch(() => { });
-            validateChatPresenceState('visibility_visible_save').catch(() => { });
-          }
-        });
       }
 
       // ============================================
