@@ -1614,15 +1614,43 @@
       // ============================================
       let activeCallConnectionState = null; // null | 'initializing' | 'connecting' | 'connected'
 
+      function getActiveChatRoomId() {
+        return roomData?.roomId || currentRoomId || null;
+      }
+
+      function shouldPreservePendingActiveCall() {
+        try {
+          return sessionStorage.getItem('returningFromCall') === 'true'
+            || sessionStorage.getItem('backgroundCallMode') === 'true'
+            || (window.parent && window.parent !== window);
+        } catch {
+          return false;
+        }
+      }
+
+      function resetHeaderCallButtons(reason = 'no active call') {
+        try { console.log(`📞 Resetting call header buttons (${reason})`); } catch { }
+        activeCallConnectionState = null;
+        activeCallInRoom = null;
+        updateCallButtonStates();
+        updateCallButtonState(false);
+      }
+
+      function clearStoredActiveCall(reason = 'unknown') {
+        try {
+          console.warn(`📞 Clearing stale activeCall (${reason})`);
+          localStorage.removeItem(ACTIVE_CALL_KEY);
+        } catch { }
+        resetHeaderCallButtons(reason);
+      }
+
       function updateActiveCallState() {
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
 
         if (!activeCallStr) {
           if (activeCallConnectionState !== null) {
             console.log('📞 No active call - clearing state');
-            activeCallConnectionState = null;
-            updateCallButtonStates();
-            updateCallButtonState(false);
+            resetHeaderCallButtons('storage empty');
           }
           return;
         }
@@ -1632,10 +1660,7 @@
             console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
             localStorage.removeItem(ACTIVE_CALL_KEY);
           } catch { }
-          activeCallConnectionState = null;
-          activeCallInRoom = null;
-          updateCallButtonStates();
-          updateCallButtonState(false);
+          resetHeaderCallButtons(reason || 'stale activeCall');
         };
 
         try {
@@ -1643,6 +1668,17 @@
           if (!callData?.callId || !callData?.roomId) {
             console.warn('📞 Invalid activeCall payload - clearing');
             clearStaleActiveCall('invalid payload');
+            return;
+          }
+
+          const activeRoomId = getActiveChatRoomId();
+          if (activeRoomId && callData.roomId !== activeRoomId) {
+            clearStaleActiveCall(`room mismatch (${callData.roomId} !== ${activeRoomId})`);
+            return;
+          }
+
+          if (!activeRoomId && !shouldPreservePendingActiveCall()) {
+            clearStaleActiveCall('chat room not resolved yet');
             return;
           }
 
@@ -1686,7 +1722,7 @@
             updateCallButtonStates();
 
             // CRITICAL: Only update room-scoped UI if the call belongs to this room
-            const callInCurrentRoom = callData.roomId === roomData?.roomId;
+            const callInCurrentRoom = callData.roomId === getActiveChatRoomId();
 
             if (callInCurrentRoom) {
               // Synchronize global activeCallInRoom variable
@@ -1844,8 +1880,7 @@
 
           if (action === 'FORCE_HIDE_CALL') {
             // Reset active call state
-            activeCallInRoom = null;
-            updateCallButtonState(false);
+            clearStoredActiveCall('call iframe closed');
           }
         } else if (action === 'REQUEST_SHOW_CALL') {
           console.log('📨 Message from call iframe: REQUEST_SHOW_CALL');
@@ -3991,7 +4026,12 @@
           if (!activeCallStr) {
             callButtonState = 'none';
           } else {
-            callButtonState = 'back';
+            try {
+              const activeCall = JSON.parse(activeCallStr);
+              callButtonState = activeCall?.roomId === roomId ? 'back' : 'none';
+            } catch {
+              callButtonState = 'none';
+            }
           }
 
           const state = {
@@ -4143,10 +4183,7 @@
             console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
             localStorage.removeItem(ACTIVE_CALL_KEY);
           } catch { }
-          activeCallConnectionState = null;
-          activeCallInRoom = null;
-          updateCallButtonStates();
-          updateCallButtonState(false);
+          resetHeaderCallButtons(reason || 'stale activeCall');
         };
 
         if (activeCallStr) {
@@ -4177,7 +4214,18 @@
               }
             }
 
-            if (activeCallData.roomId === roomData?.roomId) {
+            const activeRoomId = getActiveChatRoomId();
+            if (activeRoomId && activeCallData.roomId !== activeRoomId) {
+              clearStaleActiveCall(`room mismatch (${activeCallData.roomId} !== ${activeRoomId})`);
+              return false;
+            }
+
+            if (!activeRoomId && !shouldPreservePendingActiveCall()) {
+              clearStaleActiveCall('chat room not resolved yet');
+              return false;
+            }
+
+            if (activeCallData.roomId === getActiveChatRoomId()) {
               console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
               console.log(`✅ User is IN the call - will show "Back to Call" button`);
 
@@ -5262,17 +5310,22 @@
           if (isConfirmationDialogOpen) {
             console.log('⚠️ Confirmation already open - second back triggers immediate leave');
             backButtonHandled = true;
-            try {
-              confirmationDialogResolve?.(true);
-            } catch { }
-            const overlay = document.getElementById('confirmationOverlay');
-            if (overlay) {
-              overlay.style.display = 'none';
-              overlay.innerHTML = '';
+            const leaveButton = document.getElementById('btnLeave');
+            if (leaveButton) {
+              leaveButton.click();
+            } else {
+              try {
+                confirmationDialogResolve?.(true);
+              } catch { }
+              const overlay = document.getElementById('confirmationOverlay');
+              if (overlay) {
+                overlay.style.display = 'none';
+                overlay.innerHTML = '';
+              }
+              isConfirmationDialogOpen = false;
+              confirmationDialogResolve = null;
+              await exitRoomSequence('/mood.html');
             }
-            isConfirmationDialogOpen = false;
-            confirmationDialogResolve = null;
-            await exitRoomSequence('/mood.html');
             return;
           }
 
