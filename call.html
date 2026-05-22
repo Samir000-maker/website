@@ -1268,6 +1268,90 @@
         } catch { }
       });
 
+      function isCallStillConnecting() {
+        const loadingOverlay = document.getElementById('callLoadingOverlay');
+        const overlayVisible = loadingOverlay && !loadingOverlay.classList.contains('hidden') && loadingOverlay.style.display !== 'none';
+        return overlayVisible
+          || isJoiningCall
+          || callStatus === CALL_STATUS.joining
+          || callStatus === CALL_STATUS.initializing
+          || callConnectionState === 'initializing'
+          || callConnectionState === 'connecting';
+      }
+
+      function cancelConnectingCallAndReturnToChat(reason = 'browser_back_connecting') {
+        if (leaveCallInProgress) return;
+        console.warn(`🔙 Cancelling call connection (${reason})`);
+
+        leaveCallInProgress = true;
+        callStatus = CALL_STATUS.leaving;
+        explicitLeaveCall = true;
+        joinAttemptId++;
+
+        try { joinAttemptController?.abort(); } catch { }
+        joinAttemptController = null;
+        isJoiningCall = false;
+        isInitializing = false;
+        hasJoinedCall = false;
+
+        try { sessionStorage.setItem('vibe_suppress_leave_beacon_until', String(Date.now() + 5000)); } catch { }
+        try { clearCallSetupWatchdog(); } catch { }
+        try { cleanupDisposables(); } catch { }
+        try { stopCallHeartbeat(); } catch { }
+        try { stopBackgroundKeepAlive(); } catch { }
+        try { stopBackgroundAudioWatchdog(); } catch { }
+
+        try {
+          for (const [userId, id] of loadingWatchdogs) {
+            try { clearTimeout(id); } catch { }
+            loadingWatchdogs.delete(userId);
+          }
+        } catch { }
+
+        try {
+          if (localStream) {
+            localStream.getTracks().forEach(track => {
+              try { track.stop(); } catch { }
+            });
+          }
+        } catch { }
+        localStream = null;
+
+        try {
+          peerConnections.forEach(pc => {
+            try { pc.close(); } catch { }
+          });
+          peerConnections.clear();
+        } catch { }
+
+        try {
+          if (socketInstance && socketInstance.connected) {
+            socketInstance.emit('leave_call', { callId: callData?.callId || null, reason });
+            socketInstance.emit('exit_call_mode', { roomId: callData?.roomId || null });
+            socketInstance.emit('page_context', {
+              location: 'chat',
+              path: '/chat.html',
+              roomId: callData?.roomId || null,
+              source: reason
+            });
+          }
+        } catch { }
+
+        try { localStorage.removeItem('activeCall'); } catch { }
+        try {
+          sessionStorage.removeItem('hasBackgroundCall');
+          sessionStorage.removeItem('backgroundCallMode');
+          sessionStorage.setItem('returningFromCall', 'true');
+        } catch { }
+
+        if (window.parent && window.parent !== window) {
+          try { window.parent.postMessage({ action: 'FORCE_HIDE_CALL' }, '*'); } catch { }
+          setTimeout(() => { window.location.href = 'about:blank'; }, 100);
+        } else {
+          setTimeout(() => { window.location.href = '/chat.html'; }, 100);
+        }
+      }
+
       function setupCallBackButtonHandler() {
         console.log('🔙 Setting up call page back button handler');
 
@@ -1304,6 +1388,12 @@
           // CRITICAL: Check if we are running inside an iframe
           const isInIframe = window.parent && window.parent !== window;
           console.log(`   Running in iframe: ${isInIframe}`);
+
+          if (isCallStillConnecting()) {
+            history.pushState({ view: 'call' }, 'Call', window.location.href);
+            cancelConnectingCallAndReturnToChat('browser_back_connecting');
+            return;
+          }
 
           if (isInIframe) {
             // We are in an iframe inside chat.html
