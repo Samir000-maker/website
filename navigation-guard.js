@@ -18,6 +18,8 @@ class NavigationGuard {
     this.onConfirmCallback = null;
     this.dialogElement = null;
     this.dialogOverlay = null;
+    this.isDialogOpen = false;
+    this.confirmInProgress = false;
     
     // Initialize
     this.init();
@@ -174,11 +176,7 @@ class NavigationGuard {
     });
 
     confirmBtn.addEventListener('click', () => {
-      this.hideDialog();
-      // Allow navigation
-      if (this.onConfirmCallback) {
-        this.onConfirmCallback();
-      }
+      this.confirmLeave();
     });
 
     // Close on overlay click
@@ -205,8 +203,15 @@ class NavigationGuard {
       if (this.isGuardActive) {
         // Prevent default back navigation
         event.preventDefault();
-        
-        // Show confirmation dialog
+
+        if (this.isDialogOpen) {
+          this.confirmLeave();
+          return;
+        }
+
+        // Re-arm the trap before showing the dialog so a second browser back
+        // press cannot slip past the page without running the same leave flow.
+        this.pushGuardState();
         this.showDialog();
       }
     });
@@ -219,6 +224,7 @@ class NavigationGuard {
     this.isGuardActive = true;
     this.currentPage = page;
     this.onConfirmCallback = onConfirm;
+    this.confirmInProgress = false;
     
     // Push initial guard state
     this.pushGuardState();
@@ -250,6 +256,8 @@ class NavigationGuard {
    * Show confirmation dialog
    */
   showDialog() {
+    this.isDialogOpen = true;
+
     // Show overlay
     this.dialogOverlay.style.display = 'block';
     this.dialogElement.style.display = 'block';
@@ -273,6 +281,8 @@ class NavigationGuard {
    * Hide confirmation dialog
    */
   hideDialog() {
+    this.isDialogOpen = false;
+
     // Animate out
     this.dialogOverlay.style.opacity = '0';
     this.dialogElement.style.opacity = '0';
@@ -298,6 +308,17 @@ class NavigationGuard {
     setTimeout(() => {
       window.location.href = url;
     }, 50);
+  }
+
+  confirmLeave() {
+    if (this.confirmInProgress) return;
+    this.confirmInProgress = true;
+    const callback = this.onConfirmCallback;
+    this.hideDialog();
+    this.disable();
+    if (callback) {
+      callback();
+    }
   }
 }
 
