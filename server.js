@@ -2759,11 +2759,19 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
+  let activeRooms = 0;
+  try {
+    const rooms = await matchmaking.getActiveRooms();
+    activeRooms = Array.isArray(rooms) ? rooms.length : 0;
+  } catch (error) {
+    console.warn('⚠️ Health check could not read active rooms:', error.message);
+  }
+
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
-      activeRooms: matchmaking.getActiveRooms().length,
+      activeRooms,
       webrtcMetrics: webrtcMetrics.getAll(),
       turnConfigured: !!(
         ((process.env.CLOUDFLARE_TURN_TOKEN_ID || HARDCODED_CLOUDFLARE_TURN_TOKEN_ID) &&
