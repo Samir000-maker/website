@@ -4452,16 +4452,48 @@
             return;
           }
 
-          safeSocketEmit('join_call', { callId }, { queueWhenDisconnected: false });
+          let timeout = null;
+          let settled = false;
+
+          const cleanupJoinAttemptListeners = () => {
+            if (timeout) {
+              clearTimeout(timeout);
+              timeout = null;
+            }
+            try { socketInstance.off('call_joined', handleJoined); } catch { }
+            try { socketInstance.off('error', handleError); } catch { }
+          };
+
+          const settleJoinAttempt = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            cleanupJoinAttemptListeners();
+            fn(value);
+          };
+
+          // Listen before emitting so a very fast server response cannot race past us.
+          const handleJoined = (data) => {
+            clearJoinRetryCount(callId);
+            joinCallRetryCount = 0;
+            console.log(`✅ Join call succeeded on attempt ${attemptNumber}`);
+            settleJoinAttempt(resolve, data);
+          };
+
+          const handleError = (errorData) => {
+            settleJoinAttempt(reject, new Error(errorData.message || 'Join call failed'));
+          };
+
+          socketInstance.once('call_joined', handleJoined);
+          socketInstance.once('error', handleError);
 
           // Set timeout for response
-          const timeout = trackTimeout(setTimeout(() => {
+          timeout = trackTimeout(setTimeout(() => {
             if (controller?.signal?.aborted) {
-              reject(new Error('Join attempt aborted'));
+              settleJoinAttempt(reject, new Error('Join attempt aborted'));
               return;
             }
             if (myAttemptId !== joinAttemptId) {
-              reject(new Error('Stale join attempt'));
+              settleJoinAttempt(reject, new Error('Stale join attempt'));
               return;
             }
             joinCallRetryCount = attemptNumber;
@@ -4470,34 +4502,18 @@
             if (joinCallRetryCount < MAX_JOIN_RETRIES) {
               const backoff = computeBackoffDelayMs(joinCallRetryCount + 1);
               console.warn(`⚠️ Join call timeout, retrying in ${backoff}ms...`);
+              cleanupJoinAttemptListeners();
               trackTimeout(setTimeout(() => {
-                attemptJoinCall(callId, backoff).then(resolve).catch(reject);
+                attemptJoinCall(callId, backoff)
+                  .then(data => settleJoinAttempt(resolve, data))
+                  .catch(error => settleJoinAttempt(reject, error));
               }, backoff));
             } else {
-              reject(new Error('Failed to join call after maximum retries'));
+              settleJoinAttempt(reject, new Error('Failed to join call after maximum retries'));
             }
           }, 5000)); // 5 second timeout per attempt
 
-          // Listen for successful join (one-time)
-          const handleJoined = (data) => {
-            clearTimeout(timeout);
-            clearJoinRetryCount(callId);
-            joinCallRetryCount = 0;
-            console.log(`✅ Join call succeeded on attempt ${attemptNumber}`);
-            socketInstance.off('call_joined', handleJoined);
-            socketInstance.off('error', handleError);
-            resolve(data);
-          };
-
-          const handleError = (errorData) => {
-            clearTimeout(timeout);
-            socketInstance.off('call_joined', handleJoined);
-            socketInstance.off('error', handleError);
-            reject(new Error(errorData.message || 'Join call failed'));
-          };
-
-          socketInstance.once('call_joined', handleJoined);
-          socketInstance.once('error', handleError);
+          safeSocketEmit('join_call', { callId }, { queueWhenDisconnected: false });
         });
       }
 
