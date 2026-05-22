@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
  
@@ -1345,19 +1346,39 @@
       // ============================================
 
 
+      function exitWholeWebsiteFromMood() {
+        try { socketInstance?.disconnect?.(); } catch { }
+        try {
+          sessionStorage.removeItem('hasBackgroundCall');
+          sessionStorage.removeItem('returningFromCall');
+          sessionStorage.removeItem('backgroundCallMode');
+          localStorage.removeItem('activeCall');
+        } catch { }
+
+        try { window.open('', '_self'); } catch { }
+        try { window.close(); } catch { }
+
+        setTimeout(() => {
+          try {
+            document.documentElement.innerHTML = '<head><title></title></head><body style="margin:0;background:#000;"></body>';
+          } catch { }
+          try {
+            window.location.replace('about:blank');
+          } catch { }
+        }, 80);
+      }
+
       function preventBackNavigation() {
-        // Push a dummy state to history
-        history.pushState(null, null, location.href);
+        const EXIT_TRAP_STATE = { page: 'mood', exitTrap: true };
 
-        // Listen for popstate (back button)
+        try {
+          history.replaceState({ page: 'mood', root: true }, '', location.href);
+          history.pushState(EXIT_TRAP_STATE, '', location.href);
+        } catch { }
+
         window.addEventListener('popstate', function (event) {
-          // Push state again to prevent navigation
-          history.pushState(null, null, location.href);
-
-          // Optional: Show a toast message
-          if (_Toast && typeof _Toast.warning === 'function') {
-            _Toast.warning('Please use logout to exit');
-          }
+          event.preventDefault();
+          exitWholeWebsiteFromMood();
         });
       }
 
