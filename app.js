@@ -749,6 +749,8 @@ const Presence = {
   _initialized: false,
   _tokenCache: null,
   _heartbeatInterval: null,
+  _lastContextReportKey: null,
+  _lastContextReportAt: 0,
 
   normalizePath(pathname = window.location.pathname || '') {
     try {
@@ -929,6 +931,18 @@ const Presence = {
     const roomId = Object.prototype.hasOwnProperty.call(options, 'roomId')
       ? options.roomId
       : this.getContextRoomId(location);
+
+    const dedupeWindowMs = Number.isFinite(options.dedupeWindowMs) ? options.dedupeWindowMs : 1500;
+    const dedupeKey = `${location}|${path}|${roomId || ''}`;
+    const bypassDedupe = options.force === true || reason === 'pagehide';
+    if (!bypassDedupe && dedupeWindowMs > 0) {
+      const now = Date.now();
+      if (this._lastContextReportKey === dedupeKey && now - this._lastContextReportAt < dedupeWindowMs) {
+        return null;
+      }
+      this._lastContextReportKey = dedupeKey;
+      this._lastContextReportAt = now;
+    }
 
     try {
       const response = await authFetch('/api/presence/context', {
