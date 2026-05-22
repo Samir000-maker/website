@@ -250,6 +250,21 @@
       border: 1px solid #22d3ee;
     }
 
+    #audioCallBtn.call-ready,
+    #videoCallBtn.call-ready {
+      opacity: 1 !important;
+      cursor: pointer !important;
+      filter: none !important;
+      pointer-events: auto;
+      transform: translateZ(0);
+    }
+
+    #audioCallBtn:disabled,
+    #videoCallBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     #audioCallBtn:hover,
     #videoCallBtn:hover {
       background: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
@@ -1706,10 +1721,12 @@
           // Call is connecting - disable call buttons
           console.log('🚫 Disabling call buttons - call connecting');
           audioCallBtn.disabled = true;
+          audioCallBtn.classList.remove('call-ready');
           audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
           audioCallBtn.title = 'Call connecting...';
 
           videoCallBtn.disabled = true;
+          videoCallBtn.classList.remove('call-ready');
           videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
           videoCallBtn.title = 'Call connecting...';
 
@@ -1718,6 +1735,8 @@
           console.log('✅ Call connected - disabling initiate buttons');
           audioCallBtn.disabled = true;
           videoCallBtn.disabled = true;
+          audioCallBtn.classList.remove('call-ready');
+          videoCallBtn.classList.remove('call-ready');
           audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
           videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
           audioCallBtn.title = 'Call in progress';
@@ -1737,13 +1756,21 @@
             videoCallBtn.disabled = false;
             audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
             videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
+            audioCallBtn.classList.add('call-ready');
+            videoCallBtn.classList.add('call-ready');
+            audioCallBtn.removeAttribute('aria-disabled');
+            videoCallBtn.removeAttribute('aria-disabled');
             audioCallBtn.title = 'Start audio call';
             videoCallBtn.title = 'Start video call';
           } else {
             audioCallBtn.disabled = true;
             videoCallBtn.disabled = true;
+            audioCallBtn.classList.remove('call-ready');
+            videoCallBtn.classList.remove('call-ready');
             audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
             videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            audioCallBtn.setAttribute('aria-disabled', 'true');
+            videoCallBtn.setAttribute('aria-disabled', 'true');
             audioCallBtn.title = isInitiatingCall ? 'Calling...' : 'Preparing chat...';
             videoCallBtn.title = isInitiatingCall ? 'Calling...' : 'Preparing chat...';
           }
@@ -1894,6 +1921,8 @@
       }
       let serverClockOffset = 0; // Milliseconds to add to client time to get server time
       let serverExpiresAt = null; // Legacy (rooms no longer expire)
+      const CLOCK_SKEW_NOTICE_MS = 5000;
+      const CLOCK_SKEW_WARNING_MS = 30000;
 
       const selectedMood = (() => {
         try {
@@ -3419,6 +3448,8 @@
         if (audioCallBtn) {
           audioCallBtn.disabled = false;
           audioCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
+          audioCallBtn.classList.add('call-ready');
+          audioCallBtn.removeAttribute('aria-disabled');
           audioCallBtn.title = 'Start Audio Call';
           console.log(`   ✅ Audio button enabled`);
         }
@@ -3426,6 +3457,8 @@
         if (videoCallBtn) {
           videoCallBtn.disabled = false;
           videoCallBtn.classList.remove('opacity-50', 'cursor-not-allowed', 'animate-pulse', 'call-btn-loading', 'calling');
+          videoCallBtn.classList.add('call-ready');
+          videoCallBtn.removeAttribute('aria-disabled');
           videoCallBtn.title = 'Start Video Call';
           console.log(`   ✅ Video button enabled`);
         }
@@ -3436,7 +3469,9 @@
 
         if (audioCallBtn) {
           audioCallBtn.disabled = true;
+          audioCallBtn.classList.remove('call-ready');
           audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          audioCallBtn.setAttribute('aria-disabled', 'true');
           if (showLoading) {
             audioCallBtn.classList.add('animate-pulse');
             audioCallBtn.title = 'Connecting...';
@@ -3448,7 +3483,9 @@
 
         if (videoCallBtn) {
           videoCallBtn.disabled = true;
+          videoCallBtn.classList.remove('call-ready');
           videoCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
+          videoCallBtn.setAttribute('aria-disabled', 'true');
           if (showLoading) {
             videoCallBtn.classList.add('animate-pulse');
             videoCallBtn.title = 'Connecting...';
@@ -3628,15 +3665,17 @@
 
 
 
-      function checkForCachedCall() {
-        console.log('🔍 Checking for cached incoming call...');
+      function checkForCachedCall(options = {}) {
+        const logMiss = options.logMiss === true;
 
         const cachedCallStr = localStorage.getItem(CACHED_CALL_KEY);
 
         if (!cachedCallStr) {
-          console.log('ℹ️ No cached call found');
+          if (logMiss) console.log('ℹ️ No cached call found');
           return;
         }
+
+        console.log('🔍 Checking for cached incoming call...');
 
         try {
           const cachedCall = JSON.parse(cachedCallStr);
@@ -3718,7 +3757,7 @@
         console.log('🔄 Starting cached call monitoring...');
 
         // Check immediately on load
-        checkForCachedCall();
+        checkForCachedCall({ logMiss: true });
 
         // Check every 2 seconds for cached calls
         cachedCallCheckInterval = setInterval(() => {
@@ -4214,11 +4253,11 @@
 
         // Remove loading states and re-enable buttons
         if (audioCallBtn) {
-          audioCallBtn.classList.remove('call-btn-loading');
+          audioCallBtn.classList.remove('call-btn-loading', 'animate-pulse', 'calling');
           audioCallBtn.disabled = false;
         }
         if (videoCallBtn) {
-          videoCallBtn.classList.remove('call-btn-loading');
+          videoCallBtn.classList.remove('call-btn-loading', 'animate-pulse', 'calling');
           videoCallBtn.disabled = false;
         }
         if (joinCallBtn) {
@@ -4245,10 +4284,14 @@
           // Hide audio/video buttons
           if (audioCallBtn) {
             audioCallBtn.classList.add('hidden');
+            audioCallBtn.classList.remove('call-ready');
+            audioCallBtn.setAttribute('aria-disabled', 'true');
             audioCallBtn.disabled = true;
           }
           if (videoCallBtn) {
             videoCallBtn.classList.add('hidden');
+            videoCallBtn.classList.remove('call-ready');
+            videoCallBtn.setAttribute('aria-disabled', 'true');
             videoCallBtn.disabled = true;
           }
 
@@ -4289,10 +4332,14 @@
           // Hide audio/video buttons
           if (audioCallBtn) {
             audioCallBtn.classList.add('hidden');
+            audioCallBtn.classList.remove('call-ready');
+            audioCallBtn.setAttribute('aria-disabled', 'true');
             audioCallBtn.disabled = true;
           }
           if (videoCallBtn) {
             videoCallBtn.classList.add('hidden');
+            videoCallBtn.classList.remove('call-ready');
+            videoCallBtn.setAttribute('aria-disabled', 'true');
             videoCallBtn.disabled = true;
           }
 
@@ -4323,11 +4370,9 @@
           // Show audio/video buttons
           if (audioCallBtn) {
             audioCallBtn.classList.remove('hidden');
-            audioCallBtn.disabled = false;
           }
           if (videoCallBtn) {
             videoCallBtn.classList.remove('hidden');
-            videoCallBtn.disabled = false;
           }
 
           // Hide join button
@@ -4337,6 +4382,7 @@
             joinCallBtn.disabled = true;
           }
 
+          updateCallButtonStates();
           console.log('✅ Audio/Video buttons displayed');
         }
       }
@@ -5635,8 +5681,10 @@
             console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
             console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
 
-            if (Math.abs(serverClockOffset) > 5000) {
+            if (Math.abs(serverClockOffset) > CLOCK_SKEW_WARNING_MS) {
               console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+            } else if (Math.abs(serverClockOffset) > CLOCK_SKEW_NOTICE_MS) {
+              console.log(`ℹ️ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
             }
           } else {
             console.warn('⚠️ No serverTime in room_joined, assuming no clock skew');
@@ -6032,9 +6080,11 @@
           console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
           console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
 
-          if (Math.abs(serverClockOffset) > 5000) {
+          if (Math.abs(serverClockOffset) > CLOCK_SKEW_WARNING_MS) {
             console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
             console.warn(`   Timer will be adjusted to compensate`);
+          } else if (Math.abs(serverClockOffset) > CLOCK_SKEW_NOTICE_MS) {
+            console.log(`ℹ️ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
           }
 
           serverExpiresAt = null;
@@ -6668,9 +6718,11 @@
         joinRoomSound.preload = 'auto';
         joinRoomSound.crossOrigin = 'anonymous';
 
-        (async () => {
-          try {
-            console.log('🔊 [JoinSound] Checking sound asset availability...');
+        const ENABLE_JOIN_SOUND_DIAGNOSTICS = false;
+        if (ENABLE_JOIN_SOUND_DIAGNOSTICS) {
+          (async () => {
+            try {
+              console.log('🔊 [JoinSound] Checking sound asset availability...');
             let res = null;
             try {
               res = await fetch(JOIN_ROOM_SOUND_URL, { method: 'HEAD', cache: 'no-store' });
@@ -6763,18 +6815,21 @@
             } else {
               console.warn('🔊 [JoinSound] Asset check produced no response object');
             }
-          } catch (e) {
-            console.error('🔊 [JoinSound] Unexpected error during asset check:', e);
-          }
-        })();
+            } catch (e) {
+              console.error('🔊 [JoinSound] Unexpected error during asset check:', e);
+            }
+          })();
+        }
 
         try {
-          joinRoomSound.addEventListener('loadeddata', () => {
-            console.log('🔊 [JoinSound] loadeddata fired (some data available)');
-          });
-          joinRoomSound.addEventListener('canplaythrough', () => {
-            console.log('🔊 [JoinSound] canplaythrough fired (likely buffered enough)');
-          });
+          if (ENABLE_JOIN_SOUND_DIAGNOSTICS) {
+            joinRoomSound.addEventListener('loadeddata', () => {
+              console.log('🔊 [JoinSound] loadeddata fired (some data available)');
+            });
+            joinRoomSound.addEventListener('canplaythrough', () => {
+              console.log('🔊 [JoinSound] canplaythrough fired (likely buffered enough)');
+            });
+          }
           joinRoomSound.addEventListener('error', () => {
             const mediaErr = joinRoomSound.error;
             console.error('🔊 [JoinSound] Audio element error event fired');
