@@ -830,10 +830,28 @@ const Presence = {
     }
   },
 
+  hasIntentionalLeaveSignal() {
+    try {
+      const raw = sessionStorage.getItem('vibe_intentional_chat_leave_until');
+      const until = raw ? Number(raw) : 0;
+      return !!(until && Number.isFinite(until) && Date.now() < until);
+    } catch {
+      return false;
+    }
+  },
+
   sendLeaveBeacon(reason = 'pagehide') {
     try {
       const location = this.classifyLocation();
       if (!this.isChatContext(location)) return false;
+
+      const intentionalLeave = this.hasIntentionalLeaveSignal();
+      if (!intentionalLeave) {
+        try {
+          console.log(`[Presence] sendLeaveBeacon suppressed (not intentional leave): reason=${reason} path=${window.location.pathname}${window.location.search || ''}`);
+        } catch { }
+        return false;
+      }
 
       // If the call UI runs inside an iframe (chat embeds call.html), its teardown navigation
       // must not trigger a server-side room leave via beacon.
@@ -886,7 +904,8 @@ const Presence = {
         callId: callId || null,
         socketId,
         location,
-        reason
+        reason,
+        intentionalLeave: true
       };
 
       try {
