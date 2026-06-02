@@ -5192,6 +5192,9 @@
         }
         leaveSequenceInProgress = true;
         const reason = options?.reason || 'manual';
+        try {
+          sessionStorage.setItem('vibe_intentional_chat_leave_until', String(Date.now() + 15000));
+        } catch { }
         console.log('🚪 ========================================');
         console.log('🚪 STARTING EXIT ROOM SEQUENCE (Server-Authoritative)');
         console.log('🚪 ========================================');
@@ -5257,6 +5260,9 @@
 
           // 4. Clear chat state
           await clearChatState(true);
+          try {
+            localStorage.removeItem('currentRoom');
+          } catch { }
           currentRoomId = null;
 
           // 5. Navigate
@@ -7469,6 +7475,14 @@
 
           console.log('🚪 Page unloading (refresh/close) - relying on server-side timeout for cleanup');
 
+          try {
+            if (roomData?.roomId) {
+              saveChatState(roomData.roomId, messagesCache);
+              localStorage.setItem('currentRoom', JSON.stringify(roomData));
+              sessionStorage.setItem('vibe_chat_reload_restore_until', String(Date.now() + 60000));
+            }
+          } catch { }
+
           // We can still stop the local heartbeat to be clean
           stopHeartbeat();
           stopTyping();
@@ -8159,9 +8173,11 @@
         const isBackgroundCall = sessionStorage.getItem('backgroundCallMode') === 'true';
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
         const isInIframe = window.parent && window.parent !== window;
+        const cachedRoomStr = localStorage.getItem('currentRoom');
+        const cachedChatStateStr = localStorage.getItem(CHAT_STATE_KEY);
 
         // CRITICAL: If there's an active call in this room, we're likely returning from it
-        let shouldPreserveState = returningFromCall || isBackgroundCall;
+        let shouldPreserveState = returningFromCall || isBackgroundCall || !!cachedRoomStr || !!cachedChatStateStr;
 
         if (!shouldPreserveState && activeCallStr && isInIframe) {
           try {
@@ -8224,11 +8240,15 @@
       }
 
       try {
-        if (isSocialClubMode) {
+        if (isSocialClubMode && roomDataStr) {
+          roomData = JSON.parse(roomDataStr);
+          currentRoomId = roomData?.roomId || null;
+          console.log('🎭 Social Club reload/reconnect - restoring cached currentRoom before server sync');
+          console.log(`   roomId: ${currentRoomId || 'unknown'}`);
+        } else if (isSocialClubMode) {
           roomData = null;
           currentRoomId = null;
           console.log('🎭 Social Club mode - ignoring cached currentRoom, will join via join_social_club');
-          try { localStorage.removeItem('currentRoom'); } catch { }
         } else if (roomDataStr) {
           roomData = JSON.parse(roomDataStr);
           currentRoomId = roomData?.roomId || null;
