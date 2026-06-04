@@ -4,60 +4,82 @@
    diurnal color spectrum with CSS custom props.
    ============================================ */
 
-/* ── Diurnal Theme Variables ── */
+/* ── Diurnal Theme Variables & Global Fixes ── */
 :root {
-  --fluid-blob1: rgba(255, 154, 158, 0.65);
-  --fluid-blob2: rgba(250, 208, 196, 0.55);
-  --fluid-blob3: rgba(199, 125, 255, 0.50);
-  --fluid-blob4: rgba(255, 183, 122, 0.45);
+  --fluid-bg-color: #0f0c1b;
+  --fluid-blob1: rgba(255, 154, 158, 0.70);
+  --fluid-blob2: rgba(250, 208, 196, 0.60);
+  --fluid-blob3: rgba(199, 125, 255, 0.55);
+  --fluid-blob4: rgba(255, 183, 122, 0.50);
 }
 
 /* Morning (06:00–11:00): Soft pastel pinks, oranges, warm purples */
 body.theme-morning {
-  --fluid-blob1: rgba(255, 154, 158, 0.65);
-  --fluid-blob2: rgba(250, 208, 196, 0.55);
-  --fluid-blob3: rgba(199, 125, 255, 0.50);
-  --fluid-blob4: rgba(255, 183, 122, 0.45);
+  --fluid-bg-color: #0f0b1a;
+  --fluid-blob1: rgba(255, 154, 158, 0.70);
+  --fluid-blob2: rgba(250, 208, 196, 0.60);
+  --fluid-blob3: rgba(199, 125, 255, 0.55);
+  --fluid-blob4: rgba(255, 183, 122, 0.50);
 }
 
 /* Noon (11:00–15:00): Vibrant sky blues and bright teals */
 body.theme-noon {
-  --fluid-blob1: rgba(56, 189, 248, 0.65);
-  --fluid-blob2: rgba(34, 211, 238, 0.55);
-  --fluid-blob3: rgba(99, 179, 237, 0.50);
-  --fluid-blob4: rgba(45, 212, 191, 0.50);
+  --fluid-bg-color: #08111e;
+  --fluid-blob1: rgba(56, 189, 248, 0.70);
+  --fluid-blob2: rgba(34, 211, 238, 0.60);
+  --fluid-blob3: rgba(99, 179, 237, 0.55);
+  --fluid-blob4: rgba(45, 212, 191, 0.55);
 }
 
 /* Afternoon (15:00–18:00): Golden hour ambers, warm oranges, deep purples */
 body.theme-afternoon {
-  --fluid-blob1: rgba(251, 191, 36, 0.65);
-  --fluid-blob2: rgba(251, 146, 60, 0.55);
-  --fluid-blob3: rgba(192, 132, 252, 0.50);
-  --fluid-blob4: rgba(245, 158, 11, 0.45);
+  --fluid-bg-color: #140d1a;
+  --fluid-blob1: rgba(251, 191, 36, 0.70);
+  --fluid-blob2: rgba(251, 146, 60, 0.60);
+  --fluid-blob3: rgba(192, 132, 252, 0.55);
+  --fluid-blob4: rgba(245, 158, 11, 0.50);
 }
 
 /* Evening (18:00–21:00): Deep twilight blues, purples, midnight indigos */
 body.theme-evening {
-  --fluid-blob1: rgba(99, 102, 241, 0.60);
-  --fluid-blob2: rgba(139, 92, 246, 0.55);
-  --fluid-blob3: rgba(67, 56, 202, 0.50);
-  --fluid-blob4: rgba(79, 70, 229, 0.45);
+  --fluid-bg-color: #0a0a23;
+  --fluid-blob1: rgba(99, 102, 241, 0.65);
+  --fluid-blob2: rgba(139, 92, 246, 0.60);
+  --fluid-blob3: rgba(67, 56, 202, 0.55);
+  --fluid-blob4: rgba(79, 70, 229, 0.50);
 }
 
 /* Night (21:00–01:00): Deep velvet dark blues, subtle neon purple */
 body.theme-night {
-  --fluid-blob1: rgba(30, 27, 75, 0.70);
-  --fluid-blob2: rgba(88, 28, 135, 0.45);
-  --fluid-blob3: rgba(49, 46, 129, 0.50);
-  --fluid-blob4: rgba(126, 34, 206, 0.30);
+  --fluid-bg-color: #050414;
+  --fluid-blob1: rgba(30, 27, 75, 0.75);
+  --fluid-blob2: rgba(88, 28, 135, 0.50);
+  --fluid-blob3: rgba(49, 46, 129, 0.55);
+  --fluid-blob4: rgba(126, 34, 206, 0.35);
 }
 
-/* Deep Night (01:00–06:00): Introspective dark lo-fi hues */
+/* Deep Night (01:00–06:00): Introspective lo-fi dark charcoal */
 body.theme-deepnight {
-  --fluid-blob1: rgba(17, 12, 34, 0.75);
-  --fluid-blob2: rgba(46, 16, 101, 0.35);
-  --fluid-blob3: rgba(30, 27, 75, 0.50);
-  --fluid-blob4: rgba(20, 15, 40, 0.40);
+  --fluid-bg-color: #040408;
+  --fluid-blob1: rgba(17, 12, 34, 0.80);
+  --fluid-blob2: rgba(46, 16, 101, 0.40);
+  --fluid-blob3: rgba(30, 27, 75, 0.55);
+  --fluid-blob4: rgba(20, 15, 40, 0.45);
+}
+
+/* ── Force Body Background to Transparent so Fluid Canvas Shows ── */
+body.theme-morning,
+body.theme-noon,
+body.theme-afternoon,
+body.theme-evening,
+body.theme-night,
+body.theme-deepnight {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html {
+  background-color: #040408; /* Darkest base fallback */
 }
 
 /* ── Fluid Background Container ── */
@@ -70,9 +92,21 @@ body.theme-deepnight {
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+  background-color: var(--fluid-bg-color);
+  /* Smooth 4s transition for diurnal theme morphing */
+  transition: background-color 4s ease-in-out;
+}
+
+/* ── Blobs Wrapper for Perfect Bleed-free Blur ── */
+.fluid-blobs-wrapper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   filter: blur(80px);
   -webkit-filter: blur(80px);
-  will-change: filter;
+  transform: scale(1.15); /* Eliminates edge pixelation and bleeding */
+  will-change: transform;
 }
 
 /* ── Blob Base Styles ── */
@@ -82,11 +116,10 @@ body.theme-deepnight {
   will-change: transform;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  /* 4-second smooth transition when theme changes */
   transition: background 4s ease-in-out;
 }
 
-/* ── Individual Blob Sizes & Colors ── */
+/* ── Individual Blob Sizes & Drift Animations ── */
 #fluid-bg .fluid-blob--1 {
   width: 55vmax;
   height: 55vmax;
@@ -156,12 +189,36 @@ body.theme-deepnight {
   100% { transform: translate3d(-5vw, 5vh, 0) rotate(-360deg) scale(1); }
 }
 
-/* ── Chat-specific override: subtle opacity ── */
+/* ── Chat Page Specific Overrides ── */
 body.fluid-bg-chat #fluid-bg {
   opacity: 0.25;
 }
 
-/* ── Reduced-motion a11y ── */
+body.fluid-bg-chat,
+body.fluid-bg-chat .chat-main,
+body.fluid-bg-chat #messagesList {
+  background-color: transparent !important;
+}
+
+body.fluid-bg-chat .sidebar {
+  background-color: rgba(22, 27, 34, 0.45) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+body.fluid-bg-chat header {
+  background-color: rgba(22, 27, 34, 0.65) !important;
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+
+body.fluid-bg-chat #composerBar {
+  background-color: rgba(31, 34, 40, 0.65) !important;
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+
+/* ── Reduced-motion accessibility ── */
 @media (prefers-reduced-motion: reduce) {
   #fluid-bg .fluid-blob {
     animation-duration: 60s !important;
