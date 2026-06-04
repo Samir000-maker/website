@@ -22,10 +22,10 @@ body.theme-morning {
   --fluid-blob3: rgba(184, 109, 255, 0.65);
   --fluid-blob4: rgba(255, 221, 148, 0.60);
 }
-body.theme-morning #fluid-bg .fluid-blob--1 { animation: drift-morning-1 10s ease-in-out infinite alternate; }
-body.theme-morning #fluid-bg .fluid-blob--2 { animation: drift-morning-2 12s ease-in-out infinite alternate; }
-body.theme-morning #fluid-bg .fluid-blob--3 { animation: drift-morning-3 11s ease-in-out infinite alternate; }
-body.theme-morning #fluid-bg .fluid-blob--4 { animation: drift-morning-4 9s ease-in-out infinite alternate; }
+body.theme-morning #fluid-bg .fluid-blob--1 { animation: drift-morning-1 4.5s ease-in-out infinite alternate; }
+body.theme-morning #fluid-bg .fluid-blob--2 { animation: drift-morning-2 5s ease-in-out infinite alternate; }
+body.theme-morning #fluid-bg .fluid-blob--3 { animation: drift-morning-3 4.8s ease-in-out infinite alternate; }
+body.theme-morning #fluid-bg .fluid-blob--4 { animation: drift-morning-4 4s ease-in-out infinite alternate; }
 
 /* ── NOON THEME (11:00–15:00) ── */
 /* Vibrant sky blue, bright teal, electric cyan, electric indigo. Energetic swirling. */
@@ -36,10 +36,10 @@ body.theme-noon {
   --fluid-blob3: rgba(6, 182, 212, 0.75);
   --fluid-blob4: rgba(99, 102, 241, 0.65);
 }
-body.theme-noon #fluid-bg .fluid-blob--1 { animation: drift-noon-1 6s ease-in-out infinite alternate; }
-body.theme-noon #fluid-bg .fluid-blob--2 { animation: drift-noon-2 7s ease-in-out infinite alternate; }
-body.theme-noon #fluid-bg .fluid-blob--3 { animation: drift-noon-3 6.5s ease-in-out infinite alternate; }
-body.theme-noon #fluid-bg .fluid-blob--4 { animation: drift-noon-4 5.5s ease-in-out infinite alternate; }
+body.theme-noon #fluid-bg .fluid-blob--1 { animation: drift-noon-1 2.8s ease-in-out infinite alternate; }
+body.theme-noon #fluid-bg .fluid-blob--2 { animation: drift-noon-2 3.2s ease-in-out infinite alternate; }
+body.theme-noon #fluid-bg .fluid-blob--3 { animation: drift-noon-3 3s ease-in-out infinite alternate; }
+body.theme-noon #fluid-bg .fluid-blob--4 { animation: drift-noon-4 2.5s ease-in-out infinite alternate; }
 
 /* ── AFTERNOON THEME (15:00–18:00) ── */
 /* Sunset orange, neon magenta, amber gold, deep purple. Warm horizontal sweep. */
@@ -50,10 +50,10 @@ body.theme-afternoon {
   --fluid-blob3: rgba(245, 158, 11, 0.75);
   --fluid-blob4: rgba(124, 58, 237, 0.65);
 }
-body.theme-afternoon #fluid-bg .fluid-blob--1 { animation: drift-afternoon-1 8s ease-in-out infinite alternate; }
-body.theme-afternoon #fluid-bg .fluid-blob--2 { animation: drift-afternoon-2 9s ease-in-out infinite alternate; }
-body.theme-afternoon #fluid-bg .fluid-blob--3 { animation: drift-afternoon-3 8.5s ease-in-out infinite alternate; }
-body.theme-afternoon #fluid-bg .fluid-blob--4 { animation: drift-afternoon-4 7.5s ease-in-out infinite alternate; }
+body.theme-afternoon #fluid-bg .fluid-blob--1 { animation: drift-afternoon-1 3.5s ease-in-out infinite alternate; }
+body.theme-afternoon #fluid-bg .fluid-blob--2 { animation: drift-afternoon-2 4s ease-in-out infinite alternate; }
+body.theme-afternoon #fluid-bg .fluid-blob--3 { animation: drift-afternoon-3 3.8s ease-in-out infinite alternate; }
+body.theme-afternoon #fluid-bg .fluid-blob--4 { animation: drift-afternoon-4 3.2s ease-in-out infinite alternate; }
 
 /* ── EVENING THEME (18:00–21:00) ── */
 /* Calming twilight indigo, twilight purple, deep twilight blue, medium violet. */
@@ -64,10 +64,10 @@ body.theme-evening {
   --fluid-blob3: rgba(37, 99, 235, 0.70);
   --fluid-blob4: rgba(168, 85, 247, 0.65);
 }
-body.theme-evening #fluid-bg .fluid-blob--1 { animation: drift-evening-1 9s ease-in-out infinite alternate; }
-body.theme-evening #fluid-bg .fluid-blob--2 { animation: drift-evening-2 10s ease-in-out infinite alternate; }
-body.theme-evening #fluid-bg .fluid-blob--3 { animation: drift-evening-3 9.5s ease-in-out infinite alternate; }
-body.theme-evening #fluid-bg .fluid-blob--4 { animation: drift-evening-4 8.5s ease-in-out infinite alternate; }
+body.theme-evening #fluid-bg .fluid-blob--1 { animation: drift-evening-1 4.2s ease-in-out infinite alternate; }
+body.theme-evening #fluid-bg .fluid-blob--2 { animation: drift-evening-2 4.8s ease-in-out infinite alternate; }
+body.theme-evening #fluid-bg .fluid-blob--3 { animation: drift-evening-3 4.5s ease-in-out infinite alternate; }
+body.theme-evening #fluid-bg .fluid-blob--4 { animation: drift-evening-4 3.8s ease-in-out infinite alternate; }
 
 /* ── NIGHT THEME (21:00–01:00) ── */
 /* Deep velvet blue, neon purple, midnight indigo, amethyst purple. Breathing pulses. */
@@ -78,10 +78,10 @@ body.theme-night {
   --fluid-blob3: rgba(30, 58, 138, 0.80);
   --fluid-blob4: rgba(147, 51, 234, 0.60);
 }
-body.theme-night #fluid-bg .fluid-blob--1 { animation: drift-night-1 11s ease-in-out infinite alternate; }
-body.theme-night #fluid-bg .fluid-blob--2 { animation: drift-night-2 13s ease-in-out infinite alternate; }
-body.theme-night #fluid-bg .fluid-blob--3 { animation: drift-night-3 12s ease-in-out infinite alternate; }
-body.theme-night #fluid-bg .fluid-blob--4 { animation: drift-night-4 10.5s ease-in-out infinite alternate; }
+body.theme-night #fluid-bg .fluid-blob--1 { animation: drift-night-1 5s ease-in-out infinite alternate; }
+body.theme-night #fluid-bg .fluid-blob--2 { animation: drift-night-2 5.5s ease-in-out infinite alternate; }
+body.theme-night #fluid-bg .fluid-blob--3 { animation: drift-night-3 5.2s ease-in-out infinite alternate; }
+body.theme-night #fluid-bg .fluid-blob--4 { animation: drift-night-4 4.5s ease-in-out infinite alternate; }
 
 /* ── DEEP NIGHT THEME (01:00–06:00) ── */
 /* Introspective violet, deep slate black, deep dark purple, dark ink. Lo-fi shifts. */
@@ -92,10 +92,10 @@ body.theme-deepnight {
   --fluid-blob3: rgba(20, 10, 50, 0.75);
   --fluid-blob4: rgba(10, 10, 20, 0.65);
 }
-body.theme-deepnight #fluid-bg .fluid-blob--1 { animation: drift-deepnight-1 14s ease-in-out infinite alternate; }
-body.theme-deepnight #fluid-bg .fluid-blob--2 { animation: drift-deepnight-2 16s ease-in-out infinite alternate; }
-body.theme-deepnight #fluid-bg .fluid-blob--3 { animation: drift-deepnight-3 15s ease-in-out infinite alternate; }
-body.theme-deepnight #fluid-bg .fluid-blob--4 { animation: drift-deepnight-4 13s ease-in-out infinite alternate; }
+body.theme-deepnight #fluid-bg .fluid-blob--1 { animation: drift-deepnight-1 6.5s ease-in-out infinite alternate; }
+body.theme-deepnight #fluid-bg .fluid-blob--2 { animation: drift-deepnight-2 7.2s ease-in-out infinite alternate; }
+body.theme-deepnight #fluid-bg .fluid-blob--3 { animation: drift-deepnight-3 6.8s ease-in-out infinite alternate; }
+body.theme-deepnight #fluid-bg .fluid-blob--4 { animation: drift-deepnight-4 5.8s ease-in-out infinite alternate; }
 
 /* ── Force Body Background to Transparent so Fluid Canvas Shows ── */
 body.theme-morning,
@@ -104,6 +104,7 @@ body.theme-afternoon,
 body.theme-evening,
 body.theme-night,
 body.theme-deepnight {
+  background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
 }
@@ -133,8 +134,8 @@ html {
   inset: 0;
   width: 100%;
   height: 100%;
-  filter: blur(80px);
-  -webkit-filter: blur(80px);
+  filter: blur(45px); /* Reduced from 80px to make shape movements highly visible */
+  -webkit-filter: blur(45px);
   transform: scale(1.15); /* Eliminates edge pixelation and bleeding */
   will-change: transform;
 }
@@ -183,143 +184,143 @@ html {
 }
 
 /* ==========================================================================
-   BESPOKE DIURNAL DRIVING KEYFRAMES (HARDWARE-ACCELERATED & VIBRANT)
+   BESPOKE DIURNAL DRIVING KEYFRAMES (HARDWARE-ACCELERATED & HIGH TRAVEL)
    ========================================================================== */
 
 /* ── Morning Keyframes: Sunrise drift (mostly vertical rise) ── */
 @keyframes drift-morning-1 {
-  0%   { transform: translate3d(0, 10vh, 0) rotate(0deg) scale(0.95); }
-  50%  { transform: translate3d(8vw, -8vh, 0) rotate(45deg) scale(1.10); }
-  100% { transform: translate3d(-8vw, -20vh, 0) rotate(90deg) scale(1); }
+  0%   { transform: translate3d(0, 15vh, 0) rotate(0deg) scale(0.95); }
+  50%  { transform: translate3d(12vw, -12vh, 0) rotate(45deg) scale(1.10); }
+  100% { transform: translate3d(-12vw, -30vh, 0) rotate(90deg) scale(1); }
 }
 @keyframes drift-morning-2 {
-  0%   { transform: translate3d(0, 15vh, 0) rotate(0deg) scale(1); }
-  50%  { transform: translate3d(-10vw, -4vh, 0) rotate(-60deg) scale(1.15); }
-  100% { transform: translate3d(10vw, -18vh, 0) rotate(-120deg) scale(0.95); }
+  0%   { transform: translate3d(0, 20vh, 0) rotate(0deg) scale(1); }
+  50%  { transform: translate3d(-15vw, -6vh, 0) rotate(-60deg) scale(1.15); }
+  100% { transform: translate3d(15vw, -25vh, 0) rotate(-120deg) scale(0.95); }
 }
 @keyframes drift-morning-3 {
-  0%   { transform: translate3d(0, 20vh, 0) rotate(0deg) scale(1.08); }
-  50%  { transform: translate3d(12vw, 0, 0) rotate(40deg) scale(0.92); }
-  100% { transform: translate3d(-12vw, -15vh, 0) rotate(80deg) scale(1.12); }
+  0%   { transform: translate3d(0, 25vh, 0) rotate(0deg) scale(1.08); }
+  50%  { transform: translate3d(16vw, 0, 0) rotate(40deg) scale(0.92); }
+  100% { transform: translate3d(-16vw, -20vh, 0) rotate(80deg) scale(1.12); }
 }
 @keyframes drift-morning-4 {
-  0%   { transform: translate3d(0, 8vh, 0) rotate(0deg) scale(0.95); }
-  50%  { transform: translate3d(-12vw, -10vh, 0) rotate(-35deg) scale(1.10); }
-  100% { transform: translate3d(12vw, -22vh, 0) rotate(-70deg) scale(1); }
+  0%   { transform: translate3d(0, 12vh, 0) rotate(0deg) scale(0.95); }
+  50%  { transform: translate3d(-16vw, -15vh, 0) rotate(-35deg) scale(1.10); }
+  100% { transform: translate3d(16vw, -30vh, 0) rotate(-70deg) scale(1); }
 }
 
 /* ── Noon Keyframes: Swirling high energy (large scale morph & movement) ── */
 @keyframes drift-noon-1 {
   0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
-  33%  { transform: translate3d(18vw, 12vh, 0) rotate(120deg) scale(1.25); }
-  66%  { transform: translate3d(-12vw, 22vh, 0) rotate(240deg) scale(0.80); }
-  100% { transform: translate3d(8vw, -8vh, 0) rotate(360deg) scale(1.05); }
+  33%  { transform: translate3d(24vw, 18vh, 0) rotate(120deg) scale(1.25); }
+  66%  { transform: translate3d(-18vw, 30vh, 0) rotate(240deg) scale(0.80); }
+  100% { transform: translate3d(12vw, -12vh, 0) rotate(360deg) scale(1.05); }
 }
 @keyframes drift-noon-2 {
   0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
-  33%  { transform: translate3d(-20vw, -18vh, 0) rotate(-120deg) scale(0.78); }
-  66%  { transform: translate3d(15vw, 8vh, 0) rotate(-240deg) scale(1.20); }
-  100% { transform: translate3d(-10vw, -15vh, 0) rotate(-360deg) scale(1); }
+  33%  { transform: translate3d(-25vw, -25vh, 0) rotate(-120deg) scale(0.78); }
+  66%  { transform: translate3d(20vw, 12vh, 0) rotate(-240deg) scale(1.20); }
+  100% { transform: translate3d(-15vw, -20vh, 0) rotate(-360deg) scale(1); }
 }
 @keyframes drift-noon-3 {
   0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1.05); }
-  33%  { transform: translate3d(22vw, -12vh, 0) rotate(90deg) scale(0.85); }
-  66%  { transform: translate3d(-18vw, -25vh, 0) rotate(180deg) scale(1.25); }
-  100% { transform: translate3d(12vw, -18vh, 0) rotate(360deg) scale(1.08); }
+  33%  { transform: translate3d(30vw, -18vh, 0) rotate(90deg) scale(0.85); }
+  66%  { transform: translate3d(-25vw, -35vh, 0) rotate(180deg) scale(1.25); }
+  100% { transform: translate3d(18vw, -25vh, 0) rotate(360deg) scale(1.08); }
 }
 @keyframes drift-noon-4 {
   0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(0.90); }
-  33%  { transform: translate3d(-15vw, 18vh, 0) rotate(-90deg) scale(1.18); }
-  66%  { transform: translate3d(18vw, -15vh, 0) rotate(-180deg) scale(0.85); }
-  100% { transform: translate3d(-6vw, 6vh, 0) rotate(-360deg) scale(1); }
+  33%  { transform: translate3d(-20vw, 25vh, 0) rotate(-90deg) scale(1.18); }
+  66%  { transform: translate3d(25vw, -20vh, 0) rotate(-180deg) scale(0.85); }
+  100% { transform: translate3d(-8vw, 8vh, 0) rotate(-360deg) scale(1); }
 }
 
 /* ── Afternoon Keyframes: Warm golden lazy drift (horizontally biased) ── */
 @keyframes drift-afternoon-1 {
-  0%   { transform: translate3d(-12vw, 0, 0) scale(1); }
-  50%  { transform: translate3d(20vw, 5vh, 0) scale(1.15); }
-  100% { transform: translate3d(-15vw, -5vh, 0) scale(0.90); }
+  0%   { transform: translate3d(-18vw, 0, 0) scale(1); }
+  50%  { transform: translate3d(30vw, 8vh, 0) scale(1.15); }
+  100% { transform: translate3d(-22vw, -8vh, 0) scale(0.90); }
 }
 @keyframes drift-afternoon-2 {
-  0%   { transform: translate3d(15vw, 0, 0) scale(1.10); }
-  50%  { transform: translate3d(-22vw, -6vh, 0) scale(0.85); }
-  100% { transform: translate3d(18vw, 6vh, 0) scale(1.15); }
+  0%   { transform: translate3d(22vw, 0, 0) scale(1.10); }
+  50%  { transform: translate3d(-30vw, -10vh, 0) scale(0.85); }
+  100% { transform: translate3d(25vw, 10vh, 0) scale(1.15); }
 }
 @keyframes drift-afternoon-3 {
-  0%   { transform: translate3d(-15vw, 0, 0) scale(0.90); }
-  50%  { transform: translate3d(24vw, -4vh, 0) scale(1.20); }
-  100% { transform: translate3d(-20vw, 4vh, 0) scale(1.02); }
+  0%   { transform: translate3d(-22vw, 0, 0) scale(0.90); }
+  50%  { transform: translate3d(32vw, -6vh, 0) scale(1.20); }
+  100% { transform: translate3d(-28vw, 6vh, 0) scale(1.02); }
 }
 @keyframes drift-afternoon-4 {
-  0%   { transform: translate3d(12vw, 0, 0) scale(1.05); }
-  50%  { transform: translate3d(-18vw, 8vh, 0) scale(0.85); }
-  100% { transform: translate3d(15vw, -8vh, 0) scale(1.10); }
+  0%   { transform: translate3d(18vw, 0, 0) scale(1.05); }
+  50%  { transform: translate3d(-25vw, 12vh, 0) scale(0.85); }
+  100% { transform: translate3d(22vw, -12vh, 0) scale(1.10); }
 }
 
 /* ── Evening Keyframes: Twilight sinking drift (mostly vertical drop) ── */
 @keyframes drift-evening-1 {
-  0%   { transform: translate3d(0, -15vh, 0) rotate(0deg) scale(1.10); }
-  50%  { transform: translate3d(6vw, 0, 0) rotate(45deg) scale(0.90); }
-  100% { transform: translate3d(-6vw, 15vh, 0) rotate(90deg) scale(1.05); }
+  0%   { transform: translate3d(0, -20vh, 0) rotate(0deg) scale(1.10); }
+  50%  { transform: translate3d(10vw, 0, 0) rotate(45deg) scale(0.90); }
+  100% { transform: translate3d(-10vw, 20vh, 0) rotate(90deg) scale(1.05); }
 }
 @keyframes drift-evening-2 {
-  0%   { transform: translate3d(0, -20vh, 0) rotate(0deg) scale(0.95); }
-  50%  { transform: translate3d(-8vw, -4vh, 0) rotate(-60deg) scale(1.12); }
-  100% { transform: translate3d(8vw, 12vh, 0) rotate(-120deg) scale(0.90); }
+  0%   { transform: translate3d(0, -28vh, 0) rotate(0deg) scale(0.95); }
+  50%  { transform: translate3d(-12vw, -6vh, 0) rotate(-60deg) scale(1.12); }
+  100% { transform: translate3d(12vw, 18vh, 0) rotate(-120deg) scale(0.90); }
 }
 @keyframes drift-evening-3 {
-  0%   { transform: translate3d(0, -12vh, 0) rotate(0deg) scale(1.15); }
-  50%  { transform: translate3d(10vw, 4vh, 0) rotate(35deg) scale(0.98); }
-  100% { transform: translate3d(-10vw, 18vh, 0) rotate(70deg) scale(1.12); }
+  0%   { transform: translate3d(0, -18vh, 0) rotate(0deg) scale(1.15); }
+  50%  { transform: translate3d(15vw, 6vh, 0) rotate(35deg) scale(0.98); }
+  100% { transform: translate3d(-15vw, 25vh, 0) rotate(70deg) scale(1.12); }
 }
 @keyframes drift-evening-4 {
-  0%   { transform: translate3d(0, -22vh, 0) rotate(0deg) scale(0.90); }
-  50%  { transform: translate3d(-6vw, -6vh, 0) rotate(-40deg) scale(1.10); }
-  100% { transform: translate3d(6vw, 10vh, 0) rotate(-80deg) scale(1); }
+  0%   { transform: translate3d(0, -30vh, 0) rotate(0deg) scale(0.90); }
+  50%  { transform: translate3d(-10vw, -10vh, 0) rotate(-40deg) scale(1.10); }
+  100% { transform: translate3d(10vw, 15vh, 0) rotate(-80deg) scale(1); }
 }
 
 /* ── Night Keyframes: Calming deep indigo breaths (pulsing in place) ── */
 @keyframes drift-night-1 {
-  0%   { transform: translate3d(-4vw, -4vh, 0) scale(0.80); }
-  50%  { transform: translate3d(6vw, 6vh, 0) scale(1.25); }
-  100% { transform: translate3d(-4vw, -4vh, 0) scale(0.80); }
+  0%   { transform: translate3d(-6vw, -6vh, 0) scale(0.80); }
+  50%  { transform: translate3d(10vw, 10vh, 0) scale(1.25); }
+  100% { transform: translate3d(-6vw, -6vh, 0) scale(0.80); }
 }
 @keyframes drift-night-2 {
-  0%   { transform: translate3d(6vw, 4vh, 0) scale(1.20); }
-  50%  { transform: translate3d(-6vw, -6vh, 0) scale(0.75); }
-  100% { transform: translate3d(6vw, 4vh, 0) scale(1.20); }
+  0%   { transform: translate3d(10vw, 6vh, 0) scale(1.20); }
+  50%  { transform: translate3d(-10vw, -10vh, 0) scale(0.75); }
+  100% { transform: translate3d(10vw, 6vh, 0) scale(1.20); }
 }
 @keyframes drift-night-3 {
-  0%   { transform: translate3d(-6vw, 6vh, 0) scale(0.85); }
-  50%  { transform: translate3d(8vw, -8vh, 0) scale(1.30); }
-  100% { transform: translate3d(-6vw, 6vh, 0) scale(0.85); }
+  0%   { transform: translate3d(-10vw, 10vh, 0) scale(0.85); }
+  50%  { transform: translate3d(12vw, -12vh, 0) scale(1.30); }
+  100% { transform: translate3d(-10vw, 10vh, 0) scale(0.85); }
 }
 @keyframes drift-night-4 {
-  0%   { transform: translate3d(4vw, -5vh, 0) scale(1.15); }
-  50%  { transform: translate3d(-8vw, 8vh, 0) scale(0.80); }
-  100% { transform: translate3d(4vw, -5vh, 0) scale(1.15); }
+  0%   { transform: translate3d(6vw, -8vh, 0) scale(1.15); }
+  50%  { transform: translate3d(-12vw, 12vh, 0) scale(0.80); }
+  100% { transform: translate3d(6vw, -8vh, 0) scale(1.15); }
 }
 
 /* ── Deep Night Keyframes: Ultra-slow lo-fi breathing (minimal movement) ── */
 @keyframes drift-deepnight-1 {
   0%   { transform: translate3d(0, 0, 0) scale(1.0); }
-  50%  { transform: translate3d(4vw, -4vh, 0) scale(1.15); }
-  100% { transform: translate3d(-2vw, 2vh, 0) scale(0.90); }
+  50%  { transform: translate3d(6vw, -6vh, 0) scale(1.15); }
+  100% { transform: translate3d(-3vw, 3vh, 0) scale(0.90); }
 }
 @keyframes drift-deepnight-2 {
   0%   { transform: translate3d(0, 0, 0) scale(0.90); }
-  50%  { transform: translate3d(-4vw, 4vh, 0) scale(1.10); }
-  100% { transform: translate3d(2vw, -2vh, 0) scale(0.85); }
+  50%  { transform: translate3d(-6vw, 6vh, 0) scale(1.10); }
+  100% { transform: translate3d(3vw, -3vh, 0) scale(0.85); }
 }
 @keyframes drift-deepnight-3 {
   0%   { transform: translate3d(0, 0, 0) scale(1.10); }
-  50%  { transform: translate3d(2vw, 4vh, 0) scale(0.85); }
-  100% { transform: translate3d(-4vw, -4vh, 0) scale(1.18); }
+  50%  { transform: translate3d(3vw, 6vh, 0) scale(0.85); }
+  100% { transform: translate3d(-6vw, -6vh, 0) scale(1.18); }
 }
 @keyframes drift-deepnight-4 {
   0%   { transform: translate3d(0, 0, 0) scale(0.85); }
-  50%  { transform: translate3d(-4vw, -2vh, 0) scale(1.12); }
-  100% { transform: translate3d(4vw, 2vh, 0) scale(0.90); }
+  50%  { transform: translate3d(-6vw, -3vh, 0) scale(1.12); }
+  100% { transform: translate3d(6vw, 3vh, 0) scale(0.90); }
 }
 
 /* ── Chat Page Specific Overrides ── */
