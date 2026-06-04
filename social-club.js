@@ -24,8 +24,8 @@
     const style = document.createElement('style');
     style.id = 'socialClubStyles';
     style.textContent = `
-      .social-club-wrap{width:100%;max-width:48rem;margin:0 auto;}
-      .social-club-kicker{color:rgba(148,163,184,0.9);font-size:0.95rem;line-height:1.4;margin-bottom:12px;text-align:center;}
+      .social-club-wrap{width:100%;max-width:48rem;margin:24px auto;padding-top:12px;}
+      .social-club-kicker{display:none;}
       .social-club-card{position:relative;overflow:hidden;border-radius:18px;padding:18px 18px 16px;border:1px solid rgba(255,255,255,0.12);background:linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.04));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 18px 60px rgba(0,0,0,0.35);transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;}
       .social-club-card:hover{transform:translateY(-2px);border-color:rgba(99,32,233,0.55);box-shadow:0 22px 70px rgba(99,32,233,0.18),0 18px 60px rgba(0,0,0,0.40);}
       .social-club-title{display:flex;align-items:center;justify-content:space-between;gap:12px;}
@@ -340,7 +340,6 @@
 
     const wrap = createEl(`
       <section class="social-club-wrap" data-social-club-root="1">
-        <div class="social-club-kicker">Event will start soon</div>
         <div class="social-club-card">
           <div class="social-club-title">
             <h3>Social Club</h3>
