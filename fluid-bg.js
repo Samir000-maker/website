@@ -14,10 +14,12 @@
     container.id = 'fluid-bg';
     container.setAttribute('aria-hidden', 'true');
     container.innerHTML =
+      '<div class="fluid-blobs-wrapper">' +
       '<div class="fluid-blob fluid-blob--1"></div>' +
       '<div class="fluid-blob fluid-blob--2"></div>' +
       '<div class="fluid-blob fluid-blob--3"></div>' +
-      '<div class="fluid-blob fluid-blob--4"></div>';
+      '<div class="fluid-blob fluid-blob--4"></div>' +
+      '</div>';
     document.body.insertBefore(container, document.body.firstChild);
   }
 
@@ -61,8 +63,8 @@
   function boot() {
     injectFluidContainer();
     applyTheme();
-    /* Re-check every 60 seconds */
-    setInterval(applyTheme, 60000);
+    /* Re-check every second */
+    setInterval(applyTheme, 1000);
   }
 
   if (document.readyState === 'loading') {
