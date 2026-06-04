@@ -1,0 +1,169 @@
+/* ============================================
+   FLUID BACKGROUND ANIMATION LAYER
+   Lava-lamp style, hardware-accelerated,
+   diurnal color spectrum with CSS custom props.
+   ============================================ */
+
+/* ── Diurnal Theme Variables ── */
+:root {
+  --fluid-blob1: rgba(255, 154, 158, 0.65);
+  --fluid-blob2: rgba(250, 208, 196, 0.55);
+  --fluid-blob3: rgba(199, 125, 255, 0.50);
+  --fluid-blob4: rgba(255, 183, 122, 0.45);
+}
+
+/* Morning (06:00–11:00): Soft pastel pinks, oranges, warm purples */
+body.theme-morning {
+  --fluid-blob1: rgba(255, 154, 158, 0.65);
+  --fluid-blob2: rgba(250, 208, 196, 0.55);
+  --fluid-blob3: rgba(199, 125, 255, 0.50);
+  --fluid-blob4: rgba(255, 183, 122, 0.45);
+}
+
+/* Noon (11:00–15:00): Vibrant sky blues and bright teals */
+body.theme-noon {
+  --fluid-blob1: rgba(56, 189, 248, 0.65);
+  --fluid-blob2: rgba(34, 211, 238, 0.55);
+  --fluid-blob3: rgba(99, 179, 237, 0.50);
+  --fluid-blob4: rgba(45, 212, 191, 0.50);
+}
+
+/* Afternoon (15:00–18:00): Golden hour ambers, warm oranges, deep purples */
+body.theme-afternoon {
+  --fluid-blob1: rgba(251, 191, 36, 0.65);
+  --fluid-blob2: rgba(251, 146, 60, 0.55);
+  --fluid-blob3: rgba(192, 132, 252, 0.50);
+  --fluid-blob4: rgba(245, 158, 11, 0.45);
+}
+
+/* Evening (18:00–21:00): Deep twilight blues, purples, midnight indigos */
+body.theme-evening {
+  --fluid-blob1: rgba(99, 102, 241, 0.60);
+  --fluid-blob2: rgba(139, 92, 246, 0.55);
+  --fluid-blob3: rgba(67, 56, 202, 0.50);
+  --fluid-blob4: rgba(79, 70, 229, 0.45);
+}
+
+/* Night (21:00–01:00): Deep velvet dark blues, subtle neon purple */
+body.theme-night {
+  --fluid-blob1: rgba(30, 27, 75, 0.70);
+  --fluid-blob2: rgba(88, 28, 135, 0.45);
+  --fluid-blob3: rgba(49, 46, 129, 0.50);
+  --fluid-blob4: rgba(126, 34, 206, 0.30);
+}
+
+/* Deep Night (01:00–06:00): Introspective dark lo-fi hues */
+body.theme-deepnight {
+  --fluid-blob1: rgba(17, 12, 34, 0.75);
+  --fluid-blob2: rgba(46, 16, 101, 0.35);
+  --fluid-blob3: rgba(30, 27, 75, 0.50);
+  --fluid-blob4: rgba(20, 15, 40, 0.40);
+}
+
+/* ── Fluid Background Container ── */
+#fluid-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  filter: blur(80px);
+  -webkit-filter: blur(80px);
+  will-change: filter;
+}
+
+/* ── Blob Base Styles ── */
+#fluid-bg .fluid-blob {
+  position: absolute;
+  border-radius: 50%;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  /* 4-second smooth transition when theme changes */
+  transition: background 4s ease-in-out;
+}
+
+/* ── Individual Blob Sizes & Colors ── */
+#fluid-bg .fluid-blob--1 {
+  width: 55vmax;
+  height: 55vmax;
+  background: radial-gradient(circle at 30% 40%, var(--fluid-blob1), transparent 70%);
+  top: -15%;
+  left: -10%;
+  animation: fluid-drift-1 25s ease-in-out infinite alternate;
+}
+
+#fluid-bg .fluid-blob--2 {
+  width: 50vmax;
+  height: 50vmax;
+  background: radial-gradient(circle at 60% 50%, var(--fluid-blob2), transparent 70%);
+  top: 30%;
+  right: -15%;
+  animation: fluid-drift-2 30s ease-in-out infinite alternate;
+}
+
+#fluid-bg .fluid-blob--3 {
+  width: 60vmax;
+  height: 60vmax;
+  background: radial-gradient(circle at 40% 60%, var(--fluid-blob3), transparent 70%);
+  bottom: -20%;
+  left: 20%;
+  animation: fluid-drift-3 28s ease-in-out infinite alternate;
+}
+
+#fluid-bg .fluid-blob--4 {
+  width: 45vmax;
+  height: 45vmax;
+  background: radial-gradient(circle at 50% 50%, var(--fluid-blob4), transparent 70%);
+  top: 50%;
+  left: 55%;
+  animation: fluid-drift-4 22s ease-in-out infinite alternate;
+}
+
+/* ── Hardware-Accelerated Keyframes ── */
+@keyframes fluid-drift-1 {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  25%  { transform: translate3d(8vw, 12vh, 0) rotate(45deg) scale(1.08); }
+  50%  { transform: translate3d(-5vw, 20vh, 0) rotate(120deg) scale(0.95); }
+  75%  { transform: translate3d(15vw, 5vh, 0) rotate(200deg) scale(1.12); }
+  100% { transform: translate3d(10vw, 15vh, 0) rotate(360deg) scale(1.05); }
+}
+
+@keyframes fluid-drift-2 {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  25%  { transform: translate3d(-12vw, -8vh, 0) rotate(-60deg) scale(1.1); }
+  50%  { transform: translate3d(-18vw, 10vh, 0) rotate(-150deg) scale(0.92); }
+  75%  { transform: translate3d(-6vw, -15vh, 0) rotate(-250deg) scale(1.15); }
+  100% { transform: translate3d(-15vw, -5vh, 0) rotate(-360deg) scale(1); }
+}
+
+@keyframes fluid-drift-3 {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  25%  { transform: translate3d(10vw, -18vh, 0) rotate(80deg) scale(1.05); }
+  50%  { transform: translate3d(20vw, -10vh, 0) rotate(180deg) scale(1.15); }
+  75%  { transform: translate3d(5vw, -22vh, 0) rotate(270deg) scale(0.9); }
+  100% { transform: translate3d(12vw, -14vh, 0) rotate(360deg) scale(1.08); }
+}
+
+@keyframes fluid-drift-4 {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  25%  { transform: translate3d(-14vw, 10vh, 0) rotate(-90deg) scale(1.12); }
+  50%  { transform: translate3d(8vw, -12vh, 0) rotate(-180deg) scale(0.88); }
+  75%  { transform: translate3d(-10vw, -8vh, 0) rotate(-300deg) scale(1.1); }
+  100% { transform: translate3d(-5vw, 5vh, 0) rotate(-360deg) scale(1); }
+}
+
+/* ── Chat-specific override: subtle opacity ── */
+body.fluid-bg-chat #fluid-bg {
+  opacity: 0.25;
+}
+
+/* ── Reduced-motion a11y ── */
+@media (prefers-reduced-motion: reduce) {
+  #fluid-bg .fluid-blob {
+    animation-duration: 60s !important;
+  }
+}
