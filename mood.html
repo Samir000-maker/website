@@ -361,8 +361,10 @@
     }
  
     .mood-card {
-      background: var(--bg-card);
-      border: 2px solid var(--border-dark);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01)) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
       border-radius: 16px;
       padding: 32px 24px;
       display: flex;
@@ -370,19 +372,52 @@
       align-items: center;
       gap: 12px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
+      perspective: 1000px;
     }
  
     .mood-card:hover {
-      background: var(--bg-card-hover);
-      border-color: #3d4062;
+      border-color: rgba(139, 92, 246, 0.5) !important;
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(255, 255, 255, 0.01)) !important;
+      transform: translateY(-8px);
+      box-shadow: 0 16px 48px 0 rgba(139, 92, 246, 0.3), 0 0 40px rgba(139, 92, 246, 0.2) !important;
     }
  
     .mood-card.selected {
-      background: rgba(99, 102, 241, 0.1);
-      border-color: #6366f1;
-      box-shadow: 0 0 0 1px #6366f1;
+      background: rgba(139, 92, 246, 0.12) !important;
+      border-color: #8b5cf6 !important;
+      box-shadow: 0 0 0 1px #8b5cf6, 0 0 30px rgba(139, 92, 246, 0.3) !important;
+      transform: translateY(-4px);
+    }
+
+    .emoji-wrapper {
+      transform-style: preserve-3d;
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .mood-card:hover .emoji-wrapper {
+      transform: perspective(1000px) rotateY(5deg);
+    }
+ 
+    .emoji-3d {
+      filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+      transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      font-size: 3.5rem;
+      line-height: 1;
+      display: inline-block;
+      animation: float 3s ease-in-out infinite;
+      transform-style: preserve-3d;
+    }
+ 
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(0deg); }
+      50% { transform: translateY(-10px) rotate(2deg); }
+    }
+ 
+    .mood-card:hover .emoji-3d {
+      animation-play-state: paused;
+      transform: scale(1.25) translateY(-8px) rotateZ(8deg) rotateY(10deg);
+      filter: drop-shadow(0 12px 32px rgba(139,92,246,0.7)) drop-shadow(0 0 20px rgba(139,92,246,0.5));
     }
  
     .mood-card.selected::after {
@@ -417,10 +452,13 @@
     .context-section {
       max-width: 700px;
       margin: 0 auto 48px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-dark);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01)) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
       border-radius: 16px;
       padding: 24px;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3) !important;
     }
  
     .context-header {
@@ -537,18 +575,22 @@
     }
  
     .session-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-dark);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01)) !important;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
       border-radius: 12px;
       padding: 20px;
-      transition: all 0.2s;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2) !important;
       cursor: pointer;
     }
  
     .session-card:hover {
-      background: var(--bg-card-hover);
-      border-color: #3d4062;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)) !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
       transform: translateY(-2px);
+      box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.3) !important;
     }
  
     .session-header {
@@ -669,11 +711,11 @@
       .sessions-grid { grid-template-columns: 1fr; }
     }
   </style>
-<link rel="stylesheet" href="/fluid-bg.css">
+<link rel="stylesheet" href="fluid-bg.css">
 </head>
  
 <body>
-<script src="/fluid-bg.js"></script>
+<script src="fluid-bg.js"></script>
   <!-- Contact Support Modal -->
   <div id="contactSupportModal" class="hidden" style="position: fixed; inset: 0; z-index: 70; align-items: center; justify-content: center;">
     <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"></div>
@@ -1695,12 +1737,14 @@
           card.className = 'mood-card';
           card.setAttribute('data-mood', id);
           card.innerHTML = `
-      <div class="mood-emoji">${emoji}</div>
-      <div class="mood-label">${id}</div>
-      <div class="mood-user-count" id="mood-count-${id}" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-        <span>—</span>
-      </div>
-    `;
+            <div class="emoji-wrapper">
+              <span class="emoji-3d">${emoji}</span>
+            </div>
+            <div class="mood-label" style="margin-top: 8px;">${id}</div>
+            <div class="mood-user-count" id="mood-count-${id}" style="font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 4px;">
+              <span>—</span>
+            </div>
+          `;
           card.addEventListener('click', () => selectMood(id, card));
           moodsGrid.appendChild(card);
         });
