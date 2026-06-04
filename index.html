@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
@@ -168,9 +169,148 @@
 
         a { text-decoration: none; }
         a.glow-button { display: inline-flex; }
-    </style>
+    
+/* === Vibegra temporal fluid glass system === */
+@property --blob-a { syntax: '<color>'; inherits: true; initial-value: #ffb86b; }
+@property --blob-b { syntax: '<color>'; inherits: true; initial-value: #8b5cf6; }
+@property --blob-c { syntax: '<color>'; inherits: true; initial-value: #2dd4bf; }
+@property --blob-d { syntax: '<color>'; inherits: true; initial-value: #f472b6; }
+:root {
+  --glass-bg: rgba(15, 15, 25, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --text-primary: #fff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-muted: rgba(255, 255, 255, 0.42);
+  --mood-primary: #7dd3fc;
+  --mood-secondary: #c084fc;
+  --mood-glow: rgba(125, 211, 252, 0.46);
+  --blob-a: #ffb86b;
+  --blob-b: #8b5cf6;
+  --blob-c: #2dd4bf;
+  --blob-d: #f472b6;
+  --page-bg: #090a12;
+}
+body.theme-morning { --blob-a:#ffb86b; --blob-b:#f472b6; --blob-c:#38bdf8; --blob-d:#fef3c7; --page-bg:#10111c; }
+body.theme-noon { --blob-a:#60a5fa; --blob-b:#22d3ee; --blob-c:#a7f3d0; --blob-d:#f0abfc; --page-bg:#08111b; }
+body.theme-afternoon { --blob-a:#fb923c; --blob-b:#f472b6; --blob-c:#818cf8; --blob-d:#2dd4bf; --page-bg:#120d17; }
+body.theme-evening { --blob-a:#f97316; --blob-b:#a855f7; --blob-c:#ec4899; --blob-d:#38bdf8; --page-bg:#0b0814; }
+body.theme-night { --blob-a:#2563eb; --blob-b:#7c3aed; --blob-c:#06b6d4; --blob-d:#f0abfc; --page-bg:#050816; }
+body.theme-deep-night { --blob-a:#172554; --blob-b:#4c1d95; --blob-c:#164e63; --blob-d:#831843; --page-bg:#02030a; }
+body[data-session-mood="happy"] { --mood-primary:#34d399; --mood-secondary:#fbbf24; --mood-glow:rgba(52,211,153,.48); }
+body[data-session-mood="sad"] { --mood-primary:#60a5fa; --mood-secondary:#818cf8; --mood-glow:rgba(96,165,250,.48); }
+body[data-session-mood="angry"] { --mood-primary:#fb7185; --mood-secondary:#f97316; --mood-glow:rgba(251,113,133,.5); }
+body[data-session-mood="lonely"] { --mood-primary:#7dd3fc; --mood-secondary:#c4b5fd; --mood-glow:rgba(125,211,252,.48); }
+body[data-session-mood="calm"] { --mood-primary:#2dd4bf; --mood-secondary:#99f6e4; --mood-glow:rgba(45,212,191,.46); }
+body[data-session-mood="excited"] { --mood-primary:#f472b6; --mood-secondary:#facc15; --mood-glow:rgba(244,114,182,.5); }
+body[data-session-mood="tired"] { --mood-primary:#a78bfa; --mood-secondary:#64748b; --mood-glow:rgba(167,139,250,.46); }
+body[data-session-mood="stressed"] { --mood-primary:#f87171; --mood-secondary:#fb923c; --mood-glow:rgba(248,113,113,.5); }
+body[data-session-mood="confused"] { --mood-primary:#c084fc; --mood-secondary:#38bdf8; --mood-glow:rgba(192,132,252,.48); }
+body {
+  color: var(--text-primary);
+  background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07), transparent 34%), var(--page-bg) !important;
+  transition: background 4000ms ease-in-out, --blob-a 4000ms ease-in-out, --blob-b 4000ms ease-in-out, --blob-c 4000ms ease-in-out, --blob-d 4000ms ease-in-out;
+}
+#fluid-bg {
+  position: fixed;
+  inset: -12vh -12vw;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 120%, rgba(255,255,255,.06), transparent 46%);
+  opacity: .88;
+  filter: saturate(120%);
+  transition: opacity 4000ms ease-in-out, background 4000ms ease-in-out;
+}
+#fluid-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(0,0,0,.38) 100%);
+}
+.fluid-blob {
+  position: absolute;
+  width: min(56vw, 760px);
+  aspect-ratio: 1;
+  border-radius: 42% 58% 62% 38% / 48% 37% 63% 52%;
+  opacity: .58;
+  filter: blur(54px);
+  transform: translate3d(0,0,0);
+  will-change: transform, border-radius;
+  mix-blend-mode: screen;
+  transition: background 4000ms ease-in-out;
+}
+.fluid-blob.one { left:-8vw; top:3vh; background:radial-gradient(circle at 35% 35%, var(--blob-a), transparent 62%); animation: fluidDriftOne 32s ease-in-out infinite alternate; }
+.fluid-blob.two { right:-10vw; top:6vh; background:radial-gradient(circle at 45% 45%, var(--blob-b), transparent 64%); animation: fluidDriftTwo 38s ease-in-out infinite alternate; }
+.fluid-blob.three { left:20vw; bottom:-18vh; background:radial-gradient(circle at 50% 50%, var(--blob-c), transparent 66%); animation: fluidDriftThree 44s ease-in-out infinite alternate; }
+.fluid-blob.four { right:15vw; bottom:-16vh; width:min(42vw,620px); background:radial-gradient(circle at 50% 50%, var(--blob-d), transparent 64%); animation: fluidDriftFour 48s ease-in-out infinite alternate; }
+@keyframes fluidDriftOne { 0%{transform:translate3d(-4%,0,0) rotate(0deg) scale(1)} 50%{border-radius:60% 40% 44% 56% / 38% 58% 42% 62%} 100%{transform:translate3d(18%,12%,0) rotate(34deg) scale(1.12)} }
+@keyframes fluidDriftTwo { 0%{transform:translate3d(4%,-2%,0) rotate(18deg) scale(1.05)} 50%{border-radius:39% 61% 55% 45% / 60% 41% 59% 40%} 100%{transform:translate3d(-16%,16%,0) rotate(-28deg) scale(.98)} }
+@keyframes fluidDriftThree { 0%{transform:translate3d(-8%,8%,0) rotate(-12deg) scale(1.1)} 50%{border-radius:52% 48% 37% 63% / 50% 64% 36% 50%} 100%{transform:translate3d(14%,-12%,0) rotate(32deg) scale(1)} }
+@keyframes fluidDriftFour { 0%{transform:translate3d(5%,10%,0) rotate(0deg) scale(.96)} 100%{transform:translate3d(-12%,-18%,0) rotate(48deg) scale(1.15)} }
+.glass-card, .context-section, .session-card, .profile-menu, #contactSupportModal > div:last-child, #profileSettingsModal > div:last-child {
+  background: var(--glass-bg) !important;
+  border: 1px solid var(--glass-border) !important;
+  backdrop-filter: blur(30px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
+  box-shadow: 0 24px 80px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.07) !important;
+}main, header, nav, footer, .header { position: relative; z-index: 2; }
+.premium-bg, body { overflow-x: hidden; }
+nav, .header, footer {
+  background: rgba(8, 9, 18, .34) !important;
+  border-color: var(--glass-border) !important;
+  backdrop-filter: blur(30px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
+}
+h1, .hero h1 { color: #fff !important; text-shadow: 0 20px 80px rgba(0,0,0,.5); letter-spacing: 0 !important; }
+.hero p, p, .helper-text, .text-slate-500, .text-slate-400, .text-gray-400 { color: var(--text-secondary) !important; }
+#connectNowBtn, .primary-btn {
+  color: #fff !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mood-primary) 88%, white 12%), var(--mood-secondary)) !important;
+  border: 1px solid rgba(255,255,255,.16) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 18px 60px var(--mood-glow), inset 0 1px 0 rgba(255,255,255,.3) !important;
+  transform: translate3d(0,0,0);
+}
+#connectNowBtn:hover:not(:disabled), .primary-btn:hover:not(:disabled) { transform: translate3d(0,-2px,0) scale(1.02); }
+#moodCardsGrid, .moods-grid { position: relative; z-index: 2; gap: 18px !important; }
+.glass-card, .mood-card {
+  background: rgba(15,15,25,.32) !important;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 24px !important;
+  backdrop-filter: blur(30px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
+  box-shadow: 0 20px 70px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.07) !important;
+  transition: transform .45s cubic-bezier(.2,.8,.2,1), box-shadow .45s ease, background .45s ease, border-color .45s ease !important;
+  transform: translate3d(0,0,0);
+}
+.glass-card:hover, .mood-card:hover, .mood-card.selected {
+  transform: translate3d(0,-8px,0) scale(1.04) !important;
+  background: rgba(15,15,25,.45) !important;
+  border-color: rgba(255,255,255,.12) !important;
+  box-shadow: 0 26px 90px rgba(0,0,0,.3), 0 0 52px var(--mood-glow), inset 0 1px 0 rgba(255,255,255,.14) !important;
+}
+.mood-card[data-mood="happy"], button[data-mood="happy"] { --mood-glow:rgba(52,211,153,.52); --mood-primary:#34d399; --mood-secondary:#fbbf24; }
+.mood-card[data-mood="sad"], button[data-mood="sad"] { --mood-glow:rgba(96,165,250,.52); --mood-primary:#60a5fa; --mood-secondary:#818cf8; }
+.mood-card[data-mood="angry"], button[data-mood="angry"] { --mood-glow:rgba(251,113,133,.56); --mood-primary:#fb7185; --mood-secondary:#fb923c; }
+.mood-card[data-mood="lonely"], button[data-mood="lonely"] { --mood-glow:rgba(125,211,252,.52); --mood-primary:#7dd3fc; --mood-secondary:#c4b5fd; }
+.mood-card[data-mood="calm"], button[data-mood="calm"] { --mood-glow:rgba(45,212,191,.5); --mood-primary:#2dd4bf; --mood-secondary:#99f6e4; }
+.mood-card[data-mood="excited"], button[data-mood="excited"] { --mood-glow:rgba(244,114,182,.56); --mood-primary:#f472b6; --mood-secondary:#facc15; }
+.mood-card[data-mood="tired"], button[data-mood="tired"] { --mood-glow:rgba(167,139,250,.5); --mood-primary:#a78bfa; --mood-secondary:#64748b; }
+.mood-card[data-mood="stressed"], button[data-mood="stressed"] { --mood-glow:rgba(248,113,113,.56); --mood-primary:#f87171; --mood-secondary:#fb923c; }
+.mood-card[data-mood="confused"], button[data-mood="confused"] { --mood-glow:rgba(192,132,252,.52); --mood-primary:#c084fc; --mood-secondary:#38bdf8; }
+.mood-label, .session-mood, .sessions-title { color: #fff !important; }
+.mood-user-count, .session-time, .session-text { color: var(--text-secondary) !important; }
+.mood-card.selected::after { background: linear-gradient(135deg, var(--mood-primary), var(--mood-secondary)) !important; box-shadow: 0 0 28px var(--mood-glow); }
+.context-textarea, input, textarea { background: rgba(255,255,255,.055) !important; border-color: rgba(255,255,255,.1) !important; color: #fff !important; }
+@media (max-width:768px){ #fluid-bg{inset:-18vh -42vw;} .fluid-blob{width:92vw; filter:blur(42px);} }</style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display text-slate-800 dark:text-white premium-bg min-h-screen flex flex-col overflow-x-hidden selection:bg-primary selection:text-white">
+  <div id="fluid-bg" aria-hidden="true">
+    <span class="fluid-blob one"></span>
+    <span class="fluid-blob two"></span>
+    <span class="fluid-blob three"></span>
+    <span class="fluid-blob four"></span>
+  </div>
 
     <!-- Contact Support Modal -->
     <div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
@@ -445,15 +585,15 @@
             const grid = document.getElementById('moodCardsGrid');
 
             const moods = [
-                { id: 'happy',   name: 'Happy',   emoji: '😊', hint: 'Feeling good',       tint: 'from-emerald-400/10' },
-                { id: 'sad',     name: 'Sad',     emoji: '😭', hint: 'Feeling down',       tint: 'from-indigo-500/10'  },
-                { id: 'angry',   name: 'Angry',   emoji: '😠', hint: 'Frustrated',         tint: 'from-orange-500/10'  },
-                { id: 'lonely',  name: 'Lonely',  emoji: '😔', hint: 'Seeking connection', tint: 'from-blue-400/10'    },
-                { id: 'calm',    name: 'Calm',    emoji: '😌', hint: 'Peaceful',           tint: 'from-teal-400/10'    },
-                { id: 'excited', name: 'Excited', emoji: '🤩', hint: 'High energy',        tint: 'from-pink-500/10'    },
-                { id: 'tired',   name: 'Tired',   emoji: '😴', hint: 'Low energy',         tint: 'from-primary/15'     },
-                { id: 'stressed',name: 'Stressed',emoji: '😣', hint: 'Overwhelmed',        tint: 'from-red-400/10'     },
-                { id: 'confused',name: 'Confused',emoji: '😕', hint: 'Uncertain',          tint: 'from-purple-400/10'  },
+                { id: 'happy',   name: 'Happy',   emoji: 'ðŸ˜Š', hint: 'Feeling good',       tint: 'from-emerald-400/10' },
+                { id: 'sad',     name: 'Sad',     emoji: 'ðŸ˜­', hint: 'Feeling down',       tint: 'from-indigo-500/10'  },
+                { id: 'angry',   name: 'Angry',   emoji: 'ðŸ˜ ', hint: 'Frustrated',         tint: 'from-orange-500/10'  },
+                { id: 'lonely',  name: 'Lonely',  emoji: 'ðŸ˜”', hint: 'Seeking connection', tint: 'from-blue-400/10'    },
+                { id: 'calm',    name: 'Calm',    emoji: 'ðŸ˜Œ', hint: 'Peaceful',           tint: 'from-teal-400/10'    },
+                { id: 'excited', name: 'Excited', emoji: 'ðŸ¤©', hint: 'High energy',        tint: 'from-pink-500/10'    },
+                { id: 'tired',   name: 'Tired',   emoji: 'ðŸ˜´', hint: 'Low energy',         tint: 'from-primary/15'     },
+                { id: 'stressed',name: 'Stressed',emoji: 'ðŸ˜£', hint: 'Overwhelmed',        tint: 'from-red-400/10'     },
+                { id: 'confused',name: 'Confused',emoji: 'ðŸ˜•', hint: 'Uncertain',          tint: 'from-purple-400/10'  },
             ];
 
             let selectedMood = null;
@@ -470,8 +610,8 @@
                     <div class="flex items-center gap-3">
                       <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: breathe 1.2s ease-in-out infinite;"></div>
                       <div>
-                        <div class="text-base font-bold text-white">Connecting…</div>
-                        <div id="guestConnectOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profile…</div>
+                        <div class="text-base font-bold text-white">Connectingâ€¦</div>
+                        <div id="guestConnectOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profileâ€¦</div>
                       </div>
                     </div>
                   </div>
@@ -539,7 +679,7 @@
                 if (!selectedMood) return;
                 if (!connectBtn || connectBtn.disabled) return;
                 connectBtn.disabled = true;
-                showOverlay('Signing you in anonymously…');
+                showOverlay('Signing you in anonymouslyâ€¦');
                 try {
                     await initFirebase();
                     let user = firebase.auth().currentUser;
@@ -548,7 +688,7 @@
                         user = credential.user;
                     }
                     if (!user) throw new Error('Anonymous auth failed');
-                    showOverlay('Creating your guest profile…');
+                    showOverlay('Creating your guest profileâ€¦');
                     const token = await user.getIdToken();
                     const res = await fetch('/api/users/ensure-guest', {
                         method: 'POST',
@@ -567,7 +707,7 @@
                         localStorage.setItem('selectedMood', selectedMood);
                         localStorage.removeItem('currentRoom');
                     } catch { }
-                    showOverlay('Entering chat…');
+                    showOverlay('Entering chatâ€¦');
                     window.location.href = '/chat.html';
                 } catch (err) {
                     const msg = (err && err.message) ? String(err.message) : 'Connection failed';
@@ -587,5 +727,36 @@
             } catch { }
         })();
     </script>
+  <script>
+    (function () {
+      const themeClasses = ['theme-morning','theme-noon','theme-afternoon','theme-evening','theme-night','theme-deep-night'];
+      function phase(hour) {
+        if (hour >= 5 && hour < 10) return 'theme-morning';
+        if (hour >= 10 && hour < 14) return 'theme-noon';
+        if (hour >= 14 && hour < 17) return 'theme-afternoon';
+        if (hour >= 17 && hour < 21) return 'theme-evening';
+        if (hour >= 21 || hour < 1) return 'theme-night';
+        return 'theme-deep-night';
+      }
+      function currentMood() {
+        try {
+          return localStorage.getItem('selectedMood') || localStorage.getItem('guest_mood') || '';
+        } catch { return ''; }
+      }
+      function applyTemporalTheme() {
+        const body = document.body;
+        if (!body) return;
+        body.classList.remove.apply(body.classList, themeClasses);
+        body.classList.add(phase(new Date().getHours()));
+        const mood = currentMood();
+        if (mood) body.dataset.sessionMood = mood;
+      }
+      applyTemporalTheme();
+      window.VibeTemporalTheme = { apply: applyTemporalTheme };
+      window.addEventListener('storage', applyTemporalTheme);
+      setInterval(applyTemporalTheme, 60000);
+    })();
+  </script>
 </body>
 </html>
+
