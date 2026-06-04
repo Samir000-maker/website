@@ -1,762 +1,591 @@
-
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
-    <link rel="icon" href="/favicon.ico">
-    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png">
-    <link rel="icon" type="image/png" sizes="48x48" href="/public/favicon.png">
-    <link rel="apple-touch-icon" href="/favicon.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/favicon.png">
-    <link rel="canonical" href="https://vibegra.com/">
-    <meta name="theme-color" content="#0f172a">
-    <link rel="manifest" href="/manifest.webmanifest">
-    <meta name="theme-color" content="#6320e9">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta charset="utf-8"/>
-    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>Vibegra Home Screen</title>
-    <link href="https://fonts.googleapis.com" rel="preconnect"/>
-    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script>
-        (function () {
-            try {
-                if (window.__VIBE_SILENCE_CONSOLE__) return;
-                window.__VIBE_SILENCE_CONSOLE__ = true;
-                const noop = function () { };
-                console.log = noop;
-                console.info = noop;
-                console.warn = noop;
-                console.error = noop;
-                console.debug = noop;
-            } catch { }
-        })();
-    </script>
-    <script src="/env-config.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        "primary": "#6320e9",
-                        "background-light": "#f6f6f8",
-                        "background-dark": "#161121",
-                        "accent-teal": "#2DD4BF",
-                        "accent-amber": "#F59E0B",
-                    },
-                    fontFamily: {
-                        "display": ["Plus Jakarta Sans", "sans-serif"]
-                    },
-                    borderRadius: {
-                        "DEFAULT": "0.5rem",
-                        "lg": "1rem",
-                        "xl": "1.5rem",
-                        "full": "9999px"
-                    },
-                    backgroundImage: {
-                        'mesh-gradient': 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(260,82%,65%,0.15) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,0.3) 0, transparent 50%)',
-                        'glass-gradient': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02))',
-                        'glass-border': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05))'
-                    }
-                },
-            },
-        }
-    </script>
-    <style>
-        .premium-bg {
-            background-color: #161121;
-            background-image:
-                radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.08) 0%, transparent 40%),
-                radial-gradient(circle at 85% 30%, rgba(245, 158, 11, 0.06) 0%, transparent 40%),
-                radial-gradient(circle at 50% 80%, rgba(99, 32, 233, 0.15) 0%, transparent 50%);
-        }
-
-        @keyframes breathe {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.02); opacity: 0.95; }
-        }
-
-        .glass-card {
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            perspective: 1000px;
-            animation: breathe 4s ease-in-out infinite;
-        }
-        .glass-card:hover {
-            border-color: rgba(99, 32, 233, 0.5);
-            background: linear-gradient(135deg, rgba(99, 32, 233, 0.1), rgba(255, 255, 255, 0.01));
-            transform: translateY(-8px);
-            box-shadow: 0 16px 48px 0 rgba(99, 32, 233, 0.3), 0 0 40px rgba(99, 32, 233, 0.2);
-            animation: none;
-        }
-
-        .emoji-wrapper {
-            transform-style: preserve-3d;
-            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .glass-card:hover .emoji-wrapper {
-            transform: perspective(1000px) rotateY(5deg);
-        }
-
-        .glow-button {
-            box-shadow: 0 0 20px rgba(99, 32, 233, 0.3);
-            transition: all 0.3s ease;
-        }
-        .glow-button:hover {
-            box-shadow: 0 0 30px rgba(99, 32, 233, 0.6);
-            transform: scale(1.02);
-        }
-
-        .nav-link { position: relative; }
-        .nav-link::after {
-            content: '';
-            position: absolute;
-            width: 0;
-            height: 2px;
-            bottom: -4px;
-            left: 50%;
-            background-color: #6320e9;
-            transition: all 0.3s ease;
-            transform: translateX(-50%);
-        }
-        .nav-link:hover::after { width: 100%; }
-
-        .emoji-3d {
-            filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
-            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-            font-size: 3.5rem;
-            line-height: 1;
-            display: inline-block;
-            animation: float 3s ease-in-out infinite;
-            transform-style: preserve-3d;
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translateY(0px) rotate(0deg); }
-            50% { transform: translateY(-10px) rotate(2deg); }
-        }
-
-        @keyframes pulse-glow {
-            0%, 100% { filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4)); }
-            50% { filter: drop-shadow(0 8px 24px rgba(99,32,233,0.6)); }
-        }
-
-        .emoji-3d:nth-child(1) { animation: float 3s ease-in-out infinite; }
-        .emoji-3d:nth-child(2) { animation: float 3.5s ease-in-out infinite; animation-delay: 0.2s; }
-        .emoji-3d:nth-child(3) { animation: float 2.8s ease-in-out infinite; animation-delay: 0.4s; }
-        .emoji-3d:nth-child(4) { animation: float 3.2s ease-in-out infinite; animation-delay: 0.6s; }
-
-        .group:hover .emoji-3d {
-            animation: none;
-            transform: scale(1.25) translateY(-8px) rotateZ(8deg) rotateY(10deg);
-            filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) drop-shadow(0 0 20px rgba(99,32,233,0.5));
-        }
-        .glass-card:hover .emoji-3d { animation-play-state: paused; }
-        .ring-2 .emoji-3d { animation: float 2.5s ease-in-out infinite, pulse-glow 2s ease-in-out infinite; }
-
-        a { text-decoration: none; }
-        a.glow-button { display: inline-flex; }
-    
-/* === Vibegra temporal fluid glass system === */
-@property --blob-a { syntax: '<color>'; inherits: true; initial-value: #ffb86b; }
-@property --blob-b { syntax: '<color>'; inherits: true; initial-value: #8b5cf6; }
-@property --blob-c { syntax: '<color>'; inherits: true; initial-value: #2dd4bf; }
-@property --blob-d { syntax: '<color>'; inherits: true; initial-value: #f472b6; }
-:root {
-  --glass-bg: rgba(15, 15, 25, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --text-primary: #fff;
-  --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-muted: rgba(255, 255, 255, 0.42);
-  --mood-primary: #7dd3fc;
-  --mood-secondary: #c084fc;
-  --mood-glow: rgba(125, 211, 252, 0.46);
-  --blob-a: #ffb86b;
-  --blob-b: #8b5cf6;
-  --blob-c: #2dd4bf;
-  --blob-d: #f472b6;
-  --page-bg: #090a12;
+<link rel="icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon.png">
+<link rel="icon" type="image/png" sizes="48x48" href="/public/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/favicon.png">
+<link rel="canonical" href="https://vibegra.com/">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#6320e9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vibegra Home Screen</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+(function () {
+try {
+if (window.__VIBE_SILENCE_CONSOLE__) return;
+window.__VIBE_SILENCE_CONSOLE__ = true;
+const noop = function () { };
+console.log = noop;
+console.info = noop;
+console.warn = noop;
+console.error = noop;
+console.debug = noop;
+} catch { }
+})();
+</script>
+<script src="/env-config.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
+<script id="tailwind-config">
+tailwind.config = {
+darkMode: "class",
+theme: {
+extend: {
+colors: {
+"primary": "#6320e9",
+"background-light": "#f6f6f8",
+"background-dark": "#161121",
+"accent-teal": "#2DD4BF",
+"accent-amber": "#F59E0B",
+},
+fontFamily: {
+"display": ["Plus Jakarta Sans", "sans-serif"]
+},
+borderRadius: {
+"DEFAULT": "0.5rem",
+"lg": "1rem",
+"xl": "1.5rem",
+"full": "9999px"
+},
+backgroundImage: {
+'mesh-gradient': 'radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(260,82%,65%,0.15) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,0.3) 0, transparent 50%)',
+'glass-gradient': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02))',
+'glass-border': 'linear-gradient(to bottom right, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05))'
 }
-body.theme-morning { --blob-a:#ffb86b; --blob-b:#f472b6; --blob-c:#38bdf8; --blob-d:#fef3c7; --page-bg:#10111c; }
-body.theme-noon { --blob-a:#60a5fa; --blob-b:#22d3ee; --blob-c:#a7f3d0; --blob-d:#f0abfc; --page-bg:#08111b; }
-body.theme-afternoon { --blob-a:#fb923c; --blob-b:#f472b6; --blob-c:#818cf8; --blob-d:#2dd4bf; --page-bg:#120d17; }
-body.theme-evening { --blob-a:#f97316; --blob-b:#a855f7; --blob-c:#ec4899; --blob-d:#38bdf8; --page-bg:#0b0814; }
-body.theme-night { --blob-a:#2563eb; --blob-b:#7c3aed; --blob-c:#06b6d4; --blob-d:#f0abfc; --page-bg:#050816; }
-body.theme-deep-night { --blob-a:#172554; --blob-b:#4c1d95; --blob-c:#164e63; --blob-d:#831843; --page-bg:#02030a; }
-body[data-session-mood="happy"] { --mood-primary:#34d399; --mood-secondary:#fbbf24; --mood-glow:rgba(52,211,153,.48); }
-body[data-session-mood="sad"] { --mood-primary:#60a5fa; --mood-secondary:#818cf8; --mood-glow:rgba(96,165,250,.48); }
-body[data-session-mood="angry"] { --mood-primary:#fb7185; --mood-secondary:#f97316; --mood-glow:rgba(251,113,133,.5); }
-body[data-session-mood="lonely"] { --mood-primary:#7dd3fc; --mood-secondary:#c4b5fd; --mood-glow:rgba(125,211,252,.48); }
-body[data-session-mood="calm"] { --mood-primary:#2dd4bf; --mood-secondary:#99f6e4; --mood-glow:rgba(45,212,191,.46); }
-body[data-session-mood="excited"] { --mood-primary:#f472b6; --mood-secondary:#facc15; --mood-glow:rgba(244,114,182,.5); }
-body[data-session-mood="tired"] { --mood-primary:#a78bfa; --mood-secondary:#64748b; --mood-glow:rgba(167,139,250,.46); }
-body[data-session-mood="stressed"] { --mood-primary:#f87171; --mood-secondary:#fb923c; --mood-glow:rgba(248,113,113,.5); }
-body[data-session-mood="confused"] { --mood-primary:#c084fc; --mood-secondary:#38bdf8; --mood-glow:rgba(192,132,252,.48); }
-body {
-  color: var(--text-primary);
-  background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07), transparent 34%), var(--page-bg) !important;
-  transition: background 4000ms ease-in-out, --blob-a 4000ms ease-in-out, --blob-b 4000ms ease-in-out, --blob-c 4000ms ease-in-out, --blob-d 4000ms ease-in-out;
+},
+},
 }
-#fluid-bg {
-  position: fixed;
-  inset: -12vh -12vw;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 120%, rgba(255,255,255,.06), transparent 46%);
-  opacity: .88;
-  filter: saturate(120%);
-  transition: opacity 4000ms ease-in-out, background 4000ms ease-in-out;
+</script>
+<style>
+.premium-bg {
+background-color: #161121;
+background-image:
+radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.08) 0%, transparent 40%),
+radial-gradient(circle at 85% 30%, rgba(245, 158, 11, 0.06) 0%, transparent 40%),
+radial-gradient(circle at 50% 80%, rgba(99, 32, 233, 0.15) 0%, transparent 50%);
 }
-#fluid-bg::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 50% 50%, transparent 0 42%, rgba(0,0,0,.38) 100%);
+
+@keyframes breathe {
+0%, 100% { transform: scale(1); opacity: 1; }
+50% { transform: scale(1.02); opacity: 0.95; }
 }
-.fluid-blob {
-  position: absolute;
-  width: min(56vw, 760px);
-  aspect-ratio: 1;
-  border-radius: 42% 58% 62% 38% / 48% 37% 63% 52%;
-  opacity: .58;
-  filter: blur(54px);
-  transform: translate3d(0,0,0);
-  will-change: transform, border-radius;
-  mix-blend-mode: screen;
-  transition: background 4000ms ease-in-out;
+
+.glass-card {
+background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+backdrop-filter: blur(20px);
+-webkit-backdrop-filter: blur(20px);
+border: 1px solid rgba(255, 255, 255, 0.08);
+box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+perspective: 1000px;
+animation: breathe 4s ease-in-out infinite;
 }
-.fluid-blob.one { left:-8vw; top:3vh; background:radial-gradient(circle at 35% 35%, var(--blob-a), transparent 62%); animation: fluidDriftOne 32s ease-in-out infinite alternate; }
-.fluid-blob.two { right:-10vw; top:6vh; background:radial-gradient(circle at 45% 45%, var(--blob-b), transparent 64%); animation: fluidDriftTwo 38s ease-in-out infinite alternate; }
-.fluid-blob.three { left:20vw; bottom:-18vh; background:radial-gradient(circle at 50% 50%, var(--blob-c), transparent 66%); animation: fluidDriftThree 44s ease-in-out infinite alternate; }
-.fluid-blob.four { right:15vw; bottom:-16vh; width:min(42vw,620px); background:radial-gradient(circle at 50% 50%, var(--blob-d), transparent 64%); animation: fluidDriftFour 48s ease-in-out infinite alternate; }
-@keyframes fluidDriftOne { 0%{transform:translate3d(-4%,0,0) rotate(0deg) scale(1)} 50%{border-radius:60% 40% 44% 56% / 38% 58% 42% 62%} 100%{transform:translate3d(18%,12%,0) rotate(34deg) scale(1.12)} }
-@keyframes fluidDriftTwo { 0%{transform:translate3d(4%,-2%,0) rotate(18deg) scale(1.05)} 50%{border-radius:39% 61% 55% 45% / 60% 41% 59% 40%} 100%{transform:translate3d(-16%,16%,0) rotate(-28deg) scale(.98)} }
-@keyframes fluidDriftThree { 0%{transform:translate3d(-8%,8%,0) rotate(-12deg) scale(1.1)} 50%{border-radius:52% 48% 37% 63% / 50% 64% 36% 50%} 100%{transform:translate3d(14%,-12%,0) rotate(32deg) scale(1)} }
-@keyframes fluidDriftFour { 0%{transform:translate3d(5%,10%,0) rotate(0deg) scale(.96)} 100%{transform:translate3d(-12%,-18%,0) rotate(48deg) scale(1.15)} }
-.glass-card, .context-section, .session-card, .profile-menu, #contactSupportModal > div:last-child, #profileSettingsModal > div:last-child {
-  background: var(--glass-bg) !important;
-  border: 1px solid var(--glass-border) !important;
-  backdrop-filter: blur(30px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
-  box-shadow: 0 24px 80px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.07) !important;
-}main, header, nav, footer, .header { position: relative; z-index: 2; }
-.premium-bg, body { overflow-x: hidden; }
-nav, .header, footer {
-  background: rgba(8, 9, 18, .34) !important;
-  border-color: var(--glass-border) !important;
-  backdrop-filter: blur(30px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
+.glass-card:hover {
+border-color: rgba(99, 32, 233, 0.5);
+background: linear-gradient(135deg, rgba(99, 32, 233, 0.1), rgba(255, 255, 255, 0.01));
+transform: translateY(-8px);
+box-shadow: 0 16px 48px 0 rgba(99, 32, 233, 0.3), 0 0 40px rgba(99, 32, 233, 0.2);
+animation: none;
 }
-h1, .hero h1 { color: #fff !important; text-shadow: 0 20px 80px rgba(0,0,0,.5); letter-spacing: 0 !important; }
-.hero p, p, .helper-text, .text-slate-500, .text-slate-400, .text-gray-400 { color: var(--text-secondary) !important; }
-#connectNowBtn, .primary-btn {
-  color: #fff !important;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--mood-primary) 88%, white 12%), var(--mood-secondary)) !important;
-  border: 1px solid rgba(255,255,255,.16) !important;
-  border-radius: 999px !important;
-  box-shadow: 0 18px 60px var(--mood-glow), inset 0 1px 0 rgba(255,255,255,.3) !important;
-  transform: translate3d(0,0,0);
+
+.emoji-wrapper {
+transform-style: preserve-3d;
+transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-#connectNowBtn:hover:not(:disabled), .primary-btn:hover:not(:disabled) { transform: translate3d(0,-2px,0) scale(1.02); }
-#moodCardsGrid, .moods-grid { position: relative; z-index: 2; gap: 18px !important; }
-.glass-card, .mood-card {
-  background: rgba(15,15,25,.32) !important;
-  border: 1px solid rgba(255,255,255,.08) !important;
-  border-radius: 24px !important;
-  backdrop-filter: blur(30px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
-  box-shadow: 0 20px 70px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.07) !important;
-  transition: transform .45s cubic-bezier(.2,.8,.2,1), box-shadow .45s ease, background .45s ease, border-color .45s ease !important;
-  transform: translate3d(0,0,0);
+.glass-card:hover .emoji-wrapper {
+transform: perspective(1000px) rotateY(5deg);
 }
-.glass-card:hover, .mood-card:hover, .mood-card.selected {
-  transform: translate3d(0,-8px,0) scale(1.04) !important;
-  background: rgba(15,15,25,.45) !important;
-  border-color: rgba(255,255,255,.12) !important;
-  box-shadow: 0 26px 90px rgba(0,0,0,.3), 0 0 52px var(--mood-glow), inset 0 1px 0 rgba(255,255,255,.14) !important;
+
+.glow-button {
+box-shadow: 0 0 20px rgba(99, 32, 233, 0.3);
+transition: all 0.3s ease;
 }
-.mood-card[data-mood="happy"], button[data-mood="happy"] { --mood-glow:rgba(52,211,153,.52); --mood-primary:#34d399; --mood-secondary:#fbbf24; }
-.mood-card[data-mood="sad"], button[data-mood="sad"] { --mood-glow:rgba(96,165,250,.52); --mood-primary:#60a5fa; --mood-secondary:#818cf8; }
-.mood-card[data-mood="angry"], button[data-mood="angry"] { --mood-glow:rgba(251,113,133,.56); --mood-primary:#fb7185; --mood-secondary:#fb923c; }
-.mood-card[data-mood="lonely"], button[data-mood="lonely"] { --mood-glow:rgba(125,211,252,.52); --mood-primary:#7dd3fc; --mood-secondary:#c4b5fd; }
-.mood-card[data-mood="calm"], button[data-mood="calm"] { --mood-glow:rgba(45,212,191,.5); --mood-primary:#2dd4bf; --mood-secondary:#99f6e4; }
-.mood-card[data-mood="excited"], button[data-mood="excited"] { --mood-glow:rgba(244,114,182,.56); --mood-primary:#f472b6; --mood-secondary:#facc15; }
-.mood-card[data-mood="tired"], button[data-mood="tired"] { --mood-glow:rgba(167,139,250,.5); --mood-primary:#a78bfa; --mood-secondary:#64748b; }
-.mood-card[data-mood="stressed"], button[data-mood="stressed"] { --mood-glow:rgba(248,113,113,.56); --mood-primary:#f87171; --mood-secondary:#fb923c; }
-.mood-card[data-mood="confused"], button[data-mood="confused"] { --mood-glow:rgba(192,132,252,.52); --mood-primary:#c084fc; --mood-secondary:#38bdf8; }
-.mood-label, .session-mood, .sessions-title { color: #fff !important; }
-.mood-user-count, .session-time, .session-text { color: var(--text-secondary) !important; }
-.mood-card.selected::after { background: linear-gradient(135deg, var(--mood-primary), var(--mood-secondary)) !important; box-shadow: 0 0 28px var(--mood-glow); }
-.context-textarea, input, textarea { background: rgba(255,255,255,.055) !important; border-color: rgba(255,255,255,.1) !important; color: #fff !important; }
-@media (max-width:768px){ #fluid-bg{inset:-18vh -42vw;} .fluid-blob{width:92vw; filter:blur(42px);} }</style>
+.glow-button:hover {
+box-shadow: 0 0 30px rgba(99, 32, 233, 0.6);
+transform: scale(1.02);
+}
+
+.nav-link { position: relative; }
+.nav-link::after {
+content: '';
+position: absolute;
+width: 0;
+height: 2px;
+bottom: -4px;
+left: 50%;
+background-color: #6320e9;
+transition: all 0.3s ease;
+transform: translateX(-50%);
+}
+.nav-link:hover::after { width: 100%; }
+
+.emoji-3d {
+filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4));
+transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+font-size: 3.5rem;
+line-height: 1;
+display: inline-block;
+animation: float 3s ease-in-out infinite;
+transform-style: preserve-3d;
+}
+
+@keyframes float {
+0%, 100% { transform: translateY(0px) rotate(0deg); }
+50% { transform: translateY(-10px) rotate(2deg); }
+}
+
+@keyframes pulse-glow {
+0%, 100% { filter: drop-shadow(0 8px 16px rgba(0,0,0,0.4)); }
+50% { filter: drop-shadow(0 8px 24px rgba(99,32,233,0.6)); }
+}
+
+.emoji-3d:nth-child(1) { animation: float 3s ease-in-out infinite; }
+.emoji-3d:nth-child(2) { animation: float 3.5s ease-in-out infinite; animation-delay: 0.2s; }
+.emoji-3d:nth-child(3) { animation: float 2.8s ease-in-out infinite; animation-delay: 0.4s; }
+.emoji-3d:nth-child(4) { animation: float 3.2s ease-in-out infinite; animation-delay: 0.6s; }
+
+.group:hover .emoji-3d {
+animation: none;
+transform: scale(1.25) translateY(-8px) rotateZ(8deg) rotateY(10deg);
+filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) drop-shadow(0 0 20px rgba(99,32,233,0.5));
+}
+.glass-card:hover .emoji-3d { animation-play-state: paused; }
+.ring-2 .emoji-3d { animation: float 2.5s ease-in-out infinite, pulse-glow 2s ease-in-out infinite; }
+
+a { text-decoration: none; }
+a.glow-button { display: inline-flex; }
+</style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display text-slate-800 dark:text-white premium-bg min-h-screen flex flex-col overflow-x-hidden selection:bg-primary selection:text-white">
-  <div id="fluid-bg" aria-hidden="true">
-    <span class="fluid-blob one"></span>
-    <span class="fluid-blob two"></span>
-    <span class="fluid-blob three"></span>
-    <span class="fluid-blob four"></span>
-  </div>
 
-    <!-- Contact Support Modal -->
-    <div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-close="1"></div>
-        <div class="relative w-[92vw] max-w-md rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <h3 class="text-lg font-bold tracking-tight text-white">Contact support</h3>
-                    <p class="mt-1 text-sm text-slate-400">Email us and we'll get back to you.</p>
-                </div>
-                <button type="button" class="text-slate-400 hover:text-white transition-colors" data-close="1">
-                    <span class="material-symbols-outlined">close</span>
-                </button>
-            </div>
-            <div class="mt-5 flex items-center gap-2 rounded-xl bg-black/30 border border-white/10 px-4 py-3">
-                <span class="text-sm font-semibold text-white select-all" id="contactSupportEmail">contact@vibegra.com</span>
-                <button id="contactSupportCopyBtn" type="button" class="ml-auto inline-flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 transition-colors">
-                    <span class="material-symbols-outlined text-[18px]">content_copy</span>
-                </button>
-            </div>
-            <p id="contactSupportCopyHint" class="mt-2 text-xs text-slate-500 hidden">Copied</p>
-        </div>
-    </div>
+<!-- Contact Support Modal -->
+<div id="contactSupportModal" class="fixed inset-0 z-[70] hidden items-center justify-center">
+<div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-close="1"></div>
+<div class="relative w-[92vw] max-w-md rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
+<div class="flex items-start justify-between gap-4">
+<div>
+<h3 class="text-lg font-bold tracking-tight text-white">Contact support</h3>
+<p class="mt-1 text-sm text-slate-400">Email us and we'll get back to you.</p>
+</div>
+<button type="button" class="text-slate-400 hover:text-white transition-colors" data-close="1">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="mt-5 flex items-center gap-2 rounded-xl bg-black/30 border border-white/10 px-4 py-3">
+<span class="text-sm font-semibold text-white select-all" id="contactSupportEmail">contact@vibegra.com</span>
+<button id="contactSupportCopyBtn" type="button" class="ml-auto inline-flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 transition-colors">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+</button>
+</div>
+<p id="contactSupportCopyHint" class="mt-2 text-xs text-slate-500 hidden">Copied</p>
+</div>
+</div>
 
-    <!-- Navigation -->
-    <nav class="fixed w-full z-50 top-0 left-0 transition-all duration-300 backdrop-blur-md bg-background-dark/30 border-b border-white/5">
-        <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-            <div class="flex items-center gap-3 group cursor-pointer">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center transition-all">
-                    <img src="/public/favicon.png" alt="Vibegra" class="w-8 h-8 object-contain">
-                </div>
-                <span class="text-xl font-bold tracking-tight">Vibegra</span>
-            </div>
-            <div class="hidden md:flex items-center gap-10"></div>
-            <div class="flex items-center gap-4">
-                <a href="login.html" class="hidden md:flex text-sm font-medium text-white/70 hover:text-white transition-colors cursor-pointer">Sign In</a>
-                <a href="signup.html" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10 backdrop-blur-sm cursor-pointer">
-                    Get Started
-                </a>
-            </div>
-        </div>
-    </nav>
+<!-- Navigation -->
+<nav class="fixed w-full z-50 top-0 left-0 transition-all duration-300 backdrop-blur-md bg-background-dark/30 border-b border-white/5">
+<div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+<div class="flex items-center gap-3 group cursor-pointer">
+<div class="w-10 h-10 rounded-xl flex items-center justify-center transition-all">
+<img src="/public/favicon.png" alt="Vibegra" class="w-8 h-8 object-contain">
+</div>
+<span class="text-xl font-bold tracking-tight">Vibegra</span>
+</div>
+<div class="hidden md:flex items-center gap-10"></div>
+<div class="flex items-center gap-4">
+<a href="login.html" class="hidden md:flex text-sm font-medium text-white/70 hover:text-white transition-colors cursor-pointer">Sign In</a>
+<a href="signup.html" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors border border-white/10 backdrop-blur-sm cursor-pointer">
+Get Started
+</a>
+</div>
+</div>
+</nav>
 
-    <!-- Main Content -->
-    <main class="flex-grow flex flex-col justify-center relative pt-16">
-        <!-- Ambient Blur Effects -->
-        <div class="absolute top-1/4 left-10 w-64 h-64 bg-accent-teal/10 rounded-full blur-[100px] pointer-events-none"></div>
-        <div class="absolute bottom-1/4 right-10 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
+<!-- Main Content -->
+<main class="flex-grow flex flex-col justify-center relative pt-16">
+<!-- Ambient Blur Effects -->
+<div class="absolute top-1/4 left-10 w-64 h-64 bg-accent-teal/10 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="absolute bottom-1/4 right-10 w-96 h-96 bg-primary/10 rounded-full blur-[120px] pointer-events-none"></div>
 
-        <div class="max-w-7xl mx-auto w-full px-6 py-8 lg:py-14 z-10 flex flex-col items-center text-center">
+<div class="max-w-7xl mx-auto w-full px-6 py-8 lg:py-14 z-10 flex flex-col items-center text-center">
 
-            <!-- Hero Section -->
-            <div class="max-w-2xl mx-auto mb-14 space-y-8">
-                <div id="socialClubMountIndex"></div>
-                <div id="socialClubOwnerToggleIndex" class="hidden w-full max-w-3xl mx-auto">
-                    <div class="flex items-center justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-sm">
-                        <div class="text-left">
-                            <div class="text-sm font-semibold text-white">Social Club Live</div>
-                            <div id="socialClubOwnerToggleHintIndex" class="text-xs text-slate-400">Only visible to the owner account</div>
-                        </div>
-                        <label class="inline-flex items-center gap-2 select-none">
-                            <span id="socialClubOwnerToggleStateIndex" class="text-xs font-semibold text-white/70">OFF</span>
-                            <input id="socialClubOwnerToggleCheckboxIndex" type="checkbox" class="h-5 w-10 rounded-full accent-primary cursor-pointer" />
-                        </label>
-                    </div>
-                </div>
+<!-- Hero Section -->
+<div class="max-w-2xl mx-auto mb-14 space-y-8">
+<div id="socialClubMountIndex"></div>
+<div id="socialClubOwnerToggleIndex" class="hidden w-full max-w-3xl mx-auto">
+<div class="flex items-center justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-sm">
+<div class="text-left">
+<div class="text-sm font-semibold text-white">Social Club Live</div>
+<div id="socialClubOwnerToggleHintIndex" class="text-xs text-slate-400">Only visible to the owner account</div>
+</div>
+<label class="inline-flex items-center gap-2 select-none">
+<span id="socialClubOwnerToggleStateIndex" class="text-xs font-semibold text-white/70">OFF</span>
+<input id="socialClubOwnerToggleCheckboxIndex" type="checkbox" class="h-5 w-10 rounded-full accent-primary cursor-pointer" />
+</label>
+</div>
+</div>
 
-                <h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
-                    Connect on how<br/><span class="text-white">you feel.</span>
-                </h1>
-            </div>
+<h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
+Connect on how<br/><span class="text-white">you feel.</span>
+</h1>
+</div>
 
-            <!-- CTA Section -->
-            <div class="flex flex-col items-center gap-6 mb-16">
-                <button id="connectNowBtn" disabled class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary">
-                    Connect Now
-                    <span class="material-icons-outlined text-xl">arrow_forward</span>
-                </button>
-                <div class="flex items-center gap-6 text-sm text-slate-500">
-                    <div class="flex items-center gap-1.5">
-                        <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
-                        <span>End-to-end Encrypted</span>
-                    </div>
-                    <div class="w-1 h-1 rounded-full bg-white/20"></div>
-                    <div class="flex items-center gap-1.5">
-                        <span class="material-icons-outlined text-base text-primary">face</span>
-                        <span>Verified Profiles Only</span>
-                    </div>
-                </div>
-            </div>
+<!-- CTA Section -->
+<div class="flex flex-col items-center gap-6 mb-16">
+<button id="connectNowBtn" disabled class="bg-primary hover:bg-primary/90 text-white text-lg font-semibold px-12 py-4 rounded-xl glow-button flex items-center gap-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary">
+Connect Now
+<span class="material-icons-outlined text-xl">arrow_forward</span>
+</button>
+<div class="flex items-center gap-6 text-sm text-slate-500">
+<div class="flex items-center gap-1.5">
+<span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
+<span>End-to-end Encrypted</span>
+</div>
+<div class="w-1 h-1 rounded-full bg-white/20"></div>
+<div class="flex items-center gap-1.5">
+<span class="material-icons-outlined text-base text-primary">face</span>
+<span>Verified Profiles Only</span>
+</div>
+</div>
+</div>
 
-            <!-- Mood Cards -->
-            <div class="w-full max-w-6xl mx-auto mb-16">
-                <p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
-                <div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
-            </div>
-        </div>
+<!-- Mood Cards -->
+<div class="w-full max-w-6xl mx-auto mb-16">
+<p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
+<div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
+</div>
+</div>
 
-        <!-- Decorative Background Elements -->
-        <div class="absolute top-0 w-full h-full overflow-hidden pointer-events-none z-0">
-            <div class="absolute top-[15%] right-[10%] w-32 h-32 opacity-20" style="background-image: radial-gradient(circle, rgba(99,32,233,0.4) 0%, transparent 70%);"></div>
-            <div class="absolute bottom-[20%] left-[5%] w-48 h-48 opacity-10" style="background-image: radial-gradient(circle, rgba(45,212,191,0.4) 0%, transparent 70%);"></div>
-        </div>
-    </main>
+<!-- Decorative Background Elements -->
+<div class="absolute top-0 w-full h-full overflow-hidden pointer-events-none z-0">
+<div class="absolute top-[15%] right-[10%] w-32 h-32 opacity-20" style="background-image: radial-gradient(circle, rgba(99,32,233,0.4) 0%, transparent 70%);"></div>
+<div class="absolute bottom-[20%] left-[5%] w-48 h-48 opacity-10" style="background-image: radial-gradient(circle, rgba(45,212,191,0.4) 0%, transparent 70%);"></div>
+</div>
+</main>
 
-    <!-- Footer -->
-    <footer class="border-t border-white/5 bg-background-dark/50 backdrop-blur-sm relative z-10">
-        <div class="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div class="text-slate-500 text-sm">
-                &copy; 2026 Vibegra. All rights reserved.
-            </div>
-            <div class="flex items-center gap-6">
-                <button id="contactSupportBtn" type="button" class="text-slate-500 hover:text-white text-sm transition-colors bg-transparent border-none cursor-pointer p-0">
-                    Contact
-                </button>
-                <a class="text-slate-500 hover:text-white text-sm transition-colors" href="vibegra-privacy-policy.html">Privacy Policy</a>
-            </div>
-        </div>
-    </footer>
+<!-- Footer -->
+<footer class="border-t border-white/5 bg-background-dark/50 backdrop-blur-sm relative z-10">
+<div class="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4">
+<div class="text-slate-500 text-sm">
+&copy; 2026 Vibegra. All rights reserved.
+</div>
+<div class="flex items-center gap-6">
+<button id="contactSupportBtn" type="button" class="text-slate-500 hover:text-white text-sm transition-colors bg-transparent border-none cursor-pointer p-0">
+Contact
+</button>
+<a class="text-slate-500 hover:text-white text-sm transition-colors" href="vibegra-privacy-policy.html">Privacy Policy</a>
+</div>
+</div>
+</footer>
 
-    <script>
-        (function () {
-            const btn = document.getElementById('contactSupportBtn');
-            const modal = document.getElementById('contactSupportModal');
-            const copyBtn = document.getElementById('contactSupportCopyBtn');
-            const emailEl = document.getElementById('contactSupportEmail');
-            const hint = document.getElementById('contactSupportCopyHint');
-            if (!btn || !modal || !copyBtn || !emailEl) return;
+<script>
+(function () {
+const btn = document.getElementById('contactSupportBtn');
+const modal = document.getElementById('contactSupportModal');
+const copyBtn = document.getElementById('contactSupportCopyBtn');
+const emailEl = document.getElementById('contactSupportEmail');
+const hint = document.getElementById('contactSupportCopyHint');
+if (!btn || !modal || !copyBtn || !emailEl) return;
 
-            const open = () => { modal.classList.remove('hidden'); modal.classList.add('flex'); };
-            const close = () => { modal.classList.add('hidden'); modal.classList.remove('flex'); if (hint) hint.classList.add('hidden'); };
+const open = () => { modal.classList.remove('hidden'); modal.classList.add('flex'); };
+const close = () => { modal.classList.add('hidden'); modal.classList.remove('flex'); if (hint) hint.classList.add('hidden'); };
 
-            btn.addEventListener('click', open);
-            modal.addEventListener('click', (e) => {
-                const t = e.target;
-                if (t && t.closest && t.closest('[data-close="1"]')) close();
-            });
-            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+btn.addEventListener('click', open);
+modal.addEventListener('click', (e) => {
+const t = e.target;
+if (t && t.closest && t.closest('[data-close="1"]')) close();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
-            copyBtn.addEventListener('click', async () => {
-                const text = emailEl.textContent || 'contact@vibegra.com';
-                try {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(text);
-                    } else {
-                        const ta = document.createElement('textarea');
-                        ta.value = text;
-                        ta.style.position = 'fixed';
-                        ta.style.opacity = '0';
-                        document.body.appendChild(ta);
-                        ta.select();
-                        document.execCommand('copy');
-                        ta.remove();
-                    }
-                    if (hint) { hint.classList.remove('hidden'); setTimeout(() => hint.classList.add('hidden'), 1200); }
-                } catch { }
-            });
-        })();
-    </script>
-    <script src="/pwa-install.js"></script>
-    <script>
-        try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
-    </script>
+copyBtn.addEventListener('click', async () => {
+const text = emailEl.textContent || 'contact@vibegra.com';
+try {
+if (navigator.clipboard && navigator.clipboard.writeText) {
+await navigator.clipboard.writeText(text);
+} else {
+const ta = document.createElement('textarea');
+ta.value = text;
+ta.style.position = 'fixed';
+ta.style.opacity = '0';
+document.body.appendChild(ta);
+ta.select();
+document.execCommand('copy');
+ta.remove();
+}
+if (hint) { hint.classList.remove('hidden'); setTimeout(() => hint.classList.add('hidden'), 1200); }
+} catch { }
+});
+})();
+</script>
+<script src="/pwa-install.js"></script>
+<script>
+try { window.VibePWA && window.VibePWA.init && window.VibePWA.init(); } catch { }
+</script>
 
-    <script src="/social-club.js?v=20260222"></script>
-    <script>
-        (function () {
-            const mount = () => {
-                try {
-                    const el = document.getElementById('socialClubMountIndex');
-                    if (el && window.SocialClub && typeof window.SocialClub.mount === 'function') {
-                        window.SocialClub.mount(el);
-                    }
-                } catch { }
-            };
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', mount);
-            } else {
-                mount();
-            }
-        })();
-    </script>
+<script src="/social-club.js?v=20260222"></script>
+<script>
+(function () {
+const mount = () => {
+try {
+const el = document.getElementById('socialClubMountIndex');
+if (el && window.SocialClub && typeof window.SocialClub.mount === 'function') {
+window.SocialClub.mount(el);
+}
+} catch { }
+};
+if (document.readyState === 'loading') {
+document.addEventListener('DOMContentLoaded', mount);
+} else {
+mount();
+}
+})();
+</script>
 
-    <script>
-        (function () {
-            const root = document.getElementById('socialClubOwnerToggleIndex');
-            const checkbox = document.getElementById('socialClubOwnerToggleCheckboxIndex');
-            const stateEl = document.getElementById('socialClubOwnerToggleStateIndex');
-            const hintEl = document.getElementById('socialClubOwnerToggleHintIndex');
-            if (!root || !checkbox || !stateEl) return;
+<script>
+(function () {
+const root = document.getElementById('socialClubOwnerToggleIndex');
+const checkbox = document.getElementById('socialClubOwnerToggleCheckboxIndex');
+const stateEl = document.getElementById('socialClubOwnerToggleStateIndex');
+const hintEl = document.getElementById('socialClubOwnerToggleHintIndex');
+if (!root || !checkbox || !stateEl) return;
 
-            const OWNER_EMAIL = 'samirahmed1887@gmail.com';
+const OWNER_EMAIL = 'samirahmed1887@gmail.com';
 
-            function ensureFirebaseReady() {
-                try {
-                    if (typeof firebase === 'undefined') return false;
-                    if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
-                    try { firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch { }
-                    return true;
-                } catch { return false; }
-            }
+function ensureFirebaseReady() {
+try {
+if (typeof firebase === 'undefined') return false;
+if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
+try { firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch { }
+return true;
+} catch { return false; }
+}
 
-            async function authedHeaders() {
-                if (!ensureFirebaseReady()) return null;
-                const u = firebase?.auth?.().currentUser;
-                if (!u) return null;
-                const token = await u.getIdToken();
-                return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-            }
+async function authedHeaders() {
+if (!ensureFirebaseReady()) return null;
+const u = firebase?.auth?.().currentUser;
+if (!u) return null;
+const token = await u.getIdToken();
+return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+}
 
-            async function isOwner() {
-                try {
-                    const headers = await authedHeaders();
-                    if (!headers) return false;
-                    const res = await fetch('/api/users/me', { headers, credentials: 'same-origin' });
-                    if (!res.ok) return false;
-                    const me = await res.json();
-                    return String(me?.email || '').trim().toLowerCase() === OWNER_EMAIL;
-                } catch { return false; }
-            }
+async function isOwner() {
+try {
+const headers = await authedHeaders();
+if (!headers) return false;
+const res = await fetch('/api/users/me', { headers, credentials: 'same-origin' });
+if (!res.ok) return false;
+const me = await res.json();
+return String(me?.email || '').trim().toLowerCase() === OWNER_EMAIL;
+} catch { return false; }
+}
 
-            async function refresh() {
-                const headers = await authedHeaders();
-                if (!headers) return;
-                const res = await fetch('/api/admin/social_club/event-owner', { headers, credentials: 'same-origin' });
-                if (!res.ok) throw new Error('Failed to fetch event state');
-                const payload = await res.json();
-                const open = !!payload?.event?.isEventOpen;
-                checkbox.checked = open;
-                stateEl.textContent = open ? 'ON' : 'OFF';
-            }
+async function refresh() {
+const headers = await authedHeaders();
+if (!headers) return;
+const res = await fetch('/api/admin/social_club/event-owner', { headers, credentials: 'same-origin' });
+if (!res.ok) throw new Error('Failed to fetch event state');
+const payload = await res.json();
+const open = !!payload?.event?.isEventOpen;
+checkbox.checked = open;
+stateEl.textContent = open ? 'ON' : 'OFF';
+}
 
-            async function setOpen(nextOpen) {
-                const headers = await authedHeaders();
-                if (!headers) throw new Error('Not authenticated');
-                const res = await fetch('/api/admin/social_club/event-owner', {
-                    method: 'POST',
-                    headers,
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ isEventOpen: !!nextOpen })
-                });
-                if (!res.ok) { const t = await res.text(); throw new Error(t || 'Failed to update event'); }
-                await refresh();
-            }
+async function setOpen(nextOpen) {
+const headers = await authedHeaders();
+if (!headers) throw new Error('Not authenticated');
+const res = await fetch('/api/admin/social_club/event-owner', {
+method: 'POST',
+headers,
+credentials: 'same-origin',
+body: JSON.stringify({ isEventOpen: !!nextOpen })
+});
+if (!res.ok) { const t = await res.text(); throw new Error(t || 'Failed to update event'); }
+await refresh();
+}
 
-            checkbox.addEventListener('change', async () => {
-                const desired = checkbox.checked;
-                checkbox.disabled = true;
-                try { await setOpen(desired); }
-                catch (e) {
-                    checkbox.checked = !desired;
-                    if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to update';
-                } finally { checkbox.disabled = false; }
-            });
+checkbox.addEventListener('change', async () => {
+const desired = checkbox.checked;
+checkbox.disabled = true;
+try { await setOpen(desired); }
+catch (e) {
+checkbox.checked = !desired;
+if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to update';
+} finally { checkbox.disabled = false; }
+});
 
-            async function boot() {
-                ensureFirebaseReady();
-                const ok = await isOwner();
-                if (!ok) return;
-                root.classList.remove('hidden');
-                try { await refresh(); }
-                catch (e) { if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to load'; }
-            }
+async function boot() {
+ensureFirebaseReady();
+const ok = await isOwner();
+if (!ok) return;
+root.classList.remove('hidden');
+try { await refresh(); }
+catch (e) { if (hintEl) hintEl.textContent = e?.message ? String(e.message) : 'Failed to load'; }
+}
 
-            try { firebase?.auth?.().onAuthStateChanged(() => { boot(); }); } catch { boot(); }
-        })();
-    </script>
+try { firebase?.auth?.().onAuthStateChanged(() => { boot(); }); } catch { boot(); }
+})();
+</script>
 
-    <script>
-        (function () {
-            const connectBtn = document.getElementById('connectNowBtn');
-            const grid = document.getElementById('moodCardsGrid');
+<script>
+(function () {
+const connectBtn = document.getElementById('connectNowBtn');
+const grid = document.getElementById('moodCardsGrid');
 
-            const moods = [
-                { id: 'happy',   name: 'Happy',   emoji: 'ðŸ˜Š', hint: 'Feeling good',       tint: 'from-emerald-400/10' },
-                { id: 'sad',     name: 'Sad',     emoji: 'ðŸ˜­', hint: 'Feeling down',       tint: 'from-indigo-500/10'  },
-                { id: 'angry',   name: 'Angry',   emoji: 'ðŸ˜ ', hint: 'Frustrated',         tint: 'from-orange-500/10'  },
-                { id: 'lonely',  name: 'Lonely',  emoji: 'ðŸ˜”', hint: 'Seeking connection', tint: 'from-blue-400/10'    },
-                { id: 'calm',    name: 'Calm',    emoji: 'ðŸ˜Œ', hint: 'Peaceful',           tint: 'from-teal-400/10'    },
-                { id: 'excited', name: 'Excited', emoji: 'ðŸ¤©', hint: 'High energy',        tint: 'from-pink-500/10'    },
-                { id: 'tired',   name: 'Tired',   emoji: 'ðŸ˜´', hint: 'Low energy',         tint: 'from-primary/15'     },
-                { id: 'stressed',name: 'Stressed',emoji: 'ðŸ˜£', hint: 'Overwhelmed',        tint: 'from-red-400/10'     },
-                { id: 'confused',name: 'Confused',emoji: 'ðŸ˜•', hint: 'Uncertain',          tint: 'from-purple-400/10'  },
-            ];
+const moods = [
+{ id: 'happy', name: 'Happy', emoji: '😊', hint: 'Feeling good', tint: 'from-emerald-400/10' },
+{ id: 'sad', name: 'Sad', emoji: '😭', hint: 'Feeling down', tint: 'from-indigo-500/10' },
+{ id: 'angry', name: 'Angry', emoji: '😠', hint: 'Frustrated', tint: 'from-orange-500/10' },
+{ id: 'lonely', name: 'Lonely', emoji: '😔', hint: 'Seeking connection', tint: 'from-blue-400/10' },
+{ id: 'calm', name: 'Calm', emoji: '😌', hint: 'Peaceful', tint: 'from-teal-400/10' },
+{ id: 'excited', name: 'Excited', emoji: '🤩', hint: 'High energy', tint: 'from-pink-500/10' },
+{ id: 'tired', name: 'Tired', emoji: '😴', hint: 'Low energy', tint: 'from-primary/15' },
+{ id: 'stressed',name: 'Stressed',emoji: '😣', hint: 'Overwhelmed', tint: 'from-red-400/10' },
+{ id: 'confused',name: 'Confused',emoji: '😕', hint: 'Uncertain', tint: 'from-purple-400/10' },
+];
 
-            let selectedMood = null;
+let selectedMood = null;
 
-            function ensureOverlay() {
-                let el = document.getElementById('guestConnectOverlay');
-                if (el) return el;
-                el = document.createElement('div');
-                el.id = 'guestConnectOverlay';
-                el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
-                el.innerHTML = `
-                  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
-                  <div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
-                    <div class="flex items-center gap-3">
-                      <div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: breathe 1.2s ease-in-out infinite;"></div>
-                      <div>
-                        <div class="text-base font-bold text-white">Connectingâ€¦</div>
-                        <div id="guestConnectOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profileâ€¦</div>
-                      </div>
-                    </div>
-                  </div>
-                `;
-                document.body.appendChild(el);
-                return el;
-            }
+function ensureOverlay() {
+let el = document.getElementById('guestConnectOverlay');
+if (el) return el;
+el = document.createElement('div');
+el.id = 'guestConnectOverlay';
+el.className = 'fixed inset-0 z-[9999] hidden items-center justify-center';
+el.innerHTML = `
+<div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+<div class="relative w-[92vw] max-w-sm rounded-2xl bg-[#15161C]/95 border border-white/10 shadow-2xl p-6">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full border-2 border-primary/30 border-t-primary" style="animation: breathe 1.2s ease-in-out infinite;"></div>
+<div>
+<div class="text-base font-bold text-white">Connecting…</div>
+<div id="guestConnectOverlayText" class="mt-1 text-sm text-slate-400">Preparing your guest profile…</div>
+</div>
+</div>
+</div>
+`;
+document.body.appendChild(el);
+return el;
+}
 
-            function showOverlay(msg) {
-                const el = ensureOverlay();
-                const t = el.querySelector('#guestConnectOverlayText');
-                if (t && msg) t.textContent = msg;
-                el.classList.remove('hidden');
-                el.classList.add('flex');
-            }
+function showOverlay(msg) {
+const el = ensureOverlay();
+const t = el.querySelector('#guestConnectOverlayText');
+if (t && msg) t.textContent = msg;
+el.classList.remove('hidden');
+el.classList.add('flex');
+}
 
-            function render() {
-                if (!grid) return;
-                grid.innerHTML = '';
-                moods.forEach((m) => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'group glass-card rounded-2xl p-5 flex flex-col items-center justify-center gap-3 text-center cursor-pointer relative overflow-hidden h-full';
-                    btn.dataset.mood = m.id;
-                    btn.innerHTML = `
-                      <div class="absolute inset-0 bg-gradient-to-br ${m.tint} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                      <div class="w-16 h-16 flex items-center justify-center emoji-wrapper">
-                        <span class="emoji-3d" style="font-size: 3rem;">${m.emoji}</span>
-                      </div>
-                      <div class="relative z-10">
-                        <h3 class="text-base font-semibold text-white mb-1">${m.name}</h3>
-                        <p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">${m.hint}</p>
-                      </div>
-                    `;
-                    btn.addEventListener('click', () => {
-                        selectedMood = m.id;
-                        try { localStorage.setItem('selectedMood', selectedMood); } catch { }
-                        updateSelection();
-                    });
-                    grid.appendChild(btn);
-                });
-                updateSelection();
-            }
+function render() {
+if (!grid) return;
+grid.innerHTML = '';
+moods.forEach((m) => {
+const btn = document.createElement('button');
+btn.type = 'button';
+btn.className = 'group glass-card rounded-2xl p-5 flex flex-col items-center justify-center gap-3 text-center cursor-pointer relative overflow-hidden h-full';
+btn.dataset.mood = m.id;
+btn.innerHTML = `
+<div class="absolute inset-0 bg-gradient-to-br ${m.tint} to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+<div class="w-16 h-16 flex items-center justify-center emoji-wrapper">
+<span class="emoji-3d" style="font-size: 3rem;">${m.emoji}</span>
+</div>
+<div class="relative z-10">
+<h3 class="text-base font-semibold text-white mb-1">${m.name}</h3>
+<p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">${m.hint}</p>
+</div>
+`;
+btn.addEventListener('click', () => {
+selectedMood = m.id;
+try { localStorage.setItem('selectedMood', selectedMood); } catch { }
+updateSelection();
+});
+grid.appendChild(btn);
+});
+updateSelection();
+}
 
-            function updateSelection() {
-                const cards = grid ? Array.from(grid.querySelectorAll('button[data-mood]')) : [];
-                cards.forEach((c) => {
-                    const isSelected = c.dataset.mood === selectedMood;
-                    c.classList.toggle('ring-2', isSelected);
-                    c.classList.toggle('ring-primary/50', isSelected);
-                    c.classList.toggle('shadow-[0_0_30px_rgba(99,32,233,0.15)]', isSelected);
-                    c.classList.toggle('transform', isSelected);
-                    c.classList.toggle('-translate-y-2', isSelected);
-                });
-                if (connectBtn) connectBtn.disabled = !selectedMood;
-            }
+function updateSelection() {
+const cards = grid ? Array.from(grid.querySelectorAll('button[data-mood]')) : [];
+cards.forEach((c) => {
+const isSelected = c.dataset.mood === selectedMood;
+c.classList.toggle('ring-2', isSelected);
+c.classList.toggle('ring-primary/50', isSelected);
+c.classList.toggle('shadow-[0_0_30px_rgba(99,32,233,0.15)]', isSelected);
+c.classList.toggle('transform', isSelected);
+c.classList.toggle('-translate-y-2', isSelected);
+});
+if (connectBtn) connectBtn.disabled = !selectedMood;
+}
 
-            async function initFirebase() {
-                if (typeof firebase === 'undefined') throw new Error('Firebase not loaded');
-                if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
-                firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-            }
+async function initFirebase() {
+if (typeof firebase === 'undefined') throw new Error('Firebase not loaded');
+if (!firebase.apps?.length) { firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__); }
+firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+}
 
-            async function connectNow() {
-                if (!selectedMood) return;
-                if (!connectBtn || connectBtn.disabled) return;
-                connectBtn.disabled = true;
-                showOverlay('Signing you in anonymouslyâ€¦');
-                try {
-                    await initFirebase();
-                    let user = firebase.auth().currentUser;
-                    if (!user) {
-                        const credential = await firebase.auth().signInAnonymously();
-                        user = credential.user;
-                    }
-                    if (!user) throw new Error('Anonymous auth failed');
-                    showOverlay('Creating your guest profileâ€¦');
-                    const token = await user.getIdToken();
-                    const res = await fetch('/api/users/ensure-guest', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                        body: JSON.stringify({ mood: selectedMood })
-                    });
-                    const text = await res.text();
-                    if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-                    let payload = null;
-                    try { payload = JSON.parse(text); } catch { }
-                    try {
-                        localStorage.setItem('guest_uid', user.uid);
-                        if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
-                        localStorage.setItem('guest_mood', selectedMood);
-                        localStorage.setItem('guest_timestamp', String(Date.now()));
-                        localStorage.setItem('selectedMood', selectedMood);
-                        localStorage.removeItem('currentRoom');
-                    } catch { }
-                    showOverlay('Entering chatâ€¦');
-                    window.location.href = '/chat.html';
-                } catch (err) {
-                    const msg = (err && err.message) ? String(err.message) : 'Connection failed';
-                    alert(msg);
-                    const overlay = document.getElementById('guestConnectOverlay');
-                    if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
-                    connectBtn.disabled = !selectedMood;
-                }
-            }
+async function connectNow() {
+if (!selectedMood) return;
+if (!connectBtn || connectBtn.disabled) return;
+connectBtn.disabled = true;
+showOverlay('Signing you in anonymously…');
+try {
+await initFirebase();
+let user = firebase.auth().currentUser;
+if (!user) {
+const credential = await firebase.auth().signInAnonymously();
+user = credential.user;
+}
+if (!user) throw new Error('Anonymous auth failed');
+showOverlay('Creating your guest profile…');
+const token = await user.getIdToken();
+const res = await fetch('/api/users/ensure-guest', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+body: JSON.stringify({ mood: selectedMood })
+});
+const text = await res.text();
+if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+let payload = null;
+try { payload = JSON.parse(text); } catch { }
+try {
+localStorage.setItem('guest_uid', user.uid);
+if (payload?.user?.username) localStorage.setItem('guest_username', payload.user.username);
+localStorage.setItem('guest_mood', selectedMood);
+localStorage.setItem('guest_timestamp', String(Date.now()));
+localStorage.setItem('selectedMood', selectedMood);
+localStorage.removeItem('currentRoom');
+} catch { }
+showOverlay('Entering chat…');
+window.location.href = '/chat.html';
+} catch (err) {
+const msg = (err && err.message) ? String(err.message) : 'Connection failed';
+alert(msg);
+const overlay = document.getElementById('guestConnectOverlay');
+if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
+connectBtn.disabled = !selectedMood;
+}
+}
 
-            render();
-            if (connectBtn) connectBtn.addEventListener('click', connectNow);
+render();
+if (connectBtn) connectBtn.addEventListener('click', connectNow);
 
-            try {
-                const persisted = localStorage.getItem('selectedMood');
-                if (persisted) { selectedMood = persisted; updateSelection(); }
-            } catch { }
-        })();
-    </script>
-  <script>
-    (function () {
-      const themeClasses = ['theme-morning','theme-noon','theme-afternoon','theme-evening','theme-night','theme-deep-night'];
-      function phase(hour) {
-        if (hour >= 5 && hour < 10) return 'theme-morning';
-        if (hour >= 10 && hour < 14) return 'theme-noon';
-        if (hour >= 14 && hour < 17) return 'theme-afternoon';
-        if (hour >= 17 && hour < 21) return 'theme-evening';
-        if (hour >= 21 || hour < 1) return 'theme-night';
-        return 'theme-deep-night';
-      }
-      function currentMood() {
-        try {
-          return localStorage.getItem('selectedMood') || localStorage.getItem('guest_mood') || '';
-        } catch { return ''; }
-      }
-      function applyTemporalTheme() {
-        const body = document.body;
-        if (!body) return;
-        body.classList.remove.apply(body.classList, themeClasses);
-        body.classList.add(phase(new Date().getHours()));
-        const mood = currentMood();
-        if (mood) body.dataset.sessionMood = mood;
-      }
-      applyTemporalTheme();
-      window.VibeTemporalTheme = { apply: applyTemporalTheme };
-      window.addEventListener('storage', applyTemporalTheme);
-      setInterval(applyTemporalTheme, 60000);
-    })();
-  </script>
+try {
+const persisted = localStorage.getItem('selectedMood');
+if (persisted) { selectedMood = persisted; updateSelection(); }
+} catch { }
+})();
+</script>
 </body>
 </html>
-
