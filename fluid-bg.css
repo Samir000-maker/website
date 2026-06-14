@@ -359,6 +359,7 @@ body.fluid-bg-chat #messagesList {
 
 body.fluid-bg-chat,
 body.fluid-bg-chat .chat-main,
+body.fluid-bg-chat main,
 body.fluid-bg-chat #messagesList {
   background-color: transparent !important;
 }
