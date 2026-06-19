@@ -382,28 +382,6 @@ body.fluid-bg-chat #composerBar {
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
 }
 
-/* ── Text legibility overlay for non-chat pages ── */
-/* Ensures all text remains sharp/readable against moving blobs */
-body:not(.fluid-bg-chat) {
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-
-body:not(.fluid-bg-chat) h1,
-body:not(.fluid-bg-chat) h2,
-body:not(.fluid-bg-chat) h3,
-body:not(.fluid-bg-chat) .hero p,
-body:not(.fluid-bg-chat) .helper-text,
-body:not(.fluid-bg-chat) .social-club-desc {
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
-}
-
-body:not(.fluid-bg-chat) .glass-card *,
-body:not(.fluid-bg-chat) .mood-card *,
-body:not(.fluid-bg-chat) .session-card *,
-body:not(.fluid-bg-chat) .context-section * {
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
-}
-
 /* ── Reduced-motion accessibility ── */
 @media (prefers-reduced-motion: reduce) {
   #fluid-bg .fluid-blob {
