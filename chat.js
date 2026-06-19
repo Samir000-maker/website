@@ -1,14 +1,31 @@
-  <script>
-    (function () {
-      try {
-        window.__VIBE_SILENCE_CONSOLE__ = false;
-      } catch { }
-    })();
-  <script>
-    if (!firebase.apps.length) {
-      firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-    }
+(function () {
+  try {
+    window.__VIBE_SILENCE_CONSOLE__ = false;
+  } catch { }
+})();
+
+// Initialize Firebase with error handling
+try {
+  if (firebase && firebase.apps && typeof firebase.apps.length === 'number' && !firebase.apps.length) {
+    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+    console.log('✅ Firebase initialized successfully');
+  } else if (firebase && firebase.apps && firebase.apps.length) {
+    console.log('ℹ️ Firebase already initialized');
+  } else {
+    console.warn('⚠️ Firebase not properly loaded, skipping initialization');
+  }
+} catch (firebaseError) {
+  console.error('❌ Failed to initialize Firebase:', firebaseError);
+}
+
+// Initialize Firebase Auth persistence if Firebase is available
+if (firebase && firebase.auth) {
+  try {
     firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  } catch (authError) {
+    console.error('❌ Failed to set Firebase Auth persistence:', authError);
+  }
+}
 
     // ============================================
     // PRESENCE & HEARTBEAT
@@ -199,11 +216,9 @@
           location: 'chat',
           path: window.location.pathname
         });
-      }
     }
+  }
 
-  </script>
-<script>
   (async () => {
     try {
       try {
@@ -7095,7 +7110,3 @@
     }
 
     })();
-  </script>
-</body>
-
-</html>
