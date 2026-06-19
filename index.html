@@ -178,6 +178,31 @@ a.glow-button { display: inline-flex; }
 .hero-heading {
   position: relative;
 }
+
+/* ── Theme-adaptive text colors ── */
+.mood-hint {
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color 2s cubic-bezier(0.25,1,0.5,1);
+}
+body.theme-morning .mood-hint { color: rgba(255,245,230,0.9); }
+body.theme-noon .mood-hint      { color: rgba(230,245,255,0.9); }
+body.theme-afternoon .mood-hint { color: rgba(255,242,225,0.9); }
+body.theme-evening .mood-hint   { color: rgba(235,228,255,0.9); }
+body.theme-night .mood-hint     { color: rgba(225,232,255,0.9); }
+body.theme-deepnight .mood-hint { color: rgba(225,218,245,0.9); }
+
+.section-label {
+  color: #6320e9;
+  transition: color 2s cubic-bezier(0.25,1,0.5,1);
+}
+body.theme-morning .section-label { color: #fbbf24; }
+body.theme-noon .section-label      { color: #2DD4BF; }
+body.theme-afternoon .section-label { color: #fb923c; }
+body.theme-evening .section-label   { color: #a78bfa; }
+body.theme-night .section-label     { color: #818cf8; }
+body.theme-deepnight .section-label { color: #a78bfa; }
 </style>
 <link rel="stylesheet" href="/fluid-bg.css">
 </head>
@@ -261,7 +286,7 @@ Get Started
 Connect Now
 <span class="material-icons-outlined text-xl">arrow_forward</span>
 </button>
-<div class="flex items-center gap-6 text-sm text-white/70 font-medium tracking-wide">
+<div class="flex items-center gap-6 text-sm text-white/80 font-medium tracking-wide">
 <div class="flex items-center gap-1.5">
 <span class="material-icons-outlined text-base text-accent-teal">verified_user</span>
 <span>End-to-end Encrypted</span>
@@ -276,7 +301,7 @@ Connect Now
 
 <!-- Mood Cards -->
 <div class="w-full max-w-6xl mx-auto mb-16">
-<p class="text-sm font-medium text-primary mb-6 uppercase tracking-widest opacity-80">How are you feeling?</p>
+<p class="text-sm font-medium section-label mb-6 uppercase tracking-widest">How are you feeling?</p>
 <div id="moodCardsGrid" class="grid grid-cols-2 md:grid-cols-5 gap-5"></div>
 </div>
 </div>
@@ -515,7 +540,7 @@ btn.innerHTML = `
 </div>
 <div class="relative z-10">
 <h3 class="text-base font-semibold text-white mb-1">${m.name}</h3>
-<p class="text-xs text-white/40 font-light group-hover:text-white/60 transition-colors">${m.hint}</p>
+<p class="text-xs mood-hint font-light">${m.hint}</p>
 </div>
 `;
 btn.addEventListener('click', () => {
