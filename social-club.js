@@ -24,29 +24,30 @@
     const style = document.createElement('style');
     style.id = 'socialClubStyles';
     style.textContent = `
-      .social-club-wrap{width:100%;max-width:48rem;margin:24px auto;padding-top:12px;}
+      .social-club-wrap{width:100%;margin:0 auto;}
       .social-club-kicker{display:none;}
-      .social-club-card{position:relative;overflow:hidden;border-radius:18px;padding:18px 18px 16px;border:1px solid rgba(255,255,255,0.12);background:linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.04));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 18px 60px rgba(0,0,0,0.35);transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;}
-      .social-club-card:hover{transform:translateY(-2px);border-color:rgba(99,32,233,0.55);box-shadow:0 22px 70px rgba(99,32,233,0.18),0 18px 60px rgba(0,0,0,0.40);}
-      .social-club-title{display:flex;align-items:center;justify-content:space-between;gap:12px;}
-      .social-club-title h3{font-weight:900;font-size:1.2rem;letter-spacing:-0.01em;color:rgba(255,255,255,0.96);}
-      .social-club-status{display:flex;align-items:center;gap:10px;justify-content:flex-end;}
-      .social-club-dot{width:10px;height:10px;border-radius:9999px;background:rgba(148,163,184,0.45);box-shadow:none;}
-      .social-club-dot.live{background:#22c55e;box-shadow:0 0 0 6px rgba(34,197,94,0.12);}
-      .social-club-status-text{font-size:0.85rem;font-weight:800;color:rgba(226,232,240,0.88);white-space:nowrap;}
-      .social-club-body{margin-top:12px;display:flex;flex-direction:column;gap:14px;}
-      .social-club-desc{color:rgba(148,163,184,0.92);font-size:0.92rem;line-height:1.5;}
-      .social-club-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;}
-      .social-club-btn{appearance:none;-webkit-appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:11px 14px;border-radius:14px;font-weight:900;font-size:0.92rem;line-height:1;color:rgba(255,255,255,0.95);background:linear-gradient(135deg,rgba(99,32,233,0.95),rgba(45,212,191,0.60));box-shadow:0 14px 40px rgba(99,32,233,0.25);transition:transform 160ms ease,box-shadow 160ms ease,filter 160ms ease;}
-      .social-club-btn:hover{transform:translateY(-1px);filter:saturate(1.1);box-shadow:0 18px 55px rgba(99,32,233,0.35);}
-      .social-club-btn:disabled{opacity:0.55;cursor:not-allowed;transform:none;box-shadow:none;}
-      .social-club-btn-icon{width:22px;height:22px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.20);border:1px solid rgba(255,255,255,0.16);}
-      .social-club-note{font-size:0.78rem;color:rgba(148,163,184,0.85);line-height:1.4;}
+      .social-club-card{position:relative;overflow:hidden;border-radius:14px;padding:12px 16px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg,rgba(255,255,255,0.05),rgba(255,255,255,0.01));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 8px 32px rgba(0,0,0,0.20);transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;}
+      .social-club-card:hover{transform:translateY(-1px);border-color:rgba(99,32,233,0.35);box-shadow:0 12px 40px rgba(99,32,233,0.1),0 8px 32px rgba(0,0,0,0.25);}
+      .social-club-title{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+      .social-club-title h3{font-weight:800;font-size:0.95rem;letter-spacing:-0.01em;color:rgba(255,255,255,0.96);line-height:1.2;}
+      .social-club-status{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+      .social-club-dot{width:8px;height:8px;border-radius:9999px;background:rgba(148,163,184,0.45);box-shadow:none;flex-shrink:0;}
+      .social-club-dot.live{background:#22c55e;box-shadow:0 0 0 5px rgba(34,197,94,0.12);}
+      .social-club-status-text{font-size:0.72rem;font-weight:700;color:rgba(226,232,240,0.82);white-space:nowrap;}
+      .social-club-body{display:flex;align-items:center;gap:10px;margin-top:4px;}
+      .social-club-desc{color:rgba(148,163,184,0.85);font-size:0.75rem;line-height:1.3;flex:1;}
+      .social-club-actions{flex-shrink:0;}
+      .social-club-btn{appearance:none;-webkit-appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 12px;border-radius:10px;font-weight:700;font-size:0.78rem;line-height:1;color:rgba(255,255,255,0.95);background:linear-gradient(135deg,rgba(99,32,233,0.9),rgba(45,212,191,0.5));box-shadow:0 6px 20px rgba(99,32,233,0.2);transition:transform 160ms ease,box-shadow 160ms ease,filter 160ms ease;white-space:nowrap;}
+      .social-club-btn:hover{transform:translateY(-1px);filter:saturate(1.1);box-shadow:0 10px 28px rgba(99,32,233,0.3);}
+      .social-club-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;box-shadow:none;}
+      .social-club-btn-icon{width:18px;height:18px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.20);border:1px solid rgba(255,255,255,0.12);}
       @media (max-width: 640px){
-        .social-club-card{padding:16px;}
-        .social-club-actions{justify-content:stretch;}
-        .social-club-btn{width:100%;}
-        .social-club-kicker{text-align:left;}
+        .social-club-card{padding:10px 12px;}
+        .social-club-body{flex-wrap:wrap;gap:6px;}
+        .social-club-desc{font-size:0.7rem;}
+        .social-club-btn{padding:6px 10px;font-size:0.72rem;}
+        .social-club-title h3{font-size:0.88rem;}
+        .social-club-status-text{font-size:0.68rem;}
       }
     `;
     document.head.appendChild(style);
@@ -341,22 +342,20 @@
     const wrap = createEl(`
       <section class="social-club-wrap" data-social-club-root="1">
         <div class="social-club-card">
+          <div class="social-club-kicker">Event will start soon</div>
           <div class="social-club-title">
             <h3>Social Club</h3>
             <div class="social-club-status">
               <span class="social-club-dot" data-social-dot="1"></span>
               <span class="social-club-status-text" data-social-status-text="1">Event will start soon</span>
+              <button type="button" class="social-club-btn" data-social-action="1" disabled>
+                <span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:16px;">playlist_add</span></span>
+                <span>Join</span>
+              </button>
             </div>
           </div>
           <div class="social-club-body">
-            <div class="social-club-desc">A quick event matchmaking room. When live, you can enter instantly to meet new people.</div>
-            <div class="social-club-actions">
-              <button type="button" class="social-club-btn" data-social-action="1" disabled>
-                <span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:18px;">playlist_add</span></span>
-                <span>Join Waitlist</span>
-              </button>
-            </div>
-            <div class="social-club-note">Notifications work best while your browser is running. Delivery can vary if the browser is fully closed.</div>
+            <div class="social-club-desc">Match with people in real-time when the event goes live</div>
           </div>
         </div>
       </section>
