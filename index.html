@@ -169,6 +169,12 @@ filter: drop-shadow(0 12px 32px rgba(99,32,233,0.7)) drop-shadow(0 0 20px rgba(9
 
 a { text-decoration: none; }
 a.glow-button { display: inline-flex; }
+.gradient-highlight {
+  background: linear-gradient(135deg, #2DD4BF 0%, #6320e9 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
 </style>
 <link rel="stylesheet" href="/fluid-bg.css">
 </head>
@@ -242,7 +248,7 @@ Get Started
 </div>
 
 <h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-tight bg-clip-text text-transparent bg-gradient-to-b from-white via-white to-white/50">
-  Connect on how<br/><span class="bg-clip-text text-transparent bg-gradient-to-r from-[#2DD4BF] to-[#6320e9]">you feel.</span>
+  Connect on how<br/><span class="gradient-highlight">you feel.</span>
 </h1>
 </div>
 
