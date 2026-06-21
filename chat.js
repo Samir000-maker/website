@@ -1,31 +1,7 @@
-(function () {
-  try {
-    window.__VIBE_SILENCE_CONSOLE__ = false;
-  } catch { }
-})();
-
-// Initialize Firebase with error handling
-try {
-  if (firebase && firebase.apps && typeof firebase.apps.length === 'number' && !firebase.apps.length) {
-    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-    console.log('✅ Firebase initialized successfully');
-  } else if (firebase && firebase.apps && firebase.apps.length) {
-    console.log('ℹ️ Firebase already initialized');
-  } else {
-    console.warn('⚠️ Firebase not properly loaded, skipping initialization');
-  }
-} catch (firebaseError) {
-  console.error('❌ Failed to initialize Firebase:', firebaseError);
-}
-
-// Initialize Firebase Auth persistence if Firebase is available
-if (firebase && firebase.auth) {
-  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+    }
     firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  } catch (authError) {
-    console.error('❌ Failed to set Firebase Auth persistence:', authError);
-  }
-}
 
     // ============================================
     // PRESENCE & HEARTBEAT
@@ -90,7 +66,7 @@ if (firebase && firebase.auth) {
       }
 
       if (flushed > 0) {
-        console.log(`ðŸ“¤ Flushed ${flushed} queued socket message(s)`);
+        console.log(`📤 Flushed ${flushed} queued socket message(s)`);
       }
     }
 
@@ -127,7 +103,7 @@ if (firebase && firebase.auth) {
 
     function startHeartbeat() {
       if (heartbeatInterval) stopHeartbeat();
-      console.log('ðŸ’“ [Presence] Starting heartbeat interval');
+      console.log('💓 [Presence] Starting heartbeat interval');
       const heartbeatRoomId = currentRoomId;
 
       // Send initial heartbeat immediately
@@ -155,7 +131,7 @@ if (firebase && firebase.auth) {
 
     function stopHeartbeat() {
       if (heartbeatInterval) {
-        console.log('ðŸ’“ [Presence] Stopping heartbeat interval');
+        console.log('💓 [Presence] Stopping heartbeat interval');
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
       }
@@ -195,7 +171,7 @@ if (firebase && firebase.auth) {
 
         if (count > 2) {
           controlledReloadInProgress = false;
-          console.error(`âŒ [Socket] Reload suppressed by loop guard (${reason})`);
+          console.error(`❌ [Socket] Reload suppressed by loop guard (${reason})`);
           return;
         }
 
@@ -208,7 +184,7 @@ if (firebase && firebase.auth) {
     function reconnectSocketIfNeeded(trigger = 'resume') {
       if (!socketInstance) return;
       if (!socketInstance.connected) {
-        console.log(`ðŸ”„ [Socket] Reconnect requested (${trigger})`);
+        console.log(`🔄 [Socket] Reconnect requested (${trigger})`);
         socketInstance.connect();
       } else if (currentRoomId) {
         safeSocketEmit('heartbeat', {
@@ -216,8 +192,9 @@ if (firebase && firebase.auth) {
           location: 'chat',
           path: window.location.pathname
         });
+      }
     }
-  }
+
 
   (async () => {
     try {
@@ -279,7 +256,7 @@ if (firebase && firebase.auth) {
       }
 
       function resetHeaderCallButtons(reason = 'no active call') {
-        try { console.log(`ðŸ“ž Resetting call header buttons (${reason})`); } catch { }
+        try { console.log(`📞 Resetting call header buttons (${reason})`); } catch { }
         activeCallConnectionState = null;
         activeCallInRoom = null;
         updateCallButtonStates();
@@ -288,7 +265,7 @@ if (firebase && firebase.auth) {
 
       function clearStoredActiveCall(reason = 'unknown') {
         try {
-          console.warn(`ðŸ“ž Clearing stale activeCall (${reason})`);
+          console.warn(`📞 Clearing stale activeCall (${reason})`);
           localStorage.removeItem(ACTIVE_CALL_KEY);
         } catch { }
         resetHeaderCallButtons(reason);
@@ -299,7 +276,7 @@ if (firebase && firebase.auth) {
 
         if (!activeCallStr) {
           if (activeCallConnectionState !== null) {
-            console.log('ðŸ“ž No active call - clearing state');
+            console.log('📞 No active call - clearing state');
             resetHeaderCallButtons('storage empty');
           }
           return;
@@ -307,7 +284,7 @@ if (firebase && firebase.auth) {
 
         const clearStaleActiveCall = (reason) => {
           try {
-            console.warn(`ðŸ“ž Clearing stale activeCall (${reason || 'unknown'})`);
+            console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
             localStorage.removeItem(ACTIVE_CALL_KEY);
           } catch { }
           resetHeaderCallButtons(reason || 'stale activeCall');
@@ -316,7 +293,7 @@ if (firebase && firebase.auth) {
         try {
           const callData = JSON.parse(activeCallStr);
           if (!callData?.callId || !callData?.roomId) {
-            console.warn('ðŸ“ž Invalid activeCall payload - clearing');
+            console.warn('📞 Invalid activeCall payload - clearing');
             clearStaleActiveCall('invalid payload');
             return;
           }
@@ -356,14 +333,14 @@ if (firebase && firebase.auth) {
 
           // Sync local state
           if (activeCallConnectionState !== newState) {
-            console.log(`ðŸ“ž Active call state changed: ${activeCallConnectionState} â†’ ${newState}`);
+            console.log(`📞 Active call state changed: ${activeCallConnectionState} → ${newState}`);
             activeCallConnectionState = newState;
 
             // CRITICAL: Hide incoming call modal if user is now in an active call state
             if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected') {
               const modal = document.getElementById('incomingCallModal');
               if (modal && !modal.classList.contains('hidden')) {
-                console.log('ðŸ§¹ Hiding incoming call modal - user is now in an active/initiating callState');
+                console.log('🧹 Hiding incoming call modal - user is now in an active/initiating callState');
                 modal.classList.add('hidden');
                 pendingCallData = null;
               }
@@ -377,7 +354,7 @@ if (firebase && firebase.auth) {
             if (callInCurrentRoom) {
               // Synchronize global activeCallInRoom variable
               if (!activeCallInRoom || activeCallInRoom.callId !== callData.callId) {
-                console.log('ðŸ’¾ Synchronizing activeCallInRoom from localStorage update');
+                console.log('💾 Synchronizing activeCallInRoom from localStorage update');
                 activeCallInRoom = {
                   callId: callData.callId,
                   callType: callData.callType,
@@ -395,7 +372,7 @@ if (firebase && firebase.auth) {
             }
           }
         } catch (e) {
-          console.error('âŒ Failed to parse active call data:', e);
+          console.error('❌ Failed to parse active call data:', e);
           clearStaleActiveCall('parse error');
         }
       }
@@ -405,7 +382,7 @@ if (firebase && firebase.auth) {
 
         if (activeCallConnectionState === 'connecting' || activeCallConnectionState === 'initializing') {
           // Call is connecting - disable call buttons
-          console.log('ðŸš« Disabling call buttons - call connecting');
+          console.log('🚫 Disabling call buttons - call connecting');
           audioCallBtn.disabled = true;
           audioCallBtn.classList.remove('call-ready');
           audioCallBtn.classList.add('opacity-50', 'cursor-not-allowed');
@@ -418,7 +395,7 @@ if (firebase && firebase.auth) {
 
         } else if (activeCallConnectionState === 'connected') {
           // Call is connected - disable call buttons
-          console.log('âœ… Call connected - disabling initiate buttons');
+          console.log('✅ Call connected - disabling initiate buttons');
           audioCallBtn.disabled = true;
           videoCallBtn.disabled = true;
           audioCallBtn.classList.remove('call-ready');
@@ -431,7 +408,7 @@ if (firebase && firebase.auth) {
           // CRITICAL: Automatically show call iframe when connected
           const callIframeContainer = document.getElementById('callIframeContainer');
           if (callIframeContainer && callIframeContainer.classList.contains('hidden')) {
-            console.log('ðŸŽ¬ Call connected - automatically showing call UI');
+            console.log('🎬 Call connected - automatically showing call UI');
             callIframeContainer.classList.remove('hidden');
           }
 
@@ -466,7 +443,7 @@ if (firebase && firebase.auth) {
       // Listen for call state changes from call.html
       window.addEventListener('storage', (e) => {
         if (e.key === 'callStateChanged' || e.key === 'activeCall') {
-          console.log('ðŸ”„ Storage event detected - updating call state');
+          console.log('🔄 Storage event detected - updating call state');
           updateActiveCallState();
         }
       });
@@ -521,11 +498,11 @@ if (firebase && firebase.auth) {
         const action = event.data?.action || event.data?.type; // Support both for compatibility
 
         if (action === 'hideCall' || action === 'REQUEST_SHOW_CHAT' || action === 'FORCE_HIDE_CALL') {
-          console.log(`ðŸ“¨ Message from call iframe: ${action}`);
+          console.log(`📨 Message from call iframe: ${action}`);
           const callIframeContainer = document.getElementById('callIframeContainer');
           if (callIframeContainer) {
             callIframeContainer.classList.add('hidden');
-            console.log('âœ… Call iframe hidden - chat visible');
+            console.log('✅ Call iframe hidden - chat visible');
           }
 
           if (action === 'FORCE_HIDE_CALL') {
@@ -533,11 +510,11 @@ if (firebase && firebase.auth) {
             clearStoredActiveCall('call iframe closed');
           }
         } else if (action === 'REQUEST_SHOW_CALL') {
-          console.log('ðŸ“¨ Message from call iframe: REQUEST_SHOW_CALL');
+          console.log('📨 Message from call iframe: REQUEST_SHOW_CALL');
           const callIframeContainer = document.getElementById('callIframeContainer');
           if (callIframeContainer) {
             callIframeContainer.classList.remove('hidden');
-            console.log('âœ… Call iframe shown');
+            console.log('✅ Call iframe shown');
           }
         }
       });
@@ -588,7 +565,7 @@ if (firebase && firebase.auth) {
         pendingInitialRoomSync = false;
 
         try {
-          showChatLoadingOverlay('Creating your roomâ€¦', 'You can invite someone anytime.');
+          showChatLoadingOverlay('Creating your room…', 'You can invite someone anytime.');
         } catch { }
 
         reportChatPresenceContext('stale_room_recreate', {
@@ -618,7 +595,7 @@ if (firebase && firebase.auth) {
         }
       })();
 
-      const showChatLoadingOverlay = (titleText = 'Preparing your roomâ€¦', subtitleText = 'Connecting you nowâ€¦') => {
+      const showChatLoadingOverlay = (titleText = 'Preparing your room…', subtitleText = 'Connecting you now…') => {
         try {
           let overlay = document.getElementById('chatLoadingOverlay');
           if (!overlay) {
@@ -884,19 +861,19 @@ if (firebase && firebase.auth) {
 
 
       async function fetchEmojis() {
-        console.log('ðŸ˜€ ========================================');
-        console.log('ðŸ˜€ FETCHING EMOJIS FROM API');
-        console.log('ðŸ˜€ ========================================');
+        console.log('😀 ========================================');
+        console.log('😀 FETCHING EMOJIS FROM API');
+        console.log('😀 ========================================');
 
         // Return cached data if available
         if (emojiData) {
-          console.log('âœ… Using cached emoji data');
-          console.log('ðŸ˜€ ========================================\n');
+          console.log('✅ Using cached emoji data');
+          console.log('😀 ========================================\n');
           return emojiData;
         }
 
         try {
-          console.log('ðŸ“¡ Fetching from: https://emojihub.yurace.pro/api/all');
+          console.log('📡 Fetching from: https://emojihub.yurace.pro/api/all');
           const response = await fetch('https://emojihub.yurace.pro/api/all');
 
           if (!response.ok) {
@@ -905,19 +882,19 @@ if (firebase && firebase.auth) {
 
           emojiData = await response.json();
 
-          console.log(`âœ… Fetched ${emojiData.length} emojis`);
+          console.log(`✅ Fetched ${emojiData.length} emojis`);
           console.log(`   Categories: ${[...new Set(emojiData.map(e => e.category))].length}`);
-          console.log('ðŸ˜€ ========================================\n');
+          console.log('😀 ========================================\n');
 
           return emojiData;
 
         } catch (error) {
-          console.error('âŒ ========================================');
-          console.error('âŒ EMOJI FETCH FAILED');
-          console.error('âŒ ========================================');
+          console.error('❌ ========================================');
+          console.error('❌ EMOJI FETCH FAILED');
+          console.error('❌ ========================================');
           console.error('   Error:', error.message);
           console.error('   Stack:', error.stack);
-          console.error('âŒ ========================================\n');
+          console.error('❌ ========================================\n');
           throw error;
         }
       }
@@ -926,7 +903,7 @@ if (firebase && firebase.auth) {
       const emojiBtn = document.querySelector('.emoji-btn');
       if (emojiBtn) {
         emojiBtn.addEventListener('click', openEmojiPicker, { passive: true });
-        console.log('âœ… Emoji button listener attached');
+        console.log('✅ Emoji button listener attached');
       }
 
       // Emoji picker overlay click - close picker
@@ -938,7 +915,7 @@ if (firebase && firebase.auth) {
             closeEmojiPicker();
           }
         }, { passive: true });
-        console.log('âœ… Emoji overlay listener attached');
+        console.log('✅ Emoji overlay listener attached');
       }
 
       // Emoji search input - filter emojis
@@ -953,7 +930,7 @@ if (firebase && firebase.auth) {
           debouncedSearch(e.target.value);
         }, { passive: true });
 
-        console.log('âœ… Emoji search listener attached');
+        console.log('✅ Emoji search listener attached');
       }
 
       // ESC key - close emoji picker
@@ -971,7 +948,7 @@ if (firebase && firebase.auth) {
        * Groups by category and creates search index
        */
       function processEmojiData(rawData) {
-        console.log('âš™ï¸ Processing emoji data for optimized access...');
+        console.log('⚙️ Processing emoji data for optimized access...');
 
         const categories = {};
         const searchIndex = [];
@@ -1001,7 +978,7 @@ if (firebase && firebase.auth) {
           searchIndex.push(processed);
         });
 
-        console.log(`âœ… Processed ${searchIndex.length} emojis into ${Object.keys(categories).length} categories`);
+        console.log(`✅ Processed ${searchIndex.length} emojis into ${Object.keys(categories).length} categories`);
 
         return { categories, searchIndex, all: searchIndex };
       }
@@ -1066,7 +1043,7 @@ if (firebase && firebase.auth) {
 
         const filteredEmojis = filterEmojis(emojiSearchTerm, currentEmojiCategory);
 
-        console.log(`ðŸŽ¨ Rendering ${filteredEmojis.length} emojis (category: ${currentEmojiCategory}, search: "${emojiSearchTerm}")`);
+        console.log(`🎨 Rendering ${filteredEmojis.length} emojis (category: ${currentEmojiCategory}, search: "${emojiSearchTerm}")`);
 
         if (filteredEmojis.length === 0) {
           container.innerHTML = '<div class="emoji-empty">No emojis found</div>';
@@ -1101,11 +1078,11 @@ if (firebase && firebase.auth) {
        */
       function insertEmojiIntoInput(emoji) {
         if (!messageInput) {
-          console.error('âŒ Message input not found');
+          console.error('❌ Message input not found');
           return;
         }
 
-        console.log(`ðŸ˜€ Inserting emoji: ${emoji}`);
+        console.log(`😀 Inserting emoji: ${emoji}`);
 
         // Get current cursor position
         const start = messageInput.selectionStart;
@@ -1123,7 +1100,7 @@ if (firebase && firebase.auth) {
         // Focus input
         messageInput.focus();
 
-        console.log(`âœ… Emoji inserted at position ${start}, cursor now at ${newCursorPos}`);
+        console.log(`✅ Emoji inserted at position ${start}, cursor now at ${newCursorPos}`);
 
         // Close picker after selection
         closeEmojiPicker();
@@ -1133,19 +1110,19 @@ if (firebase && firebase.auth) {
        * Open emoji picker bottom sheet
        */
       async function openEmojiPicker() {
-        console.log('ðŸ˜€ ========================================');
-        console.log('ðŸ˜€ OPENING EMOJI PICKER');
-        console.log('ðŸ˜€ ========================================');
+        console.log('😀 ========================================');
+        console.log('😀 OPENING EMOJI PICKER');
+        console.log('😀 ========================================');
 
         const overlay = document.getElementById('emojiPickerOverlay');
         if (!overlay) {
-          console.error('âŒ Emoji picker overlay not found');
+          console.error('❌ Emoji picker overlay not found');
           return;
         }
 
         if (isEmojiPickerOpen) {
-          console.log('âš ï¸ Picker already open');
-          console.log('ðŸ˜€ ========================================\n');
+          console.log('⚠️ Picker already open');
+          console.log('😀 ========================================\n');
           return;
         }
 
@@ -1164,30 +1141,30 @@ if (firebase && firebase.auth) {
 
         // Show overlay with animation
         overlay.classList.add('active');
-        console.log('âœ… Overlay shown');
+        console.log('✅ Overlay shown');
 
         try {
           // Fetch emojis if not cached
           if (!emojiCache) {
-            console.log('ðŸ“¡ Fetching emoji data...');
+            console.log('📡 Fetching emoji data...');
             const rawData = await fetchEmojis();
             emojiCache = processEmojiData(rawData);
-            console.log('âœ… Emoji cache ready');
+            console.log('✅ Emoji cache ready');
           }
 
           // Render UI
           renderEmojiCategories();
           renderEmojiGrid();
 
-          console.log('âœ… Emoji picker rendered successfully');
+          console.log('✅ Emoji picker rendered successfully');
 
         } catch (error) {
-          console.error('âŒ Failed to load emojis:', error);
+          console.error('❌ Failed to load emojis:', error);
 
           if (grid) {
             grid.innerHTML = `
         <div class="emoji-error">
-          <div style="font-size: 2rem; margin-bottom: 8px;">ðŸ˜ž</div>
+          <div style="font-size: 2rem; margin-bottom: 8px;">😞</div>
           <div>Failed to load emojis</div>
           <div style="font-size: 0.75rem; margin-top: 4px; opacity: 0.7;">Please try again</div>
         </div>
@@ -1195,14 +1172,14 @@ if (firebase && firebase.auth) {
           }
         }
 
-        console.log('ðŸ˜€ ========================================\n');
+        console.log('😀 ========================================\n');
       }
 
       /**
        * Close emoji picker bottom sheet
        */
       function closeEmojiPicker() {
-        console.log('ðŸ˜€ Closing emoji picker');
+        console.log('😀 Closing emoji picker');
 
         const overlay = document.getElementById('emojiPickerOverlay');
         if (overlay) {
@@ -1221,7 +1198,7 @@ if (firebase && firebase.auth) {
         // Reset to "all" category
         currentEmojiCategory = 'all';
 
-        console.log('âœ… Emoji picker closed');
+        console.log('✅ Emoji picker closed');
       }
 
       /**
@@ -1241,27 +1218,27 @@ if (firebase && firebase.auth) {
 
 
       function setAuthenticationState(authenticated) {
-        console.log(`ðŸ” ========================================`);
-        console.log(`ðŸ” AUTHENTICATION STATE CHANGE`);
-        console.log(`ðŸ” ========================================`);
+        console.log(`🔐 ========================================`);
+        console.log(`🔐 AUTHENTICATION STATE CHANGE`);
+        console.log(`🔐 ========================================`);
         console.log(`   Previous state: ${isSocketAuthenticated}`);
         console.log(`   New state: ${authenticated}`);
 
         isSocketAuthenticated = authenticated;
 
         if (authenticated) {
-          console.log(`âœ… Socket fully authenticated - call features will enable after room join`);
+          console.log(`✅ Socket fully authenticated - call features will enable after room join`);
           if (hasJoinedRoom && roomData?.roomId && !isInitiatingCall) {
             enableCallButtons();
           } else {
             disableCallButtons(false);
           }
         } else {
-          console.log(`ðŸ”’ Socket not authenticated - disabling call features`);
+          console.log(`🔒 Socket not authenticated - disabling call features`);
           disableCallButtons(true); // true = show loading state
         }
 
-        console.log(`ðŸ” ========================================\n`);
+        console.log(`🔐 ========================================\n`);
       }
 
 
@@ -1287,22 +1264,22 @@ if (firebase && firebase.auth) {
             return;
           }
 
-          console.log('ðŸ“‚ Initializing IndexedDB for file attachments...');
+          console.log('📂 Initializing IndexedDB for file attachments...');
           const request = indexedDB.open(DB_NAME, DB_VERSION);
 
           request.onerror = () => {
-            console.error('âŒ IndexedDB open failed:', request.error);
+            console.error('❌ IndexedDB open failed:', request.error);
             reject(request.error);
           };
 
           request.onsuccess = () => {
             dbInstance = request.result;
-            console.log('âœ… IndexedDB initialized successfully');
+            console.log('✅ IndexedDB initialized successfully');
             resolve(dbInstance);
           };
 
           request.onupgradeneeded = (event) => {
-            console.log('ðŸ”§ IndexedDB upgrade needed - creating object stores');
+            console.log('🔧 IndexedDB upgrade needed - creating object stores');
             const db = event.target.result;
 
             // Create object store for file attachments
@@ -1311,7 +1288,7 @@ if (firebase && firebase.auth) {
               store.createIndex('roomId', 'roomId', { unique: false });
               store.createIndex('messageId', 'messageId', { unique: false });
               store.createIndex('timestamp', 'timestamp', { unique: false });
-              console.log('âœ… Object store created:', FILE_STORE_NAME);
+              console.log('✅ Object store created:', FILE_STORE_NAME);
             }
           };
         });
@@ -1322,9 +1299,9 @@ if (firebase && firebase.auth) {
        * Uses chunked reading for large files
        */
       async function storeFileToIndexedDB(file, roomId, messageId = null, customFileId = null) {
-        console.log('ðŸ’¾ ========================================');
-        console.log('ðŸ’¾ STORING FILE TO INDEXEDDB');
-        console.log('ðŸ’¾ ========================================');
+        console.log('💾 ========================================');
+        console.log('💾 STORING FILE TO INDEXEDDB');
+        console.log('💾 ========================================');
         console.log(`   File: ${file.name}`);
         console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
         console.log(`   Type: ${file.type}`);
@@ -1378,23 +1355,23 @@ if (firebase && firebase.auth) {
             const request = store.add(fileRecord);
 
             request.onsuccess = () => {
-              console.log(`âœ… File stored to IndexedDB: ${fileId}`);
+              console.log(`✅ File stored to IndexedDB: ${fileId}`);
               console.log(`   Disk-backed storage (not in RAM)`);
               resolve(fileId);
             };
 
             request.onerror = () => {
-              console.error('âŒ Failed to store file:', request.error);
+              console.error('❌ Failed to store file:', request.error);
               reject(request.error);
             };
           });
 
-          console.log('ðŸ’¾ ========================================\n');
+          console.log('💾 ========================================\n');
           return fileId;
 
         } catch (error) {
-          console.error('âŒ Error storing file to IndexedDB:', error);
-          console.log('ðŸ’¾ ========================================\n');
+          console.error('❌ Error storing file to IndexedDB:', error);
+          console.log('💾 ========================================\n');
           throw error;
         }
       }
@@ -1415,7 +1392,7 @@ if (firebase && firebase.auth) {
        * Retrieve file from IndexedDB
        */
       async function getFileFromIndexedDB(fileId) {
-        console.log(`ðŸ“‚ Retrieving file: ${fileId}`);
+        console.log(`📂 Retrieving file: ${fileId}`);
 
         try {
           const db = await initFileDB();
@@ -1427,22 +1404,22 @@ if (firebase && firebase.auth) {
 
             request.onsuccess = () => {
               if (request.result) {
-                console.log(`âœ… File retrieved: ${request.result.name}`);
+                console.log(`✅ File retrieved: ${request.result.name}`);
                 resolve(request.result);
               } else {
-                console.warn(`âš ï¸ File not found: ${fileId}`);
+                console.warn(`⚠️ File not found: ${fileId}`);
                 resolve(null);
               }
             };
 
             request.onerror = () => {
-              console.error('âŒ Failed to retrieve file:', request.error);
+              console.error('❌ Failed to retrieve file:', request.error);
               reject(request.error);
             };
           });
 
         } catch (error) {
-          console.error('âŒ Error retrieving file:', error);
+          console.error('❌ Error retrieving file:', error);
           throw error;
         }
       }
@@ -1452,9 +1429,9 @@ if (firebase && firebase.auth) {
        * Called when room is destroyed, expired, or left
        */
       async function deleteRoomFiles(roomId) {
-        console.log('ðŸ—‘ï¸ ========================================');
-        console.log('ðŸ—‘ï¸ DELETING ALL FILES FOR ROOM');
-        console.log('ðŸ—‘ï¸ ========================================');
+        console.log('🗑️ ========================================');
+        console.log('🗑️ DELETING ALL FILES FOR ROOM');
+        console.log('🗑️ ========================================');
         console.log(`   Room ID: ${roomId}`);
 
         try {
@@ -1471,27 +1448,27 @@ if (firebase && firebase.auth) {
             request.onsuccess = (event) => {
               const cursor = event.target.result;
               if (cursor) {
-                console.log(`   ðŸ—‘ï¸ Deleting file: ${cursor.value.name} (${cursor.value.id})`);
+                console.log(`   🗑️ Deleting file: ${cursor.value.name} (${cursor.value.id})`);
                 cursor.delete();
                 deletedCount++;
                 cursor.continue();
               } else {
-                console.log(`âœ… Deleted ${deletedCount} file(s) for room ${roomId}`);
-                console.log('ðŸ—‘ï¸ ========================================\n');
+                console.log(`✅ Deleted ${deletedCount} file(s) for room ${roomId}`);
+                console.log('🗑️ ========================================\n');
                 resolve(deletedCount);
               }
             };
 
             request.onerror = () => {
-              console.error('âŒ Failed to delete room files:', request.error);
-              console.log('ðŸ—‘ï¸ ========================================\n');
+              console.error('❌ Failed to delete room files:', request.error);
+              console.log('🗑️ ========================================\n');
               reject(request.error);
             };
           });
 
         } catch (error) {
-          console.error('âŒ Error deleting room files:', error);
-          console.log('ðŸ—‘ï¸ ========================================\n');
+          console.error('❌ Error deleting room files:', error);
+          console.log('🗑️ ========================================\n');
           throw error;
         }
       }
@@ -1500,7 +1477,7 @@ if (firebase && firebase.auth) {
        * Delete specific file by ID
        */
       async function deleteFileFromIndexedDB(fileId) {
-        console.log(`ðŸ—‘ï¸ Deleting file: ${fileId}`);
+        console.log(`🗑️ Deleting file: ${fileId}`);
 
         try {
           const db = await initFileDB();
@@ -1511,18 +1488,18 @@ if (firebase && firebase.auth) {
             const request = store.delete(fileId);
 
             request.onsuccess = () => {
-              console.log(`âœ… File deleted: ${fileId}`);
+              console.log(`✅ File deleted: ${fileId}`);
               resolve();
             };
 
             request.onerror = () => {
-              console.error('âŒ Failed to delete file:', request.error);
+              console.error('❌ Failed to delete file:', request.error);
               reject(request.error);
             };
           });
 
         } catch (error) {
-          console.error('âŒ Error deleting file:', error);
+          console.error('❌ Error deleting file:', error);
           throw error;
         }
       }
@@ -1545,7 +1522,7 @@ if (firebase && firebase.auth) {
           });
 
         } catch (error) {
-          console.error('âŒ Error counting room files:', error);
+          console.error('❌ Error counting room files:', error);
           return 0;
         }
       }
@@ -1594,9 +1571,9 @@ if (firebase && firebase.auth) {
        * Returns { valid: boolean, error: string|null }
        */
       function validateFile(file) {
-        console.log('ðŸ” ========================================');
-        console.log('ðŸ” FILE VALIDATION');
-        console.log('ðŸ” ========================================');
+        console.log('🔍 ========================================');
+        console.log('🔍 FILE VALIDATION');
+        console.log('🔍 ========================================');
         console.log(`   File: ${file.name}`);
         console.log(`   Type: ${file.type}`);
         console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
@@ -1605,8 +1582,8 @@ if (firebase && firebase.auth) {
         if (file.size > ABSOLUTE_MAX_FILE_SIZE) {
           const sizeMB = (file.size / 1024 / 1024).toFixed(2);
           const maxMB = (ABSOLUTE_MAX_FILE_SIZE / 1024 / 1024).toFixed(0);
-          console.error(`âŒ File exceeds absolute limit: ${sizeMB}MB > ${maxMB}MB`);
-          console.log('ðŸ” ========================================\n');
+          console.error(`❌ File exceeds absolute limit: ${sizeMB}MB > ${maxMB}MB`);
+          console.log('🔍 ========================================\n');
           return {
             valid: false,
             error: `File too large (${sizeMB}MB). Maximum file size is ${maxMB}MB.`
@@ -1621,11 +1598,11 @@ if (firebase && firebase.auth) {
             mime === 'application/pdf' ||
             mime.startsWith('application/vnd.') || mime.startsWith('application/msword') ||
             mime === 'text/plain' || mime === 'application/rtf') {
-            console.log(`ðŸ” Allowing generic type: ${file.type}`);
+            console.log(`🔍 Allowing generic type: ${file.type}`);
             return { valid: true, error: null };
           }
-          console.warn(`âš ï¸ Unknown MIME type (${file.type || 'none'}) - allowing with fallback handling`);
-          console.log('ðŸ” ========================================\n');
+          console.warn(`⚠️ Unknown MIME type (${file.type || 'none'}) - allowing with fallback handling`);
+          console.log('🔍 ========================================\n');
           return { valid: true, error: null };
         }
 
@@ -1633,8 +1610,8 @@ if (firebase && firebase.auth) {
         const fileName = file.name.toLowerCase();
         const hasValidExtension = typeConfig.ext.some(ext => fileName.endsWith(ext));
         if (!hasValidExtension) {
-          console.error(`âŒ File extension doesn't match type: ${file.name}`);
-          console.log('ðŸ” ========================================\n');
+          console.error(`❌ File extension doesn't match type: ${file.name}`);
+          console.log('🔍 ========================================\n');
           return {
             valid: false,
             error: `File extension doesn't match its type. Expected: ${typeConfig.ext.join(', ')}`
@@ -1645,16 +1622,16 @@ if (firebase && firebase.auth) {
         if (file.size > typeConfig.maxSize) {
           const sizeMB = (file.size / 1024 / 1024).toFixed(2);
           const maxMB = (typeConfig.maxSize / 1024 / 1024).toFixed(0);
-          console.error(`âŒ File exceeds type limit: ${sizeMB}MB > ${maxMB}MB`);
-          console.log('ðŸ” ========================================\n');
+          console.error(`❌ File exceeds type limit: ${sizeMB}MB > ${maxMB}MB`);
+          console.log('🔍 ========================================\n');
           return {
             valid: false,
             error: `${file.type} files must be under ${maxMB}MB. Your file is ${sizeMB}MB.`
           };
         }
 
-        console.log('âœ… File validation passed');
-        console.log('ðŸ” ========================================\n');
+        console.log('✅ File validation passed');
+        console.log('🔍 ========================================\n');
         return { valid: true, error: null };
       }
 
@@ -1676,9 +1653,9 @@ if (firebase && firebase.auth) {
 
 
       async function openImageViewer(fileId, fileName, fallbackUrl = null) {
-        console.log('ðŸ–¼ï¸ ========================================');
-        console.log('ðŸ–¼ï¸ OPENING IMAGE VIEWER');
-        console.log('ðŸ–¼ï¸ ========================================');
+        console.log('🖼️ ========================================');
+        console.log('🖼️ OPENING IMAGE VIEWER');
+        console.log('🖼️ ========================================');
         console.log(`   FileID: ${fileId}`);
         console.log(`   Filename: ${fileName}`);
 
@@ -1688,7 +1665,7 @@ if (firebase && firebase.auth) {
         const sizeEl = document.getElementById('imageViewerSize');
 
         if (!overlay || !image) {
-          console.error('âŒ Image viewer elements not found');
+          console.error('❌ Image viewer elements not found');
           console.error('   overlay:', !!overlay);
           console.error('   image:', !!image);
           return;
@@ -1700,7 +1677,7 @@ if (firebase && firebase.auth) {
 
           if (!fileData || !fileData.blob) {
             if (!fallbackUrl) {
-              console.error('âŒ File not found in IndexedDB');
+              console.error('❌ File not found in IndexedDB');
               toast('Image not found', 'error');
               return;
             }
@@ -1711,7 +1688,7 @@ if (firebase && firebase.auth) {
             if (filenameEl) filenameEl.textContent = fileName || 'Image';
             if (sizeEl) sizeEl.textContent = 'Loaded from secure storage';
           } else {
-            console.log(`âœ… File retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+            console.log(`✅ File retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
 
             // Create blob URL for display
             const blobUrl = URL.createObjectURL(fileData.blob);
@@ -1723,7 +1700,7 @@ if (firebase && firebase.auth) {
 
             // Update info
             if (filenameEl) filenameEl.textContent = fileData.name;
-            if (sizeEl) sizeEl.textContent = `${formatFileSize(fileData.size)} â€¢ Click image to zoom`;
+            if (sizeEl) sizeEl.textContent = `${formatFileSize(fileData.size)} • Click image to zoom`;
           }
 
           // Reset zoom state
@@ -1737,13 +1714,13 @@ if (firebase && firebase.auth) {
           // Force a reflow to ensure the display change is applied
           void overlay.offsetHeight;
 
-          console.log('âœ… Image viewer opened');
+          console.log('✅ Image viewer opened');
           console.log('   Display:', overlay.style.display);
           console.log('   Has active class:', overlay.classList.contains('active'));
-          console.log('ðŸ–¼ï¸ ========================================\n');
+          console.log('🖼️ ========================================\n');
 
         } catch (error) {
-          console.error('âŒ Error opening image viewer:', error);
+          console.error('❌ Error opening image viewer:', error);
           toast('Failed to open image', 'error');
         }
       }
@@ -1752,7 +1729,7 @@ if (firebase && firebase.auth) {
        * Close image viewer and cleanup
        */
       function closeImageViewer() {
-        console.log('ðŸ–¼ï¸ Closing image viewer');
+        console.log('🖼️ Closing image viewer');
 
         const overlay = document.getElementById('imageViewerOverlay');
         const image = document.getElementById('imageViewerImage');
@@ -1769,7 +1746,7 @@ if (firebase && firebase.auth) {
         if (image && image.dataset.blobUrl) {
           URL.revokeObjectURL(image.dataset.blobUrl);
           delete image.dataset.blobUrl;
-          console.log('ðŸ§¹ Blob URL revoked');
+          console.log('🧹 Blob URL revoked');
         }
 
         // Reset zoom
@@ -1778,7 +1755,7 @@ if (firebase && firebase.auth) {
           image.classList.remove('zoomed');
         }
 
-        console.log('âœ… Image viewer closed');
+        console.log('✅ Image viewer closed');
       }
 
       /**
@@ -1792,10 +1769,10 @@ if (firebase && firebase.auth) {
 
         if (isImageZoomed) {
           image.classList.add('zoomed');
-          console.log('ðŸ” Image zoomed in');
+          console.log('🔍 Image zoomed in');
         } else {
           image.classList.remove('zoomed');
-          console.log('ðŸ” Image zoomed out');
+          console.log('🔍 Image zoomed out');
         }
       }
 
@@ -1805,7 +1782,7 @@ if (firebase && firebase.auth) {
        */
       function base64ToBlob(base64, contentType) {
         if (!base64 || typeof base64 !== 'string') {
-          console.error('âŒ Cannot convert to blob: base64 data is missing or not a string', { type: typeof base64 });
+          console.error('❌ Cannot convert to blob: base64 data is missing or not a string', { type: typeof base64 });
           return null;
         }
 
@@ -1834,7 +1811,7 @@ if (firebase && firebase.auth) {
           const byteArray = new Uint8Array(byteNumbers);
           return new Blob([byteArray], { type: contentType });
         } catch (error) {
-          console.error('âŒ base64ToBlob conversion failed:', error);
+          console.error('❌ base64ToBlob conversion failed:', error);
           if (base64 && typeof base64 === 'string') {
             console.log('   Data sample (first 50 chars):', base64.substring(0, 50));
             console.log('   Data length:', base64.length);
@@ -1844,9 +1821,9 @@ if (firebase && firebase.auth) {
       }
 
       async function chunkFile(file) {
-        console.log('âœ‚ï¸ ========================================');
-        console.log('âœ‚ï¸ CHUNKING FILE FOR TRANSMISSION (BINARY)');
-        console.log('âœ‚ï¸ ========================================');
+        console.log('✂️ ========================================');
+        console.log('✂️ CHUNKING FILE FOR TRANSMISSION (BINARY)');
+        console.log('✂️ ========================================');
         console.log(`   File: ${file.name}`);
         console.log(`   Total size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
         console.log(`   Chunk size: ${(CHUNK_SIZE / 1024).toFixed(0)} KB`);
@@ -1881,8 +1858,8 @@ if (firebase && firebase.auth) {
           }
         }
 
-        console.log(`âœ… File chunked: ${chunks.length} binary chunks ready`);
-        console.log('âœ‚ï¸ ========================================\n');
+        console.log(`✅ File chunked: ${chunks.length} binary chunks ready`);
+        console.log('✂️ ========================================\n');
 
         return chunks;
       }
@@ -1892,9 +1869,9 @@ if (firebase && firebase.auth) {
        * This starts transmitting immediately instead of pre-building all chunks in memory.
        */
       async function sendFileInChunks(fileId, fileName, fileType, fileSize, fileBlob, roomId) {
-        console.log('ðŸ“¤ ========================================');
-        console.log('ðŸ“¤ PIPELINED BINARY TRANSMISSION START');
-        console.log('ðŸ“¤ ========================================');
+        console.log('📤 ========================================');
+        console.log('📤 PIPELINED BINARY TRANSMISSION START');
+        console.log('📤 ========================================');
         console.log(`   FileID: ${fileId}`);
         console.log(`   Size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`);
 
@@ -1933,7 +1910,7 @@ if (firebase && firebase.auth) {
             if (acknowledgedCount >= totalChunks) {
               socketInstance.off('file_chunk_ack', ackHandler);
               clearInterval(stallWatcher);
-              console.log('âœ… Pipelined transmission complete');
+              console.log('✅ Pipelined transmission complete');
               resolve();
               return;
             }
@@ -1953,7 +1930,7 @@ if (firebase && firebase.auth) {
               return;
             }
             if (index === 0 || index === totalChunks - 1 || index % 8 === 0) {
-              console.log(`ðŸ“¤ Sending chunk ${index + 1}/${totalChunks}`);
+              console.log(`📤 Sending chunk ${index + 1}/${totalChunks}`);
             }
 
             socketInstance.emit('file_chunk', {
@@ -1973,7 +1950,7 @@ if (firebase && firebase.auth) {
             while (!failed && inFlight.size < WINDOW_SIZE && nextChunkIndex < totalChunks) {
               const index = nextChunkIndex++;
               sendChunk(index).catch((err) => {
-                console.error('âŒ Failed to read/send chunk:', err);
+                console.error('❌ Failed to read/send chunk:', err);
                 fail(new Error('Chunk transmission failed'));
               });
             }
@@ -1982,7 +1959,7 @@ if (firebase && firebase.auth) {
           const stallWatcher = setInterval(() => {
             if (failed || acknowledgedCount >= totalChunks) return;
             if (Date.now() - lastProgressAt > CHUNK_TIMEOUT) {
-              console.error('âŒ Transmission stalled (timeout)');
+              console.error('❌ Transmission stalled (timeout)');
               fail(new Error('Transmission stalled'));
             }
           }, 1000);
@@ -2001,7 +1978,7 @@ if (firebase && firebase.auth) {
           const { fileId, fileName, fileType, fileSize, roomId, chunkIndex, totalChunks, chunkData, chunkSize } = data;
 
           if (chunkIndex === 0 || chunkIndex === totalChunks - 1 || chunkIndex % 8 === 0) {
-            console.log(`ðŸ“¥ Received chunk ${chunkIndex + 1}/${totalChunks} for ${fileName}`);
+            console.log(`📥 Received chunk ${chunkIndex + 1}/${totalChunks} for ${fileName}`);
           }
 
           if (!this.activeTransfers.has(fileId)) {
@@ -2078,7 +2055,7 @@ if (firebase && firebase.auth) {
 
             toast(`Received: ${fileName}`, 'success');
           } catch (error) {
-            console.error('âŒ File reconstruction failed:', error);
+            console.error('❌ File reconstruction failed:', error);
             this.activeTransfers.delete(fileId);
             toast(`Failed to receive: ${fileName}`, 'error');
             throw error;
@@ -2099,16 +2076,16 @@ if (firebase && firebase.auth) {
 
       function waitForAuthentication() {
         if (isSocketAuthenticated) {
-          console.log(`âœ… Already authenticated, proceeding immediately`);
+          console.log(`✅ Already authenticated, proceeding immediately`);
           return Promise.resolve();
         }
 
         if (!authenticationPromise) {
-          console.log(`â³ Creating authentication promise...`);
+          console.log(`⏳ Creating authentication promise...`);
           authenticationPromise = new Promise((resolve) => {
             const checkAuth = () => {
               if (isSocketAuthenticated) {
-                console.log(`âœ… Authentication promise resolved`);
+                console.log(`✅ Authentication promise resolved`);
                 resolve();
               } else {
                 setTimeout(checkAuth, 50);
@@ -2122,10 +2099,10 @@ if (firebase && firebase.auth) {
       }
 
       function enableCallButtons() {
-        console.log(`ðŸŽšï¸ Enabling call buttons`);
+        console.log(`🎚️ Enabling call buttons`);
 
         if (!isSocketAuthenticated || !hasJoinedRoom || !roomData?.roomId || isInitiatingCall) {
-          console.log(`   â³ Call buttons stay disabled until chat room is ready`);
+          console.log(`   ⏳ Call buttons stay disabled until chat room is ready`);
           disableCallButtons(false);
           return;
         }
@@ -2136,7 +2113,7 @@ if (firebase && firebase.auth) {
           audioCallBtn.classList.add('call-ready');
           audioCallBtn.removeAttribute('aria-disabled');
           audioCallBtn.title = 'Start Audio Call';
-          console.log(`   âœ… Audio button enabled`);
+          console.log(`   ✅ Audio button enabled`);
         }
 
         if (videoCallBtn) {
@@ -2145,12 +2122,12 @@ if (firebase && firebase.auth) {
           videoCallBtn.classList.add('call-ready');
           videoCallBtn.removeAttribute('aria-disabled');
           videoCallBtn.title = 'Start Video Call';
-          console.log(`   âœ… Video button enabled`);
+          console.log(`   ✅ Video button enabled`);
         }
       }
 
       function disableCallButtons(showLoading = false) {
-        console.log(`ðŸ”’ Disabling call buttons (loading: ${showLoading})`);
+        console.log(`🔒 Disabling call buttons (loading: ${showLoading})`);
 
         if (audioCallBtn) {
           audioCallBtn.disabled = true;
@@ -2163,7 +2140,7 @@ if (firebase && firebase.auth) {
           } else {
             audioCallBtn.title = 'Authenticating...';
           }
-          console.log(`   ðŸ”’ Audio button disabled`);
+          console.log(`   🔒 Audio button disabled`);
         }
 
         if (videoCallBtn) {
@@ -2177,7 +2154,7 @@ if (firebase && firebase.auth) {
           } else {
             videoCallBtn.title = 'Authenticating...';
           }
-          console.log(`   ðŸ”’ Video button disabled`);
+          console.log(`   🔒 Video button disabled`);
         }
       }
 
@@ -2253,9 +2230,9 @@ if (firebase && firebase.auth) {
        * Show attachment preview in UI
        */
       async function showAttachmentPreview(fileId, fileName, fileType, fileSize, blob) {
-        console.log('ðŸ–¼ï¸ ========================================');
-        console.log('ðŸ–¼ï¸ SHOWING ATTACHMENT PREVIEW');
-        console.log('ðŸ–¼ï¸ ========================================');
+        console.log('🖼️ ========================================');
+        console.log('🖼️ SHOWING ATTACHMENT PREVIEW');
+        console.log('🖼️ ========================================');
         console.log(`   File: ${fileName}`);
         console.log(`   Type: ${fileType}`);
         console.log(`   Size: ${formatFileSize(fileSize)}`);
@@ -2266,7 +2243,7 @@ if (firebase && firebase.auth) {
         const sizeElement = document.getElementById('attachmentSize');
 
         if (!previewContainer || !iconWrapper || !nameElement || !sizeElement) {
-          console.error('âŒ Preview elements not found');
+          console.error('❌ Preview elements not found');
           return;
         }
 
@@ -2287,23 +2264,23 @@ if (firebase && firebase.auth) {
             img.src = previewUrl;
             img.alt = fileName;
             iconWrapper.appendChild(img);
-            console.log('âœ… Image preview created');
+            console.log('✅ Image preview created');
           }
         } else if (fileCategory === 'pdf') {
           // Show PDF icon
           iconWrapper.classList.add('pdf-preview');
           iconWrapper.innerHTML = '<span class="material-symbols-outlined">picture_as_pdf</span>';
-          console.log('âœ… PDF icon displayed');
+          console.log('✅ PDF icon displayed');
         } else if (fileCategory === 'video') {
           // Show video icon
           iconWrapper.classList.add('video-preview');
           iconWrapper.innerHTML = '<span class="material-symbols-outlined">videocam</span>';
-          console.log('âœ… Video icon displayed');
+          console.log('✅ Video icon displayed');
         } else {
           // Show generic document icon
           iconWrapper.classList.add('pdf-preview');
           iconWrapper.innerHTML = '<span class="material-symbols-outlined">description</span>';
-          console.log('âœ… Document icon displayed');
+          console.log('✅ Document icon displayed');
         }
 
         // Update file info
@@ -2322,15 +2299,15 @@ if (firebase && firebase.auth) {
         // Show preview
         previewContainer.classList.remove('hidden');
 
-        console.log('âœ… Attachment preview displayed');
-        console.log('ðŸ–¼ï¸ ========================================\n');
+        console.log('✅ Attachment preview displayed');
+        console.log('🖼️ ========================================\n');
       }
 
       /**
        * Hide and cleanup attachment preview
        */
       function hideAttachmentPreview() {
-        console.log('ðŸ§¹ Hiding attachment preview');
+        console.log('🧹 Hiding attachment preview');
 
         const previewContainer = document.getElementById('attachmentPreview');
         if (previewContainer) {
@@ -2340,11 +2317,11 @@ if (firebase && firebase.auth) {
         // Revoke blob URL to prevent memory leak
         if (pendingAttachment?.previewUrl) {
           URL.revokeObjectURL(pendingAttachment.previewUrl);
-          console.log('âœ… Blob URL revoked');
+          console.log('✅ Blob URL revoked');
         }
 
         pendingAttachment = null;
-        console.log('âœ… Attachment preview cleaned up');
+        console.log('✅ Attachment preview cleaned up');
       }
 
 
@@ -2356,41 +2333,41 @@ if (firebase && firebase.auth) {
         const cachedCallStr = localStorage.getItem(CACHED_CALL_KEY);
 
         if (!cachedCallStr) {
-          if (logMiss) console.log('â„¹ï¸ No cached call found');
+          if (logMiss) console.log('ℹ️ No cached call found');
           return;
         }
 
-        console.log('ðŸ” Checking for cached incoming call...');
+        console.log('🔍 Checking for cached incoming call...');
 
         try {
           const cachedCall = JSON.parse(cachedCallStr);
           const cacheAge = Date.now() - cachedCall.timestamp;
 
-          console.log(`ðŸ“ž Found cached call from ${cachedCall.callerUsername}`);
+          console.log(`📞 Found cached call from ${cachedCall.callerUsername}`);
           console.log(`   Age: ${(cacheAge / 1000).toFixed(1)}s`);
           console.log(`   Call ID: ${cachedCall.callId}`);
 
           // Check if cache is expired
           if (cacheAge > CALL_CACHE_TIMEOUT) {
-            console.log(`â° Cached call expired (${(cacheAge / 1000).toFixed(1)}s > ${CALL_CACHE_TIMEOUT / 1000}s)`);
+            console.log(`⏰ Cached call expired (${(cacheAge / 1000).toFixed(1)}s > ${CALL_CACHE_TIMEOUT / 1000}s)`);
             localStorage.removeItem(CACHED_CALL_KEY);
             return;
           }
 
           // Check if call is still valid on server
           if (socketInstance && socketInstance.connected) {
-            console.log(`ðŸ“¡ Validating cached call ${cachedCall.callId} with server...`);
+            console.log(`📡 Validating cached call ${cachedCall.callId} with server...`);
 
             socketInstance.emit('validate_cached_call', {
               callId: cachedCall.callId,
               roomId: roomData.roomId
             });
           } else {
-            console.warn('âš ï¸ Socket not connected, will retry validation');
+            console.warn('⚠️ Socket not connected, will retry validation');
           }
 
         } catch (e) {
-          console.error('âŒ Failed to parse cached call:', e);
+          console.error('❌ Failed to parse cached call:', e);
           localStorage.removeItem(CACHED_CALL_KEY);
         }
       }
@@ -2398,13 +2375,13 @@ if (firebase && firebase.auth) {
       function showCachedCallModal(callData) {
         // GUARD: Don't show if already in/initiating a call
         if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall) {
-          console.log('ðŸ“ž Skipping cached call modal - user already in/initiating call');
+          console.log('📞 Skipping cached call modal - user already in/initiating call');
           return;
         }
 
-        console.log('ðŸ“ž ========================================');
-        console.log('ðŸ“ž SHOWING CACHED INCOMING CALL');
-        console.log('ðŸ“ž ========================================');
+        console.log('📞 ========================================');
+        console.log('📞 SHOWING CACHED INCOMING CALL');
+        console.log('📞 ========================================');
         console.log(`   Caller: ${callData.callerUsername}`);
         console.log(`   Call ID: ${callData.callId}`);
         console.log(`   Type: ${callData.callType}`);
@@ -2434,12 +2411,12 @@ if (firebase && firebase.auth) {
         // Show modal immediately (no delay for cached calls)
         incomingCallModal?.classList.remove('hidden');
 
-        console.log('âœ… Cached call modal displayed');
-        console.log('ðŸ“ž ========================================\n');
+        console.log('✅ Cached call modal displayed');
+        console.log('📞 ========================================\n');
       }
 
       function startCachedCallMonitoring() {
-        console.log('ðŸ”„ Starting cached call monitoring...');
+        console.log('🔄 Starting cached call monitoring...');
 
         // Check immediately on load
         checkForCachedCall({ logMiss: true });
@@ -2449,23 +2426,23 @@ if (firebase && firebase.auth) {
           checkForCachedCall();
         }, 2000);
 
-        console.log('âœ… Cached call monitoring started (checks every 2s)');
+        console.log('✅ Cached call monitoring started (checks every 2s)');
       }
 
       function stopCachedCallMonitoring() {
         if (cachedCallCheckInterval) {
           clearInterval(cachedCallCheckInterval);
           cachedCallCheckInterval = null;
-          console.log('ðŸ›‘ Cached call monitoring stopped');
+          console.log('🛑 Cached call monitoring stopped');
         }
       }
 
 
       // Function to cleanup parent call.html page
       function cleanupParentCallPage(targetUrl = null) {
-        console.log('ðŸ§¹ ========================================');
-        console.log('ðŸ§¹ CLEANING UP PARENT CALL PAGE');
-        console.log('ðŸ§¹ ========================================');
+        console.log('🧹 ========================================');
+        console.log('🧹 CLEANING UP PARENT CALL PAGE');
+        console.log('🧹 ========================================');
 
         const finalUrl = targetUrl || '/mood.html';
 
@@ -2482,75 +2459,75 @@ if (firebase && firebase.auth) {
           }
           const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
           if (isSocialClubMode && finalUrl === '/mood.html' && (navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached)) {
-            console.warn('ðŸ›¡ï¸ Social Club: Suppressing forced navigation to /mood.html during call flow');
-            console.log('ðŸ§¹ ========================================\n');
+            console.warn('🛡️ Social Club: Suppressing forced navigation to /mood.html during call flow');
+            console.log('🧹 ========================================\n');
             return;
           }
         } catch { }
 
-        // âœ… CRITICAL: Clear any persistent matchmaking state from discovery.html
+        // ✅ CRITICAL: Clear any persistent matchmaking state from discovery.html
         // This prevents automatic re-match if the user lands on discovery.html via back-button
         try {
           localStorage.removeItem('discovery_state');
           localStorage.removeItem('discovery_state_timestamp');
-          console.log('ðŸ§¹ [Cleanup] Matchmaking state cleared');
+          console.log('🧹 [Cleanup] Matchmaking state cleared');
         } catch (e) { }
 
         // Check if we're in an iframe (chat overlay on call.html)
         if (window.parent && window.parent !== window) {
-          console.log('ðŸ“± We are in iframe - accessing parent window');
+          console.log('📱 We are in iframe - accessing parent window');
           try {
             // Hide the floating button
             const parentFloatingBtn = window.parent.document.getElementById('floatingReturnToCall');
             if (parentFloatingBtn) {
               parentFloatingBtn.classList.add('hidden');
-              console.log('âœ… Parent floating button hidden');
+              console.log('✅ Parent floating button hidden');
             }
 
             // Navigate parent window
-            console.log(`ðŸ”„ Navigating parent window to ${finalUrl}`);
+            console.log(`🔄 Navigating parent window to ${finalUrl}`);
             window.parent.location.href = finalUrl;
 
-            console.log('âœ… Parent window navigation initiated');
+            console.log('✅ Parent window navigation initiated');
           } catch (e) {
-            console.error('âŒ Cannot access parent window:', e);
+            console.error('❌ Cannot access parent window:', e);
             // Fallback: just navigate ourselves
             window.location.href = finalUrl;
           }
         } else {
-          console.log(`â„¹ï¸ Not in iframe - navigating directly to ${finalUrl}`);
+          console.log(`ℹ️ Not in iframe - navigating directly to ${finalUrl}`);
           window.location.href = finalUrl;
         }
 
-        console.log('ðŸ§¹ ========================================\n');
+        console.log('🧹 ========================================\n');
       }
 
 
       // Function to hide floating button in parent call.html
       function hideCallPageFloatingButton() {
-        console.log('ðŸŽˆ Attempting to hide call.html floating button');
+        console.log('🎈 Attempting to hide call.html floating button');
 
         // Check if we're in an iframe (chat overlay)
         if (window.parent && window.parent !== window) {
-          console.log('ðŸ“± We are in iframe - accessing parent window');
+          console.log('📱 We are in iframe - accessing parent window');
           try {
             const parentFloatingBtn = window.parent.document.getElementById('floatingReturnToCall');
             if (parentFloatingBtn) {
               parentFloatingBtn.classList.add('hidden');
-              console.log('âœ… Parent floating button hidden');
+              console.log('✅ Parent floating button hidden');
             } else {
-              console.warn('âš ï¸ Parent floating button not found');
+              console.warn('⚠️ Parent floating button not found');
             }
           } catch (e) {
-            console.error('âŒ Cannot access parent window (CORS?):', e);
+            console.error('❌ Cannot access parent window (CORS?):', e);
           }
         } else {
-          console.log('â„¹ï¸ Not in iframe - checking local DOM');
+          console.log('ℹ️ Not in iframe - checking local DOM');
           // If not in iframe, might be standalone chat page
           const localFloatingBtn = document.getElementById('floatingReturnToCall');
           if (localFloatingBtn) {
             localFloatingBtn.classList.add('hidden');
-            console.log('âœ… Local floating button hidden');
+            console.log('✅ Local floating button hidden');
           }
         }
       }
@@ -2558,13 +2535,13 @@ if (firebase && firebase.auth) {
 
 
       function returnToActiveCall() {
-        console.log('ðŸ”™ ========================================');
-        console.log('ðŸ”™ RETURNING TO ACTIVE CALL FROM CHAT');
-        console.log('ðŸ”™ ========================================');
+        console.log('🔙 ========================================');
+        console.log('🔙 RETURNING TO ACTIVE CALL FROM CHAT');
+        console.log('🔙 ========================================');
 
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
         if (!activeCallStr) {
-          console.error('âŒ No active call data found');
+          console.error('❌ No active call data found');
           toast('No active call found', 'error');
           return;
         }
@@ -2590,48 +2567,48 @@ if (firebase && firebase.auth) {
 
           // Disconnect floating socket before navigating
           if (floatingCallSocket) {
-            console.log('ðŸ”Œ Disconnecting floating socket (will reconnect on call page)');
+            console.log('🔌 Disconnecting floating socket (will reconnect on call page)');
             floatingCallSocket.disconnect();
             floatingCallSocket = null;
           }
 
-          console.log('âœ… Navigating back to call page');
+          console.log('✅ Navigating back to call page');
           window.location.href = '/call.html';
 
         } catch (e) {
-          console.error('âŒ Failed to parse active call data:', e);
+          console.error('❌ Failed to parse active call data:', e);
           toast('Failed to return to call', 'error');
         }
 
-        console.log('ðŸ”™ ========================================\n');
+        console.log('🔙 ========================================\n');
       }
 
       function checkForBackgroundCall() {
         const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
         const activeCallStr = localStorage.getItem('activeCall');
 
-        console.log('ðŸ” Checking for background call...');
+        console.log('🔍 Checking for background call...');
         console.log(`   hasBackgroundCall flag: ${hasBackgroundCall}`);
         console.log(`   activeCall in storage: ${!!activeCallStr}`);
 
         if (hasBackgroundCall && activeCallStr) {
-          console.log('âœ… Background call detected - showing return button');
+          console.log('✅ Background call detected - showing return button');
 
           const returnBtn = document.getElementById('floatingReturnToCall');
           if (returnBtn) {
             returnBtn.classList.remove('hidden');
 
             returnBtn.onclick = () => {
-              console.log('ðŸ“ž Return to call clicked');
+              console.log('📞 Return to call clicked');
               navigatingToCall = true; // Set flag for auto-leave detection
               sessionStorage.removeItem('hasBackgroundCall');
               window.location.href = '/call.html';
             };
 
-            console.log('âœ… Return to call button activated');
+            console.log('✅ Return to call button activated');
           }
         } else {
-          console.log('â„¹ï¸ No background call detected');
+          console.log('ℹ️ No background call detected');
         }
       }
 
@@ -2639,20 +2616,20 @@ if (firebase && firebase.auth) {
 
       function saveChatState(roomId, messages) {
         try {
-          console.log('ðŸ’¾ ========================================');
-          console.log('ðŸ’¾ SAVING CHAT STATE');
-          console.log('ðŸ’¾ ========================================');
+          console.log('💾 ========================================');
+          console.log('💾 SAVING CHAT STATE');
+          console.log('💾 ========================================');
           console.log(`   Room: ${roomId}`);
           console.log(`   Messages: ${messages?.length || 0}`);
 
           // CRITICAL FIX: Validate input data
           if (!roomId) {
-            console.error('âŒ Cannot save state: roomId missing');
+            console.error('❌ Cannot save state: roomId missing');
             return;
           }
 
           if (!Array.isArray(messages)) {
-            console.error('âŒ Cannot save state: messages not an array');
+            console.error('❌ Cannot save state: messages not an array');
             return;
           }
 
@@ -2660,13 +2637,13 @@ if (firebase && firebase.auth) {
           const validMessages = messages.filter(msg => {
             const isValid = msg.userId && msg.timestamp && (msg.message || msg.attachment);
             if (!isValid) {
-              console.warn(`âš ï¸ Skipping invalid message in cache save:`, msg);
+              console.warn(`⚠️ Skipping invalid message in cache save:`, msg);
             }
             return isValid;
           });
 
           if (validMessages.length < messages.length) {
-            console.warn(`âš ï¸ Filtered out ${messages.length - validMessages.length} invalid messages`);
+            console.warn(`⚠️ Filtered out ${messages.length - validMessages.length} invalid messages`);
           }
 
           // Determine call button state
@@ -2698,14 +2675,14 @@ if (firebase && firebase.auth) {
             localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
             localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
 
-            console.log('âœ… Chat state saved successfully:');
+            console.log('✅ Chat state saved successfully:');
             console.log(`   Valid messages: ${validMessages.length}`);
             console.log(`   Button state: ${callButtonState}`);
-            console.log('ðŸ’¾ ========================================\n');
+            console.log('💾 ========================================\n');
 
           } catch (storageError) {
             if (storageError.name === 'QuotaExceededError') {
-              console.error('âŒ LocalStorage quota exceeded - attempting cleanup');
+              console.error('❌ LocalStorage quota exceeded - attempting cleanup');
 
               // Emergency cleanup: keep only last 50 messages
               const trimmedMessages = validMessages.slice(-50);
@@ -2713,9 +2690,9 @@ if (firebase && firebase.auth) {
 
               try {
                 localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(trimmedState));
-                console.warn(`âš ï¸ Saved trimmed state (${trimmedMessages.length} messages)`);
+                console.warn(`⚠️ Saved trimmed state (${trimmedMessages.length} messages)`);
               } catch (retryError) {
-                console.error('âŒ Failed to save even trimmed state:', retryError);
+                console.error('❌ Failed to save even trimmed state:', retryError);
                 // Clear old state to free space
                 localStorage.removeItem(CHAT_STATE_KEY);
                 localStorage.removeItem(CHAT_MESSAGES_KEY);
@@ -2726,12 +2703,12 @@ if (firebase && firebase.auth) {
           }
 
         } catch (e) {
-          console.error('âŒ ========================================');
-          console.error('âŒ FAILED TO SAVE CHAT STATE');
-          console.error('âŒ ========================================');
+          console.error('❌ ========================================');
+          console.error('❌ FAILED TO SAVE CHAT STATE');
+          console.error('❌ ========================================');
           console.error('   Error:', e.message);
           console.error('   Stack:', e.stack);
-          console.error('âŒ ========================================\n');
+          console.error('❌ ========================================\n');
         }
       }
 
@@ -2741,38 +2718,38 @@ if (firebase && firebase.auth) {
           if (!stateStr) return null;
 
           const state = JSON.parse(stateStr);
-          console.log('âœ… Chat state loaded:', state.messages?.length || 0, 'messages');
+          console.log('✅ Chat state loaded:', state.messages?.length || 0, 'messages');
           return state;
         } catch (e) {
-          console.warn('âš ï¸ Failed to load chat state:', e);
+          console.warn('⚠️ Failed to load chat state:', e);
           return null;
         }
       }
 
       // Replace the existing clearChatState function with this version:
       async function clearChatState(force = false) {
-        console.log('ðŸ§¹ ========================================');
-        console.log('ðŸ§¹ CLEARING CHAT STATE');
-        console.log('ðŸ§¹ ========================================');
+        console.log('🧹 ========================================');
+        console.log('🧹 CLEARING CHAT STATE');
+        console.log('🧹 ========================================');
         console.log(`   Force: ${force}`);
 
         // Only clear if room is actually expiring/ended, or if forced
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
 
         if (!force && activeCallStr) {
-          console.log('âš ï¸ Active call exists - preserving chat state');
-          console.log('ðŸ§¹ ========================================\n');
+          console.log('⚠️ Active call exists - preserving chat state');
+          console.log('🧹 ========================================\n');
           return;
         }
 
         // CRITICAL: Delete all files for this room from IndexedDB
         if (roomData?.roomId) {
           try {
-            console.log(`ðŸ—‘ï¸ Deleting all files for room: ${roomData.roomId}`);
+            console.log(`🗑️ Deleting all files for room: ${roomData.roomId}`);
             const deletedCount = await deleteRoomFiles(roomData.roomId);
-            console.log(`âœ… Deleted ${deletedCount} file(s) from IndexedDB`);
+            console.log(`✅ Deleted ${deletedCount} file(s) from IndexedDB`);
           } catch (error) {
-            console.error('âŒ Failed to delete room files:', error);
+            console.error('❌ Failed to delete room files:', error);
             // Continue with other cleanup even if file deletion fails
           }
         }
@@ -2782,8 +2759,8 @@ if (firebase && firebase.auth) {
         localStorage.removeItem(CHAT_MESSAGES_KEY);
         localStorage.removeItem(CHAT_TIMESTAMP_KEY);
 
-        console.log('âœ… Chat state cleared');
-        console.log('ðŸ§¹ ========================================\n');
+        console.log('✅ Chat state cleared');
+        console.log('🧹 ========================================\n');
       }
 
       function clearAllChatData() {
@@ -2792,7 +2769,7 @@ if (firebase && firebase.auth) {
         localStorage.removeItem(CHAT_MESSAGES_KEY);
         localStorage.removeItem(CHAT_TIMESTAMP_KEY);
         // Don't clear currentRoom or activeCall - those are needed
-        console.log('ðŸ§¹ All chat state cleared on entry');
+        console.log('🧹 All chat state cleared on entry');
       }
 
       function escapeHtml(text) {
@@ -2824,13 +2801,13 @@ if (firebase && firebase.auth) {
       }
 
       function setInitialCallButtonState() {
-        console.log('ðŸ” Checking for active call in localStorage...');
+        console.log('🔍 Checking for active call in localStorage...');
 
         const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
 
         const clearStaleActiveCall = (reason) => {
           try {
-            console.warn(`ðŸ“ž Clearing stale activeCall (${reason || 'unknown'})`);
+            console.warn(`📞 Clearing stale activeCall (${reason || 'unknown'})`);
             localStorage.removeItem(ACTIVE_CALL_KEY);
           } catch { }
           resetHeaderCallButtons(reason || 'stale activeCall');
@@ -2876,8 +2853,8 @@ if (firebase && firebase.auth) {
             }
 
             if (activeCallData.roomId === getActiveChatRoomId()) {
-              console.log(`ðŸ“ž Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
-              console.log(`âœ… User is IN the call - will show "Back to Call" button`);
+              console.log(`📞 Active call found: ${activeCallData.callId} in room ${activeCallData.roomId}`);
+              console.log(`✅ User is IN the call - will show "Back to Call" button`);
 
               // Hide audio/video buttons
               if (audioCallBtn) {
@@ -2906,30 +2883,30 @@ if (firebase && firebase.auth) {
                 joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
                 joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
 
-                console.log('âœ… "Back to Call" button configured');
+                console.log('✅ "Back to Call" button configured');
               }
 
               return true;
             } else {
-              console.log(`âŒ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
+              console.log(`❌ Room mismatch: ${activeCallData.roomId} !== ${roomData?.roomId}`);
             }
           } catch (e) {
-            console.error('âŒ Failed to parse activeCall:', e);
+            console.error('❌ Failed to parse activeCall:', e);
             clearStaleActiveCall('parse error');
           }
         }
 
 
 
-        // âœ… NEW: Check for active call in room data (from matchmaking/restoration)
+        // ✅ NEW: Check for active call in room data (from matchmaking/restoration)
         if (roomData?.activeCall && roomData.activeCall.isActive && roomData.activeCall.participantCount > 0) {
-          console.log('ðŸ“ž Active call detected in room data - showing "Join Call" button');
+          console.log('📞 Active call detected in room data - showing "Join Call" button');
           updateCallButtonState(true, roomData.activeCall);
           return true;
         }
 
         // No active call - show normal buttons
-        console.log('â„¹ï¸ No active call - showing audio/video buttons');
+        console.log('ℹ️ No active call - showing audio/video buttons');
         if (audioCallBtn) {
           audioCallBtn.classList.remove('hidden');
           audioCallBtn.disabled = false;
@@ -2947,7 +2924,7 @@ if (firebase && firebase.auth) {
       }
 
       function updateCallButtonState(isActive, callData = null) {
-        console.log('ðŸ”„ Updating call button state:', { isActive, participantCount: callData?.participantCount });
+        console.log('🔄 Updating call button state:', { isActive, participantCount: callData?.participantCount });
 
         // Remove loading states and re-enable buttons
         if (audioCallBtn) {
@@ -2977,7 +2954,7 @@ if (firebase && firebase.auth) {
         }
 
         if (userInCall) {
-          console.log('ðŸ“ž User is IN call - showing "Back to Call" button');
+          console.log('📞 User is IN call - showing "Back to Call" button');
 
           // Hide audio/video buttons
           if (audioCallBtn) {
@@ -3012,14 +2989,14 @@ if (firebase && firebase.auth) {
             joinCallBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
             joinCallBtn.classList.add('bg-primary', 'hover:bg-primary/90');
 
-            console.log('âœ… "Back to Call" button displayed');
+            console.log('✅ "Back to Call" button displayed');
           }
         } else if (isActive && callData) {
-          console.log('ðŸ“ž Active call in room but user NOT in it - showing "Join Call" button');
+          console.log('📞 Active call in room but user NOT in it - showing "Join Call" button');
 
           // CRITICAL: Synchronize global activeCallInRoom variable if provided
           if (callData && (!activeCallInRoom || activeCallInRoom.callId !== callData.callId)) {
-            console.log('ðŸ’¾ Synchronizing activeCallInRoom inside updateCallButtonState');
+            console.log('💾 Synchronizing activeCallInRoom inside updateCallButtonState');
             activeCallInRoom = {
               callId: callData.callId,
               callType: callData.callType,
@@ -3060,10 +3037,10 @@ if (firebase && firebase.auth) {
             joinCallBtn.classList.remove('bg-primary', 'hover:bg-primary/90');
             joinCallBtn.classList.add('bg-green-600', 'hover:bg-green-700');
 
-            console.log(`âœ… "Join Call" button displayed (${callData.participantCount} participants)`);
+            console.log(`✅ "Join Call" button displayed (${callData.participantCount} participants)`);
           }
         } else {
-          console.log('ðŸ“ž No active call - showing audio/video buttons');
+          console.log('📞 No active call - showing audio/video buttons');
 
           // Show audio/video buttons
           if (audioCallBtn) {
@@ -3081,7 +3058,7 @@ if (firebase && firebase.auth) {
           }
 
           updateCallButtonStates();
-          console.log('âœ… Audio/Video buttons displayed');
+          console.log('✅ Audio/Video buttons displayed');
         }
       }
 
@@ -3218,7 +3195,7 @@ if (firebase && firebase.auth) {
 
         // Add attachment if present
         if (data.attachment) {
-          console.log(`ðŸ“Ž Rendering attachment in message: ${data.attachment.name} (${data.attachment.type})`);
+          console.log(`📎 Rendering attachment in message: ${data.attachment.name} (${data.attachment.type})`);
 
           const attachmentDiv = document.createElement('div');
           attachmentDiv.className = 'message-attachment';
@@ -3345,7 +3322,7 @@ if (firebase && firebase.auth) {
             const fileElement = attachmentDiv.querySelector('.message-attachment-file');
             if (fileElement) {
               fileElement.addEventListener('click', () => {
-                console.log(`ðŸ“„ Opening PDF: ${data.attachment.name}`);
+                console.log(`📄 Opening PDF: ${data.attachment.name}`);
                 downloadAttachment(
                   data.attachment.fileId,
                   data.attachment.name,
@@ -3377,7 +3354,7 @@ if (firebase && firebase.auth) {
             const fileElement = attachmentDiv.querySelector('.message-attachment-file');
             if (fileElement) {
               fileElement.addEventListener('click', () => {
-                console.log(`ðŸ“ Downloading document: ${data.attachment.name}`);
+                console.log(`📁 Downloading document: ${data.attachment.name}`);
                 downloadAttachment(
                   data.attachment.fileId,
                   data.attachment.name,
@@ -3390,7 +3367,7 @@ if (firebase && firebase.auth) {
 
 
           messageBubble.appendChild(attachmentDiv);
-          console.log(`âœ… Attachment element added to message bubble`);
+          console.log(`✅ Attachment element added to message bubble`);
         }
 
         const replyBtn = document.createElement('button');
@@ -3428,11 +3405,11 @@ if (firebase && firebase.auth) {
        */
       async function loadImageAttachment(fileId, imgElement, remoteUrl = null, remoteName = null) {
         if (!imgElement) {
-          console.error('âŒ Image element not provided for fileId:', fileId);
+          console.error('❌ Image element not provided for fileId:', fileId);
           return;
         }
 
-        console.log(`ðŸ–¼ï¸ Loading image attachment: ${fileId}`);
+        console.log(`🖼️ Loading image attachment: ${fileId}`);
 
         if (remoteUrl) {
           imgElement.src = remoteUrl;
@@ -3459,14 +3436,14 @@ if (firebase && firebase.auth) {
           let fileData = await getFileFromIndexedDB(fileId);
 
           if (!fileData || !fileData.blob) {
-            console.log(`â³ File not found, waiting 2s for peer transfer...`);
+            console.log(`⏳ File not found, waiting 2s for peer transfer...`);
 
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             fileData = await getFileFromIndexedDB(fileId);
 
             if (!fileData || !fileData.blob) {
-              console.error(`âŒ File ${fileId} still not found after retry`);
+              console.error(`❌ File ${fileId} still not found after retry`);
 
               imgElement.alt = 'Loading...';
               imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="14"%3ELoading image...%3C/text%3E%3C/svg%3E';
@@ -3475,10 +3452,10 @@ if (firebase && firebase.auth) {
             }
           }
 
-          console.log(`âœ… File data retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+          console.log(`✅ File data retrieved: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
 
           const blobUrl = URL.createObjectURL(fileData.blob);
-          console.log(`ðŸ”— Created blob URL for display`);
+          console.log(`🔗 Created blob URL for display`);
 
           imgElement.src = blobUrl;
           imgElement.alt = fileData.name;
@@ -3487,11 +3464,11 @@ if (firebase && firebase.auth) {
           imgElement.style.cursor = 'pointer';
 
           imgElement.onload = () => {
-            console.log(`âœ… Image loaded successfully: ${fileData.name}`);
+            console.log(`✅ Image loaded successfully: ${fileData.name}`);
           };
 
           imgElement.onerror = () => {
-            console.error(`âŒ Failed to load image: ${fileData.name}`);
+            console.error(`❌ Failed to load image: ${fileData.name}`);
             URL.revokeObjectURL(blobUrl);
             imgElement.alt = 'Failed to load image';
           };
@@ -3501,7 +3478,7 @@ if (firebase && firebase.auth) {
           const newClickHandler = async (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log(`ðŸ” Opening image in viewer: ${fileData.name}`);
+            console.log(`🔍 Opening image in viewer: ${fileData.name}`);
             await openImageViewer(fileId, fileData.name, remoteUrl);
           };
 
@@ -3513,10 +3490,10 @@ if (firebase && firebase.auth) {
           imgElement._clickHandler = newClickHandler;
           imgElement.addEventListener('click', newClickHandler, { passive: false });
 
-          console.log(`âœ… Click handler attached to image`);
+          console.log(`✅ Click handler attached to image`);
 
         } catch (error) {
-          console.error('âŒ Error loading image attachment:', error);
+          console.error('❌ Error loading image attachment:', error);
           imgElement.alt = 'Failed to load image';
           imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EError loading image%3C/text%3E%3C/svg%3E';
         }
@@ -3526,9 +3503,9 @@ if (firebase && firebase.auth) {
        * Download attachment file
        */
       async function downloadAttachment(fileId, fileName, attachmentUrl = null, mimeType = '') {
-        console.log('ðŸ“¥ ========================================');
-        console.log('ðŸ“¥ DOWNLOAD ATTACHMENT REQUESTED');
-        console.log('ðŸ“¥ ========================================');
+        console.log('📥 ========================================');
+        console.log('📥 DOWNLOAD ATTACHMENT REQUESTED');
+        console.log('📥 ========================================');
         console.log(`   FileID: ${fileId}`);
         console.log(`   Filename: ${fileName}`);
 
@@ -3550,11 +3527,11 @@ if (firebase && firebase.auth) {
             anchor.click();
             document.body.removeChild(anchor);
 
-            console.log(`âœ… Opened attachment via persistent URL`);
-            console.log('ðŸ“¥ ========================================\n');
+            console.log(`✅ Opened attachment via persistent URL`);
+            console.log('📥 ========================================\n');
             return;
           } catch (error) {
-            console.error('âŒ Failed opening persistent URL, falling back to IndexedDB:', error);
+            console.error('❌ Failed opening persistent URL, falling back to IndexedDB:', error);
           }
         }
 
@@ -3562,13 +3539,13 @@ if (firebase && firebase.auth) {
           const fileData = await getFileFromIndexedDB(fileId);
 
           if (!fileData || !fileData.blob) {
-            console.error('âŒ File not found in IndexedDB');
+            console.error('❌ File not found in IndexedDB');
             toast('File not found', 'error');
-            console.log('ðŸ“¥ ========================================\n');
+            console.log('📥 ========================================\n');
             return;
           }
 
-          console.log(`âœ… File retrieved from IndexedDB`);
+          console.log(`✅ File retrieved from IndexedDB`);
           console.log(`   Size: ${(fileData.size / 1024).toFixed(2)} KB`);
           console.log(`   Type: ${fileData.type}`);
 
@@ -3580,25 +3557,25 @@ if (firebase && firebase.auth) {
           a.style.display = 'none';
           document.body.appendChild(a);
 
-          console.log('ðŸ”½ Triggering download...');
+          console.log('🔽 Triggering download...');
           a.click();
 
           // Cleanup
           document.body.removeChild(a);
           setTimeout(() => {
             URL.revokeObjectURL(blobUrl);
-            console.log('ðŸ§¹ Download blob URL revoked');
+            console.log('🧹 Download blob URL revoked');
           }, 1000);
 
           toast(`Downloading ${fileName}`, 'success');
-          console.log(`âœ… Download initiated successfully`);
-          console.log('ðŸ“¥ ========================================\n');
+          console.log(`✅ Download initiated successfully`);
+          console.log('📥 ========================================\n');
 
         } catch (error) {
-          console.error('âŒ Download error:', error);
+          console.error('❌ Download error:', error);
           console.error('   Stack:', error.stack);
           toast('Download failed', 'error');
-          console.log('ðŸ“¥ ========================================\n');
+          console.log('📥 ========================================\n');
         }
       }
 
@@ -3685,7 +3662,7 @@ if (firebase && firebase.auth) {
           const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
           const shouldSuppressRedirect = isSocialClubMode || navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached;
 
-          console.warn('âš ï¸ Presence validation failed:', response.reason, 'count=', presenceInvalidCount, 'suppressRedirect=', shouldSuppressRedirect);
+          console.warn('⚠️ Presence validation failed:', response.reason, 'count=', presenceInvalidCount, 'suppressRedirect=', shouldSuppressRedirect);
 
           // Always attempt a re-join + sync first.
           try {
@@ -3702,7 +3679,7 @@ if (firebase && firebase.auth) {
             return;
           }
 
-          console.warn('âš ï¸ Presence validation repeatedly failed. Exiting to mood.');
+          console.warn('⚠️ Presence validation repeatedly failed. Exiting to mood.');
           try {
             await exitRoomSequence('/mood.html', { reason: 'presence_invalid' });
           } catch {
@@ -3790,26 +3767,26 @@ if (firebase && firebase.auth) {
               btnLeave.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.3)';
             });
             btnLeave.addEventListener('click', async () => {
-              console.log('âœ… User confirmed leaving via dialog - starting cleanup');
+              console.log('✅ User confirmed leaving via dialog - starting cleanup');
               closeDialog(true);
 
               // CRITICAL: Clean up background call FIRST
               const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
 
               if (activeCallStr) {
-                console.log('ðŸ“ž Active call detected - cleaning up');
+                console.log('📞 Active call detected - cleaning up');
 
                 try {
                   const callData = JSON.parse(activeCallStr);
 
                   // 1. Emit leave_call to server
                   if (socketInstance && socketInstance.connected) {
-                    console.log('ðŸ“¤ Emitting leave_call to server...');
+                    console.log('📤 Emitting leave_call to server...');
                     socketInstance.emit('leave_call', { callId: callData.callId });
 
                     // Wait for server to process
                     await new Promise(resolve => setTimeout(resolve, 500));
-                    console.log('âœ… Leave_call emitted and processed');
+                    console.log('✅ Leave_call emitted and processed');
                   }
 
                   // 2. Clear all call-related storage
@@ -3819,10 +3796,10 @@ if (firebase && firebase.auth) {
                   sessionStorage.removeItem('backgroundCallMode');
                   sessionStorage.removeItem('returningToBackgroundCall');
 
-                  console.log('âœ… Background call destroyed');
+                  console.log('✅ Background call destroyed');
 
                 } catch (e) {
-                  console.error('âŒ Failed during call cleanup:', e);
+                  console.error('❌ Failed during call cleanup:', e);
                 }
               }
 
@@ -3837,7 +3814,7 @@ if (firebase && firebase.auth) {
       // ============================================
       async function exitRoomSequence(targetUrl = null, options = {}) {
         if (leaveSequenceInProgress) {
-          console.log('âš ï¸ Leave sequence already in progress, ignoring duplicate trigger');
+          console.log('⚠️ Leave sequence already in progress, ignoring duplicate trigger');
           return;
         }
         leaveSequenceInProgress = true;
@@ -3845,13 +3822,13 @@ if (firebase && firebase.auth) {
         try {
           sessionStorage.setItem('vibe_intentional_chat_leave_until', String(Date.now() + 15000));
         } catch { }
-        console.log('ðŸšª ========================================');
-        console.log('ðŸšª STARTING EXIT ROOM SEQUENCE (Server-Authoritative)');
-        console.log('ðŸšª ========================================');
+        console.log('🚪 ========================================');
+        console.log('🚪 STARTING EXIT ROOM SEQUENCE (Server-Authoritative)');
+        console.log('🚪 ========================================');
         try {
           // 1. Stop all monitoring and heartbeat
           stopCachedCallMonitoring();
-          stopHeartbeat(); // âœ… Stop heartbeat IMMEDIATELY
+          stopHeartbeat(); // ✅ Stop heartbeat IMMEDIATELY
           if (timerInterval) clearInterval(timerInterval);
 
           // 2. Logic to handle active call if user is leaving.
@@ -3859,7 +3836,7 @@ if (firebase && firebase.auth) {
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
           const shouldTearDownCall = (reason === 'manual' || reason === 'location_change' || reason === 'api_beacon');
           if (activeCallStr && shouldTearDownCall) {
-            console.log('ðŸ“ž Active call detected - ensuring server cleanup...');
+            console.log('📞 Active call detected - ensuring server cleanup...');
             try {
               const callData = JSON.parse(activeCallStr);
               if (socketInstance && socketInstance.connected) {
@@ -3873,29 +3850,29 @@ if (firebase && firebase.auth) {
 
           // 3. Trigger server-side leave sequence (socket first, API fallback).
           if (socketInstance && socketInstance.connected) {
-            console.log('ðŸ“¤ Emitting leave_room via socket...');
+            console.log('📤 Emitting leave_room via socket...');
             // Wrap in promise to allow sequence to continue after acknowledgment
             const emitLeaveOnce = () => new Promise((resolve) => {
               const timeout = setTimeout(() => {
-                console.warn('âš ï¸ leave_room acknowledgment timed out');
+                console.warn('⚠️ leave_room acknowledgment timed out');
                 resolve({ ok: false });
               }, 8000);
               socketInstance.emit('leave_room', { roomId: roomData?.roomId || currentRoomId || null }, (response) => {
                 clearTimeout(timeout);
-                console.log('âœ… leave_room acknowledgment received:', response);
+                console.log('✅ leave_room acknowledgment received:', response);
                 resolve({ ok: true, response });
               });
             });
 
             const r1 = await emitLeaveOnce();
             if (!r1.ok) {
-              console.warn('âš ï¸ Retrying leave_room once...');
+              console.warn('⚠️ Retrying leave_room once...');
               await emitLeaveOnce();
             }
           } else {
             const token = sessionStorage.getItem('vibe_auth_token');
             if (token && roomData?.roomId) {
-              console.log('ðŸ“¡ Socket offline - using Beacon/Fetch API leave fallback...');
+              console.log('📡 Socket offline - using Beacon/Fetch API leave fallback...');
               fetch('/api/leave-room', {
                 method: 'POST',
                 headers: {
@@ -3916,9 +3893,9 @@ if (firebase && firebase.auth) {
           currentRoomId = null;
 
           // 5. Navigate
-          console.log('âœ… Exit sequence complete');
+          console.log('✅ Exit sequence complete');
           cleanupParentCallPage(targetUrl);
-          console.log('ðŸšª ========================================\n');
+          console.log('🚪 ========================================\n');
         } finally {
           leaveSequenceInProgress = false;
         }
@@ -3930,7 +3907,7 @@ if (firebase && firebase.auth) {
         const ensureTrapState = () => {
           // Only push if we're not already in the trap state
           if (!history.state || !history.state.trap) {
-            console.log('ðŸ”’ Injecting back button trap state');
+            console.log('🔒 Injecting back button trap state');
             history.pushState(TRAP_STATE, '', window.location.href);
           }
         };
@@ -3943,7 +3920,7 @@ if (firebase && firebase.auth) {
         // Re-initialize on page show (handles BFCache and Refresh)
         window.addEventListener('pageshow', (event) => {
           // event.persisted check is optional but good for debugging BFCache
-          console.log('ðŸ“± Page show event (persisted: ' + event.persisted + ') - verifying trap state');
+          console.log('📱 Page show event (persisted: ' + event.persisted + ') - verifying trap state');
           setTimeout(ensureTrapState, 0); // specialized timeout ensures it runs after browser restoration
           reconnectSocketIfNeeded(event.persisted ? 'pageshow_bfcache' : 'pageshow');
           reportChatPresenceContext('pageshow', {
@@ -3957,14 +3934,14 @@ if (firebase && firebase.auth) {
         window.addEventListener('popstate', async (event) => {
           if (backButtonHandled) return;
 
-          console.log('â¬…ï¸ Back button pressed - Trapped!');
+          console.log('⬅️ Back button pressed - Trapped!');
 
           // Immediately push the state back to keep the user here while the modal shows
           // This effectively "cancels" the back navigation from the browser's perspective
           history.pushState(TRAP_STATE, '', window.location.href);
 
           if (isConfirmationDialogOpen) {
-            console.log('âš ï¸ Confirmation already open - second back triggers immediate leave');
+            console.log('⚠️ Confirmation already open - second back triggers immediate leave');
             backButtonHandled = true;
             const leaveButton = document.getElementById('btnLeave');
             if (leaveButton) {
@@ -3991,13 +3968,13 @@ if (firebase && firebase.auth) {
             const shouldLeave = await showConfirmationDialog();
 
             if (shouldLeave) {
-              console.log('âœ… User confirmed leaving');
+              console.log('✅ User confirmed leaving');
               backButtonHandled = true;
 
-              // âœ… Explicitly redirect with reason 'manual'
+              // ✅ Explicitly redirect with reason 'manual'
               await exitRoomSequence('/mood.html');
             } else {
-              console.log('âŒ User staying in chat');
+              console.log('❌ User staying in chat');
               // State was already pushed back, so the UI stays on chat.html
             }
           }, 10);
@@ -4008,7 +3985,7 @@ if (firebase && firebase.auth) {
           if (!navigatingToCall && !backButtonHandled && !isInBackgroundCall) {
             // Treat sudden pagehide as a "might be leaving" event
             // But don't force a full leave sequence here to allow for task switching
-            console.log('ðŸ“± Page hidden - backgrounding state preserved');
+            console.log('📱 Page hidden - backgrounding state preserved');
             reportChatPresenceContext('pagehide', {
               keepalive: true,
               allowRedirect: false,
@@ -4039,17 +4016,17 @@ if (firebase && firebase.auth) {
           try {
             await fileReceiver.handleChunk(data);
           } catch (error) {
-            console.error('âŒ Error handling chunk:', error);
+            console.error('❌ Error handling chunk:', error);
           }
         });
 
         socketInstance.on('file_transmission_complete', ({ fileId, fileName }) => {
-          console.log(`âœ… File transmission complete: ${fileName} (${fileId})`);
+          console.log(`✅ File transmission complete: ${fileName} (${fileId})`);
           toast(`Received: ${fileName}`, 'success');
         });
 
         socketInstance.on('file_transmission_failed', ({ fileId, fileName, reason }) => {
-          console.error(`âŒ File transmission failed: ${fileName}`);
+          console.error(`❌ File transmission failed: ${fileName}`);
           console.error(`   Reason: ${reason}`);
 
           fileReceiver.cleanup(fileId);
@@ -4058,7 +4035,7 @@ if (firebase && firebase.auth) {
 
 
         socketInstance.on('cached_call_valid', (data) => {
-          console.log('âœ… Cached call validated by server:', data.callId);
+          console.log('✅ Cached call validated by server:', data.callId);
           console.log(`   Showing modal for call from ${data.callerUsername}`);
 
           showCachedCallModal(data);
@@ -4082,15 +4059,15 @@ if (firebase && firebase.auth) {
         }
 
         socketInstance.on('cached_call_invalid', (data) => {
-          console.log('âŒ Cached call invalid:', data.callId);
+          console.log('❌ Cached call invalid:', data.callId);
           localStorage.removeItem(CACHED_CALL_KEY);
-          console.log('ðŸ—‘ï¸ Cleared invalid cached call');
+          console.log('🗑️ Cleared invalid cached call');
         });
 
         socketInstance.on('connect', () => {
-          console.log('ðŸ”Œ ========================================');
-          console.log('ðŸ”Œ SOCKET CONNECTED');
-          console.log('ðŸ”Œ ========================================');
+          console.log('🔌 ========================================');
+          console.log('🔌 SOCKET CONNECTED');
+          console.log('🔌 ========================================');
           console.log(`   Socket ID: ${socketInstance.id}`);
           console.log(`   User: ${currentUser?.username || 'unknown'}`);
           socketReconnectFailures = 0;
@@ -4099,7 +4076,7 @@ if (firebase && firebase.auth) {
           setAuthenticationState(false);
 
           firebase.auth().currentUser?.getIdToken().then(idToken => {
-            console.log('ðŸ“¤ Sending authentication to server...');
+            console.log('📤 Sending authentication to server...');
             const sessionId = getScopedSocketSessionId('chat');
             const tabId = window.tabManager?.tabId || null;
             socketInstance.emit('authenticate', {
@@ -4116,15 +4093,15 @@ if (firebase && firebase.auth) {
               source: 'chat_socket_connect'
             }).catch(() => { });
           }).catch(err => {
-            console.error('âŒ Failed to get token:', err);
+            console.error('❌ Failed to get token:', err);
             toast('Authentication failed. Please refresh.', 'error');
           });
 
-          console.log('ðŸ”Œ ========================================\n');
+          console.log('🔌 ========================================\n');
         });
 
         socketInstance.on('connect_error', (error) => {
-          console.error('âŒ Socket connection error:', error.message);
+          console.error('❌ Socket connection error:', error.message);
           setAuthenticationState(false);
           toast('Connection error. Retrying...', 'warning');
           socketReconnectFailures += 1;
@@ -4134,7 +4111,7 @@ if (firebase && firebase.auth) {
         });
 
         socketInstance.on('disconnect', (reason) => {
-          console.log('ðŸ”Œ Socket disconnected:', reason);
+          console.log('🔌 Socket disconnected:', reason);
           setAuthenticationState(false);
 
           if (reason === 'io server disconnect') {
@@ -4144,7 +4121,7 @@ if (firebase && firebase.auth) {
         });
 
         socketInstance.on('session_replaced', (data) => {
-          console.warn('âš ï¸ Session replaced by newer socket:', data);
+          console.warn('⚠️ Session replaced by newer socket:', data);
           setAuthenticationState(false);
           try { stopHeartbeat(); } catch { }
 
@@ -4164,7 +4141,7 @@ if (firebase && firebase.auth) {
             const backgroundCallMode = sessionStorage.getItem('backgroundCallMode') === 'true';
             const shouldSelfHeal = isSocialClubMode || navigatingToCall || isInBackgroundCall || backgroundCallMode || hasActiveCallCached;
             if (shouldSelfHeal) {
-              console.warn('ðŸ›¡ï¸ Suppressing redirect on session_replaced; rotating session and reconnecting');
+              console.warn('🛡️ Suppressing redirect on session_replaced; rotating session and reconnecting');
               toast('Connection refreshed', 'warning');
 
               // Rotate the *base* session id so subsequent getScopedSocketSessionId('chat') becomes unique.
@@ -4200,10 +4177,10 @@ if (firebase && firebase.auth) {
 
         if (socketInstance.io) {
           socketInstance.io.on('reconnect_attempt', (attempt) => {
-            console.warn(`ðŸ”„ [Socket] Reconnect attempt ${attempt}`);
+            console.warn(`🔄 [Socket] Reconnect attempt ${attempt}`);
           });
           socketInstance.io.on('reconnect_error', (error) => {
-            console.error(`âŒ [Socket] Reconnect error: ${error?.message || error}`);
+            console.error(`❌ [Socket] Reconnect error: ${error?.message || error}`);
           });
           socketInstance.io.on('reconnect_failed', () => {
             triggerSocketRecoveryReload('chat_reconnect_failed');
@@ -4211,16 +4188,16 @@ if (firebase && firebase.auth) {
         }
 
         socketInstance.on('authenticated', async () => {
-          console.log('âœ… ========================================');
-          console.log('âœ… SOCKET AUTHENTICATED');
-          console.log('âœ… ========================================');
+          console.log('✅ ========================================');
+          console.log('✅ SOCKET AUTHENTICATED');
+          console.log('✅ ========================================');
           console.log(`   Socket ID: ${socketInstance.id}`);
           console.log(`   User: ${currentUser?.username} (${currentUser?.userId})`);
 
           // CRITICAL: Set authentication state FIRST
           setAuthenticationState(true);
 
-          // âœ… START HEARTBEAT after authentication
+          // ✅ START HEARTBEAT after authentication
           startHeartbeat();
 
           await reportChatPresenceContext('socket_authenticated', {
@@ -4229,7 +4206,7 @@ if (firebase && firebase.auth) {
             source: 'chat_authenticated'
           });
 
-          // âœ… Cache token for Beacon API (beforeunload)
+          // ✅ Cache token for Beacon API (beforeunload)
           if (MoodApp.Auth) {
             MoodApp.Auth.getToken().then(token => {
               sessionStorage.setItem('vibe_auth_token', token);
@@ -4248,11 +4225,11 @@ if (firebase && firebase.auth) {
               setTimeout(() => window.location.href = '/mood.html', 800);
               return;
             }
-            showChatLoadingOverlay('Creating your roomâ€¦', 'You can invite someone anytime.');
+            showChatLoadingOverlay('Creating your room…', 'You can invite someone anytime.');
             safeSocketEmit('join_matchmaking', { mood: selectedMood });
           }
 
-          console.log('âœ… ========================================\n');
+          console.log('✅ ========================================\n');
         });
 
         socketInstance.on('match_found', async (data) => {
@@ -4274,22 +4251,22 @@ if (firebase && firebase.auth) {
             pendingInitialRoomSync = true;
             safeSocketEmit('join_room', { roomId: data.roomId });
           } catch (error) {
-            console.error('âŒ Failed to handle match_found:', error);
+            console.error('❌ Failed to handle match_found:', error);
           }
         });
 
 
         socketInstance.on('call_created', (data) => {
-          console.log('ðŸ“ž ========================================');
-          console.log('ðŸ“ž CALL_CREATED EVENT RECEIVED');
-          console.log('ðŸ“ž ========================================');
+          console.log('📞 ========================================');
+          console.log('📞 CALL_CREATED EVENT RECEIVED');
+          console.log('📞 ========================================');
           console.log(`   callId: ${data.callId}`);
           console.log(`   callType: ${data.callType}`);
           console.log(`   isInitiator: ${data.isInitiator}`);
 
           // Only handle if we're the initiator
           if (data.isInitiator) {
-            console.log('âœ… We initiated this call - loading in iframe');
+            console.log('✅ We initiated this call - loading in iframe');
 
             // Mark initiation complete so the button timeout doesn't revert UI after call_created.
             isInitiatingCall = false;
@@ -4318,48 +4295,48 @@ if (firebase && firebase.auth) {
               storedAt: Date.now()
             }));
 
-            console.log(`âœ… Stored call data with initializing state`);
+            console.log(`✅ Stored call data with initializing state`);
 
             // CRITICAL: Load call.html in iframe instead of navigating
-            console.log('ðŸ“± Loading call.html in iframe (background mode)');
+            console.log('📱 Loading call.html in iframe (background mode)');
 
             // Create or show call iframe container
             let callIframeContainer = document.getElementById('callIframeContainer');
             if (!callIframeContainer) {
               callIframeContainer = document.createElement('div');
               callIframeContainer.id = 'callIframeContainer';
-              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black'; // âœ… Visible immediately
+              callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black'; // ✅ Visible immediately
               callIframeContainer.innerHTML = '<iframe id="callIframe" class="w-full h-full border-none"></iframe>';
               document.body.appendChild(callIframeContainer);
-              console.log('âœ… Created call iframe container (visible)');
+              console.log('✅ Created call iframe container (visible)');
             } else {
-              callIframeContainer.classList.remove('hidden'); // âœ… Make visible if hidden
-              console.log('âœ… Showing existing call iframe container');
+              callIframeContainer.classList.remove('hidden'); // ✅ Make visible if hidden
+              console.log('✅ Showing existing call iframe container');
             }
 
             const callIframe = document.getElementById('callIframe');
             if (callIframe) {
               callIframe.src = '/call.html';
-              console.log('âœ… Loading call.html in iframe');
+              console.log('✅ Loading call.html in iframe');
             }
 
             // Update UI state immediately
             activeCallConnectionState = 'initializing';
             updateCallButtonStates();
 
-            console.log('âœ… Call will initialize in background iframe');
-            console.log('ðŸ“ž ========================================\n');
+            console.log('✅ Call will initialize in background iframe');
+            console.log('📞 ========================================\n');
           } else {
-            console.log('â„¹ï¸ Call created by someone else - staying in chat, showing JOIN button');
-            console.log('ðŸ“ž ========================================\n');
+            console.log('ℹ️ Call created by someone else - staying in chat, showing JOIN button');
+            console.log('📞 ========================================\n');
           }
         });
 
 
         socketInstance.on('room_joined', async (data) => {
-          console.log('âœ… ========================================');
-          console.log('âœ… ROOM_JOINED EVENT RECEIVED');
-          console.log('âœ… ========================================');
+          console.log('✅ ========================================');
+          console.log('✅ ROOM_JOINED EVENT RECEIVED');
+          console.log('✅ ========================================');
           console.log(`   roomId: ${data.roomId}`);
           freshRoomCreationInProgress = false;
           hasJoinedRoom = true;
@@ -4388,15 +4365,15 @@ if (firebase && firebase.auth) {
             serverClockOffset = data.serverTime - clientNow;
             console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
             console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
-            console.log(`   â° CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
+            console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
 
             if (Math.abs(serverClockOffset) > CLOCK_SKEW_WARNING_MS) {
-              console.warn(`âš ï¸ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+              console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
             } else if (Math.abs(serverClockOffset) > CLOCK_SKEW_NOTICE_MS) {
-              console.log(`â„¹ï¸ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
+              console.log(`ℹ️ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
             }
           } else {
-            console.warn('âš ï¸ No serverTime in room_joined, assuming no clock skew');
+            console.warn('⚠️ No serverTime in room_joined, assuming no clock skew');
             serverClockOffset = 0;
           }
 
@@ -4418,12 +4395,12 @@ if (firebase && firebase.auth) {
           let mergedMessages = [];
 
           if (data.chatHistory?.length > 0) {
-            console.log(`ðŸ“œ Server provided ${data.chatHistory.length} messages`);
+            console.log(`📜 Server provided ${data.chatHistory.length} messages`);
 
             mergedMessages = [...data.chatHistory];
 
             if (shouldUseCache && cachedState?.messages?.length > 0) {
-              console.log(`ðŸ“¦ Merging ${cachedState.messages.length} cached messages with server data`);
+              console.log(`📦 Merging ${cachedState.messages.length} cached messages with server data`);
 
               const serverMessageIds = new Set(
                 data.chatHistory.map(msg => msg.messageId || `${msg.userId}-${msg.timestamp}`)
@@ -4435,7 +4412,7 @@ if (firebase && firebase.auth) {
               });
 
               if (uniqueCachedMessages.length > 0) {
-                console.log(`âž• Adding ${uniqueCachedMessages.length} unique cached messages`);
+                console.log(`➕ Adding ${uniqueCachedMessages.length} unique cached messages`);
                 mergedMessages = [...mergedMessages, ...uniqueCachedMessages];
                 mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
               }
@@ -4444,7 +4421,7 @@ if (firebase && firebase.auth) {
             // ============================================
             // CRITICAL FIX: REQUEST MISSING FILE DATA
             // ============================================
-            console.log('ðŸ” Checking for attachments that need data...');
+            console.log('🔍 Checking for attachments that need data...');
 
             for (const msg of mergedMessages) {
               if (msg.attachment && msg.attachment.fileId) {
@@ -4456,11 +4433,11 @@ if (firebase && firebase.auth) {
                   const localFile = await getFileFromIndexedDB(msg.attachment.fileId);
 
                   if (!localFile) {
-                    console.log(`ðŸ“‚ File ${msg.attachment.fileId} not in local storage`);
+                    console.log(`📂 File ${msg.attachment.fileId} not in local storage`);
 
                     // OPTIMIZATION: If data is already in message (assembled on server), store it immediately
                     if (msg.attachment.data) {
-                      console.log(`ðŸ“¦ Found inlined data for ${msg.attachment.name} in history - storing to IndexedDB`);
+                      console.log(`📦 Found inlined data for ${msg.attachment.name} in history - storing to IndexedDB`);
                       try {
                         const blob = base64ToBlob(msg.attachment.data, msg.attachment.type);
 
@@ -4469,19 +4446,19 @@ if (firebase && firebase.auth) {
 
                           // Use existing ID
                           await storeFileToIndexedDB(file, roomData.roomId, msg.messageId, msg.attachment.fileId);
-                          console.log(`âœ… Stored inlined file to IndexedDB: ${msg.attachment.fileId}`);
+                          console.log(`✅ Stored inlined file to IndexedDB: ${msg.attachment.fileId}`);
 
                           // Clear data from memory after storing to keep cache light
                           delete msg.attachment.data;
                         } else {
-                          console.error('âŒ Failed to process inlined attachment data: Conversion returned null');
+                          console.error('❌ Failed to process inlined attachment data: Conversion returned null');
                         }
                       } catch (e) {
-                        console.error('âŒ Exception processing inlined attachment data:', e);
+                        console.error('❌ Exception processing inlined attachment data:', e);
                       }
                     } else if (msg.userId !== currentUser.userId) {
                       // Only request if sent by someone else and no data present
-                      console.log(`ðŸ“¡ Requesting file data from peer for ${msg.attachment.name}`);
+                      console.log(`📡 Requesting file data from peer for ${msg.attachment.name}`);
 
                       // Request file from sender via socket
                       socketInstance.emit('request_attachment_data', {
@@ -4490,19 +4467,19 @@ if (firebase && firebase.auth) {
                       });
                     }
                   } else {
-                    console.log(`âœ… File ${msg.attachment.name} already in local storage`);
+                    console.log(`✅ File ${msg.attachment.name} already in local storage`);
                   }
                 } catch (e) {
-                  console.error(`âŒ Error checking file ${msg.attachment.fileId}:`, e);
+                  console.error(`❌ Error checking file ${msg.attachment.fileId}:`, e);
                 }
               }
             }
 
           } else if (shouldUseCache && cachedState?.messages?.length > 0) {
-            console.log(`ðŸ“¦ No server history, using ${cachedState.messages.length} cached messages`);
+            console.log(`📦 No server history, using ${cachedState.messages.length} cached messages`);
             mergedMessages = [...cachedState.messages];
           } else {
-            console.log('â„¹ï¸ No server history and no cache - starting fresh');
+            console.log('ℹ️ No server history and no cache - starting fresh');
           }
 
           const seenMessageKeys = new Set();
@@ -4520,7 +4497,7 @@ if (firebase && firebase.auth) {
             messagesList.innerHTML = '';
           }
 
-          console.log(`ðŸŽ¨ Rendering ${messagesCache.length} total messages`);
+          console.log(`🎨 Rendering ${messagesCache.length} total messages`);
           messagesCache.forEach(msg => {
             const isCurrentUser = msg.userId === currentUser.userId;
             const msgEl = createMessageElement(msg, isCurrentUser);
@@ -4529,20 +4506,20 @@ if (firebase && firebase.auth) {
 
           if (messagesList && messagesCache.length > 0) {
             messagesList.scrollTop = messagesList.scrollHeight;
-            console.log('âœ… Scrolled to latest message');
+            console.log('✅ Scrolled to latest message');
           }
 
           saveChatState(roomData.roomId, messagesCache);
-          console.log(`ðŸ’¾ Saved ${messagesCache.length} messages to cache after merge`);
+          console.log(`💾 Saved ${messagesCache.length} messages to cache after merge`);
 
           // [Rest of room_joined handler...]
           if (shouldUseCache && cachedState) {
-            console.log('ðŸ”„ Restoring call button state from cache:', cachedState.callButtonState);
+            console.log('🔄 Restoring call button state from cache:', cachedState.callButtonState);
             console.log('   Cached activeCallInRoom:', cachedState.activeCallInRoom);
 
             if (cachedState.activeCallInRoom) {
               activeCallInRoom = cachedState.activeCallInRoom;
-              console.log('ðŸ’¾ Restored activeCallInRoom from cache:', activeCallInRoom);
+              console.log('💾 Restored activeCallInRoom from cache:', activeCallInRoom);
             } else if (cachedState.callButtonState === 'back') {
               const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
               if (activeCallStr) {
@@ -4553,13 +4530,13 @@ if (firebase && firebase.auth) {
                     callType: activeCallData.callType,
                     participantCount: 2
                   };
-                  console.log('ðŸ’¾ Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
+                  console.log('💾 Reconstructed activeCallInRoom from ACTIVE_CALL_KEY:', activeCallInRoom);
                 } catch (e) {
                   console.error('Failed to reconstruct activeCallInRoom:', e);
                 }
               }
             } else if (cachedState.callButtonState === 'join' && !activeCallInRoom) {
-              console.warn('âš ï¸ Cache says "join" but no activeCallInRoom - will wait for server update');
+              console.warn('⚠️ Cache says "join" but no activeCallInRoom - will wait for server update');
             }
 
             if (cachedState.callButtonState === 'back') {
@@ -4570,31 +4547,31 @@ if (firebase && firebase.auth) {
               updateCallButtonState(false);
             }
 
-            console.log('âœ… Call button state restored instantly');
+            console.log('✅ Call button state restored instantly');
           }
 
           if (data.activeCall) {
-            console.log('ðŸ“ž Active call in room detected');
+            console.log('📞 Active call in room detected');
 
             activeCallInRoom = {
               callId: data.activeCall.callId,
               callType: data.activeCall.callType,
               participantCount: data.activeCall.participantCount
             };
-            console.log('ðŸ’¾ Stored activeCallInRoom:', activeCallInRoom);
+            console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
 
-            // âœ… CRITICAL: Update button state immediately
+            // ✅ CRITICAL: Update button state immediately
             updateCallButtonState(true, data.activeCall);
           } else {
-            console.log('ðŸ“ž No active call in room (server authoritative)');
+            console.log('📞 No active call in room (server authoritative)');
             activeCallInRoom = null;
             updateCallButtonState(false);
           }
 
-          console.log('â° Starting timer updates with server-synced time...');
+          console.log('⏰ Starting timer updates with server-synced time...');
           updateTimer();
 
-          console.log('âœ… ========================================\n');
+          console.log('✅ ========================================\n');
         });
 
         // ============================================
@@ -4602,9 +4579,9 @@ if (firebase && firebase.auth) {
         // ============================================
 
         socketInstance.on('send_attachment_to_peer', async ({ fileId, requesterId, requesterSocketId }) => {
-          console.log('ðŸ“¤ ========================================');
-          console.log('ðŸ“¤ PEER REQUESTING OUR FILE');
-          console.log('ðŸ“¤ ========================================');
+          console.log('📤 ========================================');
+          console.log('📤 PEER REQUESTING OUR FILE');
+          console.log('📤 ========================================');
           console.log(`   FileID: ${fileId}`);
           console.log(`   Requester: ${requesterId}`);
 
@@ -4613,7 +4590,7 @@ if (firebase && firebase.auth) {
             const fileData = await getFileFromIndexedDB(fileId);
 
             if (!fileData || !fileData.blob) {
-              console.error(`âŒ File ${fileId} not found in our IndexedDB`);
+              console.error(`❌ File ${fileId} not found in our IndexedDB`);
               socketInstance.emit('attachment_data_response', {
                 fileId,
                 requesterId,
@@ -4624,7 +4601,7 @@ if (firebase && firebase.auth) {
               return;
             }
 
-            console.log(`âœ… File found: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
+            console.log(`✅ File found: ${fileData.name} (${(fileData.size / 1024).toFixed(2)} KB)`);
 
             // Convert blob to ArrayBuffer (Binary)
             const arrayBuffer = await new Promise((resolve, reject) => {
@@ -4634,7 +4611,7 @@ if (firebase && firebase.auth) {
               reader.readAsArrayBuffer(fileData.blob);
             });
 
-            console.log(`âœ… Converted to binary: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB`);
+            console.log(`✅ Converted to binary: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB`);
 
             // Send to requester via server relay
             socketInstance.emit('attachment_data_response', {
@@ -4649,25 +4626,25 @@ if (firebase && firebase.auth) {
               }
             });
 
-            console.log(`ðŸ“¤ Binary file data sent to requester`);
-            console.log('ðŸ“¤ ========================================\n');
+            console.log(`📤 Binary file data sent to requester`);
+            console.log('📤 ========================================\n');
 
           } catch (error) {
-            console.error('âŒ Error sending file to peer:', error);
-            console.log('ðŸ“¤ ========================================\n');
+            console.error('❌ Error sending file to peer:', error);
+            console.log('📤 ========================================\n');
           }
         });
 
         socketInstance.on('attachment_data_received', async ({ fileId, data, metadata }) => {
-          console.log('ðŸ“¥ ========================================');
-          console.log('ðŸ“¥ BINARY ATTACHMENT RECEIVED FROM PEER');
-          console.log('ðŸ“¥ ========================================');
+          console.log('📥 ========================================');
+          console.log('📥 BINARY ATTACHMENT RECEIVED FROM PEER');
+          console.log('📥 ========================================');
           console.log(`   FileID: ${fileId}`);
           console.log(`   File: ${metadata?.name}`);
 
           if (!data || !metadata) {
-            console.error('âŒ Invalid data received');
-            console.log('ðŸ“¥ ========================================\n');
+            console.error('❌ Invalid data received');
+            console.log('📥 ========================================\n');
             return;
           }
 
@@ -4675,11 +4652,11 @@ if (firebase && firebase.auth) {
             let blob;
             if (typeof data === 'string') {
               // Legacy/History Base64 data
-              console.log('ðŸ“¦ Processing Base64 data (History/Legacy)');
+              console.log('📦 Processing Base64 data (History/Legacy)');
               blob = base64ToBlob(data, metadata.type);
             } else {
               // High-speed Binary data
-              console.log('âš¡ Processing Binary data (Live P2P)');
+              console.log('⚡ Processing Binary data (Live P2P)');
               blob = new Blob([data], { type: metadata.type });
             }
 
@@ -4710,12 +4687,12 @@ if (firebase && firebase.auth) {
                 const request = store.add(fileRecord);
 
                 request.onsuccess = () => {
-                  console.log(`âœ… File stored to local IndexedDB: ${fileId}`);
+                  console.log(`✅ File stored to local IndexedDB: ${fileId}`);
                   resolve();
                 };
 
                 request.onerror = () => {
-                  console.error('âŒ Failed to store received file:', request.error);
+                  console.error('❌ Failed to store received file:', request.error);
                   reject(request.error);
                 };
               }).catch(reject);
@@ -4725,28 +4702,28 @@ if (firebase && firebase.auth) {
             const imgElements = document.querySelectorAll(`img[data-file-id="${fileId}"]`);
 
             if (imgElements.length > 0) {
-              console.log(`ðŸ–¼ï¸ Found ${imgElements.length} image element(s) to update`);
+              console.log(`🖼️ Found ${imgElements.length} image element(s) to update`);
 
               imgElements.forEach(imgElement => {
                 loadImageAttachment(fileId, imgElement);
               });
             } else {
-              console.log('â„¹ï¸ No rendered elements found for this file (will load when message is rendered)');
+              console.log('ℹ️ No rendered elements found for this file (will load when message is rendered)');
             }
 
-            console.log('âœ… File successfully received and stored');
-            console.log('ðŸ“¥ ========================================\n');
+            console.log('✅ File successfully received and stored');
+            console.log('📥 ========================================\n');
 
           } catch (error) {
-            console.error('âŒ Error processing received file:', error);
-            console.log('ðŸ“¥ ========================================\n');
+            console.error('❌ Error processing received file:', error);
+            console.log('📥 ========================================\n');
           }
         });
 
         socketInstance.on('attachment_data_unavailable', ({ fileId, reason }) => {
-          console.warn('âš ï¸ ========================================');
-          console.warn('âš ï¸ ATTACHMENT DATA UNAVAILABLE');
-          console.warn('âš ï¸ ========================================');
+          console.warn('⚠️ ========================================');
+          console.warn('⚠️ ATTACHMENT DATA UNAVAILABLE');
+          console.warn('⚠️ ========================================');
           console.warn(`   FileID: ${fileId}`);
           console.warn(`   Reason: ${reason}`);
 
@@ -4758,13 +4735,13 @@ if (firebase && firebase.auth) {
             img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23161b22"/%3E%3Ctext x="50%25" y="45%25" dominant-baseline="middle" text-anchor="middle" fill="%23ef4444" font-family="sans-serif" font-size="14"%3EFile unavailable%3C/text%3E%3Ctext x="50%25" y="60%25" dominant-baseline="middle" text-anchor="middle" fill="%238b949e" font-family="sans-serif" font-size="11"%3E' + encodeURIComponent(reason) + '%3C/text%3E%3C/svg%3E';
           });
 
-          console.warn('âš ï¸ ========================================\n');
+          console.warn('⚠️ ========================================\n');
         });
 
         socketInstance.on('room_sync_data', (data) => {
-          console.log('â° ========================================');
-          console.log('â° ROOM SYNC DATA RECEIVED');
-          console.log('â° ========================================');
+          console.log('⏰ ========================================');
+          console.log('⏰ ROOM SYNC DATA RECEIVED');
+          console.log('⏰ ========================================');
           currentRoomId = data.roomId || currentRoomId;
           roomRecoveryInProgress = false;
           roomRecoveryAttempts = 0;
@@ -4778,7 +4755,7 @@ if (firebase && firebase.auth) {
           const clientNow = Date.now();
 
           if (!data.serverTime) {
-            console.warn('âš ï¸ No serverTime in sync data, assuming no clock skew');
+            console.warn('⚠️ No serverTime in sync data, assuming no clock skew');
             data.serverTime = clientNow;
           }
 
@@ -4787,18 +4764,18 @@ if (firebase && firebase.auth) {
 
           console.log(`   Server time: ${new Date(data.serverTime).toISOString()}`);
           console.log(`   Client time: ${new Date(clientNow).toISOString()}`);
-          console.log(`   â° CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
+          console.log(`   ⏰ CLOCK OFFSET: ${(serverClockOffset / 1000).toFixed(1)}s`);
 
           if (Math.abs(serverClockOffset) > CLOCK_SKEW_WARNING_MS) {
-            console.warn(`âš ï¸ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
+            console.warn(`⚠️ WARNING: Large clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s)`);
             console.warn(`   Timer will be adjusted to compensate`);
           } else if (Math.abs(serverClockOffset) > CLOCK_SKEW_NOTICE_MS) {
-            console.log(`â„¹ï¸ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
+            console.log(`ℹ️ Minor clock skew detected (${(serverClockOffset / 1000).toFixed(1)}s); timer adjusted`);
           }
 
           serverExpiresAt = null;
 
-          console.log('â° ========================================\n');
+          console.log('⏰ ========================================\n');
 
           // Force timer update with new data
           updateTimer();
@@ -4807,9 +4784,9 @@ if (firebase && firebase.auth) {
         socketInstance.on('room_expiring_soon', () => { return; });
 
         socketInstance.on('error', (data) => {
-          console.error('âŒ ========================================');
-          console.error('âŒ SOCKET ERROR EVENT');
-          console.error('âŒ ========================================');
+          console.error('❌ ========================================');
+          console.error('❌ SOCKET ERROR EVENT');
+          console.error('❌ ========================================');
           console.error('   Error code:', data.code);
           console.error('   Error message:', data.message);
           console.error('   Timestamp:', new Date().toISOString());
@@ -4822,7 +4799,7 @@ if (firebase && firebase.auth) {
 
           // CRITICAL: Handle authentication errors with auto-recovery
           if (data.message === 'Not authenticated') {
-            console.error('âŒ NOT AUTHENTICATED ERROR RECEIVED');
+            console.error('❌ NOT AUTHENTICATED ERROR RECEIVED');
             console.error('   This indicates a race condition - call initiated before auth completed');
             console.error('   Current auth state:', isSocketAuthenticated);
             console.error('   Socket connected:', socketInstance?.connected);
@@ -4836,7 +4813,7 @@ if (firebase && firebase.auth) {
               if (timeoutId) {
                 clearTimeout(parseInt(timeoutId));
                 delete audioCallBtn.dataset.timeoutId;
-                console.error('   â° Cleared audio button timeout:', timeoutId);
+                console.error('   ⏰ Cleared audio button timeout:', timeoutId);
               }
             }
             if (videoCallBtn) {
@@ -4845,21 +4822,21 @@ if (firebase && firebase.auth) {
               if (timeoutId) {
                 clearTimeout(parseInt(timeoutId));
                 delete videoCallBtn.dataset.timeoutId;
-                console.error('   â° Cleared video button timeout:', timeoutId);
+                console.error('   ⏰ Cleared video button timeout:', timeoutId);
               }
             }
 
-            console.error('   ðŸ”’ Call loading states cleared');
+            console.error('   🔒 Call loading states cleared');
 
             // Force re-authentication
             setAuthenticationState(false);
 
             // Attempt to recover
             if (socketInstance && socketInstance.connected && currentUser) {
-              console.log('ðŸ”„ Attempting authentication recovery...');
+              console.log('🔄 Attempting authentication recovery...');
 
               firebase.auth().currentUser?.getIdToken(true).then(idToken => {
-                console.log('ðŸ“¤ Re-sending authentication with fresh token...');
+                console.log('📤 Re-sending authentication with fresh token...');
                 const sessionId = getScopedSocketSessionId('chat');
                 const tabId = window.tabManager?.tabId || null;
                 socketInstance.emit('authenticate', {
@@ -4874,10 +4851,10 @@ if (firebase && firebase.auth) {
                 // Set recovery timeout
                 const recoveryTimeout = setTimeout(() => {
                   if (!isSocketAuthenticated) {
-                    console.error('âŒ Recovery timeout - authentication failed after 10s');
+                    console.error('❌ Recovery timeout - authentication failed after 10s');
                     toast('Authentication failed. Please refresh the page.', 'error');
                   } else {
-                    console.log('âœ… Authentication recovered successfully');
+                    console.log('✅ Authentication recovered successfully');
 
                     // If user was trying to initiate a call, show helpful message
                     if (wasInitiating) {
@@ -4886,29 +4863,29 @@ if (firebase && firebase.auth) {
                   }
                 }, 10000);
 
-                console.log('â° Recovery timeout set:', recoveryTimeout);
+                console.log('⏰ Recovery timeout set:', recoveryTimeout);
 
               }).catch(err => {
-                console.error('âŒ Recovery authentication failed:', err);
+                console.error('❌ Recovery authentication failed:', err);
                 toast('Authentication failed. Please refresh the page.', 'error');
               });
             } else {
-              console.error('âŒ Cannot recover - missing socket or user data');
+              console.error('❌ Cannot recover - missing socket or user data');
               console.error('   Socket exists:', !!socketInstance);
               console.error('   Socket connected:', socketInstance?.connected);
               console.error('   Current user:', !!currentUser);
               toast('Connection lost. Please refresh the page.', 'error');
             }
 
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           // CRITICAL FIX: Handle CALL_ALREADY_ACTIVE error - auto-join instead
           if (data.code === 'CALL_ALREADY_ACTIVE') {
-            console.log('ðŸ”„ ========================================');
-            console.log('ðŸ”„ CALL_ALREADY_ACTIVE ERROR HANDLING');
-            console.log('ðŸ”„ ========================================');
+            console.log('🔄 ========================================');
+            console.log('🔄 CALL_ALREADY_ACTIVE ERROR HANDLING');
+            console.log('🔄 ========================================');
             console.log(`   Existing callId: ${data.callId}`);
             console.log(`   callType: ${data.callType}`);
             console.log(`   participantCount: ${data.participantCount}`);
@@ -4921,7 +4898,7 @@ if (firebase && firebase.auth) {
               if (timeoutId) {
                 clearTimeout(parseInt(timeoutId));
                 delete audioCallBtn.dataset.timeoutId;
-                console.log('   â° Cleared audio button timeout');
+                console.log('   ⏰ Cleared audio button timeout');
               }
             }
             if (videoCallBtn) {
@@ -4930,16 +4907,16 @@ if (firebase && firebase.auth) {
               if (timeoutId) {
                 clearTimeout(parseInt(timeoutId));
                 delete videoCallBtn.dataset.timeoutId;
-                console.log('   â° Cleared video button timeout');
+                console.log('   ⏰ Cleared video button timeout');
               }
             }
 
             // Re-enable buttons if authenticated
             if (isSocketAuthenticated) {
-              console.log('   âœ… Re-enabling call buttons (authenticated)');
+              console.log('   ✅ Re-enabling call buttons (authenticated)');
               enableCallButtons();
             } else {
-              console.log('   â³ Keeping buttons disabled (not authenticated)');
+              console.log('   ⏳ Keeping buttons disabled (not authenticated)');
             }
 
             // Store the active call info
@@ -4948,14 +4925,14 @@ if (firebase && firebase.auth) {
               callType: data.callType || 'audio',
               participantCount: data.participantCount || 1
             };
-            console.log('ðŸ’¾ Stored activeCallInRoom:', activeCallInRoom);
+            console.log('💾 Stored activeCallInRoom:', activeCallInRoom);
 
             // Update UI to show join button
             updateCallButtonState(true, activeCallInRoom);
 
             // Show friendly message
             toast('A call is already active. Click "Join Call" to join.', 'success');
-            console.log('ðŸ”„ ========================================\n');
+            console.log('🔄 ========================================\n');
             return;
           }
 
@@ -4963,10 +4940,10 @@ if (firebase && firebase.auth) {
           if (data.code === 'NOT_IN_ROOM') {
             if (!isSocialClubMode && selectedMood) {
               clearStaleRoomAndCreateFresh('socket_error_not_in_room');
-              console.error('âŒ ========================================\n');
+              console.error('❌ ========================================\n');
               return;
             }
-            console.warn('âš ï¸ ROOM MEMBERSHIP DESYNC DETECTED');
+            console.warn('⚠️ ROOM MEMBERSHIP DESYNC DETECTED');
             console.warn('   Attempting room recovery before exiting');
 
             if (audioCallBtn) {
@@ -5004,20 +4981,20 @@ if (firebase && firebase.auth) {
                 roomRecoveryInProgress = false;
               }, 2000);
 
-              console.warn(`ðŸ”„ Recovery attempt ${roomRecoveryAttempts}/3 initiated`);
-              console.error('âŒ ========================================\n');
+              console.warn(`🔄 Recovery attempt ${roomRecoveryAttempts}/3 initiated`);
+              console.error('❌ ========================================\n');
               return;
             }
 
-            console.error('ðŸ—‘ï¸ Room recovery exhausted; using unified exit sequence');
+            console.error('🗑️ Room recovery exhausted; using unified exit sequence');
             exitRoomSequence().catch(console.error);
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           // Handle hard room-not-found as terminal.
           if (data.code === 'ROOM_NOT_FOUND') {
-            console.error('âŒ ROOM ERROR:', data.code);
+            console.error('❌ ROOM ERROR:', data.code);
             console.error('   Message:', data.message);
             console.error('   Current room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
@@ -5032,16 +5009,16 @@ if (firebase && firebase.auth) {
 
             if (!isSocialClubMode && selectedMood) {
               clearStaleRoomAndCreateFresh('socket_error_room_not_found');
-              console.error('âŒ ========================================\n');
+              console.error('❌ ========================================\n');
               return;
             }
 
             toast('Room no longer available', 'error');
 
             if (isSocialClubMode && !roomData?.roomId) {
-              console.warn('ðŸŽ­ Social Club: no active room yet; retrying join_social_club');
+              console.warn('🎭 Social Club: no active room yet; retrying join_social_club');
               safeSocketEmit('join_social_club', {});
-              console.error('âŒ ========================================\n');
+              console.error('❌ ========================================\n');
               return;
             }
 
@@ -5062,21 +5039,21 @@ if (firebase && firebase.auth) {
               }
             }
 
-            console.error('ðŸ—‘ï¸ Using unified exit sequence due to room error');
+            console.error('🗑️ Using unified exit sequence due to room error');
             exitRoomSequence().catch(console.error);
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           if (data.code === 'ROOM_EXPIRED') {
-            console.error('ðŸ’¥ ROOM EXPIRED ERROR');
+            console.error('💥 ROOM EXPIRED ERROR');
             console.error('   Message:', data.message);
             console.error('   Room:', roomData?.roomId);
             console.error('   Was initiating:', wasInitiating);
 
             if (!isSocialClubMode && selectedMood) {
               clearStaleRoomAndCreateFresh('socket_error_room_expired');
-              console.error('âŒ ========================================\n');
+              console.error('❌ ========================================\n');
               return;
             }
 
@@ -5106,16 +5083,16 @@ if (firebase && firebase.auth) {
             }
 
             // Clear all storage
-            console.error('ðŸ—‘ï¸ Using unified exit sequence due to room expiry error');
+            console.error('🗑️ Using unified exit sequence due to room expiry error');
             exitRoomSequence().catch(console.error);
 
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           // Handle call-related errors
           if (data.code === 'CALL_NOT_FOUND' || data.code === 'CALL_ENDED') {
-            console.error('âŒ CALL ERROR:', data.code);
+            console.error('❌ CALL ERROR:', data.code);
             console.error('   Message:', data.message);
             console.error('   Was initiating:', wasInitiating);
 
@@ -5147,7 +5124,7 @@ if (firebase && firebase.auth) {
 
             // Re-enable buttons if authenticated
             if (isSocketAuthenticated) {
-              console.log('   âœ… Re-enabling call buttons');
+              console.log('   ✅ Re-enabling call buttons');
               enableCallButtons();
             }
 
@@ -5156,13 +5133,13 @@ if (firebase && firebase.auth) {
             updateCallButtonState(false);
 
             toast(data.message || 'Call is no longer available', 'warning');
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           // Handle join call failures
           if (data.code === 'JOIN_FAILED' || data.code === 'PARTICIPANT_RESOLUTION_FAILED' || data.code === 'STATE_MISMATCH') {
-            console.error('âŒ JOIN CALL ERROR:', data.code);
+            console.error('❌ JOIN CALL ERROR:', data.code);
             console.error('   Message:', data.message);
 
             // Clear join button loading state
@@ -5176,12 +5153,12 @@ if (firebase && firebase.auth) {
             }
 
             toast(data.message || 'Failed to join call. Please try again.', 'error');
-            console.error('âŒ ========================================\n');
+            console.error('❌ ========================================\n');
             return;
           }
 
           // Generic error handling
-          console.error('âŒ GENERIC ERROR');
+          console.error('❌ GENERIC ERROR');
           console.error('   Code:', data.code || 'UNKNOWN');
           console.error('   Message:', data.message || 'An error occurred');
           console.error('   Was initiating:', wasInitiating);
@@ -5210,20 +5187,20 @@ if (firebase && firebase.auth) {
 
           // Re-enable buttons if authenticated
           if (isSocketAuthenticated) {
-            console.log('   âœ… Re-enabling call buttons');
+            console.log('   ✅ Re-enabling call buttons');
             enableCallButtons();
           } else {
-            console.log('   â³ Not authenticated - buttons will enable after auth completes');
+            console.log('   ⏳ Not authenticated - buttons will enable after auth completes');
           }
 
           toast(data.message || 'An error occurred', 'error');
-          console.error('âŒ ========================================\n');
+          console.error('❌ ========================================\n');
         });
 
         socketInstance.on('chat_message', async (data) => {
-          console.log('ðŸ’¬ ========================================');
-          console.log('ðŸ’¬ INCOMING CHAT MESSAGE FROM SERVER');
-          console.log('ðŸ’¬ ========================================');
+          console.log('💬 ========================================');
+          console.log('💬 INCOMING CHAT MESSAGE FROM SERVER');
+          console.log('💬 ========================================');
           console.log(`   From: ${data.username} (${data.userId})`);
           console.log(`   MessageID: ${data.messageId}`);
           console.log(`   Has attachment: ${!!data.attachment}`);
@@ -5243,7 +5220,7 @@ if (firebase && firebase.auth) {
             );
 
             if (optimisticIndex !== -1) {
-              console.log('ðŸ”„ Replacing optimistic message with server version');
+              console.log('🔄 Replacing optimistic message with server version');
 
               const optimisticMsg = messagesCache[optimisticIndex];
               messagesCache.splice(optimisticIndex, 1);
@@ -5253,7 +5230,7 @@ if (firebase && firebase.auth) {
                 msgElements.forEach(el => {
                   if (el.dataset.messageId === optimisticMsg.messageId) {
                     el.remove();
-                    console.log('âœ… Removed optimistic message from DOM');
+                    console.log('✅ Removed optimistic message from DOM');
                   }
                 });
               }
@@ -5276,26 +5253,26 @@ if (firebase && firebase.auth) {
           });
 
           if (isDuplicate) {
-            console.warn(`âš ï¸ DUPLICATE MESSAGE DETECTED - SKIPPING`);
-            console.log('ðŸ’¬ ========================================\n');
+            console.warn(`⚠️ DUPLICATE MESSAGE DETECTED - SKIPPING`);
+            console.log('💬 ========================================\n');
             return;
           }
 
-          console.log(`âœ… New message validated - will render`);
+          console.log(`✅ New message validated - will render`);
 
           // ============================================
           // ATTACHMENT HANDLING - CHUNKED OR LEGACY
           // ============================================
           if (data.attachment) {
-            console.log('ðŸ“Ž Message contains attachment');
+            console.log('📎 Message contains attachment');
             console.log(`   Chunked: ${data.attachment.chunked || false}`);
 
             if (data.attachment.url || data.attachment.publicUrl || data.attachment.apiUrl) {
-              console.log('ðŸŒ Persistent attachment URL detected');
+              console.log('🌐 Persistent attachment URL detected');
               delete data.attachment.data;
             } else if (data.attachment.chunked) {
               // CHUNKED: File will arrive via file_chunk events
-              console.log('ðŸ“¦ Chunked attachment - file will be received separately');
+              console.log('📦 Chunked attachment - file will be received separately');
               console.log(`   FileID: ${data.attachment.fileId}`);
               console.log(`   Total chunks: ${data.attachment.totalChunks}`);
 
@@ -5304,7 +5281,7 @@ if (firebase && firebase.auth) {
 
             } else if (data.userId !== currentUser.userId && data.attachment.data) {
               // LEGACY: Single base64 payload (for backward compatibility)
-              console.log('ðŸ“¦ Legacy attachment format detected');
+              console.log('📦 Legacy attachment format detected');
 
               try {
                 const blob = base64ToBlob(data.attachment.data, data.attachment.type);
@@ -5315,16 +5292,16 @@ if (firebase && firebase.auth) {
 
                   data.attachment.fileId = storedFileId;
                   delete data.attachment.data;
-                  console.log(`âœ… Legacy attachment stored: ${storedFileId}`);
+                  console.log(`✅ Legacy attachment stored: ${storedFileId}`);
                 } else {
-                  console.error('âŒ Failed to process legacy attachment: Conversion returned null');
+                  console.error('❌ Failed to process legacy attachment: Conversion returned null');
                 }
 
               } catch (error) {
-                console.error('âŒ Failed to store legacy attachment:', error);
+                console.error('❌ Failed to store legacy attachment:', error);
               }
             } else if (data.userId === currentUser.userId) {
-              console.log('â„¹ï¸ Own message - file already in IndexedDB');
+              console.log('ℹ️ Own message - file already in IndexedDB');
               delete data.attachment.data;
             }
           }
@@ -5332,30 +5309,30 @@ if (firebase && firebase.auth) {
           // ============================================
           // RENDER MESSAGE
           // ============================================
-          console.log(`ðŸŽ¨ Rendering message`);
+          console.log(`🎨 Rendering message`);
           const msgEl = createMessageElement(data, isOwnMessage);
 
           if (messagesList) {
             messagesList.appendChild(msgEl);
             messagesList.scrollTop = messagesList.scrollHeight;
-            console.log(`âœ… Message rendered in UI`);
+            console.log(`✅ Message rendered in UI`);
           }
 
           // ============================================
           // UPDATE CACHE AND SAVE
           // ============================================
           messagesCache.push(data);
-          console.log(`âž• Added to cache (new size: ${messagesCache.length})`);
+          console.log(`➕ Added to cache (new size: ${messagesCache.length})`);
 
           saveChatState(roomData.roomId, messagesCache);
-          console.log(`ðŸ’¾ Chat state saved`);
+          console.log(`💾 Chat state saved`);
 
-          console.log('ðŸ’¬ ========================================\n');
+          console.log('💬 ========================================\n');
         });
 
         socketInstance.on('user_left', (data) => {
           const sequenceId = Math.random().toString(36).substring(2, 6).toUpperCase();
-          console.log(`ðŸ‘¤ [${sequenceId}] User left: ${data.username} (${data.userId}). Remaining: ${data.remainingUsers}`);
+          console.log(`👤 [${sequenceId}] User left: ${data.username} (${data.userId}). Remaining: ${data.remainingUsers}`);
 
           // 1. Show message
           if (shouldShowLifecycleMessage('left', data.userId)) {
@@ -5365,12 +5342,12 @@ if (firebase && firebase.auth) {
             messagesList?.appendChild(msgEl);
             if (messagesList) messagesList.scrollTop = messagesList.scrollHeight;
           } else {
-            console.log(`â„¹ï¸ [${sequenceId}] Suppressed duplicate left message for ${data.userId}`);
+            console.log(`ℹ️ [${sequenceId}] Suppressed duplicate left message for ${data.userId}`);
           }
 
           // 2. Authoritative User List Update (mirroring user_joined)
           if (data.users && Array.isArray(data.users)) {
-            console.log(`ðŸ‘¥ [${sequenceId}] Updating sidebar with ${data.users.length} users`);
+            console.log(`👥 [${sequenceId}] Updating sidebar with ${data.users.length} users`);
             renderUserList(data.users);
           } else {
             // Fallback for older server versions/single element remove
@@ -5408,20 +5385,20 @@ if (firebase && firebase.auth) {
           } catch { }
 
           if (selfLeft && (navigatingToCall || isInBackgroundCall || hasActiveCallCached)) {
-            console.warn(`ðŸ›¡ï¸ [${sequenceId}] Suppressing exit sequence on self-left during call flow`);
+            console.warn(`🛡️ [${sequenceId}] Suppressing exit sequence on self-left during call flow`);
             return;
           }
 
           if (!isSocialClubMode && (roomDestroyed || selfLeft)) {
-            console.log(`ðŸ’¥ [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
-            console.log(`ðŸšª [${sequenceId}] Triggering room exit sequence`);
+            console.log(`💥 [${sequenceId}] Room state changed: Destroyed=${data.destroyed}, Remaining=${data.remainingUsers}`);
+            console.log(`🚪 [${sequenceId}] Triggering room exit sequence`);
             toast('Room closing...', 'warning');
             exitRoomSequence().catch(console.error);
           }
         });
 
         const JOIN_ROOM_SOUND_URL = '/join_room_sound.mp3';
-        console.log(`ðŸ”Š [JoinSound] Initializing join-room sound: ${JOIN_ROOM_SOUND_URL}`);
+        console.log(`🔊 [JoinSound] Initializing join-room sound: ${JOIN_ROOM_SOUND_URL}`);
 
         const joinRoomSound = new Audio(JOIN_ROOM_SOUND_URL);
         joinRoomSound.preload = 'auto';
@@ -5431,35 +5408,35 @@ if (firebase && firebase.auth) {
         if (ENABLE_JOIN_SOUND_DIAGNOSTICS) {
           (async () => {
             try {
-              console.log('ðŸ”Š [JoinSound] Checking sound asset availability...');
+              console.log('🔊 [JoinSound] Checking sound asset availability...');
             let res = null;
             try {
               res = await fetch(JOIN_ROOM_SOUND_URL, { method: 'HEAD', cache: 'no-store' });
             } catch (e) {
-              console.warn('ðŸ”Š [JoinSound] HEAD check failed (will try GET):', e);
+              console.warn('🔊 [JoinSound] HEAD check failed (will try GET):', e);
             }
 
             if (!res) {
               try {
                 res = await fetch(JOIN_ROOM_SOUND_URL, { method: 'GET', cache: 'no-store' });
               } catch (e) {
-                console.error('ðŸ”Š [JoinSound] GET check failed:', e);
+                console.error('🔊 [JoinSound] GET check failed:', e);
               }
             }
 
             if (res) {
-              console.log(`ðŸ”Š [JoinSound] Asset check response: status=${res.status} ok=${res.ok} type=${res.type}`);
+              console.log(`🔊 [JoinSound] Asset check response: status=${res.status} ok=${res.ok} type=${res.type}`);
               try {
-                console.log(`ðŸ”Š [JoinSound] Final URL: ${res.url || JOIN_ROOM_SOUND_URL} (redirected=${!!res.redirected})`);
+                console.log(`🔊 [JoinSound] Final URL: ${res.url || JOIN_ROOM_SOUND_URL} (redirected=${!!res.redirected})`);
               } catch { }
               try {
                 const ct = res.headers?.get?.('content-type');
-                if (ct) console.log(`ðŸ”Š [JoinSound] content-type=${ct}`);
+                if (ct) console.log(`🔊 [JoinSound] content-type=${ct}`);
               } catch { }
 
               try {
                 const cl = res.headers?.get?.('content-length');
-                if (cl) console.log(`ðŸ”Š [JoinSound] content-length=${cl}`);
+                if (cl) console.log(`🔊 [JoinSound] content-length=${cl}`);
               } catch { }
 
               // Sample the first bytes using a small Range GET.
@@ -5475,27 +5452,27 @@ if (firebase && firebase.auth) {
                     }
                   });
                 } catch (e) {
-                  console.warn('ðŸ”Š [JoinSound] Range GET sample failed:', e);
+                  console.warn('🔊 [JoinSound] Range GET sample failed:', e);
                 }
 
                 if (!sampleRes) {
-                  console.warn('ðŸ”Š [JoinSound] No sample response available for header check');
+                  console.warn('🔊 [JoinSound] No sample response available for header check');
                   return;
                 }
 
-                console.log(`ðŸ”Š [JoinSound] Sample response: status=${sampleRes.status} ok=${sampleRes.ok} type=${sampleRes.type}`);
+                console.log(`🔊 [JoinSound] Sample response: status=${sampleRes.status} ok=${sampleRes.ok} type=${sampleRes.type}`);
                 try {
                   const acceptRanges = sampleRes.headers?.get?.('accept-ranges');
-                  if (acceptRanges) console.log(`ðŸ”Š [JoinSound] accept-ranges=${acceptRanges}`);
+                  if (acceptRanges) console.log(`🔊 [JoinSound] accept-ranges=${acceptRanges}`);
                   const contentRange = sampleRes.headers?.get?.('content-range');
-                  if (contentRange) console.log(`ðŸ”Š [JoinSound] content-range=${contentRange}`);
+                  if (contentRange) console.log(`🔊 [JoinSound] content-range=${contentRange}`);
                 } catch { }
 
                 const buf = await sampleRes.arrayBuffer();
                 const bytes = new Uint8Array(buf.slice(0, 24));
 
                 if (!bytes.length) {
-                  console.warn('ðŸ”Š [JoinSound] Sample returned 0 bytes; cannot detect header');
+                  console.warn('🔊 [JoinSound] Sample returned 0 bytes; cannot detect header');
                   return;
                 }
 
@@ -5505,27 +5482,27 @@ if (firebase && firebase.auth) {
                 }
 
                 const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                console.log(`ðŸ”Š [JoinSound] First bytes (ascii): ${ascii}`);
-                console.log(`ðŸ”Š [JoinSound] First bytes (hex): ${hex}`);
+                console.log(`🔊 [JoinSound] First bytes (ascii): ${ascii}`);
+                console.log(`🔊 [JoinSound] First bytes (hex): ${hex}`);
 
                 // Helpful hint: MP3 often starts with "ID3" or 0xFF 0xFB (frame sync)
                 if (ascii.startsWith('<!DOCTYPE') || ascii.startsWith('<html') || ascii.includes('<html')) {
-                  console.warn('ðŸ”Š [JoinSound] WARNING: Response looks like HTML (likely an error page), not an MP3');
+                  console.warn('🔊 [JoinSound] WARNING: Response looks like HTML (likely an error page), not an MP3');
                 } else if (ascii.startsWith('ID3')) {
-                  console.log('ðŸ”Š [JoinSound] Detected ID3 tag header (looks like a real MP3 file)');
+                  console.log('🔊 [JoinSound] Detected ID3 tag header (looks like a real MP3 file)');
                 } else if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) {
-                  console.log('ðŸ”Š [JoinSound] Detected MP3 frame sync (looks like a real MP3 stream)');
+                  console.log('🔊 [JoinSound] Detected MP3 frame sync (looks like a real MP3 stream)');
                 } else {
-                  console.warn('ðŸ”Š [JoinSound] Header does not look like common MP3 signatures; decoding may fail');
+                  console.warn('🔊 [JoinSound] Header does not look like common MP3 signatures; decoding may fail');
                 }
               } catch (e) {
-                console.warn('ðŸ”Š [JoinSound] Failed to sample first bytes:', e);
+                console.warn('🔊 [JoinSound] Failed to sample first bytes:', e);
               }
             } else {
-              console.warn('ðŸ”Š [JoinSound] Asset check produced no response object');
+              console.warn('🔊 [JoinSound] Asset check produced no response object');
             }
             } catch (e) {
-              console.error('ðŸ”Š [JoinSound] Unexpected error during asset check:', e);
+              console.error('🔊 [JoinSound] Unexpected error during asset check:', e);
             }
           })();
         }
@@ -5533,32 +5510,32 @@ if (firebase && firebase.auth) {
         try {
           if (ENABLE_JOIN_SOUND_DIAGNOSTICS) {
             joinRoomSound.addEventListener('loadeddata', () => {
-              console.log('ðŸ”Š [JoinSound] loadeddata fired (some data available)');
+              console.log('🔊 [JoinSound] loadeddata fired (some data available)');
             });
             joinRoomSound.addEventListener('canplaythrough', () => {
-              console.log('ðŸ”Š [JoinSound] canplaythrough fired (likely buffered enough)');
+              console.log('🔊 [JoinSound] canplaythrough fired (likely buffered enough)');
             });
           }
           joinRoomSound.addEventListener('error', () => {
             const mediaErr = joinRoomSound.error;
-            console.error('ðŸ”Š [JoinSound] Audio element error event fired');
+            console.error('🔊 [JoinSound] Audio element error event fired');
             if (mediaErr) {
-              console.error('ðŸ”Š [JoinSound] MediaError:', {
+              console.error('🔊 [JoinSound] MediaError:', {
                 code: mediaErr.code,
                 message: mediaErr.message
               });
             }
-            console.error('ðŸ”Š [JoinSound] Audio element src:', joinRoomSound.currentSrc || joinRoomSound.src);
+            console.error('🔊 [JoinSound] Audio element src:', joinRoomSound.currentSrc || joinRoomSound.src);
 
             try {
               if (typeof playJoinBeep === 'function') {
-                console.warn('ðŸ”Š [JoinSound] Falling back to WebAudio beep due to audio element error');
+                console.warn('🔊 [JoinSound] Falling back to WebAudio beep due to audio element error');
                 playJoinBeep();
               }
             } catch { }
           });
         } catch (e) {
-          console.warn('ðŸ”Š [JoinSound] Failed to attach audio event listeners:', e);
+          console.warn('🔊 [JoinSound] Failed to attach audio event listeners:', e);
         }
 
         const joinSoundRecentlyPlayedForUser = new Map();
@@ -5620,12 +5597,12 @@ if (firebase && firebase.auth) {
             const p = joinRoomSound.play();
             if (p && typeof p.catch === 'function') {
               p.catch((err) => {
-                console.warn('ðŸ”Š [JoinSound] play() rejected:', err);
+                console.warn('🔊 [JoinSound] play() rejected:', err);
                 // Common cause: autoplay policy. This will work after the unlock click/touch happens.
 
                 try {
                   if (joinBeepUnlocked) {
-                    console.warn('ðŸ”Š [JoinSound] Falling back to WebAudio beep due to play() rejection');
+                    console.warn('🔊 [JoinSound] Falling back to WebAudio beep due to play() rejection');
                     playJoinBeep();
                   }
                 } catch { }
@@ -5636,7 +5613,7 @@ if (firebase && firebase.auth) {
 
         const unlockJoinSoundOnce = () => {
           try {
-            console.log('ðŸ”Š [JoinSound] User gesture detected; attempting to unlock audio...');
+            console.log('🔊 [JoinSound] User gesture detected; attempting to unlock audio...');
             const prevMuted = joinRoomSound.muted;
             joinRoomSound.muted = true;
 
@@ -5654,19 +5631,19 @@ if (firebase && firebase.auth) {
                 joinRoomSound.pause();
                 joinRoomSound.currentTime = 0;
                 joinRoomSound.muted = prevMuted;
-                console.log('ðŸ”Š [JoinSound] Audio unlock succeeded');
+                console.log('🔊 [JoinSound] Audio unlock succeeded');
               }).catch(() => {
                 joinRoomSound.muted = prevMuted;
-                console.warn('ðŸ”Š [JoinSound] Audio unlock failed (play rejected)');
+                console.warn('🔊 [JoinSound] Audio unlock failed (play rejected)');
               });
             } else {
               joinRoomSound.pause();
               joinRoomSound.currentTime = 0;
               joinRoomSound.muted = prevMuted;
-              console.log('ðŸ”Š [JoinSound] Audio unlock attempted (non-promise play())');
+              console.log('🔊 [JoinSound] Audio unlock attempted (non-promise play())');
             }
           } catch (e) {
-            console.warn('ðŸ”Š [JoinSound] Audio unlock threw:', e);
+            console.warn('🔊 [JoinSound] Audio unlock threw:', e);
           }
         };
 
@@ -5674,7 +5651,7 @@ if (firebase && firebase.auth) {
         document.addEventListener('touchstart', unlockJoinSoundOnce, { once: true, passive: true });
 
         socketInstance.on('user_joined', (data) => {
-          console.log(`ðŸ‘¤ User joined: ${data.username} (${data.userId})`);
+          console.log(`👤 User joined: ${data.username} (${data.userId})`);
 
           // Display join message in chat (skip if it's the current user)
           if (data.userId !== currentUser?.userId && shouldShowLifecycleMessage('joined', data.userId)) {
@@ -5690,7 +5667,7 @@ if (firebase && firebase.auth) {
               messagesList.scrollTop = messagesList.scrollHeight;
             }
           } else if (data.userId !== currentUser?.userId) {
-            console.log(`â„¹ï¸ Suppressed duplicate joined message for ${data.userId}`);
+            console.log(`ℹ️ Suppressed duplicate joined message for ${data.userId}`);
           }
 
           // Update online count
@@ -5700,10 +5677,10 @@ if (firebase && firebase.auth) {
 
           // Update user list if provided
           if (data.users && Array.isArray(data.users)) {
-            console.log(`ðŸ‘¥ Receiving full user list: ${data.users.length} users`);
+            console.log(`👥 Receiving full user list: ${data.users.length} users`);
             renderUserList(data.users);
           } else {
-            console.warn('âš ï¸ user_joined event received without user list');
+            console.warn('⚠️ user_joined event received without user list');
             // Fallback: append single user? (Wait, server sends full list)
           }
         });
@@ -5711,7 +5688,7 @@ if (firebase && firebase.auth) {
         socketInstance.on('room_expired', () => { return; });
 
         socketInstance.on('left_room', (data) => {
-          console.log('ðŸ‘‹ Received left_room confirmation from server');
+          console.log('👋 Received left_room confirmation from server');
           toast('Left room', 'success');
           currentRoomId = null;
 
@@ -5727,13 +5704,13 @@ if (firebase && firebase.auth) {
             socketInstance.disconnect();
           }
 
-          console.log('âœ… Socket disconnected after leaving room');
+          console.log('✅ Socket disconnected after leaving room');
         });
 
         socketInstance.on('force_navigation', (data) => {
           const target = data?.to || '/mood.html';
           const safeTarget = target === '/discovery.html' ? '/mood.html' : target;
-          console.warn(`ðŸš¦ Server-authoritative navigation requested: ${safeTarget} (${data?.reason || 'unspecified'})`);
+          console.warn(`🚦 Server-authoritative navigation requested: ${safeTarget} (${data?.reason || 'unspecified'})`);
           if (isSocialClubMode) return;
           clearChatState(true).catch(() => { });
           cleanupParentCallPage(safeTarget);
@@ -5742,13 +5719,13 @@ if (firebase && firebase.auth) {
         socketInstance.on('incoming_call', (data) => {
           // GUARD: Don't show if already in/initiating a call
           if (activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall) {
-            console.log('ðŸ“ž Skipping incoming call modal - user already in/initiating call');
+            console.log('📞 Skipping incoming call modal - user already in/initiating call');
             return;
           }
 
-          console.log('ðŸ“ž ========================================');
-          console.log('ðŸ“ž INCOMING_CALL EVENT RECEIVED');
-          console.log('ðŸ“ž ========================================');
+          console.log('📞 ========================================');
+          console.log('📞 INCOMING_CALL EVENT RECEIVED');
+          console.log('📞 ========================================');
           console.log(`   Caller: ${data.callerUsername}`);
           console.log(`   Call ID: ${data.callId}`);
           console.log(`   Type: ${data.callType}`);
@@ -5765,9 +5742,9 @@ if (firebase && firebase.auth) {
 
           try {
             localStorage.setItem(CACHED_CALL_KEY, JSON.stringify(cachedCall));
-            console.log('ðŸ’¾ Call cached to localStorage');
+            console.log('💾 Call cached to localStorage');
           } catch (e) {
-            console.error('âŒ Failed to cache call:', e);
+            console.error('❌ Failed to cache call:', e);
           }
 
           // Set pending call data
@@ -5792,17 +5769,17 @@ if (firebase && firebase.auth) {
             const isBusy = activeCallConnectionState === 'initializing' || activeCallConnectionState === 'connecting' || activeCallConnectionState === 'connected' || isInitiatingCall;
             if (pendingCallData && pendingCallData.callId === data.callId && !isBusy) {
               incomingCallModal?.classList.remove('hidden');
-              console.log(`âœ… Showing incoming call modal after 2s delay`);
+              console.log(`✅ Showing incoming call modal after 2s delay`);
             } else {
-              console.log(`ðŸ“ž Call already handled or user became busy, skipping modal display`);
+              console.log(`📞 Call already handled or user became busy, skipping modal display`);
             }
           }, 2000);
 
-          console.log('ðŸ“ž ========================================\n');
+          console.log('📞 ========================================\n');
         });
 
         socketInstance.on('call_accepted', (data) => {
-          console.log('âœ… Call accepted:', data);
+          console.log('✅ Call accepted:', data);
 
           // Clear loading states
           isInitiatingCall = false;
@@ -5829,12 +5806,12 @@ if (firebase && firebase.auth) {
             users: data.users
           }));
 
-          console.log('ðŸš€ Navigating to call');
+          console.log('🚀 Navigating to call');
           window.location.href = '/call.html';
         });
 
         socketInstance.on('call_declined', (data) => {
-          console.log('âŒ Call was declined');
+          console.log('❌ Call was declined');
 
           // Clear loading states
           toast('Call was declined', 'warning');
@@ -5852,7 +5829,7 @@ if (firebase && firebase.auth) {
         });
 
         socketInstance.on('call_state_update', (data) => {
-          console.log('ðŸ“ž Call state update:', data);
+          console.log('📞 Call state update:', data);
 
           if (data.isActive && data.participantCount > 0) {
             // CRITICAL FIX: Store call data so JOIN button can access it
@@ -5861,13 +5838,13 @@ if (firebase && firebase.auth) {
               callType: data.callType,
               participantCount: data.participantCount
             };
-            console.log(`ðŸ“ž Stored active call: ${data.callId} with ${data.participantCount} participants`);
+            console.log(`📞 Stored active call: ${data.callId} with ${data.participantCount} participants`);
 
             updateCallButtonState(true, data);
           } else {
             // CRITICAL FIX: Clear call data when call ends
             activeCallInRoom = null;
-            console.log('ðŸ“ž Cleared active call - no participants');
+            console.log('📞 Cleared active call - no participants');
 
             updateCallButtonState(false);
           }
@@ -5875,14 +5852,14 @@ if (firebase && firebase.auth) {
 
 
         socketInstance.on('call_ended_notification', (data) => {
-          console.log('ðŸ“ž Call ended:', data.callId);
+          console.log('📞 Call ended:', data.callId);
           updateCallButtonState(false);
         });
 
         socketInstance.on('join_existing_call_success', (data) => {
-          console.log('âœ… ========================================');
-          console.log('âœ… JOIN_EXISTING_CALL_SUCCESS');
-          console.log('âœ… ========================================');
+          console.log('✅ ========================================');
+          console.log('✅ JOIN_EXISTING_CALL_SUCCESS');
+          console.log('✅ ========================================');
           console.log(`   callId: ${data.callId}`);
           console.log(`   callType: ${data.callType}`);
           console.log(`   roomId: ${data.roomId}`);
@@ -5896,23 +5873,23 @@ if (firebase && firebase.auth) {
             acceptCallBtn.disabled = false;
           }
 
-          // âœ… CRITICAL FIX: Show call iframe IMMEDIATELY on successful join
-          console.log('ðŸ“± Showing call iframe for joined call');
+          // ✅ CRITICAL FIX: Show call iframe IMMEDIATELY on successful join
+          console.log('📱 Showing call iframe for joined call');
           let callIframeContainer = document.getElementById('callIframeContainer');
 
           if (!callIframeContainer) {
-            console.log('ðŸ“± Call iframe container missing - creating it');
+            console.log('📱 Call iframe container missing - creating it');
             callIframeContainer = document.createElement('div');
             callIframeContainer.id = 'callIframeContainer';
             callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black'; // Visible immediately
             callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
             document.body.appendChild(callIframeContainer);
-            console.log('âœ… Call iframe container created and call.html loaded');
+            console.log('✅ Call iframe container created and call.html loaded');
           } else {
             callIframeContainer.classList.remove('hidden');
             const iframe = document.getElementById('callIframe');
             if (iframe) iframe.src = '/call.html'; // Reload to pick up new callId
-            console.log('âœ… Call iframe shown');
+            console.log('✅ Call iframe shown');
           }
 
           activeCallConnectionState = 'connecting';
@@ -5941,7 +5918,7 @@ if (firebase && firebase.auth) {
 
         if (imageViewerClose) {
           imageViewerClose.addEventListener('click', closeImageViewer, { passive: true });
-          console.log('âœ… Image viewer close button listener attached');
+          console.log('✅ Image viewer close button listener attached');
         }
 
         if (imageViewerOverlay) {
@@ -5951,12 +5928,12 @@ if (firebase && firebase.auth) {
               closeImageViewer();
             }
           }, { passive: true });
-          console.log('âœ… Image viewer overlay listener attached');
+          console.log('✅ Image viewer overlay listener attached');
         }
 
         if (imageViewerImage) {
           imageViewerImage.addEventListener('click', toggleImageZoom, { passive: true });
-          console.log('âœ… Image viewer zoom listener attached');
+          console.log('✅ Image viewer zoom listener attached');
         }
 
         // ESC key to close image viewer
@@ -5974,9 +5951,9 @@ if (firebase && firebase.auth) {
         const attachmentBtn = document.querySelector('.attachment-btn');
         if (attachmentBtn) {
           attachmentBtn.addEventListener('click', async () => {
-            console.log('ðŸ“Ž ========================================');
-            console.log('ðŸ“Ž ATTACHMENT BUTTON CLICKED');
-            console.log('ðŸ“Ž ========================================');
+            console.log('📎 ========================================');
+            console.log('📎 ATTACHMENT BUTTON CLICKED');
+            console.log('📎 ========================================');
 
             // Create file input dynamically (ensures fresh state)
             const fileInput = document.createElement('input');
@@ -5987,12 +5964,12 @@ if (firebase && firebase.auth) {
             fileInput.addEventListener('change', async (e) => {
               const file = e.target.files?.[0];
               if (!file) {
-                console.log('â„¹ï¸ No file selected');
-                console.log('ðŸ“Ž ========================================\n');
+                console.log('ℹ️ No file selected');
+                console.log('📎 ========================================\n');
                 return;
               }
 
-              console.log(`ðŸ“„ File selected: ${file.name}`);
+              console.log(`📄 File selected: ${file.name}`);
               console.log(`   Size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
               console.log(`   Type: ${file.type}`);
 
@@ -6000,7 +5977,7 @@ if (firebase && firebase.auth) {
               const validation = validateFile(file);
               if (!validation.valid) {
                 toast(validation.error, 'error');
-                console.log('ðŸ“Ž ========================================\n');
+                console.log('📎 ========================================\n');
                 return;
               }
 
@@ -6014,7 +5991,7 @@ if (firebase && firebase.auth) {
                 // Store file to IndexedDB (disk-backed, not RAM)
                 const fileId = await storeFileToIndexedDB(file, roomData.roomId, null);
 
-                console.log(`âœ… File stored successfully: ${fileId}`);
+                console.log(`✅ File stored successfully: ${fileId}`);
 
                 // Get file back from IndexedDB to show preview
                 const storedFile = await getFileFromIndexedDB(fileId);
@@ -6035,7 +6012,7 @@ if (firebase && firebase.auth) {
                 attachmentBtn.innerHTML = originalIcon;
 
               } catch (error) {
-                console.error('âŒ Failed to store file:', error);
+                console.error('❌ Failed to store file:', error);
                 toast('Failed to attach file. Please try again.', 'error');
 
                 // Restore button state
@@ -6044,7 +6021,7 @@ if (firebase && firebase.auth) {
                 attachmentBtn.innerHTML = originalIcon;
               }
 
-              console.log('ðŸ“Ž ========================================\n');
+              console.log('📎 ========================================\n');
 
               // Clean up file input
               document.body.removeChild(fileInput);
@@ -6062,20 +6039,20 @@ if (firebase && firebase.auth) {
         const removeAttachmentBtn = document.getElementById('removeAttachment');
         if (removeAttachmentBtn) {
           removeAttachmentBtn.addEventListener('click', async () => {
-            console.log('ðŸ—‘ï¸ Remove attachment clicked');
+            console.log('🗑️ Remove attachment clicked');
 
             if (pendingAttachment) {
               try {
                 // Delete from IndexedDB
                 await deleteFileFromIndexedDB(pendingAttachment.fileId);
-                console.log(`âœ… Deleted file: ${pendingAttachment.fileId}`);
+                console.log(`✅ Deleted file: ${pendingAttachment.fileId}`);
 
                 // Hide preview
                 hideAttachmentPreview();
 
                 toast('Attachment removed', 'success');
               } catch (error) {
-                console.error('âŒ Failed to remove attachment:', error);
+                console.error('❌ Failed to remove attachment:', error);
                 toast('Failed to remove attachment', 'error');
               }
             }
@@ -6100,11 +6077,11 @@ if (firebase && firebase.auth) {
           const isCallPage = url.pathname === '/call.html' || url.pathname === 'call.html' || url.pathname.endsWith('/call.html');
 
           if (isCallPage) {
-            console.log('ðŸ Navigating to call page - suppressing auto-leave');
+            console.log('🏁 Navigating to call page - suppressing auto-leave');
             navigatingToCall = true;
           } else if (url.origin === window.location.origin) {
             // Internal navigation to other pages
-            console.log(`ðŸšª Navigating to ${url.pathname} - triggering leave sequence`);
+            console.log(`🚪 Navigating to ${url.pathname} - triggering leave sequence`);
             e.preventDefault();
             await exitRoomSequence(url.href);
           }
@@ -6115,7 +6092,7 @@ if (firebase && firebase.auth) {
           const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
 
           if (navigatingToCall || hasBackgroundCall || isInBackgroundCall) {
-            console.log('â„¹ï¸ Unloading but navigating to call or in background');
+            console.log('ℹ️ Unloading but navigating to call or in background');
             return;
           }
 
@@ -6123,7 +6100,7 @@ if (firebase && firebase.auth) {
           // This allows the room to persist during refreshes/temporary disconnects.
           // The server-side heartbeat timeout (35s) will clean up orphaned rooms.
 
-          console.log('ðŸšª Page unloading (refresh/close) - relying on server-side timeout for cleanup');
+          console.log('🚪 Page unloading (refresh/close) - relying on server-side timeout for cleanup');
 
           try {
             if (roomData?.roomId) {
@@ -6147,7 +6124,7 @@ if (firebase && firebase.auth) {
             } catch { }
             const hasBackgroundCall = sessionStorage.getItem('hasBackgroundCall') === 'true';
             if (!navigatingToCall && !hasBackgroundCall && !isInBackgroundCall) {
-              console.log('ðŸ“± Tab hidden - user might be leaving chat');
+              console.log('📱 Tab hidden - user might be leaving chat');
               reportChatPresenceContext('visibility_hidden', {
                 allowRedirect: false,
                 keepalive: true,
@@ -6171,64 +6148,64 @@ if (firebase && firebase.auth) {
         });
 
         window.addEventListener('offline', () => {
-          console.warn('ðŸ“´ Network offline detected');
+          console.warn('📴 Network offline detected');
         });
 
 
         if (audioCallBtn) {
           audioCallBtn.addEventListener('click', async () => {
-            console.log('ðŸ“ž ========================================');
-            console.log('ðŸ“ž AUDIO CALL BUTTON CLICKED');
-            console.log('ðŸ“ž ========================================');
+            console.log('📞 ========================================');
+            console.log('📞 AUDIO CALL BUTTON CLICKED');
+            console.log('📞 ========================================');
             console.log(`   Authentication state: ${isSocketAuthenticated}`);
             console.log(`   Socket connected: ${socketInstance?.connected}`);
             console.log(`   Already initiating: ${isInitiatingCall}`);
 
             // CRITICAL: Block if already initiating
             if (isInitiatingCall) {
-              console.log('âš ï¸ Call already being initiated, ignoring click');
-              console.log('ðŸ“ž ========================================\n');
+              console.log('⚠️ Call already being initiated, ignoring click');
+              console.log('📞 ========================================\n');
               return;
             }
 
             // CRITICAL: Wait for authentication if not ready
             if (!isSocketAuthenticated) {
-              console.log('â³ Not authenticated yet - waiting...');
+              console.log('⏳ Not authenticated yet - waiting...');
               audioCallBtn.disabled = true;
               audioCallBtn.classList.add('animate-pulse');
 
               try {
                 await waitForAuthentication();
-                console.log('âœ… Authentication complete, proceeding with call');
+                console.log('✅ Authentication complete, proceeding with call');
               } catch (e) {
-                console.error('âŒ Authentication wait failed:', e);
+                console.error('❌ Authentication wait failed:', e);
                 toast('Connection failed. Please refresh.', 'error');
                 audioCallBtn.disabled = false;
                 audioCallBtn.classList.remove('animate-pulse');
-                console.log('ðŸ“ž ========================================\n');
+                console.log('📞 ========================================\n');
                 return;
               }
             }
 
             // CRITICAL: Verify socket still connected
             if (!socketInstance || !socketInstance.connected) {
-              console.error('âŒ Socket disconnected during call initiation');
+              console.error('❌ Socket disconnected during call initiation');
               toast('Connection lost. Please refresh.', 'error');
-              console.log('ðŸ“ž ========================================\n');
+              console.log('📞 ========================================\n');
               return;
             }
 
             if (!hasJoinedRoom || !roomData?.roomId) {
-              console.warn('âš ï¸ Chat room is not ready for call initiation yet');
+              console.warn('⚠️ Chat room is not ready for call initiation yet');
               toast('Chat is still connecting. Please try again in a moment.', 'warning');
               audioCallBtn.disabled = true;
               audioCallBtn.classList.remove('animate-pulse');
               updateCallButtonStates();
-              console.log('ðŸ“ž ========================================\n');
+              console.log('📞 ========================================\n');
               return;
             }
 
-            console.log('âœ… All checks passed - initiating audio call');
+            console.log('✅ All checks passed - initiating audio call');
             isInitiatingCall = true;
 
             try {
@@ -6249,7 +6226,7 @@ if (firebase && firebase.auth) {
               callType: 'audio'
             });
 
-            console.log('ðŸ“¤ Audio call initiation sent to server');
+            console.log('📤 Audio call initiation sent to server');
             toast('Calling...', 'success');
 
             // Timeout with recovery (iframe + auth + signaling can easily take >2s)
@@ -6259,7 +6236,7 @@ if (firebase && firebase.auth) {
               try { hasActiveCall = !!localStorage.getItem(ACTIVE_CALL_KEY); } catch { }
               if (hasActiveCall) return;
 
-              console.log('â° Call initiation timeout (12s)');
+              console.log('⏰ Call initiation timeout (12s)');
               isInitiatingCall = false;
               callInitiationTimeoutId = null;
               audioCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
@@ -6275,65 +6252,65 @@ if (firebase && firebase.auth) {
               toast('Call timeout - no response', 'warning');
             }, 12000);
 
-            console.log('ðŸ“ž ========================================\n');
+            console.log('📞 ========================================\n');
 
           }, { passive: true });
         }
 
         if (videoCallBtn) {
           videoCallBtn.addEventListener('click', async () => {
-            console.log('ðŸ“ž ========================================');
-            console.log('ðŸ“ž VIDEO CALL BUTTON CLICKED');
-            console.log('ðŸ“ž ========================================');
+            console.log('📞 ========================================');
+            console.log('📞 VIDEO CALL BUTTON CLICKED');
+            console.log('📞 ========================================');
             console.log(`   Authentication state: ${isSocketAuthenticated}`);
             console.log(`   Socket connected: ${socketInstance?.connected}`);
             console.log(`   Already initiating: ${isInitiatingCall}`);
 
             // CRITICAL: Block if already initiating
             if (isInitiatingCall) {
-              console.log('âš ï¸ Call already being initiated, ignoring click');
-              console.log('ðŸ“ž ========================================\n');
+              console.log('⚠️ Call already being initiated, ignoring click');
+              console.log('📞 ========================================\n');
               return;
             }
 
             // CRITICAL: Wait for authentication if not ready
             if (!isSocketAuthenticated) {
-              console.log('â³ Not authenticated yet - waiting...');
+              console.log('⏳ Not authenticated yet - waiting...');
               videoCallBtn.disabled = true;
               videoCallBtn.classList.add('animate-pulse');
 
               try {
                 await waitForAuthentication();
-                console.log('âœ… Authentication complete, proceeding with call');
+                console.log('✅ Authentication complete, proceeding with call');
               } catch (e) {
-                console.error('âŒ Authentication wait failed:', e);
+                console.error('❌ Authentication wait failed:', e);
                 toast('Connection failed. Please refresh.', 'error');
                 videoCallBtn.disabled = false;
                 videoCallBtn.classList.remove('animate-pulse');
-                console.log('ðŸ“ž ========================================\n');
+                console.log('📞 ========================================\n');
                 return;
               }
             }
 
             // CRITICAL: Verify socket still connected
             if (!socketInstance || !socketInstance.connected) {
-              console.error('âŒ Socket disconnected during call initiation');
+              console.error('❌ Socket disconnected during call initiation');
               toast('Connection lost. Please refresh.', 'error');
-              console.log('ðŸ“ž ========================================\n');
+              console.log('📞 ========================================\n');
               return;
             }
 
             if (!hasJoinedRoom || !roomData?.roomId) {
-              console.warn('âš ï¸ Chat room is not ready for call initiation yet');
+              console.warn('⚠️ Chat room is not ready for call initiation yet');
               toast('Chat is still connecting. Please try again in a moment.', 'warning');
               videoCallBtn.disabled = true;
               videoCallBtn.classList.remove('animate-pulse');
               updateCallButtonStates();
-              console.log('ðŸ“ž ========================================\n');
+              console.log('📞 ========================================\n');
               return;
             }
 
-            console.log('âœ… All checks passed - initiating video call');
+            console.log('✅ All checks passed - initiating video call');
             isInitiatingCall = true;
 
             try {
@@ -6354,7 +6331,7 @@ if (firebase && firebase.auth) {
               callType: 'video'
             });
 
-            console.log('ðŸ“¤ Video call initiation sent to server');
+            console.log('📤 Video call initiation sent to server');
             toast('Calling...', 'success');
 
             // Timeout with recovery (iframe + auth + signaling can easily take >2s)
@@ -6364,7 +6341,7 @@ if (firebase && firebase.auth) {
               try { hasActiveCall = !!localStorage.getItem(ACTIVE_CALL_KEY); } catch { }
               if (hasActiveCall) return;
 
-              console.log('â° Call initiation timeout (12s)');
+              console.log('⏰ Call initiation timeout (12s)');
               isInitiatingCall = false;
               callInitiationTimeoutId = null;
               videoCallBtn.classList.remove('call-btn-loading', 'animate-pulse');
@@ -6380,7 +6357,7 @@ if (firebase && firebase.auth) {
               toast('Call timeout - no response', 'warning');
             }, 12000);
 
-            console.log('ðŸ“ž ========================================\n');
+            console.log('📞 ========================================\n');
 
           }, { passive: true });
         }
@@ -6392,17 +6369,17 @@ if (firebase && firebase.auth) {
           let lastJoinClickAt = 0;
 
           joinCallBtn.addEventListener('click', () => {
-            console.log('ðŸ”˜ ========================================');
-            console.log('ðŸ”˜ JOIN CALL BUTTON CLICKED');
-            console.log('ðŸ”˜ ========================================');
+            console.log('🔘 ========================================');
+            console.log('🔘 JOIN CALL BUTTON CLICKED');
+            console.log('🔘 ========================================');
 
             const now = Date.now();
             if (joinClickInFlight) {
-              console.warn('âš ï¸ Join call click ignored: already in-flight');
+              console.warn('⚠️ Join call click ignored: already in-flight');
               return;
             }
             if (now - lastJoinClickAt < 800) {
-              console.warn('âš ï¸ Join call click throttled');
+              console.warn('⚠️ Join call click throttled');
               return;
             }
             lastJoinClickAt = now;
@@ -6433,29 +6410,29 @@ if (firebase && firebase.auth) {
 
             if (userInCall) {
               // User is already in call - show call iframe or navigate
-              console.log('ðŸ“ž BACK TO CALL MODE');
+              console.log('📞 BACK TO CALL MODE');
 
               // CRITICAL: Force show local iframe first
               let callIframeContainer = document.getElementById('callIframeContainer');
 
               if (!callIframeContainer) {
                 // Create iframe container if it doesn't exist
-                console.log('ðŸ“± Call iframe container missing - creating it');
+                console.log('📱 Call iframe container missing - creating it');
                 callIframeContainer = document.createElement('div');
                 callIframeContainer.id = 'callIframeContainer';
                 callIframeContainer.className = 'fixed inset-0 z-[9999] bg-black';
                 callIframeContainer.innerHTML = '<iframe id="callIframe" src="/call.html" class="w-full h-full border-none"></iframe>';
                 document.body.appendChild(callIframeContainer);
-                console.log('âœ… Call iframe container created and call.html loaded');
+                console.log('✅ Call iframe container created and call.html loaded');
               } else {
                 // Iframe exists, just show it
                 callIframeContainer.classList.remove('hidden');
-                console.log('âœ… Call iframe shown');
+                console.log('✅ Call iframe shown');
               }
 
               // Fallback for iframe mode (if applicable)
               if (window.parent && window.parent !== window) {
-                console.log('ðŸ“± In iframe - sending showCall to parent (redundant but safe)');
+                console.log('📱 In iframe - sending showCall to parent (redundant but safe)');
                 window.parent.postMessage({ action: 'REQUEST_SHOW_CALL' }, '*');
               }
 
@@ -6468,7 +6445,7 @@ if (firebase && firebase.auth) {
 
             } else {
               if (!activeCallInRoom) {
-                console.error('âŒ Cannot join call: activeCallInRoom is null');
+                console.error('❌ Cannot join call: activeCallInRoom is null');
                 toast('Failed to join call data. Please refresh.', 'error');
                 resetJoinBtnState();
                 return;
@@ -6476,7 +6453,7 @@ if (firebase && firebase.auth) {
 
               joinCallBtn.classList.add('join-btn-loading');
               joinCallBtn.disabled = true;
-              console.log('â³ Join button set to loading state');
+              console.log('⏳ Join button set to loading state');
 
               // CRITICAL FIX: Store call data BEFORE emitting join_existing_call
               const callDataToStore = {
@@ -6488,7 +6465,7 @@ if (firebase && firebase.auth) {
               };
 
               localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(callDataToStore));
-              console.log('ðŸ’¾ Stored call data to localStorage (pre-join):');
+              console.log('💾 Stored call data to localStorage (pre-join):');
               console.log('   ', JSON.stringify(callDataToStore, null, 2));
 
               const eventData = {
@@ -6496,27 +6473,27 @@ if (firebase && firebase.auth) {
                 roomId: roomData.roomId
               };
 
-              console.log('ðŸ“¤ Emitting join_existing_call with data:');
+              console.log('📤 Emitting join_existing_call with data:');
               console.log('   ', JSON.stringify(eventData, null, 2));
 
               if (!socketInstance || !socketInstance.connected) {
-                console.error('âŒ Socket not connected!');
+                console.error('❌ Socket not connected!');
                 toast('Connection lost. Please refresh the page.', 'error');
                 resetJoinBtnState();
-                console.log('ðŸ”˜ ========================================\n');
+                console.log('🔘 ========================================\n');
                 return;
               }
 
               socketInstance.emit('join_existing_call', eventData);
 
               toast('Joining call...', 'success');
-              console.log('âœ… Event emitted successfully');
-              console.log('ðŸ”˜ ========================================\n');
+              console.log('✅ Event emitted successfully');
+              console.log('🔘 ========================================\n');
 
               // If we never navigate / never get server response, don't keep the button locked forever.
               setTimeout(() => {
                 if (joinClickInFlight) {
-                  console.warn('â±ï¸ Join click watchdog releasing button (no navigation yet)');
+                  console.warn('⏱️ Join click watchdog releasing button (no navigation yet)');
                   resetJoinBtnState();
                 }
               }, 6000);
@@ -6530,9 +6507,9 @@ if (firebase && firebase.auth) {
               const callToAccept = pendingCallData;
               pendingCallData = null;
 
-              console.log('âœ… ========================================');
-              console.log('âœ… USER ACCEPTED INCOMING CALL');
-              console.log('âœ… ========================================');
+              console.log('✅ ========================================');
+              console.log('✅ USER ACCEPTED INCOMING CALL');
+              console.log('✅ ========================================');
               console.log(`   callId: ${callToAccept.callId}`);
 
               // Clear cached call
@@ -6552,7 +6529,7 @@ if (firebase && firebase.auth) {
               saveChatState(roomData.roomId, messagesCache);
               sessionStorage.setItem('returningFromCall', 'true');
 
-              // âœ… CRITICAL FIX: Store call data BEFORE emitting join_existing_call
+              // ✅ CRITICAL FIX: Store call data BEFORE emitting join_existing_call
               localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify({
                 callId: callToAccept.callId,
                 roomId: roomData.roomId,
@@ -6560,9 +6537,9 @@ if (firebase && firebase.auth) {
                 storedAt: Date.now(),
                 users: []
               }));
-              console.log('ðŸ’¾ Stored call data to localStorage (pre-join)');
+              console.log('💾 Stored call data to localStorage (pre-join)');
 
-              console.log('ðŸ“¤ Emitting join_existing_call to server');
+              console.log('📤 Emitting join_existing_call to server');
 
               // Use join_existing_call to ensure server adds us to participants list first
               socketInstance?.emit('join_existing_call', {
@@ -6570,8 +6547,8 @@ if (firebase && firebase.auth) {
                 roomId: roomData.roomId
               });
 
-              console.log('âœ… Join request sent - will navigate on success');
-              console.log('âœ… ========================================\n');
+              console.log('✅ Join request sent - will navigate on success');
+              console.log('✅ ========================================\n');
 
               // Don't navigate here - wait for join_existing_call_success event
             }
@@ -6584,21 +6561,21 @@ if (firebase && firebase.auth) {
               const callToDecline = pendingCallData;
               pendingCallData = null;
 
-              console.log('âŒ ========================================');
-              console.log('âŒ USER DECLINED INCOMING CALL');
-              console.log('âŒ ========================================');
+              console.log('❌ ========================================');
+              console.log('❌ USER DECLINED INCOMING CALL');
+              console.log('❌ ========================================');
               console.log(`   callId: ${callToDecline.callId}`);
               console.log(`   Call remains active - user can still join via JOIN button`);
 
               // Clear cached call
               localStorage.removeItem(CACHED_CALL_KEY);
-              console.log('ðŸ—‘ï¸ Cleared cached call after decline');
+              console.log('🗑️ Cleared cached call after decline');
 
               // Hide modal
               incomingCallModal?.classList.add('hidden');
 
-              console.log('âœ… Modal dismissed - call still active in room');
-              console.log('âŒ ========================================\n');
+              console.log('✅ Modal dismissed - call still active in room');
+              console.log('❌ ========================================\n');
             }
           }, { passive: true });
         }
@@ -6610,13 +6587,13 @@ if (firebase && firebase.auth) {
 
             // Allow sending if there's a message OR an attachment
             if (!message && !pendingAttachment) {
-              console.log('âš ï¸ No message or attachment to send');
+              console.log('⚠️ No message or attachment to send');
               return;
             }
 
-            console.log('ðŸ“¤ ========================================');
-            console.log('ðŸ“¤ SENDING MESSAGE TO SERVER');
-            console.log('ðŸ“¤ ========================================');
+            console.log('📤 ========================================');
+            console.log('📤 SENDING MESSAGE TO SERVER');
+            console.log('📤 ========================================');
             console.log(`   Message: ${message || '[attachment only]'}`);
             console.log(`   Has attachment: ${!!pendingAttachment}`);
 
@@ -6644,9 +6621,9 @@ if (firebase && firebase.auth) {
             // ============================================
             if (pendingAttachment) {
               try {
-                console.log('ðŸ“Ž ========================================');
-                console.log('ðŸ“Ž PREPARING ATTACHMENT UPLOAD');
-                console.log('ðŸ“Ž ========================================');
+                console.log('📎 ========================================');
+                console.log('📎 PREPARING ATTACHMENT UPLOAD');
+                console.log('📎 ========================================');
                 console.log(`   FileID: ${pendingAttachment.fileId}`);
                 console.log(`   File: ${pendingAttachment.name}`);
                 console.log(`   Size: ${(pendingAttachment.size / 1024 / 1024).toFixed(2)} MB`);
@@ -6675,7 +6652,7 @@ if (firebase && firebase.auth) {
                   throw new Error('Failed to retrieve file from storage');
                 }
 
-                console.log(`âœ… File retrieved from IndexedDB`);
+                console.log(`✅ File retrieved from IndexedDB`);
 
                 // Upload payload
                 const file = new File([fileData.blob], fileData.name, { type: fileData.type });
@@ -6699,37 +6676,37 @@ if (firebase && firebase.auth) {
                 // IMMEDIATE: Hide preview for responsive UX
                 hideAttachmentPreview();
 
-                console.log('ðŸ“¤ Emitting message metadata to server...');
+                console.log('📤 Emitting message metadata to server...');
                 safeSocketEmit('chat_message', serverMessageData);
 
-                console.log('âœ… Attachment uploaded and message broadcasted');
+                console.log('✅ Attachment uploaded and message broadcasted');
 
                 // Remove progress UI
                 progressDiv.remove();
 
                 toast(`File uploaded: ${uploadedAttachment.name || file.name}`, 'success');
 
-                console.log('ðŸ“Ž ========================================\\n');
+                console.log('📎 ========================================\\n');
 
               } catch (error) {
-                console.error('âŒ Attachment transmission failed:', error);
+                console.error('❌ Attachment transmission failed:', error);
 
                 // Remove progress UI
                 const progressDiv = document.getElementById('uploadProgress');
                 if (progressDiv) progressDiv.remove();
 
                 toast('Failed to send attachment. Please try again.', 'error');
-                console.log('ðŸ“Ž ========================================\n');
+                console.log('📎 ========================================\n');
                 return; // Don't clear input on failure
               }
             } else {
               // No attachment - send message normally
-              console.log('ðŸ“¤ Emitting text-only message...');
+              console.log('📤 Emitting text-only message...');
               safeSocketEmit('chat_message', serverMessageData);
-              console.log('âœ… Message sent to server');
+              console.log('✅ Message sent to server');
             }
 
-            console.log('ðŸ“¤ ========================================\n');
+            console.log('📤 ========================================\n');
 
             // ============================================
             // CLEAR INPUT AND ATTACHMENTS
@@ -6749,7 +6726,7 @@ if (firebase && firebase.auth) {
         }
 
         leaveBtn?.addEventListener('click', async () => {
-          console.log('ðŸšª Leave button clicked - initiating exit sequence');
+          console.log('🚪 Leave button clicked - initiating exit sequence');
           await exitRoomSequence();
         });
 
@@ -6796,17 +6773,17 @@ if (firebase && firebase.auth) {
 
       try {
         await initFileDB();
-        console.log('âœ… File storage initialized');
+        console.log('✅ File storage initialized');
 
         // Clean up any orphaned files from previous sessions
         if (roomData?.roomId) {
           const fileCount = await getRoomFileCount(roomData.roomId);
           if (fileCount > 0) {
-            console.log(`â„¹ï¸ Found ${fileCount} existing file(s) for this room`);
+            console.log(`ℹ️ Found ${fileCount} existing file(s) for this room`);
           }
         }
       } catch (error) {
-        console.error('âš ï¸ File storage initialization failed:', error);
+        console.error('⚠️ File storage initialization failed:', error);
         console.error('   File attachments will be disabled');
         // Disable attachment button if IndexedDB fails
         const attachBtn = document.querySelector('.attachment-btn');
@@ -6836,7 +6813,7 @@ if (firebase && firebase.auth) {
             if (roomStr) {
               const room = JSON.parse(roomStr);
               if (activeCall.roomId === room.roomId) {
-                console.log('ðŸ” Active call detected in iframe - treating as return from call');
+                console.log('🔍 Active call detected in iframe - treating as return from call');
                 shouldPreserveState = true;
               }
             }
@@ -6846,7 +6823,7 @@ if (firebase && firebase.auth) {
         }
 
 
-        console.log('ðŸ” Page load context:', {
+        console.log('🔍 Page load context:', {
           returningFromCall,
           isBackgroundCall,
           isInIframe,
@@ -6856,36 +6833,36 @@ if (firebase && firebase.auth) {
 
         if (!shouldPreserveState) {
           // Only clear if this is a fresh entry to chat (not returning from call)
-          console.log('ðŸ§¹ Fresh chat entry - clearing old state');
+          console.log('🧹 Fresh chat entry - clearing old state');
           clearAllChatData();
         } else {
-          console.log('ðŸ”„ Returning from call - preserving chat state');
+          console.log('🔄 Returning from call - preserving chat state');
           // Don't clear - we want to restore the previous state
         }
 
         // Auth check (allow anonymous)
         await _Auth.requireAuth();
       } catch (err) {
-        console.error('âŒ Auth failed:', err);
+        console.error('❌ Auth failed:', err);
         toast('Failed to sign in', 'error');
         return;
       }
 
 
       // CRITICAL: Initialize floating call popup elements early
-      console.log('ðŸŽˆ Pre-initializing floating call popup');
+      console.log('🎈 Pre-initializing floating call popup');
 
       // Check if returning from call
       const returningFromCall = sessionStorage.getItem('returningFromCall');
       if (returningFromCall === 'true') {
-        console.log('ðŸ”„ Returning from call - popup will be shown after room_joined');
-        console.log('ðŸ” Active call check:', !!localStorage.getItem(ACTIVE_CALL_KEY));
+        console.log('🔄 Returning from call - popup will be shown after room_joined');
+        console.log('🔍 Active call check:', !!localStorage.getItem(ACTIVE_CALL_KEY));
       }
 
       const roomDataStr = localStorage.getItem('currentRoom');
       if (!roomDataStr) {
         if (!isSocialClubMode) {
-          console.warn('â„¹ï¸ No currentRoom in localStorage - will create room immediately');
+          console.warn('ℹ️ No currentRoom in localStorage - will create room immediately');
         }
       }
 
@@ -6893,16 +6870,16 @@ if (firebase && firebase.auth) {
         if (isSocialClubMode && roomDataStr) {
           roomData = JSON.parse(roomDataStr);
           currentRoomId = roomData?.roomId || null;
-          console.log('ðŸŽ­ Social Club reload/reconnect - restoring cached currentRoom before server sync');
+          console.log('🎭 Social Club reload/reconnect - restoring cached currentRoom before server sync');
           console.log(`   roomId: ${currentRoomId || 'unknown'}`);
         } else if (isSocialClubMode) {
           roomData = null;
           currentRoomId = null;
-          console.log('ðŸŽ­ Social Club mode - ignoring cached currentRoom, will join via join_social_club');
+          console.log('🎭 Social Club mode - ignoring cached currentRoom, will join via join_social_club');
         } else if (roomDataStr) {
           roomData = JSON.parse(roomDataStr);
           currentRoomId = roomData?.roomId || null;
-          console.log('ðŸ“¦ Loaded room data from localStorage:');
+          console.log('📦 Loaded room data from localStorage:');
           console.log(`   roomId: ${roomData.roomId}`);
         } else {
           roomData = null;
@@ -6912,7 +6889,7 @@ if (firebase && firebase.auth) {
         // CRITICAL: Don't trust localStorage expiresAt - wait for server
         if (roomData && roomData.expiresAt) {
           console.log(`   LocalStorage expiresAt: ${new Date(roomData.expiresAt).toISOString()}`);
-          console.log(`   âš ï¸ Will be replaced with server time after connection`);
+          console.log(`   ⚠️ Will be replaced with server time after connection`);
         } else {
           console.log(`   No expiresAt in localStorage - will get from server`);
         }
@@ -6922,7 +6899,7 @@ if (firebase && firebase.auth) {
         }
         checkForBackgroundCall();
       } catch (err) {
-        console.error('âŒ Invalid room data:', err);
+        console.error('❌ Invalid room data:', err);
         toast('Invalid room data', 'error');
         clearChatState(true);
         setTimeout(() => window.location.href = '/mood.html', 1500);
@@ -6957,7 +6934,7 @@ if (firebase && firebase.auth) {
           } catch { }
         }
       } catch (e) {
-        console.warn('âš ï¸ ensure-guest failed (continuing):', e?.message || e);
+        console.warn('⚠️ ensure-guest failed (continuing):', e?.message || e);
       }
 
       // Get current user data
@@ -6981,27 +6958,27 @@ if (firebase && firebase.auth) {
           pfpUrl: userData.pfpUrl
         };
       } catch (err) {
-        console.error('âŒ Failed to get user data:', err);
+        console.error('❌ Failed to get user data:', err);
         toast('Failed to load user data', 'error');
         return;
       }
 
 
       // CRITICAL: Start with buttons DISABLED until authenticated
-      console.log('ðŸŽšï¸ Initializing call buttons (disabled until authenticated)');
+      console.log('🎚️ Initializing call buttons (disabled until authenticated)');
       disableCallButtons(false); // false = don't show loading, just disabled
 
       const cachedState = loadChatState();
 
       if (cachedState && roomData && cachedState.roomId === roomData.roomId) {
-        console.log('ðŸŽ¨ Restoring UI from cache IMMEDIATELY on page load');
+        console.log('🎨 Restoring UI from cache IMMEDIATELY on page load');
         console.log(`   Cached button state: ${cachedState.callButtonState}`);
         console.log(`   Cached activeCallInRoom:`, cachedState.activeCallInRoom);
 
         // Restore activeCallInRoom immediately
         if (cachedState.activeCallInRoom) {
           activeCallInRoom = cachedState.activeCallInRoom;
-          console.log('ðŸ’¾ Pre-loaded activeCallInRoom from cache');
+          console.log('💾 Pre-loaded activeCallInRoom from cache');
         } else if (cachedState.callButtonState === 'back') {
           // Reconstruct from ACTIVE_CALL_KEY
           const activeCallStr = localStorage.getItem(ACTIVE_CALL_KEY);
@@ -7013,7 +6990,7 @@ if (firebase && firebase.auth) {
                 callType: activeCallData.callType,
                 participantCount: 2
               };
-              console.log('ðŸ’¾ Pre-loaded activeCallInRoom from ACTIVE_CALL_KEY');
+              console.log('💾 Pre-loaded activeCallInRoom from ACTIVE_CALL_KEY');
             } catch (e) {
               console.error('Failed to reconstruct activeCallInRoom:', e);
             }
@@ -7023,10 +7000,10 @@ if (firebase && firebase.auth) {
         // Set button state immediately from cache (but keep disabled until auth)
         if (cachedState.callButtonState === 'back') {
           updateCallButtonState(true, activeCallInRoom || { participantCount: 1 });
-          console.log('âœ… "Back to Call" button shown immediately from cache (disabled until auth)');
+          console.log('✅ "Back to Call" button shown immediately from cache (disabled until auth)');
         } else if (cachedState.callButtonState === 'join' && activeCallInRoom) {
           updateCallButtonState(true, activeCallInRoom);
-          console.log('âœ… "Join Call" button shown immediately from cache (disabled until auth)');
+          console.log('✅ "Join Call" button shown immediately from cache (disabled until auth)');
         } else {
           setInitialCallButtonState();
         }
@@ -7092,7 +7069,7 @@ if (firebase && firebase.auth) {
 
         setupSocketHandlers();
       } catch (err) {
-        console.error('âŒ Socket initialization failed:', err);
+        console.error('❌ Socket initialization failed:', err);
         toast('Connection failed', 'error');
       }
 
@@ -7102,11 +7079,12 @@ if (firebase && firebase.auth) {
       // Setup back button handler
       setupBackButtonHandler();
 
-      console.log('âœ… Chat initialization complete');
+      console.log('✅ Chat initialization complete');
 
     } catch (err) {
-      console.error('âŒ Chat bootstrap failed:', err);
+      console.error('❌ Chat bootstrap failed:', err);
       try { toast('Failed to initialize chat', 'error'); } catch { }
     }
 
     })();
+
