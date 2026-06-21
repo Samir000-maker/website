@@ -23,7 +23,7 @@ const SENSITIVE_FILES = [
   '.gitignore'
 ];
 
-// Core frontend script files that require protection and dynamically served unminified
+// Core frontend script files that require protection
 const PROTECTED_SCRIPTS = [
   'chat.js',
   'call.js',
@@ -41,18 +41,28 @@ const PROTECTED_SCRIPTS = [
  * Validates whether the request is a direct access request (like curl, address-bar typing)
  */
 function isDirectAccess(req) {
+  // If the request has our custom secure fetch header, it is valid
+  if (req.headers['x-secure-fetch'] === 'true') {
+    return false;
+  }
+
   const secFetchDest = req.headers['sec-fetch-dest'];
   const secFetchMode = req.headers['sec-fetch-mode'];
   const secFetchSite = req.headers['sec-fetch-site'];
   const referer = req.headers['referer'];
   const host = req.headers['host'];
 
-  // 1. Check if modern browser sec-fetch headers indicate direct navigation or non-script destination
+  // Allow service worker requests or standard script destination
+  if (secFetchDest === 'script' || secFetchDest === 'serviceworker') {
+    return false;
+  }
+
+  // Block direct browser navigation or document/iframe requests
   if (secFetchMode === 'navigate' || secFetchDest === 'document' || secFetchDest === 'iframe') {
     return true;
   }
 
-  // 2. If it is cross-site loading (unless it is localhost development)
+  // Block cross-site loads
   if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'none') {
     const isLocalhost = host && (host.includes('localhost') || host.includes('127.0.0.1'));
     if (!isLocalhost) {
@@ -60,7 +70,7 @@ function isDirectAccess(req) {
     }
   }
 
-  // 3. Referer check
+  // Referer validation
   if (referer) {
     try {
       const refUrl = new URL(referer);
@@ -69,16 +79,85 @@ function isDirectAccess(req) {
         return true;
       }
     } catch (e) {
-      return true; // Invalid referer URL format
+      return true;
     }
   } else {
-    // If there is no referer and no sec-fetch headers, it's likely a direct command-line or bot load
+    // Block command-line/bot scraping
     if (!secFetchDest && !secFetchMode) {
       return true;
     }
   }
 
   return false;
+}
+
+/**
+ * Parses HTML and rewrites script tags to fetch and evaluate JavaScript dynamically.
+ * This prevents scripts from appearing in the Chrome DevTools 'Sources' file tree.
+ */
+function rewriteHtmlScripts(html) {
+  let scriptCounter = 0;
+
+  return html.replace(/<script\s+([^>]*src=["']([^"']+)["'][^>]*)>\s*<\/script>/gi, (match, attrs, src) => {
+    // 1. Skip tailwindcss to prevent FOUC / styling configuration issues
+    if (src.includes('tailwindcss') || src.includes('tailwind.config')) {
+      return match;
+    }
+
+    // Parse filename and check if it is a protected script
+    const cleanSrc = src.split('?')[0];
+    const baseName = path.basename(cleanSrc);
+    const isSecure = PROTECTED_SCRIPTS.includes(baseName) || baseName === 'env-config.js' || baseName === 'enc-config.js';
+
+    const type = isSecure ? 'secure' : 'external';
+    
+    // Map secure scripts to our API endpoint
+    let url = src;
+    if (isSecure) {
+      url = cleanSrc.startsWith('/api/js/') ? cleanSrc : `/api/js/${baseName}`;
+    }
+
+    scriptCounter++;
+
+    // Generate secure dynamic queue loader script
+    return `
+<script id="sec-loader-${scriptCounter}">
+  (function() {
+    window._secureScriptQueue = window._secureScriptQueue || [];
+    const prev = window._secureScriptQueue.length > 0 
+      ? window._secureScriptQueue[window._secureScriptQueue.length - 1].promise 
+      : Promise.resolve();
+    
+    let resolveFn;
+    const promise = new Promise((resolve) => { resolveFn = resolve; });
+    window._secureScriptQueue.push({ promise });
+
+    prev.then(async () => {
+      try {
+        if ("${type}" === "secure") {
+          const res = await fetch("${url}", { headers: { "X-Secure-Fetch": "true" } });
+          if (!res.ok) throw new Error("Load failed");
+          const code = await res.text();
+          (0, eval)(code);
+        } else {
+          await new Promise((resSec, rejSec) => {
+            const script = document.createElement("script");
+            script.src = "${url}";
+            script.onload = resSec;
+            script.onerror = rejSec;
+            document.head.appendChild(script);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load script: ${url}", err);
+      } finally {
+        resolveFn();
+      }
+    });
+  })();
+</script>
+`;
+  });
 }
 
 export default function securityMiddleware(req, res, next) {
@@ -106,7 +185,56 @@ export default function securityMiddleware(req, res, next) {
     return res.status(403).send('Forbidden: Access is denied.');
   }
 
-  // 3. Custom secure API route for loading scripts explicitly (e.g. GET /api/js/chat.js)
+  // 3. Dynamic HTML rewriting to inject secure loaders
+  const acceptHeader = req.headers['accept'] || '';
+  const isHtmlRequest = reqPath.endsWith('.html') || reqPath === '/' || (!path.extname(reqPath) && acceptHeader.includes('text/html'));
+
+  if (isHtmlRequest) {
+    let filePath = '';
+    if (reqPath === '/') {
+      filePath = path.join(__dirname, 'index.html');
+    } else if (reqPath.endsWith('.html')) {
+      filePath = path.join(__dirname, reqPath);
+    } else {
+      filePath = path.join(__dirname, `${reqPath}.html`);
+    }
+
+    if (fs.existsSync(filePath)) {
+      try {
+        let html = fs.readFileSync(filePath, 'utf8');
+        html = rewriteHtmlScripts(html);
+
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        return res.send(html);
+      } catch (err) {
+        console.error(`[Security] Error processing HTML file ${filePath}:`, err);
+      }
+    }
+  }
+
+  // 4. Handle dynamic configuration endpoint rewrite
+  if (reqPath === '/api/js/env-config.js' || reqPath === '/api/js/enc-config.js') {
+    if (isDirectAccess(req)) {
+      console.warn(`[Security] Blocked direct access to dynamic config: ${reqPath}`);
+      return res.status(403).send('Forbidden: Direct access to configuration is prohibited.');
+    }
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('SourceMap', '');
+    res.setHeader('X-SourceMap', '');
+
+    // Internally rewrite the request URL so server.js handles the configuration output
+    req.url = '/env-config.js';
+    return next();
+  }
+
+  // 5. Custom secure API route for loading scripts explicitly (e.g. GET /api/js/chat.js)
   const apiJsMatch = reqPath.match(/^\/api\/js\/(.+)$/);
   if (apiJsMatch) {
     const filename = apiJsMatch[1];
@@ -120,10 +248,8 @@ export default function securityMiddleware(req, res, next) {
       if (fs.existsSync(filePath)) {
         try {
           let content = fs.readFileSync(filePath, 'utf8');
-          // Dynamically strip any leftover source map comments to prevent DevTools from querying them
           content = content.replace(/\/\/#\s*sourceMappingURL=.*/g, '');
 
-          // Apply strict security and anti-scraping headers
           res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
           res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
           res.setHeader('Pragma', 'no-cache');
@@ -143,13 +269,14 @@ export default function securityMiddleware(req, res, next) {
     }
   }
 
-  // 4. Intercept direct frontend script requests (e.g. /chat.js)
+  // 6. Block direct requests to raw javascript files in root folder (redirect to 403)
   if (PROTECTED_SCRIPTS.includes(baseName) && reqPath.endsWith('.js')) {
     if (isDirectAccess(req)) {
       console.warn(`[Security] Blocked direct script load: ${reqPath}`);
       return res.status(403).send('Forbidden: Direct script access is prohibited.');
     }
 
+    // Allow normal script load (e.g. if loaded directly in old legacy manner, serve it)
     const filePath = path.join(__dirname, baseName);
     if (fs.existsSync(filePath)) {
       try {
@@ -172,23 +299,6 @@ export default function securityMiddleware(req, res, next) {
     }
   }
 
-  // 5. Apply direct access validation and headers to dynamic config endpoints (without serving the file content directly)
-  if (reqPath === '/env-config.js' || reqPath === '/enc-config.js') {
-    if (isDirectAccess(req)) {
-      console.warn(`[Security] Blocked direct access to dynamic config: ${reqPath}`);
-      return res.status(403).send('Forbidden: Direct access to configuration is prohibited.');
-    }
-
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('SourceMap', '');
-    res.setHeader('X-SourceMap', '');
-    
-    return next();
-  }
-
-  // Pass-through for other assets (HTML, images, stylesheets)
+  // Pass-through for other assets
   next();
 }
