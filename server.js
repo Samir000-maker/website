@@ -46,6 +46,7 @@ import {
 } from './cloudflare-storage.js';
 import { getUserProfile, updateUserProfileCache, invalidateUserProfileCache } from './profile-cache.js';
 import * as matchmaking from './matchmaking.js';
+import securityMiddleware from './securityMiddleware.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -2100,6 +2101,7 @@ async function getIceServers() {
 }
 
 const app = express();
+app.use(securityMiddleware);
 registerSocialClubSseRoutes(app);
 app.use(express.static(__dirname + '/public'));
 const server = createServer(app);
