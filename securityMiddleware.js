@@ -93,35 +93,43 @@ function isDirectAccess(req) {
 
 /**
  * Parses HTML and rewrites script tags to fetch and evaluate JavaScript dynamically.
- * This prevents scripts from appearing in the Chrome DevTools 'Sources' file tree.
+ * Both external/local script sources and inline script elements are queued
+ * sequentially to preserve execution order and prevent race conditions.
  */
 function rewriteHtmlScripts(html) {
   let scriptCounter = 0;
+  const anyScriptRegex = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
 
-  return html.replace(/<script\s+([^>]*src=["']([^"']+)["'][^>]*)>\s*<\/script>/gi, (match, attrs, src) => {
-    // 1. Skip tailwindcss to prevent FOUC / styling configuration issues
-    if (src.includes('tailwindcss') || src.includes('tailwind.config')) {
+  return html.replace(anyScriptRegex, (match, attrs, content) => {
+    // 1. Skip tailwindcss and tailwind config inline tags to prevent FOUC / styling configuration issues
+    if (attrs.includes('tailwindcss') || attrs.includes('id="tailwind-config"')) {
       return match;
     }
 
-    // Parse filename and check if it is a protected script
-    const cleanSrc = src.split('?')[0];
-    const baseName = path.basename(cleanSrc);
-    const isSecure = PROTECTED_SCRIPTS.includes(baseName) || baseName === 'env-config.js' || baseName === 'enc-config.js';
+    // 2. Parse src attribute if present
+    const srcMatch = attrs.match(/src=["']([^"']+)["']/i);
+    if (srcMatch) {
+      const src = srcMatch[1];
+      if (src.includes('tailwindcss')) {
+        return match;
+      }
 
-    const type = isSecure ? 'secure' : 'external';
-    
-    // Map secure scripts to our API endpoint
-    let url = src;
-    if (isSecure) {
-      url = cleanSrc.startsWith('/api/js/') ? cleanSrc : `/api/js/${baseName}`;
-    }
+      const cleanSrc = src.split('?')[0];
+      const baseName = path.basename(cleanSrc);
+      const isSecure = PROTECTED_SCRIPTS.includes(baseName) || baseName === 'env-config.js' || baseName === 'enc-config.js';
 
-    scriptCounter++;
+      const type = isSecure ? 'secure' : 'external';
+      
+      // Map secure scripts to our API endpoint
+      let url = src;
+      if (isSecure) {
+        url = cleanSrc.startsWith('/api/js/') ? cleanSrc : `/api/js/${baseName}`;
+      }
 
-    // Generate secure dynamic queue loader script
-    return `
-<script id="sec-loader-${scriptCounter}">
+      scriptCounter++;
+
+      return `
+<script id="sec-loader-src-${scriptCounter}">
   (function() {
     window._secureScriptQueue = window._secureScriptQueue || [];
     const prev = window._secureScriptQueue.length > 0 
@@ -157,6 +165,41 @@ function rewriteHtmlScripts(html) {
   })();
 </script>
 `;
+    } else {
+      // 3. Inline script: wrap its content in the global sequential execution queue
+      scriptCounter++;
+      
+      // Escape backslashes, backticks and ${} to be safe inside our template literal
+      const escapedContent = content
+        .replace(/\\/g, '\\\\')
+        .replace(/`/g, '\\`')
+        .replace(/\${/g, '\\${');
+
+      return `
+<script id="sec-loader-inline-${scriptCounter}" ${attrs}>
+  (function() {
+    window._secureScriptQueue = window._secureScriptQueue || [];
+    const prev = window._secureScriptQueue.length > 0 
+      ? window._secureScriptQueue[window._secureScriptQueue.length - 1].promise 
+      : Promise.resolve();
+    
+    let resolveFn;
+    const promise = new Promise((resolve) => { resolveFn = resolve; });
+    window._secureScriptQueue.push({ promise });
+
+    prev.then(() => {
+      try {
+        (0, eval)(\`${escapedContent}\`);
+      } catch (err) {
+        console.error("Error executing inline script ${scriptCounter}:", err);
+      } finally {
+        resolveFn();
+      }
+    });
+  })();
+</script>
+`;
+    }
   });
 }
 
