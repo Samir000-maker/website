@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
@@ -75,7 +76,15 @@
                 @apply bg-slate-900/40 backdrop-blur-2xl border border-white/10;
             }
             .glass-input {
-                @apply bg-slate-950/50 border border-white/10 focus:border-primary/50 placeholder-slate-500 text-slate-100;
+                background-color: rgb(2 6 23 / 0.5);
+                border: 1px solid rgb(255 255 255 / 0.1);
+                color: rgb(241 245 249);
+            }
+            .glass-input::placeholder {
+                color: rgb(100 116 139);
+            }
+            .glass-input:focus {
+                border-color: rgb(45 212 191 / 0.5);
             }
             .text-glow {
                 text-shadow: 0 0 20px rgba(45, 212, 191, 0.3);
@@ -308,9 +317,23 @@
     <script src="/env-config.js"></script>
 
     <script>
-        if (!firebase.apps.length) {
-            firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-        }
+        const ensureFirebaseReady = async () => {
+            const startedAt = Date.now();
+            while (typeof window.firebase === 'undefined' || !window.firebase.auth) {
+                if (Date.now() - startedAt > 10000) throw new Error('Firebase SDK did not load. Please refresh and try again.');
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+
+            if (!firebase.apps?.length) {
+                firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+            }
+
+            try {
+                await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+            } catch { }
+
+            return firebase.auth();
+        };
 
         // Toast notification system
         const Toast = {
@@ -482,7 +505,8 @@
 
             try {
                 // Send password reset email using Firebase
-                await firebase.auth().sendPasswordResetEmail(email);
+                const auth = await ensureFirebaseReady();
+                await auth.sendPasswordResetEmail(email);
                 
                 Loading.hide();
                 closeModalFunc();
@@ -496,9 +520,17 @@
         });
 
         // Main authentication logic
-        (function() {
+        (async function() {
+            let auth;
+            try {
+                auth = await ensureFirebaseReady();
+            } catch (error) {
+                Toast.error(error?.message || 'Authentication is unavailable. Please refresh and try again.');
+                return;
+            }
+
             // Check if user is already signed in
-            firebase.auth().onAuthStateChanged(async (user) => {
+            auth.onAuthStateChanged(async (user) => {
                 if (user && !isGoogleSignInInProgress && !isGuestSignInInProgress) {
                     try {
                         const idToken = await user.getIdToken();
@@ -517,9 +549,8 @@
                         let data = null;
                         try { data = text ? JSON.parse(text) : null; } catch { }
 
-                        if (!response.ok || (data && (data.error === 'User not found' || data.message === 'User not found'))) {
-                            Toast.error('Account not found. Please sign up or continue as guest.');
-                            try { await firebase.auth().signOut(); } catch { }
+                        if (!response.ok) {
+                            Toast.error('Unable to check your profile. Please try again.');
                             return;
                         }
 
@@ -577,7 +608,7 @@
                     Loading.show('Signing in...');
 
                     try {
-                        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+                        const userCredential = await auth.signInWithEmailAndPassword(email, password);
                         const idToken = await userCredential.user.getIdToken();
 
                         const apiBaseUrl = getApiBaseUrl();
@@ -596,7 +627,6 @@
                         if (!checkRes.ok || (checkData && (checkData.error === 'User not found' || checkData.message === 'User not found'))) {
                             Loading.hide();
                             Toast.error('Account not found. Please sign up or continue as guest.');
-                            try { await firebase.auth().signOut(); } catch { }
                             return;
                         }
 
@@ -638,7 +668,7 @@
 
                     try {
                         const provider = new firebase.auth.GoogleAuthProvider();
-                        const result = await firebase.auth().signInWithPopup(provider);
+                        const result = await auth.signInWithPopup(provider);
                         const idToken = await result.user.getIdToken();
 
                         const apiBaseUrl = getApiBaseUrl();
@@ -701,9 +731,9 @@
                     Loading.show('Signing you in as a guest...');
 
                     try {
-                        let user = firebase.auth().currentUser;
+                        let user = auth.currentUser;
                         if (!user) {
-                            const credential = await firebase.auth().signInAnonymously();
+                            const credential = await auth.signInAnonymously();
                             user = credential?.user || null;
                         }
 
@@ -754,7 +784,7 @@
                         console.error('Guest sign-in error:', error);
                         const msg = (error && error.message) ? String(error.message) : 'Failed to continue as guest';
                         Toast.error(msg);
-                        try { await firebase.auth().signOut(); } catch { }
+                        try { await auth.signOut(); } catch { }
                     } finally {
                         isGuestSignInInProgress = false;
                     }
