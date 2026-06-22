@@ -2939,10 +2939,19 @@ app.post('/api/users/check-profile', authenticateFirebase, async (req, res) => {
   try {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
+    const rawEmail = (firebaseUser?.email || '').trim();
+    const email = rawEmail.toLowerCase();
+    const firebaseUid = firebaseUser?.uid || null;
+    const emailQueries = rawEmail && rawEmail !== email ? [{ email }, { email: rawEmail }] : [{ email }];
+    const profileQuery = firebaseUid && email
+      ? { $or: [{ firebaseUid }, ...emailQueries] }
+      : firebaseUid
+        ? { firebaseUid }
+        : { email };
 
     // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
+      profileQuery,
       {
         projection: { username: 1, pfpUrl: 1, _id: 1 },
         maxTimeMS: 3000 // ✅ 3-second timeout
@@ -3133,10 +3142,19 @@ app.post('/api/users/profile', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
+    const rawEmail = (firebaseUser?.email || '').trim();
+    const email = rawEmail.toLowerCase();
+    const firebaseUid = firebaseUser?.uid || null;
+    const emailQueries = rawEmail && rawEmail !== email ? [{ email }, { email: rawEmail }] : [{ email }];
+    const userQuery = firebaseUid && email
+      ? { $or: [{ firebaseUid }, ...emailQueries] }
+      : firebaseUid
+        ? { firebaseUid }
+        : { email };
 
     // ✅ FIX: Add maxTimeMS timeout
     const existingUser = await db.collection('users').findOne(
-      { email: firebaseUser.email },
+      userQuery,
       { maxTimeMS: 3000 }
     );
 
@@ -3225,10 +3243,19 @@ app.post('/api/users/upload-pfp',
 
       const firebaseUser = req.firebaseUser;
       const db = getDB();
+      const rawEmail = (firebaseUser?.email || '').trim();
+      const email = rawEmail.toLowerCase();
+      const firebaseUid = firebaseUser?.uid || null;
+      const emailQueries = rawEmail && rawEmail !== email ? [{ email }, { email: rawEmail }] : [{ email }];
+      const userQuery = firebaseUid && email
+        ? { $or: [{ firebaseUid }, ...emailQueries] }
+        : firebaseUid
+          ? { firebaseUid }
+          : { email };
 
       // ✅ FIX: Add maxTimeMS timeout
       const user = await db.collection('users').findOne(
-        { email: firebaseUser.email },
+        userQuery,
         {
           projection: {
             _id: 1,
@@ -3283,9 +3310,15 @@ app.get('/api/users/me', authenticateFirebase, async (req, res) => {
     const firebaseUser = req.firebaseUser;
     const db = getDB();
 
-    const query = (firebaseUser && firebaseUser.email)
-      ? { email: firebaseUser.email }
-      : { firebaseUid: firebaseUser?.uid };
+    const rawEmail = (firebaseUser?.email || '').trim();
+    const email = rawEmail.toLowerCase();
+    const firebaseUid = firebaseUser?.uid || null;
+    const emailQueries = rawEmail && rawEmail !== email ? [{ email }, { email: rawEmail }] : [{ email }];
+    const query = firebaseUid && email
+      ? { $or: [{ firebaseUid }, ...emailQueries] }
+      : firebaseUid
+        ? { firebaseUid }
+        : { email };
 
     // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
@@ -3560,10 +3593,19 @@ app.post('/api/notes', authenticateFirebase, async (req, res) => {
     }
 
     const db = getDB();
+    const rawEmail = (firebaseUser?.email || '').trim();
+    const email = rawEmail.toLowerCase();
+    const firebaseUid = firebaseUser?.uid || null;
+    const emailQueries = rawEmail && rawEmail !== email ? [{ email }, { email: rawEmail }] : [{ email }];
+    const userQuery = firebaseUid && email
+      ? { $or: [{ firebaseUid }, ...emailQueries] }
+      : firebaseUid
+        ? { firebaseUid }
+        : { email };
 
     // ✅ FIX: Add maxTimeMS timeout
     const user = await db.collection('users').findOne(
-      { email: firebaseUser.email },
+      userQuery,
       { maxTimeMS: 3000 }
     );
 
