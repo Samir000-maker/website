@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html class="dark" lang="en">
 <head>
@@ -7,7 +6,7 @@
     <title>Sign up - Vibegra</title>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="global.css">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script>
         (function () {
             try {
@@ -22,7 +21,6 @@
             } catch { }
         })();
     </script>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script>
@@ -277,8 +275,65 @@
                 console.warn('Warning: window.MoodApp is not defined. Make sure app.js creates window.MoodApp before this script runs.');
             }
 
+            try {
+                if (!firebase.apps?.length) {
+                    firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
+                } else {
+                    console.info('Firebase already initialized.');
+                }
+            } catch (error) {
+                console.error('Firebase init error:', error);
+            }
+
             let isGoogleSignInInProgress = false;
             let isGuestSignInInProgress = false;
+
+            firebase.auth().onAuthStateChanged(async (user) => {
+                if (user && !isGoogleSignInInProgress && !isGuestSignInInProgress) {
+                    console.log('User already signed in, checking profile...');
+                    
+                    try {
+                        const idToken = await user.getIdToken();
+                        const apiBaseUrl = getApiBaseUrl();
+                        
+                        const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${idToken}`
+                            }
+                        });
+
+                        const text = await checkResponse.text();
+                        let checkData = null;
+                        try { checkData = text ? JSON.parse(text) : null; } catch { }
+
+                        if (!checkResponse.ok || (checkData && (checkData.error === 'User not found' || checkData.message === 'User not found'))) {
+                            toastError('Account not found. Please sign up or continue as guest.');
+                            try { await firebase.auth().signOut(); } catch { }
+                            return;
+                        }
+                        
+                        if (checkData.exists && checkData.hasUsername) {
+                            console.log('User has profile, redirecting to mood...');
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/mood.html');
+                            } else {
+                                window.location.href = '/mood.html';
+                            }
+                        } else {
+                            console.log('User profile incomplete, redirecting to username...');
+                            if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
+                                _PageTransition.navigateTo('/username.html');
+                            } else {
+                                window.location.href = '/username.html';
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error checking profile:', error);
+                    }
+                }
+            });
 
             const toastError = (msg) => {
                 if (_Toast && typeof _Toast.error === 'function') _Toast.error(msg);
@@ -312,72 +367,6 @@
             const googleBtn = document.getElementById('googleSignIn');
             const guestBtn = document.getElementById('guestSignIn');
 
-            const firebaseAvailable = typeof firebase !== 'undefined';
-
-            if (firebaseAvailable) {
-                try {
-                    if (!firebase.apps?.length) {
-                        firebase.initializeApp(window.__VIBE_FIREBASE_CONFIG__);
-                    }
-                } catch (error) {
-                    console.error('Firebase init error:', error);
-                    toastError('Authentication service unavailable. Please reload or try again later.');
-                }
-
-                firebase.auth().onAuthStateChanged(async (user) => {
-                    if (user && !isGoogleSignInInProgress && !isGuestSignInInProgress) {
-                        try {
-                            const idToken = await user.getIdToken();
-                            const apiBaseUrl = getApiBaseUrl();
-
-                            const checkResponse = await fetch(`${apiBaseUrl}/api/users/check-profile`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${idToken}`
-                                }
-                            });
-
-                            const text = await checkResponse.text();
-                            let checkData = null;
-                            try { checkData = text ? JSON.parse(text) : null; } catch { }
-
-                            if (!checkResponse.ok || (checkData && (checkData.error === 'User not found' || checkData.message === 'User not found'))) {
-                                toastError('Account not found. Please sign up or continue as guest.');
-                                try { await firebase.auth().signOut(); } catch { }
-                                return;
-                            }
-
-                            if (checkData.exists && checkData.hasUsername) {
-                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                                    _PageTransition.navigateTo('/mood.html');
-                                } else {
-                                    window.location.href = '/mood.html';
-                                }
-                            } else {
-                                if (_PageTransition && typeof _PageTransition.navigateTo === 'function') {
-                                    _PageTransition.navigateTo('/username.html');
-                                } else {
-                                    window.location.href = '/username.html';
-                                }
-                            }
-                        } catch (error) {
-                            console.error('Error checking profile:', error);
-                        }
-                    }
-                });
-            } else {
-                toastError('Authentication service unavailable. Please check your network connection or disable ad blockers for this site.');
-                var banner = document.getElementById('fbBanner');
-                if (!banner) {
-                    banner = document.createElement('div');
-                    banner.id = 'fbBanner';
-                    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:16px 24px;background:#dc2626;color:#fff;font-size:14px;font-weight:600;text-align:center;font-family:sans-serif';
-                    banner.textContent = 'Authentication service unavailable — please disable ad blockers for this site and reload.';
-                    document.body.prepend(banner);
-                }
-            }
-
             if (signupForm) {
                 signupForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
@@ -404,11 +393,6 @@
                     }
                     if (password !== confirmPassword) {
                         toastError('Passwords do not match');
-                        return;
-                    }
-
-                    if (!firebaseAvailable) {
-                        toastError('Authentication service unavailable. Please reload or try again later.');
                         return;
                     }
 
@@ -442,10 +426,6 @@
 
             if (googleBtn) {
                 googleBtn.addEventListener('click', async () => {
-                    if (!firebaseAvailable) {
-                        toastError('Authentication service unavailable. Please reload or try again later.');
-                        return;
-                    }
                     isGoogleSignInInProgress = true;
                     loadingShow('Signing in with Google...');
 
@@ -510,10 +490,6 @@
 
             if (guestBtn) {
                 guestBtn.addEventListener('click', async () => {
-                    if (!firebaseAvailable) {
-                        toastError('Authentication service unavailable. Please reload or try again later.');
-                        return;
-                    }
                     isGuestSignInInProgress = true;
                     loadingShow('Signing you in as a guest...');
 
