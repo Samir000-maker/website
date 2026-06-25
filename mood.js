@@ -308,8 +308,15 @@
         profileIconImg.onerror = null;
       };
     } else {
-      profileIconImg.classList.add('hidden');
-      profileIconFallback.classList.remove('hidden');
+      const avatarUrl = window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name);
+      if (avatarUrl) {
+        profileIconImg.src = avatarUrl;
+        profileIconImg.classList.remove('hidden');
+        profileIconFallback.classList.add('hidden');
+      } else {
+        profileIconImg.classList.add('hidden');
+        profileIconFallback.classList.remove('hidden');
+      }
     }
   }
 
@@ -325,6 +332,7 @@
   const profileModalError = document.getElementById('profileModalError');
 
   let profileModalSelectedFile = null;
+  let profileModalGeneratedAvatarUrl = null;
   let profileModalInitialUser = null;
 
   function setProfileModalError(msg) {
@@ -348,6 +356,7 @@
     if (!profileSettingsModal) return;
     setProfileModalError('');
     profileModalSelectedFile = null;
+    profileModalGeneratedAvatarUrl = null;
 
     if (!currentUser) {
       showLoading('Loading profile...');
@@ -373,8 +382,15 @@
         profileModalAvatarImg.onerror = null;
       };
     } else {
-      if (profileModalAvatarImg) profileModalAvatarImg.classList.add('hidden');
-      if (profileModalAvatarFallback) profileModalAvatarFallback.classList.remove('hidden');
+      const avatarUrl = window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name);
+      if (profileModalAvatarImg && avatarUrl) {
+        profileModalAvatarImg.src = avatarUrl;
+        profileModalAvatarImg.classList.remove('hidden');
+        if (profileModalAvatarFallback) profileModalAvatarFallback.classList.add('hidden');
+      } else {
+        if (profileModalAvatarImg) profileModalAvatarImg.classList.add('hidden');
+        if (profileModalAvatarFallback) profileModalAvatarFallback.classList.remove('hidden');
+      }
     }
 
     if (profileModalUsername) profileModalUsername.value = name || '';
@@ -382,10 +398,48 @@
     if (profileModalUsernameStatus) profileModalUsernameStatus.textContent = '';
 
     profileModalInitialUser = { username: name || '', pfpUrl: pfpUrl || '' };
+    renderGeneratedAvatarChoices(name || currentUser.userId || 'user');
 
     profileSettingsModal.classList.remove('hidden');
     profileSettingsModal.classList.add('flex');
     if (focus === 'username' && profileModalUsername) profileModalUsername.focus();
+  }
+
+  function renderGeneratedAvatarChoices(seedLabel) {
+    const hostParent = profileModalFileInput?.parentElement;
+    if (!hostParent || !window.VibeAvatar?.dataUrl) return;
+    let host = document.getElementById('profileGeneratedAvatarChoices');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'profileGeneratedAvatarChoices';
+      host.style.cssText = 'width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px;';
+      hostParent.insertBefore(host, profileModalFileInput.nextSibling);
+    }
+
+    host.innerHTML = '';
+    for (let i = 0; i < 4; i++) {
+      const avatarId = `${currentUser?.userId || seedLabel}-variant-${i}`;
+      const avatarUrl = window.VibeAvatar.dataUrl(avatarId, seedLabel);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.title = 'Use generated avatar';
+      btn.style.cssText = 'aspect-ratio:1;border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);padding:2px;cursor:pointer;overflow:hidden;transition:transform .16s ease,border-color .16s ease;';
+      btn.innerHTML = `<img src="${avatarUrl}" alt="Generated avatar option" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">`;
+      btn.addEventListener('click', () => {
+        profileModalGeneratedAvatarUrl = avatarUrl;
+        profileModalSelectedFile = null;
+        if (profileModalFileInput) profileModalFileInput.value = '';
+        host.querySelectorAll('button').forEach((b) => { b.style.borderColor = 'rgba(255,255,255,0.10)'; b.style.transform = 'none'; });
+        btn.style.borderColor = 'rgba(16,185,129,0.75)';
+        btn.style.transform = 'translateY(-2px)';
+        if (profileModalAvatarImg) {
+          profileModalAvatarImg.src = avatarUrl;
+          profileModalAvatarImg.classList.remove('hidden');
+        }
+        if (profileModalAvatarFallback) profileModalAvatarFallback.classList.add('hidden');
+      });
+      host.appendChild(btn);
+    }
   }
 
   function closeProfileSettingsModal() {
@@ -442,18 +496,20 @@
   function openProfileMenu() {
     if (!profileMenu || !profileIconBtn) return;
     profileMenu.classList.remove('hidden');
+    profileMenu.classList.add('open');
     profileIconBtn.setAttribute('aria-expanded', 'true');
   }
 
   function closeProfileMenu() {
     if (!profileMenu || !profileIconBtn) return;
+    profileMenu.classList.remove('open');
     profileMenu.classList.add('hidden');
     profileIconBtn.setAttribute('aria-expanded', 'false');
   }
 
   function toggleProfileMenu() {
     if (!profileMenu) return;
-    if (profileMenu.classList.contains('hidden')) openProfileMenu();
+    if (!profileMenu.classList.contains('open')) openProfileMenu();
     else closeProfileMenu();
   }
 
@@ -919,9 +975,12 @@
         _Utils.escapeHtml(note.text) :
         (() => { const d = document.createElement('div'); d.textContent = note.text; return d.innerHTML; })()) : '';
 
+    const generatedAvatar = window.VibeAvatar?.dataUrl?.(note?.userId || note?._id || username, username);
     const avatarHtml = hasPfp
       ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
-      : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`;
+      : (generatedAvatar
+        ? `<img src="${generatedAvatar}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
+        : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`);
 
     console.log(`✅ Using ${hasPfp ? 'profile picture' : 'initial fallback'} for ${username}`);
 
@@ -1033,7 +1092,44 @@
   // ============================================
   // LOGOUT
   // ============================================
+  function confirmLogout() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.68);backdrop-filter:blur(8px);padding:18px;';
+      overlay.innerHTML = `
+        <div class="profile-settings-panel" style="width:min(92vw,360px);border-radius:18px;background:rgba(15,17,21,0.96);border:1px solid rgba(16,185,129,0.18);box-shadow:0 22px 70px rgba(0,0,0,0.55);padding:20px;text-align:center;">
+          <div style="width:54px;height:54px;margin:0 auto 14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.22);">
+            <span class="material-symbols-outlined" style="color:#f87171;font-size:28px;">logout</span>
+          </div>
+          <div style="font-weight:900;font-size:17px;color:#fff;">Logout?</div>
+          <div style="margin-top:6px;color:rgba(226,232,240,0.72);font-size:13px;line-height:1.5;">Your local session will be cleared on this device.</div>
+          <div style="display:flex;gap:10px;margin-top:18px;">
+            <button type="button" data-cancel style="flex:1;padding:11px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);color:#fff;font-weight:800;cursor:pointer;font-family:inherit;">Cancel</button>
+            <button type="button" data-confirm style="flex:1;padding:11px 12px;border-radius:12px;border:0;background:linear-gradient(135deg,#fb7185,#ef4444);color:#fff;font-weight:900;cursor:pointer;font-family:inherit;">Logout</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const done = (value) => {
+        overlay.remove();
+        resolve(value);
+      };
+      overlay.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target === overlay || target.closest('[data-cancel]')) done(false);
+        if (target.closest('[data-confirm]')) done(true);
+      });
+      document.addEventListener('keydown', function onKey(e) {
+        if (e.key !== 'Escape') return;
+        document.removeEventListener('keydown', onKey);
+        done(false);
+      });
+    });
+  }
+
   function handleLogout() {
+    confirmLogout().then((ok) => {
+      if (!ok) return;
     try {
       if (socketInstance) {
         socketInstance.disconnect();
@@ -1045,6 +1141,12 @@
       } else {
         localStorage.removeItem('user');
       }
+      sessionStorage.clear();
+      localStorage.removeItem('currentRoom');
+      localStorage.removeItem('selectedMood');
+      localStorage.removeItem('guest_uid');
+      localStorage.removeItem('guest_username');
+      localStorage.removeItem('guest_timestamp');
 
       firebase.auth().signOut();
     } catch (e) {
@@ -1056,6 +1158,7 @@
     } else {
       window.location.href = '/login.html';
     }
+    });
   }
 
   // ============================================
@@ -1114,6 +1217,7 @@
         }
         setProfileModalError('');
         profileModalSelectedFile = file;
+        profileModalGeneratedAvatarUrl = null;
 
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -1162,7 +1266,15 @@
             }
 
             if (profileModalUsernameStatus) profileModalUsernameStatus.textContent = 'Available';
-            await _API.post('/api/users/profile', { username: desiredUsername });
+            await _API.post('/api/users/profile', {
+              username: desiredUsername,
+              pfpUrl: profileModalGeneratedAvatarUrl || profileModalInitialUser?.pfpUrl || currentUser?.pfpUrl || undefined
+            });
+          } else if (profileModalGeneratedAvatarUrl) {
+            await _API.post('/api/users/profile', {
+              username: desiredUsername || currentUser.username,
+              pfpUrl: profileModalGeneratedAvatarUrl
+            });
           }
 
           if (profileModalSelectedFile) {
@@ -1183,7 +1295,7 @@
     }
 
     document.addEventListener('click', (e) => {
-      if (!profileMenu || profileMenu.classList.contains('hidden')) return;
+      if (!profileMenu || !profileMenu.classList.contains('open')) return;
       const t = e.target;
       if (t && t.closest && (t.closest('#profileMenu') || t.closest('#profileIconBtn'))) return;
       closeProfileMenu();
