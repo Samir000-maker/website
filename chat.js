@@ -701,6 +701,11 @@
       const usersList = document.getElementById('usersList');
       const onlineCount = document.getElementById('onlineCount');
       const leaveBtn = document.getElementById('leaveBtn');
+      const mobileRoomUsers = document.getElementById('mobileRoomUsers');
+      const mobileRoomUsersList = document.getElementById('mobileRoomUsersList');
+      const mobileUsersToggle = document.getElementById('mobileUsersToggle');
+      const mobileUsersArrow = document.getElementById('mobileUsersArrow');
+      let mobileUsersCollapsed = false;
 
       const chatMainEl = document.querySelector('.chat-main');
       const headerEl = document.querySelector('header');
@@ -3104,15 +3109,17 @@
       }
 
 
-      function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10') {
+      function createProfilePictureElement(pfpUrl, username, size = 'w-10 h-10', userId = '') {
         const initial = username ? username.charAt(0).toUpperCase() : 'U';
         const container = document.createElement('div');
         container.className = `${size} rounded-full overflow-hidden bg-slate-100 border-2 border-white shadow-sm flex-shrink-0`;
 
-        if (pfpUrl && pfpUrl !== 'https://ui-avatars.com/api/?name=User&background=367d7d&color=ffffff&size=200') {
+        const avatarUrl = window.VibeAvatar?.profileUrl?.({ userId, _id: userId, username, pfpUrl }, username);
+
+        if (avatarUrl) {
           const img = document.createElement('img');
-          img.src = pfpUrl;
-          img.alt = username;
+          img.src = avatarUrl;
+          img.alt = username || 'Avatar';
           img.className = 'h-full w-full object-cover';
           img.loading = 'lazy';
           img.onerror = function () {
@@ -3121,17 +3128,7 @@
           };
           container.appendChild(img);
         } else {
-          const avatarUrl = window.VibeAvatar?.dataUrl?.(username || initial, username || initial);
-          if (avatarUrl) {
-            const img = document.createElement('img');
-            img.src = avatarUrl;
-            img.alt = username || 'Avatar';
-            img.className = 'h-full w-full object-cover';
-            img.loading = 'lazy';
-            container.appendChild(img);
-          } else {
-            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
-          }
+          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
         }
 
         return container;
@@ -3163,7 +3160,7 @@
         messageItem.className = `message-item flex gap-2 items-start ${isCurrentUser ? 'flex-row-reverse' : ''} animate-fade-in-up`;
         messageItem.dataset.messageId = data.messageId || `msg-${Date.now()}-${Math.random()}`;
 
-        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10');
+        const pfpContainer = createProfilePictureElement(data.pfpUrl, data.username, 'w-8 h-8 sm:w-10 sm:h-10', data.userId);
         const messageContent = document.createElement('div');
         messageContent.className = `flex flex-col ${isCurrentUser ? 'items-end' : 'items-start'} flex-1 min-w-0`;
 
@@ -6784,7 +6781,7 @@
           userCard.className = 'user-card flex items-center gap-3 p-2 rounded-lg bg-[#2a2d33] border border-gray-700 transition-all duration-300 animate-fade-in';
 
           // Profile Picture
-          const pfpContainer = createProfilePictureElement(user.pfpUrl, user.username, 'w-8 h-8');
+          const pfpContainer = createProfilePictureElement(user.pfpUrl, user.username, 'w-8 h-8', user.userId);
 
           // Username
           const infoContainer = document.createElement('div');
@@ -6801,6 +6798,50 @@
 
           usersListEl.appendChild(userCard);
         });
+
+        renderMobileRoomUsers(users);
+        setupUserCardClick();
+      }
+
+      function renderMobileRoomUsers(users) {
+        if (!mobileRoomUsers || !mobileRoomUsersList) return;
+        const roomUsers = Array.isArray(users) ? users : [];
+        mobileRoomUsersList.innerHTML = '';
+
+        roomUsers.forEach(user => {
+          const username = typeof user?.username === 'string' && user.username.trim()
+            ? user.username.trim()
+            : 'User';
+          const item = document.createElement('div');
+          item.className = 'mobile-room-user';
+
+          const avatar = document.createElement('div');
+          avatar.className = 'mobile-room-user-avatar';
+          const avatarUrl = window.VibeAvatar?.profileUrl?.(user, username);
+          if (avatarUrl) {
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.alt = username;
+            img.loading = 'lazy';
+            avatar.appendChild(img);
+          } else {
+            avatar.textContent = username.charAt(0).toUpperCase();
+          }
+
+          const name = document.createElement('div');
+          name.className = 'mobile-room-user-name';
+          name.textContent = username;
+
+          item.appendChild(avatar);
+          item.appendChild(name);
+          mobileRoomUsersList.appendChild(item);
+        });
+
+        mobileRoomUsers.classList.toggle('hidden', roomUsers.length === 0);
+        mobileRoomUsers.classList.toggle('collapsed', mobileUsersCollapsed);
+        if (mobileUsersArrow) {
+          mobileUsersArrow.textContent = mobileUsersCollapsed ? 'keyboard_arrow_down' : 'keyboard_arrow_up';
+        }
       }
 
       try {
@@ -6878,6 +6919,16 @@
         console.error('❌ Auth failed:', err);
         toast('Failed to sign in', 'error');
         return;
+      }
+
+      if (mobileUsersToggle) {
+        mobileUsersToggle.addEventListener('click', () => {
+          mobileUsersCollapsed = !mobileUsersCollapsed;
+          if (mobileRoomUsers) mobileRoomUsers.classList.toggle('collapsed', mobileUsersCollapsed);
+          if (mobileUsersArrow) {
+            mobileUsersArrow.textContent = mobileUsersCollapsed ? 'keyboard_arrow_down' : 'keyboard_arrow_up';
+          }
+        });
       }
 
 
@@ -7046,32 +7097,7 @@
       // Render initial users
       const initialUsers = (roomData && Array.isArray(roomData.users)) ? roomData.users : [];
       if (usersList && initialUsers.length) {
-        initialUsers.forEach(user => {
-          const userCard = document.createElement('div');
-          userCard.className = 'user-card flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg hover:bg-gray-50 transition-all cursor-pointer';
-
-          const pfpElement = createProfilePictureElement(user.pfpUrl, user.username, 'w-10 h-10 sm:w-12 sm:h-12');
-
-          const userInfo = document.createElement('div');
-          userInfo.className = 'flex-1 min-w-0';
-
-          const nameSpan = document.createElement('div');
-          nameSpan.className = 'text-sm font-semibold truncate';
-          nameSpan.textContent = user.username || 'User';
-
-          const statusSpan = document.createElement('div');
-          statusSpan.className = 'text-xs text-gray-500 flex items-center gap-1';
-          statusSpan.innerHTML = '<span class="flex h-2 w-2 rounded-full bg-green-500 flex-shrink-0"></span> Online';
-
-          userInfo.appendChild(nameSpan);
-          userInfo.appendChild(statusSpan);
-
-          userCard.appendChild(pfpElement);
-          userCard.appendChild(userInfo);
-          usersList.appendChild(userCard);
-        });
-
-        setupUserCardClick();
+        renderUserList(initialUsers);
 
         if (onlineCount) {
           onlineCount.textContent = `${initialUsers.length} Online`;
