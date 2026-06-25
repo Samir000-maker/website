@@ -26,26 +26,29 @@
     style.textContent = `
       .social-club-wrap{width:100%;margin:0 auto;}
       .social-club-kicker{display:none;}
-      .social-club-card{position:relative;overflow:hidden;border-radius:16px;padding:14px 20px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 10px 40px rgba(0,0,0,0.25);transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;}
-      .social-club-card:hover{transform:translateY(-1px);border-color:rgba(99,32,233,0.35);box-shadow:0 14px 50px rgba(99,32,233,0.12),0 10px 40px rgba(0,0,0,0.3);}
-      .social-club-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}
-      .social-club-left{display:flex;align-items:center;gap:10px;min-width:0;}
-      .social-club-left h3{font-weight:800;font-size:1rem;letter-spacing:-0.01em;color:#fff;line-height:1.3;white-space:nowrap;}
+      .social-club-card{position:relative;overflow:hidden;border-radius:16px;padding:16px 18px;border:1px solid rgba(16,185,129,0.16);background:linear-gradient(135deg,rgba(16,185,129,0.10),rgba(255,255,255,0.018));backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 10px 40px rgba(0,0,0,0.25);transition:transform 180ms ease,box-shadow 180ms ease,border-color 180ms ease;}
+      .social-club-card:hover{transform:translateY(-1px);border-color:rgba(16,185,129,0.36);box-shadow:0 16px 52px rgba(16,185,129,0.12),0 10px 40px rgba(0,0,0,0.3);}
+      .social-club-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:16px;}
+      .social-club-left{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"dot title" ". desc";align-items:center;column-gap:10px;row-gap:2px;min-width:0;text-align:left;}
+      .social-club-left h3{grid-area:title;font-weight:800;font-size:1rem;letter-spacing:-0.01em;color:#fff;line-height:1.22;white-space:nowrap;}
       .social-club-dot{width:9px;height:9px;border-radius:9999px;background:rgba(148,163,184,0.5);box-shadow:none;flex-shrink:0;}
       .social-club-dot.live{background:#22c55e;box-shadow:0 0 0 5px rgba(34,197,94,0.15);}
-      .social-club-status-text{font-size:0.75rem;font-weight:600;color:rgba(226,232,240,0.7);white-space:nowrap;}
-      .social-club-desc{margin-top:8px;color:rgba(148,163,184,0.85);font-size:0.78rem;line-height:1.4;}
-      .social-club-btn{appearance:none;-webkit-appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 16px;border-radius:10px;font-weight:700;font-size:0.8rem;line-height:1;color:#fff;background:linear-gradient(135deg,rgba(99,32,233,0.92),rgba(45,212,191,0.52));box-shadow:0 8px 24px rgba(99,32,233,0.22);transition:transform 160ms ease,box-shadow 160ms ease,filter 160ms ease;white-space:nowrap;flex-shrink:0;}
-      .social-club-btn:hover{transform:translateY(-1px);filter:saturate(1.1);box-shadow:0 12px 32px rgba(99,32,233,0.3);}
+      .social-club-left .social-club-dot{grid-area:dot;}
+      .social-club-status-text{display:none;}
+      .social-club-desc{grid-area:desc;margin-top:0;color:rgba(203,213,225,0.82);font-size:0.79rem;line-height:1.38;}
+      .social-club-card > .social-club-desc{display:none;}
+      .social-club-btn{appearance:none;-webkit-appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:10px 18px;border-radius:12px;font-weight:800;font-size:0.82rem;line-height:1;color:#04120e;background:linear-gradient(135deg,#34d399,#10b981);box-shadow:0 10px 28px rgba(16,185,129,0.28);transition:transform 180ms ease,box-shadow 180ms ease,filter 180ms ease,background 180ms ease;white-space:nowrap;flex-shrink:0;}
+      .social-club-btn:hover{transform:translateY(-2px);filter:saturate(1.08) brightness(1.04);box-shadow:0 14px 36px rgba(16,185,129,0.36);}
       .social-club-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;box-shadow:none;}
-      .social-club-btn-icon{width:19px;height:19px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.18);border:1px solid rgba(255,255,255,0.1);}
+      .social-club-btn-icon{width:19px;height:19px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;background:rgba(4,18,14,0.12);border:1px solid rgba(4,18,14,0.12);}
       @media (max-width: 640px){
-        .social-club-card{padding:12px 16px;}
+        .social-club-card{padding:13px 14px;}
+        .social-club-row{gap:10px;}
         .social-club-left{gap:8px;}
         .social-club-left h3{font-size:0.9rem;}
         .social-club-status-text{font-size:0.7rem;}
-        .social-club-btn{padding:7px 14px;font-size:0.75rem;}
-        .social-club-desc{font-size:0.72rem;margin-top:6px;}
+        .social-club-btn{min-height:36px;padding:9px 13px;font-size:0.75rem;}
+        .social-club-desc{font-size:0.72rem;}
       }
     `;
     document.head.appendChild(style);
@@ -328,7 +331,7 @@
       btn.dataset.mode = isOpen ? 'enter' : 'waitlist';
       btn.disabled = false;
       btn.innerHTML = isOpen
-        ? `<span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:18px;">login</span></span><span>Enter Now</span>`
+        ? `<span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:18px;">login</span></span><span>Enter</span>`
         : `<span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:18px;">playlist_add</span></span><span>Join Waitlist</span>`;
     }
   }
@@ -346,6 +349,7 @@
               <span class="social-club-dot" data-social-dot="1"></span>
               <h3>Social Club</h3>
               <span class="social-club-status-text" data-social-status-text="1">Event will start soon</span>
+              <div class="social-club-desc">Event matchmaking room - join when it's live to meet new people</div>
             </div>
             <button type="button" class="social-club-btn" data-social-action="1" disabled>
               <span class="social-club-btn-icon"><span class="material-symbols-outlined" style="font-size:16px;">playlist_add</span></span>
