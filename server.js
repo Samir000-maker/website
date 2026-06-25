@@ -5861,7 +5861,7 @@ io.on('connection', (socket) => {
   // Use io.to(`user:${userId}`) instead
 
 
-  socket.on('join_room', async ({ roomId }) => {
+  socket.on('join_room', async ({ roomId, resume, persistentSessionId, lastSeenAt }) => {
     try {
       const user = await getSocketUser(socket.id);
 
@@ -5880,8 +5880,12 @@ io.on('connection', (socket) => {
       });
 
       const joinKey = `${user.userId}:${roomId}`;
+      const persistentJoinKey = `${user.userId}:${roomId}:${persistentSessionId || socket.handshake?.auth?.persistentChatSessionId || 'default'}`;
       const existingJoin = roomJoinState.get(joinKey);
-      if (existingJoin && (Date.now() - existingJoin.timestamp < 5000)) {
+      const existingPersistentJoin = roomJoinState.get(persistentJoinKey);
+      const joinNow = Date.now();
+      const isLikelyResume = !!resume || !!existingPersistentJoin || (Number(lastSeenAt) && (joinNow - Number(lastSeenAt)) < 10 * 60 * 1000);
+      if (existingJoin && (joinNow - existingJoin.timestamp < 5000)) {
         console.log(`⚠️ Duplicate join_room from ${user.username} for ${roomId}, ignoring`);
         return;
       }
@@ -6047,11 +6051,16 @@ io.on('connection', (socket) => {
 
       // CRITICAL FIX: Mark this join as completed
       roomJoinState.set(joinKey, { joined: true, timestamp: Date.now() });
+      roomJoinState.set(persistentJoinKey, { joined: true, timestamp: Date.now(), persistent: true });
 
       // Clean up old join states (older than 10 seconds)
       setTimeout(() => {
         roomJoinState.delete(joinKey);
       }, 10000);
+
+      setTimeout(() => {
+        roomJoinState.delete(persistentJoinKey);
+      }, 10 * 60 * 1000);
 
       // ============================================
       // CRITICAL FIX: BROADCAST USER JOIN TO ROOM
@@ -6072,14 +6081,23 @@ io.on('connection', (socket) => {
         pfpUrl: u.pfpUrl
       }));
 
-      // Broadcast to ALL users in room (including the joiner for consistency)
-      io.to(roomId).emit('user_joined', {
-        userId: user.userId,
-        username: user.username,
-        pfpUrl: user.pfpUrl,
-        users: updatedUserList,
-        onlineCount: room.users.length
-      });
+      if (isLikelyResume) {
+        socket.emit('room_users_synced', {
+          users: updatedUserList,
+          onlineCount: room.users.length,
+          resumed: true
+        });
+        console.log(`â„¹ï¸ Suppressed user_joined broadcast for resumed session: ${user.username}`);
+      } else {
+        // Broadcast to ALL users in room (including the joiner for consistency)
+        io.to(roomId).emit('user_joined', {
+          userId: user.userId,
+          username: user.username,
+          pfpUrl: user.pfpUrl,
+          users: updatedUserList,
+          onlineCount: room.users.length
+        });
+      }
 
       console.log(`✅ Broadcasted user_joined event`);
       console.log(`   Notified: ${io.sockets.adapter.rooms.get(roomId)?.size || 0} socket(s)`);
