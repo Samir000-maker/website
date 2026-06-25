@@ -37,7 +37,8 @@ const PROTECTED_SCRIPTS = [
   'browser-debug.js',
   'signup.js',
   'login.js',
-  'username.js'
+  'username.js',
+  'profile-picture.js'
 ];
 
 /**
