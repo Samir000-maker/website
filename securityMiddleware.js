@@ -34,7 +34,10 @@ const PROTECTED_SCRIPTS = [
   'pwa-install.js',
   'fluid-bg.js',
   'sw.js',
-  'browser-debug.js'
+  'browser-debug.js',
+  'signup.js',
+  'login.js',
+  'username.js'
 ];
 
 /**
