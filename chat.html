@@ -1,6 +1,7 @@
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -20,6 +21,7 @@
     })();
   </script>
   <link href="global.css" rel="stylesheet">
+  <link href="/responsive.css" rel="stylesheet">
   <style>
     body {
       font-family: 'Manrope', sans-serif;
@@ -149,6 +151,55 @@
 
       .sidebar-overlay {
         display: none;
+      }
+    }
+
+    .mobile-current-user {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #30363d;
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(13, 17, 23, 0.94));
+    }
+
+    .mobile-current-user-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      color: #a7f3d0;
+      background: #0f172a;
+      flex-shrink: 0;
+    }
+
+    .mobile-current-user-toggle {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      background: rgba(16, 185, 129, 0.09);
+      color: #a7f3d0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.18s ease, background 0.18s ease;
+    }
+
+    .mobile-current-user-toggle:hover {
+      background: rgba(16, 185, 129, 0.16);
+      transform: translateY(-1px);
+    }
+
+    @media (max-width: 768px) {
+      .mobile-current-user {
+        display: flex;
       }
     }
 
@@ -1213,6 +1264,18 @@
     </aside>
 
     <main class="flex-1 flex flex-col min-h-0 bg-[#1a1d23]">
+      <div id="mobileCurrentUser" class="mobile-current-user hidden">
+        <div class="flex items-center gap-3 min-w-0">
+          <div id="mobileCurrentUserAvatar" class="mobile-current-user-avatar"></div>
+          <div class="min-w-0">
+            <div id="mobileCurrentUserName" class="text-sm font-bold text-gray-100 truncate">You</div>
+            <div class="text-xs text-emerald-300/80">Active in this room</div>
+          </div>
+        </div>
+        <button id="mobileUsersToggle" class="mobile-current-user-toggle" type="button" aria-label="Toggle active users">
+          <span id="mobileUsersArrow" class="material-symbols-outlined">keyboard_arrow_down</span>
+        </button>
+      </div>
       <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
         <div class="text-center text-xs sm:text-sm text-gray-500 mb-4">
           Welcome to the safe space. Be kind and supportive.
@@ -1370,8 +1433,12 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 
   <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+  <script src="/responsive.js"></script>
+  <script src="/avatar-generator.js"></script>
+  <script src="/chat-connection-manager.js"></script>
   <script src="app.js?v=20260222"></script>
   <script src="chat.js"></script>
+  <script src="/chat-responsive.js"></script>
 </body>
 
 </html>
