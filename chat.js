@@ -100,6 +100,16 @@
       return false;
     }
 
+    function buildJoinRoomPayload(roomId) {
+      const payload = { roomId };
+      try {
+        if (window.VibeChatConnection?.decorateJoinPayload) {
+          return window.VibeChatConnection.decorateJoinPayload(payload);
+        }
+      } catch { }
+      return payload;
+    }
+
 
     function startHeartbeat() {
       if (heartbeatInterval) stopHeartbeat();
@@ -3111,7 +3121,17 @@
           };
           container.appendChild(img);
         } else {
-          container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+          const avatarUrl = window.VibeAvatar?.dataUrl?.(username || initial, username || initial);
+          if (avatarUrl) {
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.alt = username || 'Avatar';
+            img.className = 'h-full w-full object-cover';
+            img.loading = 'lazy';
+            container.appendChild(img);
+          } else {
+            container.innerHTML = `<div class="h-full w-full bg-primary text-white flex items-center justify-center font-bold text-sm">${initial}</div>`;
+          }
         }
 
         return container;
@@ -3635,7 +3655,7 @@
           if (response.reason === 'NOT_IN_ROOM') {
             if (socketInstance?.connected && roomData?.roomId) {
               pendingInitialRoomSync = true;
-              safeSocketEmit('join_room', { roomId: roomData.roomId });
+              safeSocketEmit('join_room', buildJoinRoomPayload(roomData.roomId));
             }
             return;
           }
@@ -3668,7 +3688,7 @@
           try {
             if (socketInstance?.connected && roomData?.roomId) {
               pendingInitialRoomSync = true;
-              safeSocketEmit('join_room', { roomId: roomData.roomId });
+              safeSocketEmit('join_room', buildJoinRoomPayload(roomData.roomId));
               safeSocketEmit('request_room_sync', { roomId: roomData.roomId });
             }
           } catch { }
@@ -4078,11 +4098,13 @@
           firebase.auth().currentUser?.getIdToken().then(idToken => {
             console.log('📤 Sending authentication to server...');
             const sessionId = getScopedSocketSessionId('chat');
+            const persistentChatSessionId = window.VibeChatConnection?.getSession?.().id || null;
             const tabId = window.tabManager?.tabId || null;
             socketInstance.emit('authenticate', {
               token: idToken,
               userId: currentUser.userId,
               sessionId,
+              persistentChatSessionId,
               tabId
             });
             loadSocketEmitQueue();
@@ -4216,7 +4238,7 @@
           startCachedCallMonitoring();
           if (roomData && roomData.roomId) {
             pendingInitialRoomSync = true;
-            safeSocketEmit('join_room', { roomId: roomData.roomId });
+            safeSocketEmit('join_room', buildJoinRoomPayload(roomData.roomId));
           } else if (isSocialClubMode) {
             safeSocketEmit('join_social_club', {});
           } else {
@@ -4249,7 +4271,7 @@
             localStorage.setItem('currentRoom', JSON.stringify(roomData));
 
             pendingInitialRoomSync = true;
-            safeSocketEmit('join_room', { roomId: data.roomId });
+            safeSocketEmit('join_room', buildJoinRoomPayload(data.roomId));
           } catch (error) {
             console.error('❌ Failed to handle match_found:', error);
           }
@@ -4974,7 +4996,7 @@
               lastRoomRecoveryAttemptAt = now;
 
               toast('Connection hiccup detected. Resyncing room...', 'warning');
-              safeSocketEmit('join_room', { roomId: roomData.roomId });
+              safeSocketEmit('join_room', buildJoinRoomPayload(roomData.roomId));
               pendingInitialRoomSync = true;
 
               setTimeout(() => {
@@ -5682,6 +5704,16 @@
           } else {
             console.warn('⚠️ user_joined event received without user list');
             // Fallback: append single user? (Wait, server sends full list)
+          }
+        });
+
+        socketInstance.on('room_users_synced', (data) => {
+          console.log('Room users synced quietly', data);
+          if (data.users && Array.isArray(data.users)) {
+            renderUserList(data.users);
+          }
+          if (onlineCount && data.onlineCount !== undefined) {
+            onlineCount.textContent = `${data.onlineCount} Online`;
           }
         });
 
@@ -7053,6 +7085,7 @@
         const idToken = await firebaseUser.getIdToken();
         const socketUrl = window.location.origin;
         const sessionId = getScopedSocketSessionId('chat');
+        const persistentChatSessionId = window.VibeChatConnection?.getSession?.().id || null;
         const tabId = window.tabManager?.tabId || null;
 
         socketInstance = io(socketUrl, {
@@ -7062,7 +7095,7 @@
           reconnectionDelayMax: 10000,
           randomizationFactor: 0.5,
           reconnectionAttempts: 1000,
-          auth: { token: idToken, sessionId, tabId },
+          auth: { token: idToken, sessionId, persistentChatSessionId, tabId },
           timeout: 15000,
           closeOnBeforeunload: false
         });
@@ -7087,4 +7120,3 @@
     }
 
     })();
-
