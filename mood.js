@@ -285,6 +285,7 @@
   const menuChangeUsername = document.getElementById('menuChangeUsername');
 
   function isDefaultAvatarUrl(url) {
+    if (window.VibeAvatar?.isDefaultUrl) return window.VibeAvatar.isDefaultUrl(url);
     if (!url || typeof url !== 'string') return true;
     const u = url.trim();
     if (!u || u === 'null') return true;
@@ -298,8 +299,12 @@
     const initial = (name ? name.charAt(0) : 'U').toUpperCase();
     profileIconFallback.textContent = initial;
 
-    if (pfpUrl && !isDefaultAvatarUrl(pfpUrl)) {
-      profileIconImg.src = pfpUrl;
+    const avatarUrl = window.VibeAvatar?.profileUrl
+      ? window.VibeAvatar.profileUrl({ userId: currentUser?.userId, _id: currentUser?.userId, username: name, pfpUrl }, name)
+      : (!isDefaultAvatarUrl(pfpUrl) ? pfpUrl : window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name));
+
+    if (avatarUrl) {
+      profileIconImg.src = avatarUrl;
       profileIconImg.classList.remove('hidden');
       profileIconFallback.classList.add('hidden');
       profileIconImg.onerror = () => {
@@ -308,15 +313,8 @@
         profileIconImg.onerror = null;
       };
     } else {
-      const avatarUrl = window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name);
-      if (avatarUrl) {
-        profileIconImg.src = avatarUrl;
-        profileIconImg.classList.remove('hidden');
-        profileIconFallback.classList.add('hidden');
-      } else {
-        profileIconImg.classList.add('hidden');
-        profileIconFallback.classList.remove('hidden');
-      }
+      profileIconImg.classList.add('hidden');
+      profileIconFallback.classList.remove('hidden');
     }
   }
 
@@ -372,8 +370,12 @@
     if (profileModalAvatarFallback) profileModalAvatarFallback.textContent = initial;
 
     const pfpUrl = currentUser && currentUser.pfpUrl ? String(currentUser.pfpUrl) : '';
-    if (profileModalAvatarImg && pfpUrl && !isDefaultAvatarUrl(pfpUrl)) {
-      profileModalAvatarImg.src = pfpUrl;
+    const avatarUrl = window.VibeAvatar?.profileUrl
+      ? window.VibeAvatar.profileUrl({ userId: currentUser?.userId, _id: currentUser?.userId, username: name, pfpUrl }, name)
+      : (!isDefaultAvatarUrl(pfpUrl) ? pfpUrl : window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name));
+
+    if (profileModalAvatarImg && avatarUrl) {
+      profileModalAvatarImg.src = avatarUrl;
       profileModalAvatarImg.classList.remove('hidden');
       if (profileModalAvatarFallback) profileModalAvatarFallback.classList.add('hidden');
       profileModalAvatarImg.onerror = () => {
@@ -382,15 +384,8 @@
         profileModalAvatarImg.onerror = null;
       };
     } else {
-      const avatarUrl = window.VibeAvatar?.dataUrl?.(currentUser?.userId || name, name);
-      if (profileModalAvatarImg && avatarUrl) {
-        profileModalAvatarImg.src = avatarUrl;
-        profileModalAvatarImg.classList.remove('hidden');
-        if (profileModalAvatarFallback) profileModalAvatarFallback.classList.add('hidden');
-      } else {
-        if (profileModalAvatarImg) profileModalAvatarImg.classList.add('hidden');
-        if (profileModalAvatarFallback) profileModalAvatarFallback.classList.remove('hidden');
-      }
+      if (profileModalAvatarImg) profileModalAvatarImg.classList.add('hidden');
+      if (profileModalAvatarFallback) profileModalAvatarFallback.classList.remove('hidden');
     }
 
     if (profileModalUsername) profileModalUsername.value = name || '';
@@ -975,12 +970,11 @@
         _Utils.escapeHtml(note.text) :
         (() => { const d = document.createElement('div'); d.textContent = note.text; return d.innerHTML; })()) : '';
 
-    const generatedAvatar = window.VibeAvatar?.dataUrl?.(note?.userId || note?._id || username, username);
-    const avatarHtml = hasPfp
-      ? `<img src="${note.pfpUrl}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
-      : (generatedAvatar
-        ? `<img src="${generatedAvatar}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
-        : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`);
+    const generatedAvatar = window.VibeAvatar?.profileUrl?.(note, username)
+      || window.VibeAvatar?.dataUrl?.(note?.userId || note?._id || username, username);
+    const avatarHtml = generatedAvatar
+      ? `<img src="${generatedAvatar}" alt="${username}" class="session-emoji" style="border-radius: 50%; object-fit: cover; width: 40px; height: 40px;">`
+      : `<div class="session-emoji" style="display:flex;align-items:center;justify-content:center;font-weight:700;">${initial}</div>`;
 
     console.log(`✅ Using ${hasPfp ? 'profile picture' : 'initial fallback'} for ${username}`);
 
