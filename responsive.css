@@ -1,0 +1,61 @@
+:root {
+  --ui-scale: 1;
+  --font-scale: 1;
+  --spacing-scale: 1;
+  --radius-scale: 1;
+  --image-scale: 1;
+  --vh: 1vh;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --type-heading: clamp(2rem, calc(4rem * var(--font-scale)), 4rem);
+  --type-body: clamp(0.875rem, calc(1.125rem * var(--font-scale)), 1.125rem);
+}
+
+html {
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-size: var(--type-body);
+}
+
+.ui-container {
+  width: min(100% - calc(32px * var(--spacing-scale)), calc(1200px * var(--ui-scale)));
+  margin-inline: auto;
+}
+
+.ui-card {
+  border-radius: calc(16px * var(--radius-scale));
+  padding: calc(20px * var(--spacing-scale));
+}
+
+.ui-button {
+  min-height: calc(42px * var(--ui-scale));
+  padding: calc(10px * var(--spacing-scale)) calc(18px * var(--spacing-scale));
+  border-radius: calc(12px * var(--radius-scale));
+}
+
+.ui-image {
+  width: calc(var(--image-size, 48px) * var(--image-scale));
+  height: calc(var(--image-size, 48px) * var(--image-scale));
+  object-fit: cover;
+}
+
+.ui-no-overflow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --type-heading: clamp(2rem, calc(3rem * var(--font-scale)), 3rem);
+    --type-body: clamp(0.875rem, calc(1rem * var(--font-scale)), 1rem);
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --type-heading: clamp(1.75rem, calc(2rem * var(--font-scale)), 2rem);
+    --type-body: clamp(0.875rem, calc(0.875rem * var(--font-scale)), 0.95rem);
+  }
+}
