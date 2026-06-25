@@ -1,5 +1,6 @@
 
 
+
 <!DOCTYPE html>
 <html lang="en">
  
@@ -18,6 +19,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
     rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/responsive.css">
   <style>
     :root {
       --bg-dark: #16172b;
@@ -192,6 +194,15 @@
       opacity: 1;
       transform: translateY(0) scale(1);
       pointer-events: auto;
+    }
+
+    .profile-settings-panel {
+      animation: profilePanelIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @keyframes profilePanelIn {
+      from { opacity: 0; transform: translateY(10px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
  
     .profile-menu button {
@@ -750,6 +761,7 @@
       .mood-emoji { font-size: 40px; }
       .nav { display: none; }
       .sessions-grid { grid-template-columns: 1fr; }
+      #profileSettingsModal [data-profile-panel] { grid-template-columns: 1fr !important; }
     }
   </style>
 <link rel="stylesheet" href="fluid-bg.css">
@@ -783,7 +795,7 @@
   <!-- Profile Settings Modal -->
   <div id="profileSettingsModal" class="hidden" style="position: fixed; inset: 0; z-index: 80; align-items: center; justify-content: center;">
     <div data-close="1" style="position: absolute; inset: 0; background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);"></div>
-    <div style="position: relative; width: 92vw; max-width: 560px; border-radius: 18px; background: rgba(15, 17, 21, 0.96); border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: 0 22px 70px rgba(0,0,0,0.55); padding: 20px;">
+    <div class="profile-settings-panel" style="position: relative; width: min(92vw, 560px); max-height: calc(100vh - 32px); overflow:auto; border-radius: 18px; background: rgba(15, 17, 21, 0.96); border: 1px solid rgba(16, 185, 129, 0.18); box-shadow: 0 22px 70px rgba(0,0,0,0.55); padding: 20px;">
       <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
         <div>
           <div style="font-size:16px; font-weight:900; letter-spacing:-0.01em;">Profile settings</div>
@@ -794,7 +806,7 @@
         </button>
       </div>
  
-      <div style="margin-top:16px; display:grid; grid-template-columns: 180px 1fr; gap:16px;">
+      <div data-profile-panel="1" style="margin-top:16px; display:grid; grid-template-columns: 180px 1fr; gap:16px;">
         <div style="display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:flex-start;">
           <div id="profileModalAvatar" style="width: 160px; height: 160px; border-radius: 9999px; overflow:hidden; border: 2px solid rgba(255,255,255,0.10); background: rgba(30,33,57,0.75); display:flex; align-items:center; justify-content:center;">
             <div id="profileModalAvatarFallback" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:40px; color:#16172b; background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);">U</div>
@@ -975,6 +987,8 @@
   <script src="app.js"></script>
 
   <script src="/pwa-install.js"></script>
+  <script src="/responsive.js"></script>
+  <script src="/avatar-generator.js"></script>
 
   <script src="/social-club.js?v=20260222"></script>
 
