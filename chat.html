@@ -154,22 +154,63 @@
       }
     }
 
-    .mobile-current-user {
+    .mobile-room-users {
       display: none;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 12px;
+      align-items: stretch;
+      gap: 8px;
+      padding: 10px 10px 9px;
       border-bottom: 1px solid #30363d;
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(13, 17, 23, 0.94));
+      background: rgba(13, 17, 23, 0.96);
+      transition: padding 0.18s ease, max-height 0.18s ease, opacity 0.18s ease;
     }
 
-    .mobile-current-user-avatar {
-      width: 34px;
-      height: 34px;
+    .mobile-room-users.collapsed {
+      max-height: 42px;
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
+    .mobile-room-users-list {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      flex: 1;
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      padding: 2px 2px 3px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .mobile-room-users-list::-webkit-scrollbar {
+      display: none;
+    }
+
+    .mobile-room-users.collapsed .mobile-room-users-list {
+      display: none;
+    }
+
+    .mobile-room-user {
+      width: 56px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      flex: 0 0 56px;
+      color: #d1d5db;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .mobile-room-user-avatar {
+      position: relative;
+      width: 42px;
+      height: 42px;
       border-radius: 999px;
       overflow: hidden;
-      border: 1px solid rgba(16, 185, 129, 0.35);
+      border: 1px solid rgba(16, 185, 129, 0.25);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -179,12 +220,37 @@
       flex-shrink: 0;
     }
 
+    .mobile-room-user-avatar::after {
+      content: "";
+      position: absolute;
+      right: 1px;
+      bottom: 1px;
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #34d399;
+      border: 2px solid #0d1117;
+    }
+
+    .mobile-room-user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .mobile-room-user-name {
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .mobile-current-user-toggle {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      background: rgba(16, 185, 129, 0.09);
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border: 0;
+      background: transparent;
       color: #a7f3d0;
       display: inline-flex;
       align-items: center;
@@ -198,7 +264,7 @@
     }
 
     @media (max-width: 768px) {
-      .mobile-current-user {
+      .mobile-room-users {
         display: flex;
       }
     }
@@ -1264,16 +1330,10 @@
     </aside>
 
     <main class="flex-1 flex flex-col min-h-0 bg-[#1a1d23]">
-      <div id="mobileCurrentUser" class="mobile-current-user hidden">
-        <div class="flex items-center gap-3 min-w-0">
-          <div id="mobileCurrentUserAvatar" class="mobile-current-user-avatar"></div>
-          <div class="min-w-0">
-            <div id="mobileCurrentUserName" class="text-sm font-bold text-gray-100 truncate">You</div>
-            <div class="text-xs text-emerald-300/80">Active in this room</div>
-          </div>
-        </div>
+      <div id="mobileRoomUsers" class="mobile-room-users hidden">
+        <div id="mobileRoomUsersList" class="mobile-room-users-list"></div>
         <button id="mobileUsersToggle" class="mobile-current-user-toggle" type="button" aria-label="Toggle active users">
-          <span id="mobileUsersArrow" class="material-symbols-outlined">keyboard_arrow_down</span>
+          <span id="mobileUsersArrow" class="material-symbols-outlined">keyboard_arrow_up</span>
         </button>
       </div>
       <div id="messagesList" class="flex-1 overflow-y-auto px-2 sm:px-4 py-3 sm:py-6 space-y-2 sm:space-y-4 min-h-0">
