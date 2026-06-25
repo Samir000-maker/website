@@ -86,6 +86,23 @@
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svgFor(id, label))}`;
   }
 
+  function isDefaultUrl(url) {
+    if (!url || typeof url !== 'string') return true;
+    const u = url.trim();
+    if (!u || u === 'null' || u === 'undefined') return true;
+    return /ui-avatars\.com\/api\/.+name=User/i.test(u);
+  }
+
+  function profileUrl(profile, fallbackLabel) {
+    const user = profile || {};
+    const pfpUrl = typeof user.pfpUrl === 'string' ? user.pfpUrl.trim() : '';
+    const username = (typeof user.username === 'string' && user.username.trim())
+      ? user.username.trim()
+      : (fallbackLabel || 'User');
+    if (!isDefaultUrl(pfpUrl)) return pfpUrl;
+    return dataUrl(user.userId || user._id || username, username);
+  }
+
   function element(id, label, className) {
     const img = document.createElement('img');
     img.src = dataUrl(id, label);
@@ -95,5 +112,5 @@
     return img;
   }
 
-  window.VibeAvatar = { svgFor, dataUrl, element };
+  window.VibeAvatar = { svgFor, dataUrl, element, isDefaultUrl, profileUrl };
 })();
